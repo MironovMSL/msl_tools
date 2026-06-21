@@ -1,4 +1,3 @@
-import os
 import sys
 import logging
 from logging.handlers import RotatingFileHandler
@@ -9,11 +8,20 @@ class MSLLogger(logging.Logger):
     CONSOLE_FORMAT = ("[%(name)s][%(levelname)s] %(message)s")
     FILE_FORMAT    = ("[%(asctime)s][%(name)s][%(levelname)s]%(message)s")
 
+
     INIT_LEVEL = 15
     PATH_LEVEL = 16
 
     logging.addLevelName(INIT_LEVEL, "INIT")
     logging.addLevelName(PATH_LEVEL, "PATH")
+
+    LEVEL = {
+        "DEBUG"   : logging.DEBUG,
+        "INFO"    : logging.INFO,
+        "WARNING" : logging.WARNING,
+        "ERROR"   : logging.ERROR,
+        "CRITICAL": logging.CRITICAL
+    }
 
     def init(self, msg, *args, **kwargs):
         if self.isEnabledFor(self.INIT_LEVEL):
@@ -24,7 +32,7 @@ class MSLLogger(logging.Logger):
             self.log(self.PATH_LEVEL, msg, *args, **kwargs)
 
     def set_level(self, level):
-        self.setLevel(level)
+        self.setLevel(self.LEVEL[level])
         return self
 
     # -------------------------
@@ -39,7 +47,7 @@ class MSLLogger(logging.Logger):
         if self.has_console():
             return
 
-        fmt = fmt or self.CONSOLE_FORMAT
+        fmt     = fmt or self.CONSOLE_FORMAT
         handler = logging.StreamHandler(stream)
 
         if colored:
@@ -67,13 +75,13 @@ class MSLLogger(logging.Logger):
             return any(isinstance(h, logging.FileHandler) for h in self.handlers)
         return any(isinstance(h, logging.FileHandler) and h.baseFilename == path for h in self.handlers)
 
-    def add_file(self, path, level=logging.WARNING, max_mb=5, backup_count=3):
+    def add_file(self, path, level="WARNING", max_mb=5, backup_count=3):
 
         if self.has_file(path):
             return
 
         handler = RotatingFileHandler( path, maxBytes=max_mb * 1024 * 1024, backupCount=backup_count, encoding="utf-8")
-        handler.setLevel(level)
+        handler.setLevel(self.LEVEL[level])
         handler.setFormatter(logging.Formatter(self.FILE_FORMAT))
 
         self.addHandler(handler)
@@ -104,6 +112,6 @@ class MSLLogger(logging.Logger):
 
     def reset(self):
         self.clear_handlers()
-        self.setLevel(logging.DEBUG)
+        self.setLevel(self.LEVEL["DEBUG"])
         self.propagate = False
         self.add_console()

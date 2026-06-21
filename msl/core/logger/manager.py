@@ -11,7 +11,7 @@ class LoggerManager:
     _initialized = False
 
     @classmethod
-    def get(cls, name="msl-tools",colored=True, fmt=None):
+    def get(cls, name="msl-tools",colored=True, fmt=None, level="DEBUG"):
         if not cls._initialized:
             logging.setLoggerClass(MSLLogger)
             cls._initialized = True
@@ -19,7 +19,7 @@ class LoggerManager:
         if name not in cls._cache:
 
             logger = logging.getLogger(name)
-            logger.setLevel(logging.DEBUG)
+            logger.setLevel(level)
             logger.propagate = False
             logger.add_console(colored=colored, fmt=fmt)
 
@@ -31,8 +31,8 @@ class LoggerManager:
 
 if __name__ == "__main__":
     path = r"H:\ProjectsDev\MSL_Others\msl_tools\msl\logger"
-    log = LoggerManager.get()
-    log.add_file(path + "\log.log", level=logging.DEBUG)
+    log = LoggerManager.get(level="DEBUG")
+    log.add_file(path + "\log.log", level="DEBUG")
     log.init("init")
     log.debug("debug")
     log.info("info")

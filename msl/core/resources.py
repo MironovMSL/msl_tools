@@ -1,11 +1,17 @@
+from msl_tools import msl
 from msl_tools.msl.core.pattern.singleton import SingletonMeta
-from msl_tools.msl.core.paths import Paths
+from msl_tools.msl.core.logger.manager import LoggerManager
+from msl_tools.msl.core.fs.paths import Paths
+import logging
 
 
 class Resources(metaclass=SingletonMeta):
     def __init__(self):
 
-        self.paths = Paths()
+        self.paths      = Paths()
+        self.logManager = LoggerManager()
+
+
 
 
 if __name__ == "__main__":
