@@ -4,7 +4,7 @@ from msl_tools.msl.core.config.json_config import JsonConfig
 from msl_tools.msl.core.paths import Paths
 from typing import Union, Any
 from PySide6 import QtCore
-from msl_tools.msl.core.logger import Logger
+from msl_tools.msl.core.logger.manager import LoggerManager
 from msl_tools.msl.core.resources import Resources
 
 

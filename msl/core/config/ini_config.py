@@ -1,194 +1,205 @@
+from typing import Any
+from contextlib import contextmanager
 from PySide6 import QtCore
-from msl_tools.msl.core.logger import LauncherLogger
-
-class IniConfig(object):
-	"""
-	Class work with config.ini
-	"""
-
-	DEFAULTS: dict[str, dict[str, object]] = {
-		"startup": {
-			"title"          : "MSL Maya Launcher",
-			"window_geometry": "",
-			"environment"    : "Dev"
-		},
-	}
 
 
-	def __init__(self, config_path: str):
-
-		self.config_path = config_path
-		self.config = QtCore.QSettings(self.config_path, QtCore.QSettings.IniFormat)
-
-
-	def __getitem__(self, key: tuple[str, str, object, type]) -> object:
-		"""	config["startup", "show_cache", False, bool] -> вернёт bool	"""
-		section, var_name, *rest = key
-
-		default_value = None
-		value_type = None
-
-		if len(rest) >= 1:
-			default_value = rest[0]
-		if len(rest) == 2:
-			value_type = rest[1]
-
-		if (section, var_name) not in self:
-			LauncherLogger.debug(f"section: {section}, var_name: {var_name} not exist")
-
-		return self.get_variable(section, var_name, default_value, value_type)
-
-	def __setitem__(self, key: tuple[str, str], value: object) -> None:
-		""" config["startup", "title"] = "MSL Launcher" """
-		section, var_name = key
-		self.set_variable(section, var_name, value)
-
-	def __contains__(self, key: tuple[str, str]) -> bool:
-		"""
-            if ("startup", "title") in config:
-        """
-		section, var_name = key
-		return self.config.contains(f"{section}/{var_name}")
-
-	def set_variable(self, section: str, var_name: str, value: object) -> None:
-		if not section or not var_name:
-			raise ValueError("Both section and var_name parameters are required.")
-
-		self.config.beginGroup(section)
-		self.config.setValue(var_name, value)
-		self.config.endGroup()
-
-		LauncherLogger.info(f"[Save config.ini]{' ' * 5}[{section:.<10}] {var_name:.<15} = {value}")
-
-	def get_variable(self, section: str, var_name: str, default_value: object = None, type: type = str) -> object:
-		if not section or not var_name:
-			raise ValueError("Both section and var_name parameters are required.")
-
-		self.config.beginGroup(section)
-		value = self.config.value(var_name, default_value, type)
-		self.config.endGroup()
-		return value
-
-	def init_config(self) -> None:
-		"""Initialize default configuration if it does not exist."""
-
-		for group, values in self.DEFAULTS.items():
-			self.config.beginGroup(group) # start the group
-			for key, default in values.items():
-				if not self.config.contains(f"{key}"):
-					self.config.setValue(key, default)
-					LauncherLogger.init(f"[Initialize config.ini]      [{group:.<10}] [{key:.<20}] = [{default}]")
-
-			self.config.endGroup() # End the group
-
-	def get_info_all_keys(self) -> None:
-		"""Красиво печатает config.ini"""
-		sections: dict[str, list[tuple[str, str]]] = {}
-
-		# группируем ключи по секциям
-		for key in self.config.allKeys():
-			section, _, var_name = key.partition("/")
-			value = self.config.value(key)
-			sections.setdefault(section, []).append((var_name, value))
-
-		# выводим по секциям
-		for section, items in sections.items():
-			LauncherLogger.info(f"[config.ini][{section}]")
-			for var_name, value in items:
-				LauncherLogger.info(f"{var_name:.<20} = {value}")
-
-	def remove_variable(self, section: str, var_name: str) -> bool:
-		if not section or not var_name:
-			raise ValueError("Both section and var_name parameters are required.")
-
-		if (section, var_name) not in self:
-			LauncherLogger.debug(f"[Remove config.ini] [{section}] {var_name} — the key not found")
-			return False
-
-		self.config.beginGroup(section)
-		self.config.remove(var_name)
-		self.config.endGroup()
-
-		LauncherLogger.info(f"[Remove config.ini]{' ' * 5}[{section:.<10}] {var_name:.<15} removed")
-		return True
-
-	def remove_section(self, section: str) -> bool:
-		if not section:
-			raise ValueError("Section name is required.")
-
-		if not self.config.childGroups() or section not in self.config.childGroups():
-			LauncherLogger.debug(f"[Remove config.ini] [{section}] — the section not found")
-			return False
-
-		self.config.beginGroup(section)
-		self.config.remove("")
-		self.config.endGroup()
-
-		LauncherLogger.info(f"[Remove config.ini]{' ' * 5}[{section}] removed")
-		return True
-
-	def keys_in_section(self, section: str) -> list[str]:
-		if not section:
-			raise ValueError("Section name is required.")
-
-		self.config.beginGroup(section)
-		keys = list((self.config.childKeys()))
-		self.config.endGroup()
-		return keys
+@contextmanager
+def settings_group(settings: QtCore.QSettings, group: str):
+    settings.beginGroup(group)
+    try:
+        yield
+    finally:
+        settings.endGroup()
 
 
+class IniSection:
+    """Прокси для секции config['startup']"""
 
-# import os
-# from pathlib import Path
-# from typing import Union, Any
-# from PySide6 import QtCore
-# from MSL_MayaGate.core.logger import LauncherLogger
-#
-# # Предполагаем, что JsonConfig и _ConfigSectionDict импортированы или описаны выше
-# # from your_module import JsonConfig
-#
-# class _QSettingsSectionProxy:
-#     """Прокси-класс для секции QSettings, чтобы получить синтаксис config['section']['key']"""
-#     def __init__(self, settings: QtCore.QSettings, section: str):
-#         self._settings = settings
-#         self._section = section
-#
-#     def __getitem__(self, key: str) -> Any:
-#         self._settings.beginGroup(self._section)
-#         # По умолчанию возвращаем строку, если тип не важен, либо можно доработать
-#         val = self._settings.value(key, "")
-#         self._settings.endGroup()
-#         return val
-#
-#     def __setitem__(self, key: str, value: Any) -> None:
-#         self._settings.beginGroup(self._section)
-#         self._settings.setValue(key, value)
-#         self._settings.endGroup()
-#         LauncherLogger.info(f"[Save QSettings]{' ' * 5}[{self._section:.<10}] [{key:.<15}] = [{value}]")
-#
-#     def __delitem__(self, key: str) -> None:
-#         self._settings.beginGroup(self._section)
-#         self._settings.remove(key)
-#         self._settings.endGroup()
-#
-#
-# class IniConfig:
-#     """Обновленный класс для INI (QSettings), работающий аналогично JsonConfig"""
-#     def __init__(self, file_path: str):
-#         self.path = file_path
-#         self.config = QtCore.QSettings(self.path, QtCore.QSettings.IniFormat)
-#
-#     def __getitem__(self, section: str) -> _QSettingsSectionProxy:
-#         return _QSettingsSectionProxy(self.config, section)
-#
-#     def __delitem__(self, section: str) -> None:
-#         self.config.beginGroup(section)
-#         self.config.remove("")  # Удаляет всю секцию
-#         self.config.endGroup()
-#         LauncherLogger.info(f"[Remove IniConfig] Section [{section}] removed")
-#
-#     def get(self, section: str, key: str, default: Any = None) -> Any:
-#         self.config.beginGroup(section)
-#         val = self.config.value(key, default)
-#         self.config.endGroup()
-#         return val
+    def __init__(self, settings: QtCore.QSettings, section: str):
+        self._settings = settings
+        self._section = section
+
+    def __getitem__(self, key: str) -> Any:
+        with settings_group(self._settings, self._section):
+            return self._settings.value(key)
+
+    def __setitem__(self, key: str, value: Any) -> None:
+        with settings_group(self._settings, self._section):
+            self._settings.setValue(key, value)
+
+    def __delitem__(self, key: str) -> None:
+        with settings_group(self._settings, self._section):
+            self._settings.remove(key)
+
+    def __contains__(self, key: str) -> bool:
+        return self._settings.contains(f"{self._section}/{key}")
+
+    def __iter__(self):
+        with settings_group(self._settings, self._section):
+            keys = self._settings.childKeys()
+
+        return iter(keys)
+
+    def __len__(self) -> int:
+        with settings_group(self._settings, self._section):
+            return len(self._settings.childKeys())
+
+    def get(
+        self,
+        key: str,
+        default: Any = None,
+        value_type: type | None = None
+    ) -> Any:
+        with settings_group(self._settings, self._section):
+
+            if not self._settings.contains(key):
+                self._settings.setValue(key, default)
+
+            if value_type is None:
+                return self._settings.value(key, default)
+
+            return self._settings.value(key, defaultValue=default, type=value_type)
+
+    def setdefault(self, key: str, default: Any) -> Any:
+        if key not in self:
+            self[key] = default
+
+        return self[key]
+
+    def keys(self) -> list[str]:
+        with settings_group(self._settings, self._section):
+            return list(self._settings.childKeys())
+
+    def values(self) -> list[Any]:
+        with settings_group(self._settings, self._section):
+            return [
+                self._settings.value(key)
+                for key in self._settings.childKeys()
+            ]
+
+    def items(self) -> list[tuple[str, Any]]:
+        with settings_group(self._settings, self._section):
+            return [
+                (key, self._settings.value(key))
+                for key in self._settings.childKeys()
+            ]
+
+    def clear(self) -> None:
+        with settings_group(self._settings, self._section):
+            self._settings.remove("")
+
+    def exists(self, key: str) -> bool:
+        return key in self
+
+    def __repr__(self) -> str:
+        return f"IniSection('{self._section}')"
+
+
+class IniConfig1:
+
+    def __init__(self, path: str):
+        self.path = path
+        self.settings = QtCore.QSettings(path,QtCore.QSettings.IniFormat)
+
+    def __getitem__(self, section: str) -> IniSection:
+        return IniSection(self.settings, section)
+
+    def __contains__(self, section: str) -> bool:
+        return section in self.sections()
+
+    def __delitem__(self, section: str) -> None:
+        with settings_group(self.settings, section):
+            self.settings.remove("")
+
+    def __iter__(self):
+        return iter(self.sections())
+
+    def __len__(self) -> int:
+        return len(self.sections())
+
+    def sections(self) -> list[str]:
+        return self.settings.childGroups()
+
+    def has_section(self, section: str) -> bool:
+        return section in self
+
+    def remove_section(self, section: str) -> bool:
+        if section not in self:
+            return False
+
+        del self[section]
+        return True
+
+    def clear(self) -> None:
+        self.settings.clear()
+
+    def sync(self) -> None:
+        self.settings.sync()
+
+    def init_defaults(self, default: dict[str, dict[str, Any]]) -> None:
+        for section, values in default.items():
+
+            for key, value in values.items():
+
+                if key not in self[section]:
+                    self[section][key] = value
+
+    def dump(self) -> dict[str, dict[str, Any]]:
+        result = {}
+
+        for section in self.sections():
+            result[section] = dict(self[section].items())
+
+        return result
+
+    def print_info(self) -> None:
+
+        for section in self.sections():
+
+            print(f"[{section}]")
+
+            for key, value in self[section].items():
+                print(f"  {key:<20} = {value}")
+
+    def __repr__(self) -> str:
+        return f"IniConfig('{self.path}')"
+
+
+
+if __name__ == "__main__":
+    config = IniConfig1("test.ini")
+    DEFAULTS: dict[str, dict[str, Any]] = {
+        "startup": {
+            "init": True,
+            "title": "MSL Maya Launcher",
+            "window_geometry": "",
+            "environment": "Dev",
+        }
+    }
+
+
+    config["startup"]["title"] = "MSL Launcher"
+
+    title = config["startup"]["title"]
+    print(title)
+
+    env = config["startup"].get("environment","Dev", str)
+    print(env)
+
+    width = config["window"].get("width",1200, int)
+    print(width)
+    visible = config["window"].get("visible",True,bool)
+    sections = config.sections()
+    print("sections",sections)
+
+    print(visible)
+    if "init" not in config["startup"]:
+        print("title not exists, run get init")
+        config.init_defaults(DEFAULTS)
+
+    for key, value in config["startup"].items():
+    	print(key, value)
+    #
+    # del config["startup"]["title"]
+    #
+    # del config["startup"]

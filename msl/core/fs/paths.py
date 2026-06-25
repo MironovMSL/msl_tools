@@ -62,91 +62,100 @@ import shutil
 
 
 class Paths:
-    # 1. Корректно вычисляем корень проекта
+
     ROOT_DIR = Path(__file__).resolve().parents[3]
 
-    # 2. Переменные класса объявляем через корень класса
-    msl    = ROOT_DIR / 'msl'
-    core   = ROOT_DIR / 'msl' / 'core'
-    config = ROOT_DIR / 'msl' / 'config'
-    tools  = ROOT_DIR / 'msl' / 'tools'
-    logs   = ROOT_DIR / 'msl' / 'logs'
 
-    @staticmethod
-    def make_dir(path: str | Path) -> Path:
+    msl    = ROOT_DIR / 'msl'
+    core   = msl      / 'core'
+    config = msl      / 'config'
+    tools  = msl      / 'tools'
+    logs   = msl      / 'logs'
+
+    @classmethod
+    def make_dir(cls, path: str | Path) -> Path:
         """Создает папку и всю цепочку родителей."""
         path = Path(path)
         path.mkdir(parents=True, exist_ok=True)
         return path
 
-    @staticmethod
-    def make_file(path: str | Path) -> Path:
+    @classmethod
+    def make_file(cls, path: str | Path) -> Path:
         """Создает файл и родительские папки, если их нет."""
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.touch(exist_ok=True)
         return path
 
-    @staticmethod
-    def delete(path: str | Path) -> bool:
+    @classmethod
+    def delete(cls, path: str | Path) -> bool:
         """Безопасно удаляет файл или папку со всем содержимым."""
         path = Path(path)
 
         if not path.exists():
             return False
 
-        if path.is_file() or path.is_symlink():
-            path.unlink()
-        elif path.is_dir():
-            shutil.rmtree(path, ignore_errors=True)  # Игнорируем ошибки занятых файлов
+        try:
+            if path.is_file() or path.is_symlink():
+                path.unlink()
+            elif path.is_dir():
+                shutil.rmtree(path)
+            return True
+        except Exception:
+            # Если rmtree упал с ignore_errors=True, мы бы не узнали об ошибке.
+            # Теперь мы возвращаем False, если физическое удаление не удалось.
+            return False
 
-        return True
-
-    @staticmethod
-    def exists(path: str | Path) -> bool:
+    @classmethod
+    def exists(cls, path: str | Path) -> bool:
         """Проверяет существование пути."""
         return Path(path).exists()
 
-    @staticmethod
-    def list_dirs(path: str | Path, recursive: bool = True) -> list[Path]:
+    @classmethod
+    def list_dirs(cls, path: str | Path, recursive: bool = True) -> list[Path]:
         """Возвращает список только директорий внутри указанного пути."""
         path = Path(path)
 
-        # Защита от падения, если директории не существует
         if not path.is_dir():
             return []
 
-        generator = path.rglob('*') if recursive else path.iterdir()
-        return [p for p in generator if p.is_dir()]
+        # Использование rglob("*/") заставляет ОС возвращать ТОЛЬКО директории.
+        # Это в разы быстрее и экономит оперативную память.
+        generator = path.rglob('*/') if recursive else (p for p in path.iterdir() if p.is_dir())
+        return list(generator)
 
-    @staticmethod
-    def copy(src: str | Path, dst: str | Path) -> Path:
-        """Копирует файл или дерево папок."""
+    @classmethod
+    def copy(cls, src: str | Path, dst: str | Path) -> Path:
+        """Копирует файл или дерево папок и возвращает новый путь."""
         src, dst = Path(src), Path(dst)
         if src.is_dir():
-            return Path(shutil.copytree(src, dst, dirs_exist_ok=True))
-        return Path(shutil.copy2(src, dst))
+            shutil.copytree(src, dst, dirs_exist_ok=True)
+        else:
+            # Если целевая папка для файла не существует, shutil.copy2 упадет.
+            # Нам нужно гарантировать создание родительской директории.
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
+        return dst
 
-    @staticmethod
-    def move(src: str | Path, dst: str | Path) -> Path:
-        """Перемещает файл или папку."""
-        return Path(shutil.move(str(src), str(dst)))
+    @classmethod
+    def move(cls, src: str | Path, dst: str | Path) -> Path:
+        """Перемещает файл или папку и возвращает новый путь."""
+        src, dst = Path(src), Path(dst)
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(src), str(dst))
+        return dst
 
 
 if __name__ == '__main__':
-    # Теперь класс вызывается статически — создавать экземпляр через () не нужно!
     print("Корень проекта:", Paths.ROOT_DIR)
     print("Папка логов:", Paths.logs)
 
-    # Построение динамических путей работает идеально
     manager_path = Paths.core / "config" / "manager.py"
     print("Путь к менеджеру:", manager_path)
 
-    # Пример безопасной работы с методами
-    temp_dir_log = Paths.logs / "temp_debug" / "log.log"
-    # Paths.make_dir(temp_dir)
-    Paths.make_file(temp_dir_log)
-    print("Создана папка:", temp_dir_log.exists())
+    temp_file_log = Paths.logs / "temp_debug" / "log.log"
+    Paths.make_file(temp_file_log)
+    print("Создан файл:", temp_file_log.exists())
 
     temp_dir = Paths.logs / "temp_debug"
     Paths.delete(temp_dir)

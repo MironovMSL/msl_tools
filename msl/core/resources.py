@@ -1,14 +1,15 @@
-from msl_tools import msl
 from msl_tools.msl.core.pattern.singleton import SingletonMeta
 from msl_tools.msl.core.logger.manager import LoggerManager
+from msl_tools.msl.core.config.manager import ConfigManager
 from msl_tools.msl.core.fs.paths import Paths
-import logging
+from msl_tools.msl.core.fs.files import Files
 
 
 class Resources(metaclass=SingletonMeta):
     def __init__(self):
 
         self.paths      = Paths()
+        self.files      = Files()
         self.logManager = LoggerManager()
 
 
