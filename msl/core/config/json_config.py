@@ -1,241 +1,287 @@
-import json
-import os
 import copy
-from typing import Any, Iterator
-from msl_tools.msl.core.logger import LauncherLogger
-from collections.abc import MutableMapping
+
+from collections.abc import MutableMapping, Iterator
+from contextlib import AbstractContextManager
+from pathlib import Path
+from typing import Any, Optional
+from msl_tools.msl.core.config.storage import JsonStorage
 
 
-class _ConfigSectionDict(MutableMapping):
-    """A dict wrapper that automatically calls save() on the parent."""
-    def __init__(self, parent: "JsonConfig", section: str):
-        self._parent = parent
-        self._section = section
+def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    """
+    Recursively merges two dictionaries.
+    Values from override always have priority.
+    """
+    result = copy.deepcopy(base)
+    for key, value in override.items():
+        if (isinstance(value, dict)and isinstance(result.get(key), dict)):
+            result[key] = deep_merge(result[key], value)
+        else:
+            result[key] = copy.deepcopy(value)
+    return result
+
+
+class ConfigNode(MutableMapping):
+    """
+    Node in configuration tree.
+    Features:
+        • lazy nested dict creation
+        • parent/root awareness
+        • automatic dirty propagation
+        • dict-like API
+    """
+
+    __slots__ = ("_data", "_parent", "_root")
+
+    def __init__(self, root: "JsonConfig", parent: Optional["ConfigNode"], data: dict[str, Any]) -> None:
+
+        self._root                 = root
+        self._parent               = parent
+        self._data: dict[str, Any] = {}
+
+        for k, v in data.items():
+            self._data[k] = self._wrap(v)
+
+    def _wrap(self, value: Any) -> Any:
+        if isinstance(value, dict):
+            return ConfigNode(root=self._root, parent=self, data=value)
+        return value
+
+    def _unwrap(self, value: Any) -> Any:
+        if isinstance(value, ConfigNode):
+            return value.to_dict()
+        return value
+
+    def _mark_dirty(self) -> None:
+        """
+        Notify root that config was changed.
+        """
+        if self._root:
+            self._root.mark_dirty()
 
     def __getitem__(self, key: str) -> Any:
-        d = self._parent.data[self._section]
-        if key not in d:
-            LauncherLogger.warning(f"[GET key] The key [{key}] does not exist in section [{self._section}].")
-            d[key] = ""
-            if self._parent.autosave:
-                self._parent.save()
-        return d[key]
+        if key not in self._data:
+            self._data[key] = ConfigNode(root=self._root, parent=self, data={})
+        return self._data[key]
 
     def __setitem__(self, key: str, value: Any) -> None:
-        self._parent.data[self._section][key] = value
-        LauncherLogger.info(f"[Save JsonConfig.data]{' ' * 5}[{self._section:.<10}] [{key:.<15}] = [{value}]")
-        if self._parent.autosave:
-            self._parent.save()
+        self._data[key] = self._wrap(value)
+        self._mark_dirty()
 
     def __delitem__(self, key: str) -> None:
-        d = self._parent.data[self._section]
-        if key in d:
-            del d[key]
-            if self._parent.autosave:
-                self._parent.save()
-
-        LauncherLogger.info(f"[Remove JsonConfig.data]{' ' * 5}[{self._section:.<10}] [{key:.<15}] key removed")
+        del self._data[key]
+        self._mark_dirty()
 
     def __iter__(self) -> Iterator[str]:
-        return iter(self._parent.data[self._section])
+        return iter(self._data)
 
     def __len__(self) -> int:
-        return len(self._parent.data[self._section])
+        return len(self._data)
 
-    def __contains__(self, key: str) -> bool:
-        return key in self._parent.data[self._section]
+    def __contains__(self, key: object) -> bool:
+        return key in self._data
 
-    def __repr__(self) -> str:
-        return repr(self._parent.data[self._section])
+    def get(self, key: str, default: Any = None) -> Any:
+        return self._data.get(key, default)
 
-    def move_key_left(self, key: str) -> int:
-        d = self._parent.data[self._section]
-        keys = list(d.keys())
+    # --------------------------------------------------
+    # ORDER OPERATIONS
+    # --------------------------------------------------
 
-        if key not in keys:
-            return None
-
-        idx = keys.index(key)
-        if idx > 0:
-            keys[idx - 1], keys[idx] = keys[idx], keys[idx - 1]
-            self._parent.data[self._section] = {k: d[k] for k in keys}
-            if self._parent.autosave:
-                self._parent.save()
-            idx -= 1  # после перемещения индекс изменился
-
-        return idx
-
-    def move_key_right(self, key: str) -> None:
-        d = self._parent.data[self._section]
-        keys = list(d.keys())
+    def move_key_left(self, key: str) -> Optional[int]:
+        keys = list(self._data.keys())
 
         if key not in keys:
             return None
 
-        idx = keys.index(key)
-        if idx < len(keys) - 1:
-            keys[idx + 1], keys[idx] = keys[idx], keys[idx + 1]
-            self._parent.data[self._section] = {k: d[k] for k in keys}
-            if self._parent.autosave:
-                self._parent.save()
-            idx += 1
+        i = keys.index(key)
+        if i == 0:
+            return 0
 
-        return idx
+        keys[i - 1], keys[i] = keys[i], keys[i - 1]
+        self._rebuild(keys)
+
+        return i - 1
+
+    def move_key_right(self, key: str) -> Optional[int]:
+        keys = list(self._data.keys())
+
+        if key not in keys:
+            return None
+
+        i = keys.index(key)
+        if i == len(keys) - 1:
+            return i
+
+        keys[i + 1], keys[i] = keys[i], keys[i + 1]
+        self._rebuild(keys)
+
+        return i + 1
 
     def reorder_keys(self, new_order: list[str]) -> None:
-        d = self._parent.data[self._section]
-        current_keys = set(d.keys())
+        if set(new_order) != set(self._data.keys()):
+            raise ValueError("Key mismatch in reorder_keys")
+        self._rebuild(new_order)
 
-        if set(new_order) != current_keys:
-            raise ValueError("The new_order list does not match the current section keys")
+    def _rebuild(self, new_order: list[str]) -> None:
+        new_data = {}
+        for k in new_order:
+            new_data[k] = self._data[k]
 
-        self._parent.data[self._section] = {k: d[k] for k in new_order}
+        self._data = new_data
+        self._mark_dirty()
 
-        if self._parent.autosave:
-            self._parent.save()
+    # --------------------------------------------------
+    # SERIALIZATION
+    # --------------------------------------------------
+
+    def to_dict(self) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for k, v in self._data.items():
+            if isinstance(v, ConfigNode):
+                result[k] = v.to_dict()
+            else:
+                result[k] = v
+        return result
+
+    def __repr__(self) -> str:
+        return f"ConfigNode({self.to_dict()})"
 
 
 class JsonConfig:
+    """
+    Root configuration object.
 
-    DEFAULTS: dict[str, dict[str, Any]] = {
-        "Dev"       : {},
-        "Stable"    : {},
-        "<default>" : {},
-        "Additional": {}
-    }
+    Responsible for:
+        • lifecycle (load/save/reload)
+        • dirty tracking
+        • batching
+        • root node access
+    """
 
-    def __init__(self, json_path: str, autosave: bool = True):
-        self.path = json_path
+    def __init__(self, path: str, storage: Optional[JsonStorage] = None, defaults: Optional[dict[str, Any]] = None, autosave: bool = True) -> None:
+
+        self.path     = path
+        self.storage  = storage or JsonStorage()
+        self.defaults = copy.deepcopy(defaults or {})
         self.autosave = autosave
-        self.data: dict[str, dict[str, Any]] = {}
+
+        self._dirty: bool                = False
+        self._batch_level: int           = 0
+        self._root: Optional[ConfigNode] = None
+
         self.load()
 
     def load(self) -> None:
-        if os.path.exists(self.path):
-            try:
-                with open(self.path, "r", encoding="utf-8") as f:
-                    self.data = json.load(f)
-            except json.JSONDecodeError:
-                LauncherLogger.error(f"Config file {self.path} is corrupted. Restoring defaults.")
-                self.data = copy.deepcopy(self.DEFAULTS)
-                self.save()
-                data = json.dumps(self.data, indent=4, ensure_ascii=False)
-                LauncherLogger.init(f"[Initialize json_config.ini] {data}.")
-        else:
-            self.data = copy.deepcopy(self.DEFAULTS)
+        """
+        Load config from storage and merge with defaults.
+        """
+        loaded = self.storage.read(self.path)
+        data   = deep_merge(self.defaults, loaded)
+
+        self._root  = ConfigNode(root=self, parent=None, data=data)
+        self._dirty = False
+
+    def reload(self) -> None:
+        """
+        Reload config from disk.
+        """
+        self.load()
+
+    def mark_dirty(self) -> None:
+        """
+        Called by ConfigNode when something changes.
+        """
+        self._dirty = True
+        if self.autosave and self._batch_level == 0:
             self.save()
-            data = json.dumps(self.data, indent=4, ensure_ascii=False)
-            LauncherLogger.init(f"[Initialize json_config.ini] {data}.")
 
     def save(self) -> None:
-        LauncherLogger.info(f"[Svae json_config.json] {self.path}.]")
-        with open(self.path, "w", encoding="utf-8") as f:
-            json.dump(self.data, f, indent=4, ensure_ascii=False)
+        """
+        Persist config to storage.
+        """
+        if not self._dirty:
+            return
+        if self._root is None:
+            return
 
-    def __getitem__(self, section: str) -> _ConfigSectionDict:
-        if section not in self.data:
-            LauncherLogger.warning(f"[GET Section] Section [{section}] does not exist. Creating empty.")
-            self.data[section] = {}
-            if self.autosave:
-                self.save()
-        return _ConfigSectionDict(self, section)
+        self.storage.write(self.path, self._root.to_dict())
+        self._dirty = False
 
-    def __setitem__(self, section: str, value: dict[str, Any]) -> None:
-        if isinstance(value, dict):
-            self.data[section] = value
-            if self.autosave:
-                self.save()
-            LauncherLogger.info(f"[Save JsonConfig.data]{' ' * 5}[{section:.<10}] = [{value}]")
-        else:
-            LauncherLogger.warning(f"[SET Section] Attempt to assign a non-dict value to section [{section}]: {value}")
+    def batch(self):
+        return BatchContext(self)
 
-    def __delitem__(self, section: str) -> None:
-        if section in self.data:
-            del self.data[section]
-            if self.autosave:
-                self.save()
+    def __getitem__(self, key: str) -> Any:
+        if self._root is None:
+            raise RuntimeError("Config not loaded")
+        return self._root[key]
 
-        LauncherLogger.info(f"[Remove JsonConfig.data]{' ' * 5}[{section:.<10}] section removed")
+    def __setitem__(self, key: str, value: Any) -> None:
+        if self._root is None:
+            raise RuntimeError("Config not loaded")
+        self._root[key] = value
+
+    def __delitem__(self, key: str) -> None:
+        if self._root is None:
+            raise RuntimeError("Config not loaded")
+        del self._root[key]
+
+    @property
+    def data(self) -> dict[str, Any]:
+        """
+        Full config snapshot (copy).
+        """
+        if self._root is None:
+            return {}
+        return self._root.to_dict()
 
     def __repr__(self) -> str:
-        return f"JsonConfig({self.path!r}, sections={list(self.data.keys())})"
+        return f"JsonConfig(path={self.path}, data={self.data})"
 
-    def add_section(self, name: str) -> None:
-        if name not in self.data:
-            self.data[name] = {}
-            if self.autosave:
-                self.save()
 
-    def remove(self, section: str, key: str) -> None:
-        if section in self.data and key in self.data[section]:
-            del self.data[section][key]
-            if self.autosave:
-                self.save()
+class BatchContext(AbstractContextManager):
+    """
+    Groups multiple changes into one save operation.
+    """
+    def __init__(self, config: JsonConfig) -> None:
+        self._config = config
 
-    def reorder_keys(self, section: str, new_order: list[str]) -> None:
-        """Переставить ключи в секции в заданном порядке"""
-        if section not in self.data:
-            raise KeyError(f"Section '{section}' not found in config")
-        old_section = self.data[section]
-        self.data[section] = {k: old_section[k] for k in new_order if k in old_section}
-        if self.autosave:
-            self.save()
+    def __enter__(self) -> JsonConfig:
+        self._config._batch_level += 1
+        return self._config
 
-    def keys(self):
-        return self.data.keys()
+    def __exit__(self, exc_type, exc, tb) -> bool:
+        self._config._batch_level -= 1
 
-    def items(self):
-        return self.data.items()
-
-    def get(self, section: str, key: str, default: Any = None) -> Any:
-        return self.data.get(section, {}).get(key, default)
-
-    def setdefault(self, section: str, key: str, default: Any = None) -> Any:
-        if section not in self.data:
-            self.data[section] = {}
-        value = self.data[section].setdefault(key, default)
-        if self.autosave:
-            self.save()
-        return value
-
-    def get_info_all_keys(self) -> None:
-        """print config.json"""
-        data = json.dumps(self.data, indent=4, ensure_ascii=False)
-        LauncherLogger.info(f"[config.json]\n {data}")
+        # last batch finished
+        if (self._config._batch_level == 0 and self._config.autosave and self._config._dirty and exc is None):
+            self._config.save()
+        return False
 
 
 
 if __name__ == "__main__":
+    defaults = {
+        "Dev": {},
+        "Stable": {}
+    }
 
+    config = JsonConfig(path="config.json", defaults=defaults, storage=JsonStorage())
 
-    config = JsonConfig("Testsettings.json")
-    # set
-    config["Dev"]["TEST_PATH"] = "path"
+    config["Dev"]["Maya"]["2025"]["PATH"] = "C:/maya"
+    config["Dev"]["Maya"]["2025"]["PLUGINS"] = ["a", "b", "c"]
+    config["Dev"]["Maya"]["2025"]["test"] = ["a", "test"]
 
-    print(list(config["Dev"].items()))
-    for section, v in config.items():
-        print(f"[SECTION] {section, v}")
-    value = config.get("Dev", "MAYA_APP_DIR11", default="C:/tmp")
-    print(value)
+    node_2025 = config["Dev"]["Maya"]["2025"]
+    node_2025.move_key_left("PLUGINS")
+    node_2025.reorder_keys(["test", "PLUGINS", "PATH"])
 
-    # удаление ключа
-    del config["TEST"]
-    del config["Dev"]["MAYA_APP_DIR"]
+    del node_2025["test"]
 
-    # добавление новой секции
-    config.add_section("Custom")
-    config["Custom"]["foo"] = "bar"
+    with config.batch():
+        config["Dev"]["A"] = 1
+        config["Dev"]["B"] = 2
+        config["Dev"]["C"] = 3
 
-    # смена порядка ключей
-    keys = list(config["Dev"].keys())
-    keys.remove("NEW_PATH")
-    keys.insert(0, "NEW_PATH")
-    config.reorder_keys("Dev", keys)
-
-    print("До:", config["Dev"])
-
-    config["Dev"].move_key_right("PYTHONPATH")
-    print("После move_key_right(PYTHONPATH):", config["Dev"])
-
-    config["Dev"].move_key_left("TEMP")
-    print("После move_key_left(TEMP):", config["Dev"])
+    print("Final Data Structure:")
+    print(config.data)
