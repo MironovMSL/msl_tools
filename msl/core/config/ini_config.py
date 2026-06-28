@@ -95,7 +95,7 @@ class IniSection:
         return f"IniSection('{self._section}')"
 
 
-class IniConfig1:
+class IniConfig:
 
     def __init__(self, path: str):
         self.path = path
@@ -167,7 +167,7 @@ class IniConfig1:
 
 
 if __name__ == "__main__":
-    config = IniConfig1("test.ini")
+    config = IniConfig("test.ini")
     DEFAULTS: dict[str, dict[str, Any]] = {
         "startup": {
             "init": True,

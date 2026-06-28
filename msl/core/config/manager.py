@@ -1,11 +1,7 @@
-import os
 from msl_tools.msl.core.config.ini_config import IniConfig
 from msl_tools.msl.core.config.json_config import JsonConfig
-from msl_tools.msl.core.paths import Paths
-from typing import Union, Any
-from PySide6 import QtCore
-from msl_tools.msl.core.logger.manager import LoggerManager
-from msl_tools.msl.core.resources import Resources
+from msl_tools.msl.core.fs.paths import Paths
+from typing import Union
 
 
 class ConfigManager:
@@ -40,11 +36,12 @@ class ConfigManager:
 
             # Фабрика: выбираем класс на основе расширения
             if ext == ".json":
-                Logger.info(f"[ConfigManager] Loading JSON config for '{tool_name}'")
+                print(f"[ConfigManager] Loading JSON config for '{tool_name}'")
+                print(f"[Resources] {'Base root':.<17}: {tool_name}")
                 self._instances[tool_name] = JsonConfig(config_path)
             elif ext == ".ini":
-                Logger.info(f"[ConfigManager] Loading INI config for '{tool_name}'")
-                Logger.pathL(f"[Resources] {'Base root':.<17}: {tool_name}")
+                print(f"[ConfigManager] Loading INI config for '{tool_name}'")
+                print(f"[Resources] {'Base root':.<17}: {tool_name}")
                 self._instances[tool_name] = IniConfig(config_path)
             else:
                 raise ValueError(f"Unsupported config extension: {ext}. Use '.json' or '.ini'")
@@ -54,11 +51,11 @@ class ConfigManager:
 
 
 if __name__ == "__main__":
-    res = Resources()
+    config = Paths.config
 
-
-    renam_con = ConfigManager(res.paths.config).get_config("rename", ext=".json")
-    modeling_cnf  = ConfigManager(res.paths.config).get_config("modeling", ext=".ini")
-    modeling_cnf["startup", "window_geometry"] = "5"
+    renam_con = ConfigManager(config).get_config("rename", ext=".json")
+    renam_con["test"]["test"] = "test"
+    modeling_cnf  = ConfigManager(config).get_config("modeling", ext=".ini")
+    modeling_cnf["startup"]["window_geometry"] = 6
 
 
