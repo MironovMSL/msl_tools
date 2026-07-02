@@ -65,10 +65,9 @@ class Paths:
 
     ROOT_DIR = Path(__file__).resolve().parents[3]
 
-
     msl    = ROOT_DIR / 'msl'
     core   = msl      / 'core'
-    config = msl      / 'config'
+    configs = msl      / 'configs'
     tools  = msl      / 'tools'
     logs   = msl      / 'logs'
 
