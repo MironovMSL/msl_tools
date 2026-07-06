@@ -59,17 +59,57 @@
 
 from pathlib import Path
 import shutil
+import sys
 
 
 class Paths:
+    OS_MAC        = "darwin"
+    OS_LINUX      = "linux"
+    OS_WINDOWS    = "win32"
+    KNOWN_SYSTEMS = (OS_WINDOWS, OS_MAC, OS_LINUX)
 
     ROOT_DIR = Path(__file__).resolve().parents[3]
 
-    msl    = ROOT_DIR / 'msl'
-    core   = msl      / 'core'
-    configs = msl      / 'configs'
-    tools  = msl      / 'tools'
-    logs   = msl      / 'logs'
+    msl     = ROOT_DIR / 'msl'
+    core    = msl / 'core'
+    configs = msl / 'configs'
+    tools   = msl / 'tools'
+    logs    = msl / 'logs'
+
+    # --- OS detection ---
+
+    @classmethod
+    def get_system(cls) -> str:
+        return sys.platform
+
+    @classmethod
+    def is_windows(cls) -> bool:
+        return cls.get_system() == cls.OS_WINDOWS
+
+    @classmethod
+    def is_macos(cls) -> bool:
+        return cls.get_system() == cls.OS_MAC
+
+    @classmethod
+    def is_linux(cls) -> bool:
+        return cls.get_system() == cls.OS_LINUX
+
+    # --- generic user dirs (stdlib fallback, без Qt) ---
+
+    @classmethod
+    def get_home_dir(cls) -> Path:
+        return Path.home()
+
+    @classmethod
+    def get_desktop_dir(cls) -> Path:
+        return cls.get_home_dir() / "Desktop"
+
+    @classmethod
+    def get_temp_dir(cls) -> Path:
+        import tempfile
+        return Path(tempfile.gettempdir())
+
+    # --- filesystem operations ---
 
     @classmethod
     def make_dir(cls, path: str | Path) -> Path:
@@ -90,10 +130,8 @@ class Paths:
     def delete(cls, path: str | Path) -> bool:
         """Безопасно удаляет файл или папку со всем содержимым."""
         path = Path(path)
-
         if not path.exists():
             return False
-
         try:
             if path.is_file() or path.is_symlink():
                 path.unlink()
@@ -101,25 +139,18 @@ class Paths:
                 shutil.rmtree(path)
             return True
         except Exception:
-            # Если rmtree упал с ignore_errors=True, мы бы не узнали об ошибке.
-            # Теперь мы возвращаем False, если физическое удаление не удалось.
             return False
 
     @classmethod
     def exists(cls, path: str | Path) -> bool:
-        """Проверяет существование пути."""
         return Path(path).exists()
 
     @classmethod
     def list_dirs(cls, path: str | Path, recursive: bool = True) -> list[Path]:
         """Возвращает список только директорий внутри указанного пути."""
         path = Path(path)
-
         if not path.is_dir():
             return []
-
-        # Использование rglob("*/") заставляет ОС возвращать ТОЛЬКО директории.
-        # Это в разы быстрее и экономит оперативную память.
         generator = path.rglob('*/') if recursive else (p for p in path.iterdir() if p.is_dir())
         return list(generator)
 
@@ -130,8 +161,6 @@ class Paths:
         if src.is_dir():
             shutil.copytree(src, dst, dirs_exist_ok=True)
         else:
-            # Если целевая папка для файла не существует, shutil.copy2 упадет.
-            # Нам нужно гарантировать создание родительской директории.
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, dst)
         return dst
@@ -144,8 +173,52 @@ class Paths:
         shutil.move(str(src), str(dst))
         return dst
 
+from PySide6 import QtCore
+class StandardPaths:
+
+    @classmethod
+    def get_home_dir(cls) -> Path | None:
+        path = QtCore.QStandardPaths.writableLocation(QtCore.QStandardPaths.StandardLocation.HomeLocation)
+        return Path(path) if path else None
+
+    @classmethod
+    def get_desktop_dir(cls) -> Path | None:
+        path = QtCore.QStandardPaths.writableLocation(QtCore.QStandardPaths.StandardLocation.DesktopLocation)
+        return Path(path) if path else None
+
+    @classmethod
+    def get_documents_dir(cls) -> Path | None:
+        path = QtCore.QStandardPaths.writableLocation(QtCore.QStandardPaths.StandardLocation.DocumentsLocation)
+        return Path(path) if path else None
+
+    @classmethod
+    def get_downloads_dir(cls) -> Path | None:
+        path = QtCore.QStandardPaths.writableLocation(QtCore.QStandardPaths.StandardLocation.DownloadLocation)
+        return Path(path) if path else None
+
+    @classmethod
+    def get_pictures_dir(cls) -> Path | None:
+        path = QtCore.QStandardPaths.writableLocation(QtCore.QStandardPaths.StandardLocation.PicturesLocation)
+        return Path(path) if path else None
+
+    @classmethod
+    def get_music_dir(cls) -> Path | None:
+        path = QtCore.QStandardPaths.writableLocation(QtCore.QStandardPaths.StandardLocation.MusicLocation)
+        return Path(path) if path else None
+
+    @classmethod
+    def get_movies_dir(cls) -> Path | None:
+        path = QtCore.QStandardPaths.writableLocation(QtCore.QStandardPaths.StandardLocation.MoviesLocation)
+        return Path(path) if path else None
+
+    @classmethod
+    def get_temp_dir(cls) -> Path | None:
+        path = QtCore.QStandardPaths.writableLocation(QtCore.QStandardPaths.StandardLocation.TempLocation)
+        return Path(path) if path else None
+
 
 if __name__ == '__main__':
+    print(Paths.get_system())
     print("Корень проекта:", Paths.ROOT_DIR)
     print("Папка логов:", Paths.logs)
 
