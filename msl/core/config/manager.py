@@ -86,6 +86,7 @@ if __name__ == "__main__":
     # Теперь это РАЗРЕШЕНО: "rename" одновременно и .json, и .ini —
     # два независимых файла, два независимых объекта
     renam_ini = manager.get_config("rename", ext=".ini")
+    renam_ini["test"]["test"] = "test"
     print(renam_ini is renam_con)      # False — разные объекты
     print(type(renam_ini).__name__)    # IniConfig
     print(type(renam_con).__name__)    # JsonConfig

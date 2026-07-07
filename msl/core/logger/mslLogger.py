@@ -6,6 +6,7 @@ from msl_tools.msl.core.logger.colorFormatter import ColorFormatter
 
 class MSLLogger(logging.Logger):
     CONSOLE_FORMAT = ("[%(name)s][%(levelname)s] %(message)s")
+    # CONSOLE_FORMAT = ("[%(name)s][%(levelname)s][%(lineno)d] %(message)s")
     FILE_FORMAT    = ("[%(asctime)s][%(name)s][%(levelname)s]%(message)s")
 
 
