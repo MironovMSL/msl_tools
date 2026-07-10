@@ -50,3 +50,16 @@ class RemoteVersionChecker:
 
         from msl_tools.msl.core.version.version import Version
         return Version.parse(tag_name)
+
+
+if __name__ == "__main__":
+
+    from msl_tools.msl.core.network.network_client import NetworkClient
+
+    remote_version_config = RemoteVersionConfig(
+        releases_url="https://api.github.com/repos/MironovMSL/msl_tools/releases",
+        latest_release_url="https://api.github.com/repos/MironovMSL/msl_tools/releases/latest",
+    )
+    remote_version = RemoteVersionChecker(remote_version_config, network_client=NetworkClient())
+
+    print(remote_version.get_latest_version())

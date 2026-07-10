@@ -69,12 +69,11 @@ class Paths:
     KNOWN_SYSTEMS = (OS_WINDOWS, OS_MAC, OS_LINUX)
 
     ROOT_DIR = Path(__file__).resolve().parents[3]
-
-    msl     = ROOT_DIR / 'msl'
-    core    = msl / 'core'
-    configs = msl / 'configs'
-    tools   = msl / 'tools'
-    logs    = msl / 'logs'
+    msl      = ROOT_DIR / 'msl'
+    configs  = ROOT_DIR / 'configs'
+    logs     = ROOT_DIR / 'logs'
+    core     = msl / 'core'
+    tools    = msl / 'tools'
 
     # --- OS detection ---
 
@@ -173,48 +172,18 @@ class Paths:
         shutil.move(str(src), str(dst))
         return dst
 
-from PySide6 import QtCore
-class StandardPaths:
-
     @classmethod
-    def get_home_dir(cls) -> Path | None:
-        path = QtCore.QStandardPaths.writableLocation(QtCore.QStandardPaths.StandardLocation.HomeLocation)
-        return Path(path) if path else None
-
-    @classmethod
-    def get_desktop_dir(cls) -> Path | None:
-        path = QtCore.QStandardPaths.writableLocation(QtCore.QStandardPaths.StandardLocation.DesktopLocation)
-        return Path(path) if path else None
-
-    @classmethod
-    def get_documents_dir(cls) -> Path | None:
-        path = QtCore.QStandardPaths.writableLocation(QtCore.QStandardPaths.StandardLocation.DocumentsLocation)
-        return Path(path) if path else None
-
-    @classmethod
-    def get_downloads_dir(cls) -> Path | None:
-        path = QtCore.QStandardPaths.writableLocation(QtCore.QStandardPaths.StandardLocation.DownloadLocation)
-        return Path(path) if path else None
-
-    @classmethod
-    def get_pictures_dir(cls) -> Path | None:
-        path = QtCore.QStandardPaths.writableLocation(QtCore.QStandardPaths.StandardLocation.PicturesLocation)
-        return Path(path) if path else None
-
-    @classmethod
-    def get_music_dir(cls) -> Path | None:
-        path = QtCore.QStandardPaths.writableLocation(QtCore.QStandardPaths.StandardLocation.MusicLocation)
-        return Path(path) if path else None
-
-    @classmethod
-    def get_movies_dir(cls) -> Path | None:
-        path = QtCore.QStandardPaths.writableLocation(QtCore.QStandardPaths.StandardLocation.MoviesLocation)
-        return Path(path) if path else None
-
-    @classmethod
-    def get_temp_dir(cls) -> Path | None:
-        path = QtCore.QStandardPaths.writableLocation(QtCore.QStandardPaths.StandardLocation.TempLocation)
-        return Path(path) if path else None
+    def extract(cls, archive_path: str | Path, destination: str | Path) -> bool:
+        """Распаковывает zip/tar-архив в указанную папку."""
+        archive_path, destination = Path(archive_path), Path(destination)
+        if not archive_path.is_file():
+            return False
+        try:
+            destination.mkdir(parents=True, exist_ok=True)
+            shutil.unpack_archive(str(archive_path), str(destination))
+            return True
+        except Exception:
+            return False
 
 
 if __name__ == '__main__':

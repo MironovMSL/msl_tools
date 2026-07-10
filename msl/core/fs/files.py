@@ -235,19 +235,23 @@ class File:
 
 if __name__ == '__main__':
     # Создаем объект файла один раз
-    log_file = File("system2.log")
+    py_file = File("system2.py")
 
     # Работаем с ним через методы и свойства
-    log_file.write("Initialization...\n")
-    log_file.append_line("User logged in")
-    log_file.append_line("Database connected")
+    py_file.write("Initialization...\n")
+    py_file.append_line("User logged in")
+    py_file.append_line("Database connected")
+    py_file.append_line("import msl")
+    py_file.append_line("msl.bootstrap()")
 
     # Свойства вызываются без круглых скобок ()
-    print(f"Размер: {log_file.size} байт")
-    print(f"Строк: {log_file.line_count}")
+    print(f"Размер: {py_file.size} байт")
+    print(f"Строк: {py_file.line_count}")
 
-    if log_file.contains("Database"):
+    if py_file.contains("Database"):
         print("Лог содержит информацию о БД")
+
+    print("чтение линий",py_file.read_lines())
 
     FILES = Files()
 
