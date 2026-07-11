@@ -1,9 +1,12 @@
 import logging
 from enum import Enum
 
+logger = logging.getLogger(__name__)
+
 class MayaEnvironment:
     """Детекция рантайма Maya в текущем процессе.
     Чистый query-слой: без кэша, без side effects, не инициализирует standalone сам."""
+
 
     class State(Enum):
         NOT_RUNNING = "not_running"   # maya.cmds недоступен вовсе (обычный интерпретатор/IDE)
@@ -43,7 +46,8 @@ class MayaEnvironment:
             import maya.cmds as cmds
             return cmds.about(version=True)
         except Exception as e:
-            pass
+            logger.warning(f'Unable to retrieve Maya version. Issue: "{e}".')
+            return None
 
 
 

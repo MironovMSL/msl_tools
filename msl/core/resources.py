@@ -8,12 +8,11 @@ from msl_tools.msl.core.fs.files import Files
 
 class Resources(metaclass=SingletonMeta):
     def __init__(self):
-        self.paths      = Paths
-        self.logManager = LoggerManager(self.paths.logs)
-
-        self.files         = Files(logger=self.logManager.get(name="files",to_file=False))
-        self.networkClient = NetworkClient(logger=self.logManager.get(name="networkClient",to_file=False))
-        self.configManager = ConfigManager(self.paths.configs, logger=self.logManager.get(name="configManager",to_file=False))
+        self.paths         = Paths()
+        self.files         = Files()
+        self.logManager    = LoggerManager(self.paths.logs)
+        self.networkClient = NetworkClient()
+        self.configManager = ConfigManager(self.paths.configs)
 
 
 
