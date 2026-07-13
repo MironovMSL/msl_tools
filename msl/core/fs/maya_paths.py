@@ -3,6 +3,7 @@ import re
 from pathlib import Path
 
 from msl_tools.msl.core.fs.paths import Paths
+from msl_tools.msl.core.fs.system_info import SystemInfo
 
 logger = logging.getLogger(__name__)
 
@@ -16,11 +17,11 @@ class MayaPaths:
     def get_install_root(cls, *, system: str | None = None) -> Path | None:
         """Папка Autodesk, где лежат все установленные версии Maya.
         e.g. C:/Program Files/Autodesk"""
-        system = system or Paths.get_system()
+        system = system or SystemInfo.get_system()
         install_roots = {
-            Paths.OS_LINUX: "/usr/autodesk",  # TODO: не проверено на реальной Linux-установке
-            Paths.OS_MAC: "/Applications/Autodesk",
-            Paths.OS_WINDOWS: r"C:\Program Files\Autodesk",
+            SystemInfo.OS_LINUX: "/usr/autodesk",  # TODO: не проверено на реальной Linux-установке
+            SystemInfo.OS_MAC: "/Applications/Autodesk",
+            SystemInfo.OS_WINDOWS: r"C:\Program Files\Autodesk",
         }
         root = install_roots.get(system)
         if root is None:
@@ -35,16 +36,16 @@ class MayaPaths:
             logger.warning("Unable to resolve Maya executable path. No version provided.")
             return None
 
-        system = system or Paths.get_system()
+        system = system or SystemInfo.get_system()
         install_root = cls.get_install_root(system=system)
         if install_root is None:
             return None
 
         executable_name = "mayapy" if python_executable else "maya"
         executable_paths = {
-            Paths.OS_LINUX: install_root / f"maya{version}" / "bin" / executable_name,
-            Paths.OS_MAC: install_root / f"maya{version}" / "Maya.app" / "Contents" / "bin" / executable_name,
-            Paths.OS_WINDOWS: install_root / f"Maya{version}" / "bin" / f"{executable_name}.exe",
+            SystemInfo.OS_LINUX: install_root / f"maya{version}" / "bin" / executable_name,
+            SystemInfo.OS_MAC: install_root / f"maya{version}" / "Maya.app" / "Contents" / "bin" / executable_name,
+            SystemInfo.OS_WINDOWS: install_root / f"Maya{version}" / "bin" / f"{executable_name}.exe",
         }
         path = executable_paths.get(system)
         if path is None:
@@ -54,7 +55,7 @@ class MayaPaths:
     @classmethod
     def get_preferences_root(cls, *, system: str | None = None, use_maya_commands: bool = False) -> Path | None:
         """Родительская папка препочтений Maya (папка, где лежат версии, e.g. .../maya/2024)."""
-        system = system or Paths.get_system()
+        system = system or SystemInfo.get_system()
 
         if use_maya_commands:
             try:
@@ -66,7 +67,7 @@ class MayaPaths:
                     f"Falling back to system-based resolution."
                 )
 
-        if system == Paths.OS_WINDOWS:
+        if system == SystemInfo.OS_WINDOWS:
             try:
                 import maya.cmds as cmds
                 if cmds.about(batch=True):
@@ -75,9 +76,9 @@ class MayaPaths:
             except Exception as e:
                 logger.debug(f"Got Maya preferences path from outside Maya. Reason: {e}")
                 return Paths.get_home_dir() / "Documents" / "maya"
-        elif system == Paths.OS_MAC:
+        elif system == SystemInfo.OS_MAC:
             return Paths.get_home_dir() / "Library" / "Preferences" / "Autodesk" / "maya"
-        elif system == Paths.OS_LINUX:
+        elif system == SystemInfo.OS_LINUX:
             logger.warning("Maya preferences root resolution is not implemented for Linux yet.")
             return None
         else:
@@ -87,7 +88,7 @@ class MayaPaths:
     @classmethod
     def get_available_installs(cls, *, system: str | None = None) -> dict[str, Path]:
         """{"2024": Path(".../Maya2024")} — все найденные установки Maya."""
-        system = system or Paths.get_system()
+        system = system or SystemInfo.get_system()
         install_root = cls.get_install_root(system=system)
         if install_root is None or not install_root.exists():
             logger.warning(f'Unable to find Maya installs. Missing or invalid path: "{install_root}"')
@@ -118,7 +119,7 @@ class MayaPaths:
     @classmethod
     def get_latest_executable(cls, preferred_version: str | None = None, *, system: str | None = None, python_executable: bool = False) -> Path | None:
         """Последняя обнаруженная версия, либо preferred_version, если она доступна."""
-        system = system or Paths.get_system()
+        system = system or SystemInfo.get_system()
         installs = cls.get_available_installs(system=system)
         if not installs:
             logger.warning("Unable to find latest Maya executable. No Maya installation detected.")

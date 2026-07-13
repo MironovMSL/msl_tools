@@ -1,18 +1,18 @@
 from msl_tools.msl.core.pattern.singleton import SingletonMeta
 from msl_tools.msl.core.logger.manager import LoggerManager
 from msl_tools.msl.core.config.manager import ConfigManager
+from msl_tools.msl.core.fs.manager import FileSystemManager
+
 from msl_tools.msl.core.network.network_client import NetworkClient
-from msl_tools.msl.core.fs.paths import Paths
-from msl_tools.msl.core.fs.files import Files
+
 
 
 class Resources(metaclass=SingletonMeta):
     def __init__(self):
-        self.paths         = Paths()
-        self.files         = Files()
-        self.logManager    = LoggerManager(self.paths.logs)
+        self.fsManager     = FileSystemManager()  #fileSystem
+        self.logManager    = LoggerManager(self.fsManager.logs)
+        self.configManager = ConfigManager(self.fsManager.configs)
         self.networkClient = NetworkClient()
-        self.configManager = ConfigManager(self.paths.configs)
 
 
 

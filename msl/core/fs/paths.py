@@ -59,40 +59,9 @@
 
 from pathlib import Path
 import shutil
-import sys
 
 
 class Paths:
-    OS_MAC        = "darwin"
-    OS_LINUX      = "linux"
-    OS_WINDOWS    = "win32"
-    KNOWN_SYSTEMS = (OS_WINDOWS, OS_MAC, OS_LINUX)
-
-    ROOT_DIR = Path(__file__).resolve().parents[3]
-    msl      = ROOT_DIR / 'msl'
-    configs  = ROOT_DIR / 'configs'
-    logs     = ROOT_DIR / 'logs'
-    core     = msl / 'core'
-    tools    = msl / 'tools'
-
-    # --- OS detection ---
-
-    @classmethod
-    def get_system(cls) -> str:
-        return sys.platform
-
-    @classmethod
-    def is_windows(cls) -> bool:
-        return cls.get_system() == cls.OS_WINDOWS
-
-    @classmethod
-    def is_macos(cls) -> bool:
-        return cls.get_system() == cls.OS_MAC
-
-    @classmethod
-    def is_linux(cls) -> bool:
-        return cls.get_system() == cls.OS_LINUX
-
     # --- generic user dirs (stdlib fallback, без Qt) ---
 
     @classmethod
@@ -184,6 +153,8 @@ class Paths:
             return True
         except Exception:
             return False
+
+
 
 
 if __name__ == '__main__':
