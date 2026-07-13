@@ -11,12 +11,15 @@ import msl_tools.msl.ui.qt_bindings as qt
 
 class InstallerView(metaclass=MayaWindowMeta):
 
-    NAME   = 'MSL Installer'
+    NAME   = 'Installer'
 
-    CORE    = Resources()
-    UI_CORE = UiResources()
-    CONFIG  = CORE.configManager.get_config(NAME, ".ini")
-    LOG     = CORE.configManager.get_config(NAME)
+    CORE        = Resources()
+
+    CONFIG      = CORE.configManager.get_config(NAME, ".ini")
+    LOG         = CORE.configManager.get_config(NAME)
+
+    UI_CORE     = UiResources()
+    WINDOW_ICON = UI_CORE.iconManager.get_icon(NAME)
 
     def __init__(self, parent=None):
         super().__init__(parent=parent)

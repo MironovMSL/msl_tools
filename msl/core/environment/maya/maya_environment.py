@@ -11,7 +11,7 @@ class MayaEnvironment:
     class State(Enum):
         NOT_RUNNING = "not_running"   # maya.cmds недоступен вовсе (обычный интерпретатор/IDE)
         INTERACTIVE = "interactive"   # maya.exe, полноценный GUI
-        BATCH = "batch"               # mayapy / maya -batch / maya.standalone.initialize()
+        BATCH       = "batch"         # mayapy / maya -batch / maya.standalone.initialize()
 
     @classmethod
     def get_state(cls) -> "MayaEnvironment.State":

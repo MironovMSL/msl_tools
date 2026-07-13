@@ -14,8 +14,8 @@ class FileSystemManager:
 
     ROOT_DIR = Path(__file__).resolve().parents[3]
     msl      = ROOT_DIR / 'msl'
-    configs  = ROOT_DIR / 'configs'
-    logs     = ROOT_DIR / 'logs'
+    configs  = ROOT_DIR / 'configs' / 'maya'
+    logs     = ROOT_DIR / 'logs' / 'maya'
 
     core     = msl / 'core'
     tools    = msl / 'tools'
@@ -36,6 +36,30 @@ class FileSystemManager:
         return self.files(path, encoding=encoding)
 
 
+    def _get_icon_path(self, name: str, theme: str = "light", sub_folder: str | None = None) -> Path | None:
+        SUPPORTED_EXTENSIONS = [".svg", ".png", ".jpg", ".jpeg"]
+        base = self.icons / (sub_folder or "")
+        theme = theme
+
+        # 1. Сначала ищем файл с учетом темы (например, "search_light.svg", "search_light.png")
+        for ext in SUPPORTED_EXTENSIONS:
+            themed_path = base / f"{name}_{theme}{ext}"
+            if themed_path.exists():
+                return themed_path
+
+        # 2. Если тематический файл не найден, ищем дефолтный (fallback) без суффикса темы
+        for ext in SUPPORTED_EXTENSIONS:
+            fallback_path = base / f"{name}{ext}"
+            if fallback_path.exists():
+                return fallback_path
+
+        # 3. Если не нашли вообще ничего — логируем ошибку/предупреждение и возвращаем None
+        self._logger.error(
+            f"Icon not found: '{name}' in '{base}'.\n"
+            f"Tried extensions {SUPPORTED_EXTENSIONS} with theme='{theme}' and fallback."
+        )
+        return None
+
 if __name__ == "__main__":
     fs = FileSystemManager()
-    print(fs.icons)
+    print(fs._get_icon_path("test"))

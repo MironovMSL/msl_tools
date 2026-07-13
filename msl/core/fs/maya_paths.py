@@ -134,9 +134,9 @@ class MayaPaths:
 
 if __name__ == "__main__":
     version = '2026'
-    print(f"Instal root{MayaPaths.get_install_root()}")
+    print(f"Instal root {MayaPaths.get_install_root()}")
     print(f"executable path maya.exe    exemple {version} {MayaPaths.get_executable_path(version)}")
-    print(f"executable path mayapy.exe  exemple {version} {MayaPaths.get_executable_path(version,python_executable=True)}")
+    print(f"executable path mayapy.exe  exemple {version} {MayaPaths.get_executable_path(version, python_executable=True)}")
     print(f"available installs maya {MayaPaths.get_available_installs()}")
     print(f"preferences root {MayaPaths.get_preferences_root(use_maya_commands=True)}")
     print(f"available preferences maya {MayaPaths.get_available_preferences()}")
