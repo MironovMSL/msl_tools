@@ -18,7 +18,7 @@ class Resources(metaclass=SingletonMeta):
         self.logManager     = LoggerManager(self.fsManager.logs)
         self.configManager  = ConfigManager(self.fsManager.configs)
         self.networkClient  = NetworkClient()
-        self.versionManager = VersionManager(releases_url, latest_release_url, self.networkClient)
+        self.versionManager = VersionManager(releases_url, latest_release_url, self.networkClient, self.fsManager.msl)
 
 
 

@@ -31,7 +31,7 @@ class LoggerManager:
 
     def get(self,
         name: str          = DEFAULT_NAME,
-        colored: bool      = True,
+        colored: bool      = False,
         fmt: Optional[str] = None,
         level: str         = "DEBUG",
         to_file: bool      = True,

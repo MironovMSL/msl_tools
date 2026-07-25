@@ -43,7 +43,7 @@ class MSLLogger(logging.Logger):
     def has_console(self):
         return any(isinstance(h, logging.StreamHandler) and not isinstance(h, logging.FileHandler) for h in self.handlers)
 
-    def add_console(self, colored=True, fmt=None, stream=sys.stderr):
+    def add_console(self, colored=True, fmt=None, stream=sys.stdout):
 
         if self.has_console():
             return

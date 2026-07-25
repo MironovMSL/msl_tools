@@ -6,8 +6,8 @@ import logging
 import sys
 
 from msl_tools.msl.core.environment.maya.maya_environment import MayaEnvironment
+from msl_tools.msl.ui.windows.maya_window_query import MayaWindowQuery
 import msl_tools.msl.ui.qt_bindings as qt
-from msl_tools.msl.ui.windows.maya_window_query import get_maya_main_window
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +38,7 @@ class QtApplicationContext:
 
     def __enter__(self):
         if self.is_in_interactive_maya():
-            self.parent = get_maya_main_window()
+            self.parent = MayaWindowQuery.get_maya_main_window()
         else:
             logger.debug("Running Qt outside interactive Maya. Initializing QApplication.")
             self.app = qt.QtWidgets.QApplication.instance() or qt.QtWidgets.QApplication(sys.argv)

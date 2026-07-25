@@ -1,6 +1,6 @@
 import logging
 from pathlib import Path
-from typing import Optional, Union
+from typing import Optional, Union, Any
 
 from msl_tools.msl.core.config.ini_config import IniConfig
 from msl_tools.msl.core.config.json_config import JsonConfig
@@ -17,31 +17,26 @@ class ConfigManager:
     def __init__(self, base_dir: Path, logger: Optional[logging.Logger] = None):
         self.base_dir = Path(base_dir)
         self.base_dir.mkdir(parents=True, exist_ok=True)
+        self.logger   = logger or logging.getLogger(__name__)
 
-        # Логгер приходит извне (DI), а не создаётся здесь самостоятельно —
-        # это разрывает потенциальный циклический импорт с Resources,
-        # который сам создаёт и ConfigManager, и LoggerManager.
-        # Если логгер не передали -- используем "немой" стандартный logging,
-        # чтобы модуль оставался рабочим и вне контекста Resources.
-        self.logger = logger or logging.getLogger(__name__)
-
-        # Кэш активных конфигураторов: { (tool_name, ext): Config_Instance }
-        self._instances: dict[tuple[str, str], Union[JsonConfig, IniConfig]] = {}
+        self._instances: dict[tuple[str, str], Union[JsonConfig, IniConfig]] = {}  # { (tool_name, ext): Config_Instance }
 
     def __repr__(self) -> str:
         return f"ConfigManager('{self.base_dir}')"
 
-    def get_config(self, tool_name: str, ext: str = ".json") -> Union[JsonConfig, IniConfig]:
+    def get_config(self,
+                   tool_name: str,
+                   ext: str = ".json",
+                   defaults: Optional[dict[str, Any]] = None
+                   ) -> Union[JsonConfig, IniConfig]:
         """
         Returns the tool configurator.
 
-        Один tool_name может одновременно иметь и .json, и .ini конфиг —
-        это два независимых файла (tool_dir/config.json, tool_dir/config.ini)
-        и два независимых закэшированных объекта.
-
-        :param tool_name: Tool name (folder name)
-        :param ext: File extension ('.json' or '.ini')
-        :raises ValueError: if ext is unsupported.
+        :param defaults: Дефолтные значения, применяются только при первом
+            создании конфига (cache miss). Не перетирают уже существующие
+            значения. Формат зависит от бэкенда:
+              - JsonConfig: произвольная вложенность
+              - IniConfig: ровно два уровня {section: {key: value}}
         """
         ext = ext.lower()
         if not ext.startswith("."):
@@ -53,6 +48,11 @@ class ConfigManager:
         cache_key = (tool_name, ext)
 
         if cache_key in self._instances:
+            if defaults is not None:
+                self.logger.debug(
+                    f"Config '{tool_name}{ext}' already initialized; "
+                    f"ignoring defaults passed on repeat get_config() call."
+                )
             return self._instances[cache_key]
 
         config_cls = _EXT_TO_CLASS[ext]
@@ -61,10 +61,26 @@ class ConfigManager:
         tool_dir.mkdir(parents=True, exist_ok=True)
         config_path = str(tool_dir / f"config{ext}")
 
-        self.logger.info("Loading %s config for '%s' -> %s", config_cls.__name__, tool_name, config_path)
+        self.logger.info(f"Loading {config_cls.__name__} config for '{tool_name}' -> {config_path}")
 
-        self._instances[cache_key] = config_cls(config_path)
-        return self._instances[cache_key]
+        if config_cls is JsonConfig:
+            # JsonConfig сам мержит defaults с загруженными данными в load(),
+            # причём self.defaults остаётся на инстансе -> будет применяться
+            # и при последующих reload() тоже.
+            instance = JsonConfig(config_path, defaults=defaults)
+        else:
+            # IniConfig не принимает defaults в конструкторе -
+            # заполняем недостающие ключи явным вызовом сразу после создания.
+            instance = IniConfig(config_path)
+            if defaults:
+                instance.init_defaults(defaults)
+                self.logger.info(
+                    f"Applied defaults to '{tool_name}' ({config_path}): "
+                    f"{sum(len(v) for v in defaults.values())} key(s) checked."
+                )
+
+        self._instances[cache_key] = instance
+        return instance
 
 
 if __name__ == "__main__":

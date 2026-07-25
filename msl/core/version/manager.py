@@ -27,26 +27,33 @@ class UpdateInfo:
 
     def __str__(self) -> str:
         if self.status is UpdateStatus.UPDATE_AVAILABLE:
-            return f"Доступно обновление: {self.current_version} → {self.latest_version}"
+            return f"Update available: {self.current_version} → {self.latest_version}"
         if self.status is UpdateStatus.UP_TO_DATE:
-            return f"Установлена последняя версия ({self.current_version})"
-        return "Не удалось проверить наличие обновлений"
+            return f"The latest version is installed ({self.current_version})"
+        return "Failed to check for updates"
 
 
 class VersionManager:
     """Связывает локальную версию (любого пути с __init__.py) с проверкой релизов на GitHub.
     Не хранит фиксированный путь — принимает его при каждом вызове check_for_update()."""
 
-    def __init__(self, releases_url: str,latest_release_url: str, network_client, *, logger: logging.Logger | None = None):
+    def __init__(self,
+                 releases_url: str,
+                 latest_release_url: str,
+                 network_client,
+                 core_module_path: str | Path, *,
+                 logger: logging.Logger | None = None):
 
+        self.core_module_path = core_module_path
         self.local_reader    = LocalVersionReader()
 
         config = RemoteVersionConfig(releases_url=releases_url, latest_release_url=latest_release_url)
         self._remote_checker = RemoteVersionChecker(config, network_client=network_client)
         self._logger = logger or logging.getLogger(__name__)
 
-    def check_for_update(self, module_path: str | Path) -> UpdateInfo:
-        current_raw = self.local_reader.get_version(module_path)
+    def check_for_update(self) -> UpdateInfo:
+
+        current_raw = self.local_reader.get_version(self.core_module_path)
         if current_raw is None:
             return UpdateInfo(status=UpdateStatus.UNKNOWN, current_version="unknown")
         current_version = Version.parse(current_raw)
@@ -73,9 +80,17 @@ if __name__ == "__main__":
     releases_url       ="https://api.github.com/repos/MironovMSL/msl_tools/releases"
     latest_release_url ="https://api.github.com/repos/MironovMSL/msl_tools/releases/latest"
 
-    manager = VersionManager(releases_url=releases_url, latest_release_url=latest_release_url, network_client=NetworkClient())
-    print(manager.check_for_update(package_root))
+    manager = VersionManager(releases_url=releases_url, latest_release_url=latest_release_url, network_client=NetworkClient(), core_module_path=package_root)
+    print(manager.check_for_update())
+
 
     package_tool = Path(r"H:\ProjectsDev\MSL_Others\msl_tools\msl\tools\maya\installer")
-    print(LocalVersionReader.get_version(package_tool))
-    print(manager.local_reader.get_version(package_tool))
+    # print(LocalVersionReader.get_version(package_tool))
+    # print(manager.local_reader.get_version(package_tool))
+
+
+    info = manager.check_for_update()
+    print(info.status, "status")
+    print(info.current_version, "current_version")
+    print(info.latest_version, "latest_version")
+    print(info.has_update, "has_update")
