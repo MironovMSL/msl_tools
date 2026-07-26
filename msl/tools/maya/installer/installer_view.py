@@ -25,7 +25,12 @@ class InstallerView(qt.QtWidgets.QDialog): # "singleton" "unique" "multi"
     def __init__(self, parent=None):
         super().__init__(parent=parent)
 
-        self.version_info = self.CORE.versionManager.check_for_update()
+        path_maya = r"C:\Users\s_mironov\Documents\maya\scripts"
+        path_current = r"H:\ProjectsDev\MSL_Others"
+
+        self.version_info = self.CORE.versionManager.check_install_status(path_maya)
+        print(self.version_info)
+        self.version_setup = self.CORE.versionManager.local_reader.get_version(self.CORE.versionManager.core_module_path)
         self.setWindowTitle(self.NAME)
         self.setWindowIcon(self.WINDOW_ICON)
 
@@ -39,10 +44,12 @@ class InstallerView(qt.QtWidgets.QDialog): # "singleton" "unique" "multi"
         self.btn_run = qt.QtWidgets.QPushButton("run")
 
 
-        self.label_version = qt.QtWidgets.QLabel(f"Version:{self.version_info.current_version}")
-        self.label_latest_version = qt.QtWidgets.QLabel(f"latest Version:{self.version_info.latest_version}")
+        self.label_version = qt.QtWidgets.QLabel(f"Version:{self.version_setup}")
+        self.label_latest_version = qt.QtWidgets.QLabel(f"latest Version: ???")
         # self.label_status = qt.QtWidgets.QLabel("<status_placeholder>")
         self.label_status = qt.QtWidgets.QLabel("<status_placeholder>")
+
+        # self.update_version = qt.QtWidgets.QLabel(f"{self.version_info}")
 
         # Text-field path
         self.label_installation_path = qt.QtWidgets.QLabel("Installation Path:")
@@ -72,6 +79,9 @@ class InstallerView(qt.QtWidgets.QDialog): # "singleton" "unique" "multi"
         vr_layout.addWidget(self.label_latest_version)
         vr_layout.addWidget(self.label_status)
 
+        # update_layout = qt.QtWidgets.QHBoxLayout()
+        # update_layout.addWidget(self.update_version)
+
         main_layout = qt.QtWidgets.QVBoxLayout(self)
         main_layout.setAlignment(qt.QtCore.Qt.AlignTop)
         main_layout.setContentsMargins(5, 5, 5, 5)
@@ -80,16 +90,17 @@ class InstallerView(qt.QtWidgets.QDialog): # "singleton" "unique" "multi"
         main_layout.addLayout(bt_layout)
         main_layout.addLayout(target_path_layout)
         main_layout.addLayout(vr_layout)
+        # main_layout.addLayout(update_layout)
 
     def create_connections(self):
-        self.btn_install.clicked.connect(self.click_install)
-        self.btn_uninstall.clicked.connect(self.click_uninstall)
+        self.btn_install.clicked.connect(self.on_click_install)
+        self.btn_uninstall.clicked.connect(self.on_click_uninstall)
 
-    def click_install(self):
+    def on_click_install(self):
         self.LOG.info("click install")
         print("click")
 
-    def click_uninstall(self):
+    def on_click_uninstall(self):
         self.LOG.info("click uninstall")
         print("click")
 
