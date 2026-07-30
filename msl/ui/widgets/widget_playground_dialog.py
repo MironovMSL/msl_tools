@@ -8,12 +8,12 @@ class WidgetPlaygroundDialog(BaseDialog):
     a new widget without building a full tool around it."""
 
     def __init__(self, parent=None):
-        super().__init__(title="widget playground", width=520, height=600, parent=parent)
+        super().__init__(title="widget playground", width=400, height=300, parent=parent)
 
     def add_case(self, name: str, widget: qt.QtWidgets.QWidget) -> None:
         """Adds a widget with a name label above it, for context in the test window."""
         label = qt.QtWidgets.QLabel(name)
-        label.setStyleSheet("color: gray; font-size: 11px; font-weight: bold;")
+        label.setStyleSheet("color: rgb(0, 85, 127); font-size: 11px; font-weight: bold; text-decoration: underline;")
 
         self.add_widget(label)
         self.add_widget(widget)
