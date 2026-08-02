@@ -1,3 +1,7 @@
+# ui/widgets/base_dialog.py
+
+from enum import Enum, auto
+
 import msl_tools.msl.ui.qt_bindings as qt
 
 
@@ -6,7 +10,8 @@ class BaseDialog(qt.QtWidgets.QDialog):
     to extend and an optional bottom button row. Contains no DCC-specific logic —
     parenting to Maya (or any host) is done by the caller when instantiating."""
 
-    def __init__(self, title:str = "", width:int = 480, height:int = 320, show_close_button: bool = True, parent = None):
+    def __init__(self, title: str = "", width: int = 480, height: int = 320,
+                 show_close_button: bool = True, parent=None):
         super().__init__(parent)
 
         self.setWindowTitle(title)
@@ -26,7 +31,6 @@ class BaseDialog(qt.QtWidgets.QDialog):
 
         self.main_layout.addLayout(self.content_layout)
         self.main_layout.addStretch()
-
 
     def _build_button_row(self) -> None:
         row = qt.QtWidgets.QHBoxLayout()
@@ -50,14 +54,6 @@ class BaseDialog(qt.QtWidgets.QDialog):
         self.content_layout.addWidget(line)
 
 
-# ui/widgets/base_dialog.py
-# ui/widgets/base_dialog.py
-
-from enum import Enum, auto
-
-
-
-
 class _ResizeEdge(Enum):
     NONE = auto()
     LEFT = auto()
@@ -70,14 +66,13 @@ class _ResizeEdge(Enum):
     BOTTOM_RIGHT = auto()
 
 
-class BaseDialog2(qt.QtWidgets.QDialog):
-    """Base dialog for the widget library. Frameless, with a custom title bar
-    instead of the native one — allows embedding widgets into the header
-    (e.g. a theme switcher) alongside the centered title and close button.
-    The header is draggable to move the window, and the window edges support
-    interactive resizing, since the native title bar and frame are gone.
-    Contains no DCC-specific logic — parenting to Maya (or any host) is done
-    by the caller when instantiating.
+class FramelessDialog(qt.QtWidgets.QDialog):
+    """Frameless dialog with a custom title bar instead of the native one —
+    allows embedding widgets into the header (e.g. a theme switcher) alongside
+    the centered title and close button. The header is draggable to move the
+    window, and the window edges support interactive resizing, since the
+    native title bar and frame are gone. Contains no DCC-specific logic —
+    parenting to Maya (or any host) is done by the caller when instantiating.
     """
 
     _EDGE_MARGIN = 6
@@ -282,7 +277,6 @@ class BaseDialog2(qt.QtWidgets.QDialog):
             event.accept()
             return
 
-        # No button held — just update the cursor shape when hovering an edge
         if not event.buttons():
             edge = self._edge_at(event.position().toPoint())
             self.setCursor(self._CURSOR_BY_EDGE.get(edge, qt.QtCore.Qt.CursorShape.ArrowCursor))
@@ -298,12 +292,11 @@ class BaseDialog2(qt.QtWidgets.QDialog):
 
 
 if __name__ == '__main__':
-
     from msl_tools.msl.ui.app.application_context import QtApplicationContext
 
-
     with QtApplicationContext():
-        window = BaseDialog(title="BaseDialog")
+        # window = FramelessDialog(title="FramelessDialog")
+        window = FramelessDialog(title="BaseDialog")
         window.add_widget(qt.QtWidgets.QPushButton("test"))
         window.add_widget(qt.QtWidgets.QPushButton("test2"))
         window.add_separator()

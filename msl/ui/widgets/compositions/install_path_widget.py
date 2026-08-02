@@ -64,11 +64,11 @@ class InstallPathWidget(qt.QtWidgets.QWidget):
         if use_package_folder:
             self.path_widget.set_path(self._package_path)
             self.path_widget.set_read_only(True)
-            self.hint_label.setText("checked — path resolved from current package location")
+            self.hint_label.setText("      checked — current package location")
         else:
             self.path_widget.set_path(self._default_path)
             self.path_widget.set_read_only(False)
-            self.hint_label.setText("unchecked — using default install folder")
+            self.hint_label.setText("      unchecked — using default install folder")
 
         self.path_changed.emit(self.path_widget.path())
 

@@ -10,10 +10,10 @@ from msl_tools.msl.core.version.local_version import LocalVersionReader
 
 
 class UpdateStatus(Enum):
-    UP_TO_DATE = auto()
+    UP_TO_DATE       = auto()
     UPDATE_AVAILABLE = auto()
-    NOT_INSTALLED = auto()
-    UNKNOWN = auto()
+    NOT_INSTALLED    = auto()
+    UNKNOWN          = auto()
 
 
 @dataclass(frozen=True)
@@ -51,12 +51,13 @@ class VersionManager:
                  core_module_path: str | Path, *,
                  logger: logging.Logger | None = None):
 
-        self.core_module_path = core_module_path
-        self.local_reader    = LocalVersionReader()
-
         config = RemoteVersionConfig(releases_url=releases_url, latest_release_url=latest_release_url)
-        self._remote_checker = RemoteVersionChecker(config, network_client=network_client)
-        self._logger = logger or logging.getLogger(__name__)
+
+        self.local_reader        = LocalVersionReader()
+        self.core_module_path    = core_module_path
+        self.core_raw_version = self.local_reader.get_version(self.core_module_path)
+        self._remote_checker     = RemoteVersionChecker(config, network_client=network_client)
+        self._logger             = logger or logging.getLogger(__name__)
 
     def _resolve_package_root(self, install_root: str | Path) -> Path:
         """Достраивает полный путь до пакета (с __init__.py) внутри переданной корневой папки."""
@@ -64,19 +65,20 @@ class VersionManager:
 
     def check_for_remote_update(self) -> UpdateInfo:
 
-        current_raw = self.local_reader.get_version(self.core_module_path)
-        if current_raw is None:
+        if self.core_raw_version is None:
+            self._logger.warning(f"Failed to read package version: {self.core_module_path}")
             return UpdateInfo(status=UpdateStatus.UNKNOWN, current_version="unknown")
-        current_version = Version.parse(current_raw)
 
-        latest = self._remote_checker.get_latest_version()
+        current_version = Version.parse(self.core_raw_version)
+        latest          = self._remote_checker.get_latest_version()
+
         if latest is None:
             return UpdateInfo(status=UpdateStatus.UNKNOWN, current_version=current_version)
 
         try:
             comparison = Version.compare(latest, current_version)
         except ValueError as e:
-            self._logger.warning(f"Не удалось сравнить версии: {e}")
+            self._logger.warning(f"Unable to compare versions: {e}")
             return UpdateInfo(status=UpdateStatus.UNKNOWN, current_version=current_version)
 
         if comparison == Version.BIGGER:
@@ -88,53 +90,50 @@ class VersionManager:
         или H:\\ProjectsDev\\MSL_Others), а не путь до самого пакета.
         Метод сам находит msl_tools\\msl внутри неё."""
 
-        package_raw = self.local_reader.get_version(self.core_module_path)
-        if package_raw is None:
-            self._logger.warning(f"Не удалось прочитать версию пакета: {self.core_module_path}")
+        if self.core_raw_version is None:
+            self._logger.warning(f"Failed to read package version: {self.core_module_path}")
             return UpdateInfo(status=UpdateStatus.UNKNOWN, current_version="unknown")
-        package_version = Version.parse(package_raw)
 
+        current_version       = Version.parse(self.core_raw_version)
         resolved_install_path = self._resolve_package_root(install_root)
-        print(resolved_install_path)
-        installed_raw = self.local_reader.get_version(resolved_install_path)
+        installed_raw         = self.local_reader.get_version(resolved_install_path)
+
         if installed_raw is None:
-            return UpdateInfo(
-                status=UpdateStatus.NOT_INSTALLED,
-                current_version="not installed",
-                latest_version=package_version,
-            )
+            return UpdateInfo(status=UpdateStatus.NOT_INSTALLED, current_version="not installed", latest_version=current_version)
+
         installed_version = Version.parse(installed_raw)
 
         try:
-            comparison = Version.compare(package_version, installed_version)
+            comparison = Version.compare(current_version, installed_version)
         except ValueError as e:
-            self._logger.warning(f"Не удалось сравнить версии: {e}")
+            self._logger.warning(f"Unable to compare versions: {e}")
             return UpdateInfo(status=UpdateStatus.UNKNOWN, current_version=installed_version)
 
         if comparison == Version.BIGGER:
-            return UpdateInfo(
-                status=UpdateStatus.UPDATE_AVAILABLE,
-                current_version=installed_version,
-                latest_version=package_version,
-            )
+            return UpdateInfo(status=UpdateStatus.UPDATE_AVAILABLE, current_version=installed_version, latest_version=current_version)
         return UpdateInfo(status=UpdateStatus.UP_TO_DATE, current_version=installed_version)
 
 
 if __name__ == "__main__":
-    from msl_tools.msl.core.network.network_client import NetworkClient
-    package_root = Path(r"H:\ProjectsDev\MSL_Others\msl_tools\msl")
 
+    from msl_tools.msl.core.network.network_client import NetworkClient
+
+    package_root       = Path(r"H:\ProjectsDev\MSL_Others\msl_tools\msl")
     releases_url       = "https://api.github.com/repos/MironovMSL/msl_tools/releases"
     latest_release_url = "https://api.github.com/repos/MironovMSL/msl_tools/releases/latest"
+    root               = Path(r"H:\ProjectsDev\MSL_Others")
 
-    manager = VersionManager(releases_url=releases_url, latest_release_url=latest_release_url,
-                              network_client=NetworkClient(), core_module_path=package_root)
-    print(manager.check_for_remote_update())
 
-    package_tool = Path(r"H:\ProjectsDev\MSL_Others\msl_tools\msl\tools\maya\installer")
+    manager = VersionManager(releases_url       =releases_url,
+                             latest_release_url =latest_release_url,
+                             network_client     =NetworkClient(),
+                             core_module_path   =package_root)
 
     info = manager.check_for_remote_update()
+    print(info)
     print(info.status, "status")
     print(info.current_version, "current_version")
     print(info.latest_version, "latest_version")
     print(info.has_update, "has_update")
+
+    print(manager.check_install_status(root))
