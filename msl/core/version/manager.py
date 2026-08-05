@@ -55,7 +55,7 @@ class VersionManager:
 
         self.local_reader        = LocalVersionReader()
         self.core_module_path    = core_module_path
-        self.core_raw_version = self.local_reader.get_version(self.core_module_path)
+        self.core_raw_version    = self.local_reader.get_version(self.core_module_path)
         self._remote_checker     = RemoteVersionChecker(config, network_client=network_client)
         self._logger             = logger or logging.getLogger(__name__)
 

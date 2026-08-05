@@ -1,7 +1,6 @@
 """
 View тула установки. Чистый UI без бизнес-логики.
 """
-
 from msl_tools.msl.core.resources import Resources
 from msl_tools.msl.ui.ui_resources import UiResources
 from msl_tools.msl.ui.widgets.compositions.install_path_widget import InstallPathWidget
@@ -9,30 +8,52 @@ from msl_tools.msl.ui.widgets.atoms.status import VersionStatusWidget
 
 import msl_tools.msl.ui.qt_bindings as qt
 
+default_config = {
+    "startup": {
+        "name"  : None,
+        "version": None,
+        "width" : 400,
+        "height": 150,
+        "default_install_path": None,
+        "package_install_path": None,
+        "use_package_path": False,
+    }
+}
 
-class InstallerView(qt.QtWidgets.QDialog): # "singleton" "unique" "multi"
+class InstallerView(qt.QtWidgets.QDialog):
 
-    NAME   = 'Installer'
-
+    NAME        = 'Installer'
     CORE        = Resources()
-
-    CONFIG      = CORE.configManager.get_config(NAME, ".ini")
-    LOG         = CORE.logManager.get(NAME)
-
     UI_CORE     = UiResources()
+
+    CONFIG      = CORE.configManager.get_config(NAME, defaults=default_config)
+    LOG         = CORE.logManager.get(NAME)
     WINDOW_ICON = UI_CORE.iconManager.get_icon(NAME)
 
-    def __init__(self, parent=None):
+    def __init__(self, version: str, parent=None):
         super().__init__(parent=parent)
 
-        self.path_maya = r"C:\Users\s_mironov\Documents\maya\scripts"
-        self.path_current = r"H:\ProjectsDev\MSL_Others"
+        self.installer_version    =  version
+        self.msl_tool_version     =  self.CORE.versionManager.core_raw_version
 
-        self.version_info  = self.CORE.versionManager.check_install_status(self.path_maya)
-        self.version_setup = self.CORE.versionManager.core_raw_version
+        pref_maya_path            =  self.CORE.fsManager.mayaPaths.get_preferences_root() / "scripts"
+        root_package_path         =  self.CORE.fsManager.PARENT_DIR
+        self.default_install_path = str((self.CONFIG["startup"]["default_install_path"] or pref_maya_path))
+        self.package_install_path = str((self.CONFIG["startup"]["package_install_path"] or root_package_path))
+        self.use_package_path     =  self.CONFIG["startup"]["use_package_path"]
+
+        self.width_window         = self.CONFIG["startup"]["width"]
+        self.height_window        = self.CONFIG["startup"]["height"]
 
         self.setWindowTitle(self.NAME)
         self.setWindowIcon(self.WINDOW_ICON)
+
+        self.resize(self.width_window, self.height_window)
+
+        if self.use_package_path:
+            self.install_info  = self.CORE.versionManager.check_install_status(self.package_install_path)
+        else:
+            self.install_info  = self.CORE.versionManager.check_install_status(self.default_install_path)
 
         self.create_widgets()
         self.create_layouts()
@@ -43,11 +64,14 @@ class InstallerView(qt.QtWidgets.QDialog): # "singleton" "unique" "multi"
         self.btn_uninstall = qt.QtWidgets.QPushButton("uninstall")
         self.btn_run = qt.QtWidgets.QPushButton("run")
 
-        self.InstallPathWidget = InstallPathWidget(default_path=self.path_maya, package_path=self.path_current)
-        self.VersionStatusWidget = VersionStatusWidget(package_version=self.version_setup)
+        self.InstallPathWidget = InstallPathWidget(default_path=self.default_install_path,
+                                                   package_path=self.package_install_path,
+                                                   state_checkbox=self.use_package_path)
+
+        self.VersionStatusWidget = VersionStatusWidget(package_version=self.msl_tool_version,
+                                                       info=self.install_info)
 
 
-        # self.update_version = qt.QtWidgets.QLabel(f"{self.version_info}")
 
         # Text-field path
         self.label_installation_path = qt.QtWidgets.QLabel("Installation Path:")
@@ -71,13 +95,8 @@ class InstallerView(qt.QtWidgets.QDialog): # "singleton" "unique" "multi"
         target_path_layout.addWidget(self.InstallPathWidget)
 
         vr_layout = qt.QtWidgets.QHBoxLayout()
-        # vr_layout.addWidget(self.label_version)
-        # vr_layout.addWidget(self.label_latest_version)
-        # vr_layout.addWidget(self.label_status)
         vr_layout.addWidget(self.VersionStatusWidget)
 
-        # update_layout = qt.QtWidgets.QHBoxLayout()
-        # update_layout.addWidget(self.update_version)
 
         main_layout = qt.QtWidgets.QVBoxLayout(self)
         main_layout.setAlignment(qt.QtCore.Qt.AlignTop)
@@ -87,7 +106,6 @@ class InstallerView(qt.QtWidgets.QDialog): # "singleton" "unique" "multi"
         main_layout.addLayout(bt_layout)
         main_layout.addLayout(target_path_layout)
         main_layout.addLayout(vr_layout)
-        # main_layout.addLayout(update_layout)
 
 
     def create_connections(self):
@@ -98,9 +116,10 @@ class InstallerView(qt.QtWidgets.QDialog): # "singleton" "unique" "multi"
 
     def _on_path_edited(self, path: str) -> None:
         print(path)
+
         self.path_maya = path
         self.version_info = self.CORE.versionManager.check_install_status(self.path_maya)
-        print(self.version_info)
+
         # self.VersionStatusWidget.set_update_info(UpdateInfo(status=UpdateStatus.UP_TO_DATE, current_version="unknown"))
         self.VersionStatusWidget.set_update_info(self.version_info)
 
@@ -132,7 +151,7 @@ if __name__ == '__main__':
     with QtApplicationContext() as content:
         # InstallerView.show_window(parent=content.get_parent())
         # MayaWindowQuery.close_ui_elements([window])
-        window = InstallerView(parent=content.get_parent())
+        window = InstallerView("0.0.1",parent=content.get_parent())
         window.show()
 
 

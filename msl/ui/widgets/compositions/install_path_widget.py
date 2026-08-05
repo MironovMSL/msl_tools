@@ -18,23 +18,24 @@ class InstallPathWidget(qt.QtWidgets.QWidget):
     use_package_folder_toggled = qt.QtCore.Signal(bool)
     path_changed               = qt.QtCore.Signal(str)
 
-    def __init__(self, *, default_path: str, package_path: str, parent=None):
+    def __init__(self, *, default_path: str, package_path: str, state_checkbox: bool, parent=None):
         super().__init__(parent)
 
         self._default_path = default_path
         self._package_path = package_path
 
-        self._create_widgets()
+        self._create_widgets(state_checkbox)
         self._create_layouts()
         self._create_connections()
-        self._apply_state(use_package_folder=False)
+        self._apply_state(use_package_folder=state_checkbox)
 
-    def _create_widgets(self) -> None:
+    def _create_widgets(self,state_checkbox) -> None:
         self.path_widget = BasePathWidget(label            = "install path",
                                           placeholder_text = "Select a default install folder",
                                           initial_path     = self._default_path,
                                           dialog_title     = "Select a Folder")
         self.use_package_checkbox = qt.QtWidgets.QCheckBox("use package folder as install path")
+        self.use_package_checkbox.setChecked(state_checkbox)
         self.hint_label = qt.QtWidgets.QLabel()
         self.hint_label.setStyleSheet("color: gray; font-size: 11px;")
 

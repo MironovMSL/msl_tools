@@ -25,18 +25,21 @@ class ConfigNode(MutableMapping):
     """
     Node in configuration tree.
     Features:
-        • lazy nested dict creation
+        • lazy nested dict creation, deferred until an actual write occurs
         • parent/root awareness
         • automatic dirty propagation
         • dict-like API
     """
 
-    __slots__ = ("_data", "_parent", "_root")
+    __slots__ = ("_data", "_parent", "_root", "_key", "_attached")
 
-    def __init__(self, root: "JsonConfig", parent: Optional["ConfigNode"], data: dict[str, Any]) -> None:
+    def __init__(self, root: "JsonConfig", parent: Optional["ConfigNode"], data: dict[str, Any],
+                 key: Optional[str] = None, attached: bool = True) -> None:
 
         self._root                 = root
         self._parent               = parent
+        self._key                  = key
+        self._attached             = attached
         self._data: dict[str, Any] = {}
 
         for k, v in data.items():
@@ -44,13 +47,26 @@ class ConfigNode(MutableMapping):
 
     def _wrap(self, value: Any) -> Any:
         if isinstance(value, dict):
-            return ConfigNode(root=self._root, parent=self, data=value)
+            # Values coming from real data (loaded/assigned) are attached immediately.
+            return ConfigNode(root=self._root, parent=self, data=value, attached=True)
         return value
 
     def _unwrap(self, value: Any) -> Any:
         if isinstance(value, ConfigNode):
             return value.to_dict()
         return value
+
+    def _ensure_attached(self) -> None:
+        """
+        Materializes this node (and its whole detached ancestor chain) into the tree.
+        Called only on the write path, never on read - reading must stay side-effect free.
+        """
+        if self._attached:
+            return
+        if self._parent is not None:
+            self._parent._ensure_attached()
+            self._parent._data[self._key] = self
+        self._attached = True
 
     def _mark_dirty(self) -> None:
         """
@@ -61,14 +77,18 @@ class ConfigNode(MutableMapping):
 
     def __getitem__(self, key: str) -> Any:
         if key not in self._data:
-            self._data[key] = ConfigNode(root=self._root, parent=self, data={})
+            # Return a detached placeholder: supports chained writes like
+            # node["a"]["b"]["c"] = value without polluting the tree on plain reads.
+            return ConfigNode(root=self._root, parent=self, data={}, key=key, attached=False)
         return self._data[key]
 
     def __setitem__(self, key: str, value: Any) -> None:
+        self._ensure_attached()
         self._data[key] = self._wrap(value)
         self._mark_dirty()
 
     def __delitem__(self, key: str) -> None:
+        self._ensure_attached()
         del self._data[key]
         self._mark_dirty()
 
@@ -124,6 +144,8 @@ class ConfigNode(MutableMapping):
         self._rebuild(new_order)
 
     def _rebuild(self, new_order: list[str]) -> None:
+        self._ensure_attached()
+
         new_data = {}
         for k in new_order:
             new_data[k] = self._data[k]
@@ -164,6 +186,7 @@ class JsonConfig:
         self.path     = path
         self.storage  = storage or JsonStorage()
         self.defaults = copy.deepcopy(defaults or {})
+
         self.autosave = autosave
 
         self._dirty: bool                = False
@@ -175,12 +198,18 @@ class JsonConfig:
     def load(self) -> None:
         """
         Load config from storage and merge with defaults.
+        If defaults introduced data that isn't present on disk yet (including
+        the case where the file doesn't exist at all), persist immediately
+        instead of waiting for the first explicit write.
         """
-        loaded = self.storage.read(self.path)
+        loaded = self.storage.read(self.path) or {}
         data   = deep_merge(self.defaults, loaded)
 
-        self._root  = ConfigNode(root=self, parent=None, data=data)
-        self._dirty = False
+        self._root  = ConfigNode(root=self, parent=None, data=data, attached=True)
+        self._dirty = (data != loaded)
+
+        if self.autosave and self._dirty:
+            self.save()
 
     def reload(self) -> None:
         """
@@ -285,3 +314,8 @@ if __name__ == "__main__":
 
     print("Final Data Structure:")
     print(config.data)
+
+    # Read-only access must not pollute the tree:
+    _ = config["Dev"]["DoesNotExist"]["AlsoMissing"]
+    assert "DoesNotExist" not in config["Dev"]
+    print("Read-only probe did not create phantom keys - OK")

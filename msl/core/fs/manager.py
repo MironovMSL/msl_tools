@@ -12,7 +12,9 @@ from msl_tools.msl.core.fs.files import Files
 class FileSystemManager:
     """Единая точка входа в fs/."""
 
-    ROOT_DIR = Path(__file__).resolve().parents[3]
+    ROOT_DIR   = Path(__file__).resolve().parents[3]
+    PARENT_DIR = ROOT_DIR.parent
+
     msl      = ROOT_DIR / 'msl'
     configs  = ROOT_DIR / 'configs' / 'maya'
     logs     = ROOT_DIR / 'logs' / 'maya'

@@ -14,7 +14,7 @@ def launcher_entry_point():
 
     with QtApplicationContext() as content:
         MayaWindowQuery.close_ui_elements([window])
-        window = InstallerView(parent=content.get_parent())
+        window = InstallerView(version=__version__, parent=content.get_parent())
         window.show()
 
 
