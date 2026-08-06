@@ -2,7 +2,7 @@
 
 from enum import Enum, auto
 import msl_tools.msl.ui.qt_bindings as qt
-
+from pathlib import Path
 
 class PathMode(Enum):
     """Determines which dialog type the browse button opens."""
@@ -85,7 +85,7 @@ class BasePathWidget(qt.QtWidgets.QWidget):
             selected, _ = qt.QtWidgets.QFileDialog.getSaveFileName(self, self._dialog_title, current, self._file_filter)
 
         if selected:
-            self.set_path(selected)
+            self.set_path(str(Path(selected)))
 
     def path(self) -> str:
         """Returns the current path as entered or selected."""

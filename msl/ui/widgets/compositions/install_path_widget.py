@@ -3,7 +3,6 @@
 import msl_tools.msl.ui.qt_bindings as qt
 from msl_tools.msl.ui.widgets.atoms.paths import BasePathWidget, PathMode
 
-
 class InstallPathWidget(qt.QtWidgets.QWidget):
     """Composition of BasePathWidget with a checkbox that toggles between
     manual path entry and using the current package folder as the install path.
@@ -53,13 +52,14 @@ class InstallPathWidget(qt.QtWidgets.QWidget):
         self.path_widget.path_changed.connect(self._on_path_widget_changed)
 
     def _on_checkbox_toggled(self, checked: bool) -> None:
-        self._apply_state(use_package_folder=checked)
         self.use_package_folder_toggled.emit(checked)
+        self._apply_state(use_package_folder=checked)
 
     def _on_path_widget_changed(self, value: str) -> None:
         if not self.use_package_checkbox.isChecked():
             self._default_path = value
-            self.path_changed.emit(value)
+
+        self.path_changed.emit(value)
 
     def _apply_state(self, use_package_folder: bool) -> None:
         if use_package_folder:
@@ -70,8 +70,6 @@ class InstallPathWidget(qt.QtWidgets.QWidget):
             self.path_widget.set_path(self._default_path)
             self.path_widget.set_read_only(False)
             self.hint_label.setText("      unchecked — using default install folder")
-
-        self.path_changed.emit(self.path_widget.path())
 
     def effective_path(self) -> str:
         """Returns the currently active install path, regardless of checkbox state."""

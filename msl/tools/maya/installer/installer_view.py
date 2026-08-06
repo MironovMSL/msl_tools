@@ -5,18 +5,21 @@ from msl_tools.msl.core.resources import Resources
 from msl_tools.msl.ui.ui_resources import UiResources
 from msl_tools.msl.ui.widgets.compositions.install_path_widget import InstallPathWidget
 from msl_tools.msl.ui.widgets.atoms.status import VersionStatusWidget
+from pathlib import Path
+
 
 import msl_tools.msl.ui.qt_bindings as qt
 
+
 default_config = {
     "startup": {
-        "name"  : None,
+        "name"  : 'Installer',
         "version": None,
         "width" : 400,
         "height": 150,
         "default_install_path": None,
         "package_install_path": None,
-        "use_package_path": False,
+        "use_package_state": False,
     }
 }
 
@@ -40,17 +43,17 @@ class InstallerView(qt.QtWidgets.QDialog):
         root_package_path         =  self.CORE.fsManager.PARENT_DIR
         self.default_install_path = str((self.CONFIG["startup"]["default_install_path"] or pref_maya_path))
         self.package_install_path = str((self.CONFIG["startup"]["package_install_path"] or root_package_path))
-        self.use_package_path     =  self.CONFIG["startup"]["use_package_path"]
+        self.use_package_state     =  self.CONFIG["startup"]["use_package_state"]
 
         self.width_window         = self.CONFIG["startup"]["width"]
         self.height_window        = self.CONFIG["startup"]["height"]
 
-        self.setWindowTitle(self.NAME)
+        self.setWindowTitle((self.CONFIG["startup"]["name"] or self.NAME))
         self.setWindowIcon(self.WINDOW_ICON)
 
         self.resize(self.width_window, self.height_window)
 
-        if self.use_package_path:
+        if self.use_package_state:
             self.install_info  = self.CORE.versionManager.check_install_status(self.package_install_path)
         else:
             self.install_info  = self.CORE.versionManager.check_install_status(self.default_install_path)
@@ -62,74 +65,62 @@ class InstallerView(qt.QtWidgets.QDialog):
     def create_widgets(self):
         self.btn_install   = qt.QtWidgets.QPushButton("install")
         self.btn_uninstall = qt.QtWidgets.QPushButton("uninstall")
-        self.btn_run = qt.QtWidgets.QPushButton("run")
 
         self.InstallPathWidget = InstallPathWidget(default_path=self.default_install_path,
                                                    package_path=self.package_install_path,
-                                                   state_checkbox=self.use_package_path)
+                                                   state_checkbox=self.use_package_state)
 
         self.VersionStatusWidget = VersionStatusWidget(package_version=self.msl_tool_version,
                                                        info=self.install_info)
 
-
-
-        # Text-field path
-        self.label_installation_path = qt.QtWidgets.QLabel("Installation Path:")
-        self.line_edit_installation_path = qt.QtWidgets.QLineEdit()
-        self.line_edit_installation_path.setPlaceholderText("<installation_target_path_placeholder>")
-        self.line_edit_installation_path.setReadOnly(True)
-
-
-
     def create_layouts(self):
 
+        button_layout = qt.QtWidgets.QHBoxLayout()
+        button_layout.addWidget(self.btn_install)
+        button_layout.addWidget(self.btn_uninstall)
 
-        bt_layout = qt.QtWidgets.QHBoxLayout()
+        InstallPathWidget_layout = qt.QtWidgets.QHBoxLayout()
+        InstallPathWidget_layout.addWidget(self.InstallPathWidget)
 
-        bt_layout.addWidget(self.btn_install)
-        bt_layout.addWidget(self.btn_uninstall)
-        bt_layout.addWidget(self.btn_run)
-
-        # Install Path
-        target_path_layout = qt.QtWidgets.QHBoxLayout()
-        target_path_layout.addWidget(self.InstallPathWidget)
-
-        vr_layout = qt.QtWidgets.QHBoxLayout()
-        vr_layout.addWidget(self.VersionStatusWidget)
-
+        VersionStatusWidget_layout = qt.QtWidgets.QHBoxLayout()
+        VersionStatusWidget_layout.addWidget(self.VersionStatusWidget)
 
         main_layout = qt.QtWidgets.QVBoxLayout(self)
         main_layout.setAlignment(qt.QtCore.Qt.AlignTop)
         main_layout.setContentsMargins(5, 5, 5, 5)
         main_layout.setSpacing(5)
 
-        main_layout.addLayout(bt_layout)
-        main_layout.addLayout(target_path_layout)
-        main_layout.addLayout(vr_layout)
-
+        main_layout.addLayout(button_layout)
+        main_layout.addLayout(InstallPathWidget_layout)
+        main_layout.addLayout(VersionStatusWidget_layout)
 
     def create_connections(self):
         self.btn_install.clicked.connect(self.on_click_install)
         self.btn_uninstall.clicked.connect(self.on_click_uninstall)
 
-        self.InstallPathWidget.path_changed.connect(self._on_path_edited)
+        self.InstallPathWidget.use_package_folder_toggled.connect(self.set_use_package_state)
+        self.InstallPathWidget.path_changed.connect(self.on_path_edited)
 
-    def _on_path_edited(self, path: str) -> None:
-        print(path)
+    def set_use_package_state(self, checked: bool):
+        self.use_package_state = checked
 
-        self.path_maya = path
-        self.version_info = self.CORE.versionManager.check_install_status(self.path_maya)
+    def on_path_edited(self, path: str) -> None:
+        p = str(Path(path))
+        if not self.use_package_state:
+            self.default_install_path = p
 
-        # self.VersionStatusWidget.set_update_info(UpdateInfo(status=UpdateStatus.UP_TO_DATE, current_version="unknown"))
-        self.VersionStatusWidget.set_update_info(self.version_info)
-
-        # UpdateStatus.UP_TO_DATE: "up to date",
-        # UpdateStatus.UPDATE_AVAILABLE: "update available",
-        # UpdateStatus.NOT_INSTALLED: "not installed",
-        # UpdateStatus.UNKNOWN: "unknown",
+        self.install_info = self.CORE.versionManager.check_install_status(p)
+        self.VersionStatusWidget.set_update_info(self.install_info)
 
     def on_click_install(self):
         self.LOG.info("click install")
+        self.LOG.info("save")
+
+        self.CONFIG["startup"]["default_install_path"] = self.default_install_path
+        self.CONFIG["startup"]["package_install_path"] = self.package_install_path
+        self.CONFIG["startup"]["use_package_state"]    = self.use_package_state
+        self.CONFIG["startup"]["version"]              = self.installer_version
+
         print("click")
 
     def on_click_uninstall(self):
