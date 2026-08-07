@@ -5,6 +5,8 @@ from msl_tools.msl.core.resources import Resources
 from msl_tools.msl.ui.ui_resources import UiResources
 from msl_tools.msl.ui.widgets.compositions.install_path_widget import InstallPathWidget
 from msl_tools.msl.ui.widgets.atoms.status import VersionStatusWidget
+from msl_tools.msl.ui.widgets.atoms.progress import BaseProgressBar, ProgressState
+
 from pathlib import Path
 
 
@@ -73,6 +75,8 @@ class InstallerView(qt.QtWidgets.QDialog):
         self.VersionStatusWidget = VersionStatusWidget(package_version=self.msl_tool_version,
                                                        info=self.install_info)
 
+        self.BaseProgressBar = BaseProgressBar()
+
     def create_layouts(self):
 
         button_layout = qt.QtWidgets.QHBoxLayout()
@@ -85,6 +89,9 @@ class InstallerView(qt.QtWidgets.QDialog):
         VersionStatusWidget_layout = qt.QtWidgets.QHBoxLayout()
         VersionStatusWidget_layout.addWidget(self.VersionStatusWidget)
 
+        BaseProgressBar_layout = qt.QtWidgets.QHBoxLayout()
+        BaseProgressBar_layout.addWidget(self.BaseProgressBar)
+
         main_layout = qt.QtWidgets.QVBoxLayout(self)
         main_layout.setAlignment(qt.QtCore.Qt.AlignTop)
         main_layout.setContentsMargins(5, 5, 5, 5)
@@ -93,6 +100,7 @@ class InstallerView(qt.QtWidgets.QDialog):
         main_layout.addLayout(button_layout)
         main_layout.addLayout(InstallPathWidget_layout)
         main_layout.addLayout(VersionStatusWidget_layout)
+        main_layout.addLayout(BaseProgressBar_layout)
 
     def create_connections(self):
         self.btn_install.clicked.connect(self.on_click_install)
@@ -115,13 +123,22 @@ class InstallerView(qt.QtWidgets.QDialog):
     def on_click_install(self):
         self.LOG.info("click install")
         self.LOG.info("save")
+        import time
+        self.BaseProgressBar.set_state(ProgressState.NORMAL)
+        for i in range(1, 101):
+
+            self.BaseProgressBar.set_progress(i)
+            time.sleep(0.01)
+        else:
+            self.BaseProgressBar.set_state(ProgressState.SUCCESS)
+
 
         self.CONFIG["startup"]["default_install_path"] = self.default_install_path
         self.CONFIG["startup"]["package_install_path"] = self.package_install_path
         self.CONFIG["startup"]["use_package_state"]    = self.use_package_state
         self.CONFIG["startup"]["version"]              = self.installer_version
 
-        print("click")
+
 
     def on_click_uninstall(self):
         self.LOG.info("click uninstall")

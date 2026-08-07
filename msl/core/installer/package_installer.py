@@ -172,8 +172,7 @@ class PackageInstaller:
 
     # --- High-level install / uninstall ---
 
-    def install_package(self, source_path: str | Path, target_path: str | Path,
-                         clear_prefs: bool = False) -> bool:
+    def install_package(self, source_path: str | Path, target_path: str | Path, clear_prefs: bool = False) -> bool:
         """Полная установка: удаление старой версии, копирование новой,
         проверка целостности, регистрация entry point во всех userSetup."""
         from msl_tools.msl.core.fs.paths import Paths
@@ -218,27 +217,7 @@ class PackageInstaller:
 
         return entry_removed and files_removed
 
-    def get_local_version(self, package_root: str | Path) -> str | None:
-        """Читает __version__ из __init__.py установленного пакета."""
-        import importlib.util
-        init_path = Path(package_root) / self.config.main_module / "__init__.py"
-        if not init_path.exists():
-            self._logger.debug(f'No __init__.py found at "{init_path}".')
-            return None
-        try:
-            spec = importlib.util.spec_from_file_location("msl_version_check", init_path)
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
-            version = getattr(module, "__version__", None)
-            if version is None:
-                self._logger.warning(f'"__version__" not found in "{init_path}".')
-            return version
-        except Exception as e:
-            self._logger.warning(f'Unable to read version from "{init_path}". Issue: {e}')
-            return None
-
-    def extract_archive(self, archive_path: str | Path, destination: str | Path,
-                        remove_archive: bool = False) -> bool:
+    def extract_archive(self, archive_path: str | Path, destination: str | Path, remove_archive: bool = False) -> bool:
         """Распаковывает скачанный с GitHub архив пакета в целевую папку.
         Разворачивает единственный корневой каталог архива (например, "msl_tools-main")
         напрямую в destination, а не оставляет его вложенным."""
@@ -285,5 +264,3 @@ if __name__ == "__main__":
         entry_line='python("import msl; msl.bootstrap()")'
     )
     package_installer = PackageInstaller(config)
-    local_version = package_installer.get_local_version(Paths.ROOT_DIR)
-    print(local_version)

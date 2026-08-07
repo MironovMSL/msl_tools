@@ -57,7 +57,7 @@ class BaseProgressBar(qt.QtWidgets.QProgressBar):
         self._state = ProgressState.NORMAL
         self._cached_range = (minimum, maximum)
 
-        # self.setFixedHeight(5)
+        self.setFixedHeight(5)
         self.setMinimum(minimum)
         self.setMaximum(maximum)
         self.setTextVisible(show_percentage)
