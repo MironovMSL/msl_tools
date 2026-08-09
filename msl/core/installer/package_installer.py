@@ -3,6 +3,7 @@ from pathlib import Path
 import logging
 
 from msl_tools.msl.core.fs.files import Files
+from msl_tools.msl.core.fs.paths import Paths
 
 
 @dataclass(frozen=True)
@@ -19,12 +20,15 @@ class PackageInstaller:
     """Установка/удаление пакета из системы: entry point в userSetup, копирование файлов, проверка целостности.
     Не знает о UI — используется installer-инструментом, который решает, когда вызывать эти методы."""
 
-    def __init__(self, config: PackageInstallConfig, *,
+    def __init__(self,
+                 config: PackageInstallConfig,
                  logger: logging.Logger | None = None,
                  files: Files | None = None):
-        self.config = config
+
+        self.config  = config
         self._logger = logger or logging.getLogger(__name__)
-        self._files = files or Files(logger=self._logger)
+        self._logger.setLevel("DEBUG")
+        self._files  = files or Files(logger=self._logger)
 
     # --- Entry point management (userSetup.mel) ---
 
@@ -47,8 +51,7 @@ class PackageInstaller:
         lines.append(entry)
         return file.write_lines(lines)
 
-    def remove_entry_line(self, file_path: str | Path, line_to_remove: str,
-                           delete_empty_file: bool = True) -> int:
+    def remove_entry_line(self, file_path: str | Path, line_to_remove: str, delete_empty_file: bool = True) -> int:
         file = self._files(file_path)
         if not file.exists:
             self._logger.warning(f'Unable to remove entry line. Missing file: "{file_path}".')
@@ -75,7 +78,7 @@ class PackageInstaller:
         """Возвращает True, только если entry point успешно добавлен во ВСЕ найденные userSetup."""
         paths = self._generate_user_setup_paths(only_existing=False)
         if not paths:
-            return False  # нечего было обрабатывать — считаем это неуспехом операции
+            return False  # there was nothing to process - we consider this a failure of the operation
 
         return all(self.add_entry_line(path) for path in paths)
 
@@ -98,6 +101,7 @@ class PackageInstaller:
     def _generate_user_setup_paths(self, only_existing: bool = False) -> list[Path]:
         from msl_tools.msl.core.fs.maya_paths import MayaPaths
         preferences = MayaPaths.get_available_preferences(use_maya_commands=True)
+        print(preferences)
         if not preferences:
             self._logger.warning("Unable to generate userSetup paths. No Maya preferences found.")
             return []
@@ -115,18 +119,15 @@ class PackageInstaller:
 
     # --- Integrity check ---
 
-    def check_installation_integrity(self, package_target_folder: str | Path) -> bool:
-        package_target_folder = Path(package_target_folder)
-        if not package_target_folder.is_dir():
+    def check_installation_integrity(self, main_module: str | Path) -> bool:
+
+        if not main_module.is_dir():
+            self._logger.warning(f'Missing main module folder: "{main_module}"')
             return False
 
-        module_dir = package_target_folder / self.config.main_module
-        if not module_dir.is_dir():
-            self._logger.warning(f'Missing main module folder: "{module_dir}"')
-            return False
+        module_contents = {p.name for p in main_module.iterdir()}
+        missing         = [d for d in self.config.required_dirs if d not in module_contents]
 
-        module_contents = {p.name for p in module_dir.iterdir()}
-        missing = [d for d in self.config.required_dirs if d not in module_contents]
         if missing:
             self._logger.warning(f'Missing required elements: {", ".join(missing)}')
             return False
@@ -135,15 +136,15 @@ class PackageInstaller:
     # --- Copy / cleanup ---
 
     def remove_previous_install(self, target_path: str | Path, clear_prefs: bool = False) -> bool:
-        from msl_tools.msl.core.fs.paths import Paths
+
         target_path = Path(target_path)
         if not target_path.exists():
-            return True  # нечего удалять — это не ошибка
+            return True  # nothing to delete is not an error
 
         success = True
 
-        module_path = target_path / self.config.main_module
-        if module_path.exists():
+        module_path = target_path / self.config.main_module # .../msl module
+        if module_path.exists(): # delete module .../msl
             self._logger.debug(f'Removing previous install: "{module_path}"')
             try:
                 Paths.delete(module_path)
@@ -152,16 +153,25 @@ class PackageInstaller:
                 success = False
 
         if clear_prefs:
-            prefs_path = target_path / f"{self.config.main_module}_prefs"  # уточнить фактическое имя папки префов
-            if prefs_path.exists():
-                self._logger.debug(f'Removing previous preferences: "{prefs_path}"')
+            configs_path = target_path / "configs"
+            if configs_path.exists():
+                self._logger.debug(f'Removing previous configs: "{configs_path}"')
                 try:
-                    Paths.delete(prefs_path)
+                    Paths.delete(configs_path)
                 except Exception as e:
-                    self._logger.warning(f'Unable to remove "{prefs_path}". Issue: {e}')
+                    self._logger.warning(f'Unable to remove "{configs_path}". Issue: {e}')
                     success = False
 
-        if target_path.exists() and not any(target_path.iterdir()):
+            logs_path = target_path / "logs"
+            if logs_path.exists():
+                self._logger.debug(f'Removing previous logs: "{logs_path}"')
+                try:
+                    Paths.delete(logs_path)
+                except Exception as e:
+                    self._logger.warning(f'Unable to remove "{logs_path}". Issue: {e}')
+                    success = False
+
+        if target_path.exists() and not any(target_path.iterdir()): # delete package .../msl_tools if it's empty
             try:
                 Paths.delete(target_path)
             except Exception as e:
@@ -174,33 +184,42 @@ class PackageInstaller:
 
     def install_package(self, source_path: str | Path, target_path: str | Path, clear_prefs: bool = False) -> bool:
         """Полная установка: удаление старой версии, копирование новой,
-        проверка целостности, регистрация entry point во всех userSetup."""
-        from msl_tools.msl.core.fs.paths import Paths
+        проверка целостности, регистрация entry point во всех userSetup.
+        source_path: exemple source path  '...\...\...\...' without \msl_tools
+        target_path: exemple any path 'C:\\Users\\s_mironov\\Documents\\maya\\scripts' without \\msl_tools."""
 
-        source_path = Path(source_path)
-        target_path = Path(target_path)
 
-        if not source_path.is_dir():
-            self._logger.warning(f'Unable to install. Missing source folder: "{source_path}".')
+
+        source_path         = Path(source_path)
+        source_package_path = source_path / self.config.package_name  # .../msl_tools
+        source_main_path    = source_package_path / self.config.main_module  # .../msl_tools/msl
+
+        target_path         = Path(target_path)
+        target_package_path = target_path / self.config.package_name # .../msl_tools
+        target_main_path    = target_package_path / self.config.main_module # .../msl_tools/msl
+
+        if not source_package_path.is_dir():
+            self._logger.warning(f'Unable to install. Missing source folder: "{source_package_path}".')
             return False
 
-        if not self.remove_previous_install(target_path, clear_prefs=clear_prefs):
+        if not self.remove_previous_install(target_package_path, clear_prefs=clear_prefs):
             self._logger.warning(f'Unable to fully remove previous install at "{target_path}". Aborting.')
             return False
 
         try:
-            Paths.copy(source_path, target_path)
+            Paths.copy(source_main_path, target_main_path)
         except Exception as e:
-            self._logger.warning(f'Unable to copy package to "{target_path}". Issue: {e}')
+            self._logger.warning(f'Unable to copy package to "{target_main_path}". Issue: {e}')
             return False
 
-        if not self.check_installation_integrity(target_path):
-            self._logger.warning(f'Installation integrity check failed for "{target_path}".')
+        if not self.check_installation_integrity(target_main_path):
+            self._logger.warning(f'Installation integrity check failed for "{target_main_path}".')
             return False
 
-        if not self.add_entry_point_to_all_installs():
-            self._logger.warning('Package files installed, but entry point registration failed for one or more installs.')
-            return False
+        #TODO need check when I will have entry point loine to install to useSetaup.py
+        # if not self.add_entry_point_to_all_installs():
+        #     self._logger.warning('Package files installed, but entry point registration failed for one or more installs.')
+        #     return False
 
         self._logger.debug(f'Package "{self.config.package_name}" installed to "{target_path}".')
         return True
@@ -258,9 +277,25 @@ if __name__ == "__main__":
     from msl_tools.msl.core.fs.paths import Paths
 
     config = PackageInstallConfig(
-        package_name="msl-tools",
+        package_name="msl_tools",
         main_module="msl",
-        required_dirs=["core", "tools", "ui"],
+        required_dirs=["core", "tools", "ui", "assets"],
         entry_line='python("import msl; msl.bootstrap()")'
     )
+
+    source_path = Path(r"H:\ProjectsDev\MSL_Others")
+    # target_path = r"C:\Users\s_mironov\Documents\maya\scripts"
+    target_path = Path(r"H:\ProjectsDev\Temp")
+
+
     package_installer = PackageInstaller(config)
+    #install
+    package_installer.install_package(source_path, target_path)
+    # print(package_installer.uninstall_package(target_path))
+
+    #TODO get_available_preferences  need add path if you have another pref maya path.
+    #TODO clear prefs I need create sinle function for crear preferences (configs and log)
+
+
+
+

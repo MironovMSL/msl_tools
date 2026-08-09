@@ -19,7 +19,7 @@ class MayaPaths:
         e.g. C:/Program Files/Autodesk"""
         system = system or SystemInfo.get_system()
         install_roots = {
-            SystemInfo.OS_LINUX: "/usr/autodesk",  # TODO: не проверено на реальной Linux-установке
+            SystemInfo.OS_LINUX: "/usr/autodesk",
             SystemInfo.OS_MAC: "/Applications/Autodesk",
             SystemInfo.OS_WINDOWS: r"C:\Program Files\Autodesk",
         }
@@ -61,6 +61,7 @@ class MayaPaths:
             try:
                 import maya.cmds as cmds
                 return Path(cmds.about(preferences=True)).parent
+
             except Exception as e:
                 logger.debug(
                     f"Unable to retrieve preferences using Maya commands. Issue: {e}. "
@@ -69,6 +70,7 @@ class MayaPaths:
 
         if system == SystemInfo.OS_WINDOWS:
             try:
+
                 import maya.cmds as cmds
                 if cmds.about(batch=True):
                     raise RuntimeError("batch mode, prefer filesystem fallback")
@@ -102,8 +104,7 @@ class MayaPaths:
         return found
 
     @classmethod
-    def get_available_preferences(cls, *, system: str | None = None,
-                                   use_maya_commands: bool = False) -> dict[str, Path]:
+    def get_available_preferences(cls, system: str | None = None, use_maya_commands: bool = False) -> dict[str, Path]:
         """{"2024": Path(".../maya/2024")} — все найденные папки препочтений по версиям."""
         preferences_root = cls.get_preferences_root(system=system, use_maya_commands=use_maya_commands)
         if preferences_root is None or not preferences_root.exists():
