@@ -28,7 +28,7 @@ class Resources(metaclass=SingletonMeta):
         installConfig = PackageInstallConfig(package_name="msl_tools",
                                              main_module="msl",
                                              required_dirs=["core", "tools", "ui", "assets"],
-                                             entry_line='python("import msl; msl.bootstrap()")')  # TODO need invent
+                                             entry_line='import msl; msl.bootstrap()')  # TODO need invent
         return installConfig
 
 

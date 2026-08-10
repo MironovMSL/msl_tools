@@ -1,7 +1,7 @@
 {
     "startup": {
         "name": "Installer",
-        "version": "0.0.1 alpha",
+        "version": "0.0.1",
         "width": 400,
         "height": 150,
         "default_install_path": "H:\\ProjectsDev\\Temp",
