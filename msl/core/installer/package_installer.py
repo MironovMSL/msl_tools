@@ -27,7 +27,6 @@ class PackageInstaller:
 
         self.config  = config
         self._logger = logger or logging.getLogger(__name__)
-        self._logger.setLevel("DEBUG")
         self._files  = files or Files(logger=self._logger)
 
     # --- Entry point management (userSetup.mel) ---
@@ -182,7 +181,10 @@ class PackageInstaller:
 
     # --- High-level install / uninstall ---
 
-    def install_package(self, source_path: str | Path, target_path: str | Path, clear_prefs: bool = False) -> bool:
+    def install_package(self,
+                        source_path: str | Path,
+                        target_path: str | Path,
+                        clear_prefs:       bool = False) -> bool:
         """Полная установка: удаление старой версии, копирование новой,
         проверка целостности, регистрация entry point во всех userSetup.
         source_path: exemple source path  '...\...\...\...' without \msl_tools
@@ -217,20 +219,26 @@ class PackageInstaller:
             return False
 
         #TODO need check when I will have entry point loine to install to useSetaup.py
-        # if not self.add_entry_point_to_all_installs():
-        #     self._logger.warning('Package files installed, but entry point registration failed for one or more installs.')
-        #     return False
+        if not self.add_entry_point_to_all_installs():
+            self._logger.warning('Package files installed, but entry point registration failed for one or more installs.')
+            return False
 
         self._logger.debug(f'Package "{self.config.package_name}" installed to "{target_path}".')
         return True
 
-    def uninstall_package(self, target_path: str | Path, clear_prefs: bool = False) -> bool:
+    def uninstall_package(self,
+                          target_path: str | Path,
+                          clear_prefs: bool = True) -> bool:
+
         """Полное удаление: снятие entry point из всех userSetup, удаление файлов пакета."""
+        target_path = Path(target_path)
+        target_package_path = target_path / self.config.package_name # .../msl_tools
+
         entry_removed = self.remove_entry_point_from_all_installs()
-        files_removed = self.remove_previous_install(target_path, clear_prefs=clear_prefs)
+        files_removed = self.remove_previous_install(target_package_path, clear_prefs=clear_prefs)
 
         if entry_removed and files_removed:
-            self._logger.debug(f'Package "{self.config.package_name}" uninstalled from "{target_path}".')
+            self._logger.debug(f'Package "{self.config.package_name}" uninstalled from "{target_package_path}".')
         else:
             self._logger.warning(f'Uninstall of "{self.config.package_name}" completed with errors.')
 
@@ -289,12 +297,12 @@ if __name__ == "__main__":
 
 
     package_installer = PackageInstaller(config)
-    #install
-    package_installer.install_package(source_path, target_path)
+
+    print(package_installer.install_package(source_path, target_path))
     # print(package_installer.uninstall_package(target_path))
 
     #TODO get_available_preferences  need add path if you have another pref maya path.
-    #TODO clear prefs I need create sinle function for crear preferences (configs and log)
+    #TODO clear prefs I need create sinle function for clear preferences (configs and log)
 
 
 

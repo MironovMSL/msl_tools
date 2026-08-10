@@ -7,6 +7,7 @@ from msl_tools.msl.ui.widgets.compositions.install_path_widget import InstallPat
 from msl_tools.msl.ui.widgets.atoms.status import VersionStatusWidget
 from msl_tools.msl.ui.widgets.atoms.progress import BaseProgressBar, ProgressState
 
+
 from pathlib import Path
 
 
@@ -121,16 +122,28 @@ class InstallerView(qt.QtWidgets.QDialog):
         self.VersionStatusWidget.set_update_info(self.install_info)
 
     def on_click_install(self):
-        self.LOG.info("click install")
-        self.LOG.info("save")
-        import time
         self.BaseProgressBar.set_state(ProgressState.NORMAL)
-        for i in range(1, 101):
+        self.BaseProgressBar.set_progress(20)
+        check_path = None
+
+        if not self.use_package_state:
+            self.CORE.packageInstaller.install_package(self.package_install_path, self.default_install_path)
+            check_path = self.default_install_path
+        else:
+            check_path = self.package_install_path
+
+
+        import time
+
+        for i in range(21, 101):
 
             self.BaseProgressBar.set_progress(i)
-            time.sleep(0.01)
+            time.sleep(0.005)
         else:
             self.BaseProgressBar.set_state(ProgressState.SUCCESS)
+
+        self.install_info = self.CORE.versionManager.check_install_status(check_path)
+        self.VersionStatusWidget.set_update_info(self.install_info)
 
 
         self.CONFIG["startup"]["default_install_path"] = self.default_install_path
@@ -141,8 +154,28 @@ class InstallerView(qt.QtWidgets.QDialog):
 
 
     def on_click_uninstall(self):
-        self.LOG.info("click uninstall")
-        print("click")
+        check_path = None
+        self.BaseProgressBar.set_state(ProgressState.NORMAL)
+        self.BaseProgressBar.set_progress(20)
+
+        if not self.use_package_state:
+            self.CORE.packageInstaller.uninstall_package(self.default_install_path)
+            check_path = self.default_install_path
+
+        else:
+            check_path = self.package_install_path
+
+        import time
+
+        for i in range(21, 101):
+
+            self.BaseProgressBar.set_progress(i)
+            time.sleep(0.005)
+        else:
+            self.BaseProgressBar.set_state(ProgressState.SUCCESS)
+
+        self.install_info = self.CORE.versionManager.check_install_status(check_path)
+        self.VersionStatusWidget.set_update_info(self.install_info)
 
 
 

@@ -4,10 +4,12 @@ from msl_tools.msl.core.config.manager import ConfigManager
 from msl_tools.msl.core.fs.manager import FileSystemManager
 from msl_tools.msl.core.version.manager import VersionManager
 from msl_tools.msl.core.network.network_client import NetworkClient
+from msl_tools.msl.core.installer import PackageInstaller, PackageInstallConfig
 
 
 
 class Resources(metaclass=SingletonMeta):
+
     def __init__(self):
         #TODO create default config 'core' where I can request any value, after I see how many parameters I need.
         releases_url       = "https://api.github.com/repos/MironovMSL/msl_tools/releases"
@@ -19,6 +21,15 @@ class Resources(metaclass=SingletonMeta):
         self.configManager  = ConfigManager(self.fsManager.configs)
         self.networkClient  = NetworkClient()
         self.versionManager = VersionManager(releases_url, latest_release_url, self.networkClient, self.fsManager.msl)
+        self.packageInstaller = PackageInstaller(self.get_installer_config())
+
+
+    def get_installer_config(self) -> PackageInstallConfig:
+        installConfig = PackageInstallConfig(package_name="msl_tools",
+                                             main_module="msl",
+                                             required_dirs=["core", "tools", "ui", "assets"],
+                                             entry_line='python("import msl; msl.bootstrap()")')  # TODO need invent
+        return installConfig
 
 
 
