@@ -65,8 +65,8 @@ if __name__ == '__main__':
         dialog.add_case("QPushButton / QLineEdit (global QSS)", qt.QtWidgets.QPushButton("click me"))
         dialog.add_widget(qt.QtWidgets.QLineEdit("plain QLineEdit"))
 
-        BasePathWidget = BasePathWidget()
-        dialog.add_case("BasePathWidget / QLineEdit (global QSS)", BasePathWidget)
+        base_path_demo = BasePathWidget()
+        dialog.add_case("BasePathWidget / QLineEdit (global QSS)", base_path_demo)
         # dialog.add_widget(qt.QtWidgets.QLineEdit("plain QLineEdit"))
 
         # --- state-виджеты: сами подписаны на theme_changed ---

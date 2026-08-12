@@ -98,7 +98,6 @@ class ThemeRegistry:
             return
 
         for name, tokens in raw.items():
-            print(name,tokens)
             theme = self._build_theme(name, tokens)
             if theme is not None:
                 self._loaded_themes[name] = theme
