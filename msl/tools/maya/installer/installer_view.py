@@ -35,34 +35,13 @@ class InstallerView(qt.QtWidgets.QDialog):
 
     NAME = 'Installer'
 
-    # Populated lazily by _ensure_core() on first instantiation, not at
-    # class-body/import time. Resources()/UiResources() perform real I/O in
-    # their constructors — importing this module must not trigger that.
-    CORE: Resources | None = None
-    UI_CORE: UiResources | None = None
-    CONFIG = None
-    LOG = None
-    WINDOW_ICON = None
-
-    @classmethod
-    def _ensure_core(cls) -> None:
-        """Initializes shared core/UI resources on first use.
-
-        Resources and UiResources are singletons, so this performs real I/O
-        only once per process no matter how many InstallerView instances are
-        created afterwards.
-        """
-        if cls.CORE is not None:
-            return
-        cls.CORE = Resources()
-        cls.UI_CORE = UiResources()
-        cls.CONFIG = cls.CORE.configManager.get_config(cls.NAME, defaults=default_config)
-        cls.LOG = cls.CORE.logManager.get(cls.NAME)
-        cls.WINDOW_ICON = cls.UI_CORE.iconManager.get_icon(cls.NAME)
-
     def __init__(self, version: str, parent=None):
         super().__init__(parent=parent)
-        self._ensure_core()
+        self.CORE    = Resources()
+        self.UI_CORE = UiResources()
+        self.CONFIG  = self.CORE.configsMayaMng.get_config(self.NAME, defaults=default_config)
+        self.LOG     = self.CORE.logsMaya.get(self.NAME)
+        self.WINDOW_ICON = self.UI_CORE.iconManager.get_icon(self.NAME)
 
         self.installer_version = version
         self.msl_tool_version  = self.CORE.versionManager.core_raw_version
@@ -94,14 +73,18 @@ class InstallerView(qt.QtWidgets.QDialog):
         self.btn_install   = qt.QtWidgets.QPushButton("install")
         self.btn_uninstall = qt.QtWidgets.QPushButton("uninstall")
 
+        current_theme = self.UI_CORE.themeManager.current_theme
+
         self.InstallPathWidget = InstallPathWidget(default_path=self.default_install_path,
                                                     package_path=self.package_install_path,
-                                                    state_checkbox=self.use_package_state)
+                                                    state_checkbox=self.use_package_state,
+                                                    theme=current_theme)
 
         self.VersionStatusWidget = VersionStatusWidget(package_version=self.msl_tool_version,
-                                                         info=self.install_info)
+                                                         info=self.install_info,
+                                                         theme=current_theme)
 
-        self.BaseProgressBar = BaseProgressBar()
+        self.BaseProgressBar = BaseProgressBar(theme=current_theme)
 
     def create_layouts(self):
         button_layout = qt.QtWidgets.QHBoxLayout()
@@ -133,6 +116,17 @@ class InstallerView(qt.QtWidgets.QDialog):
 
         self.InstallPathWidget.use_package_folder_toggled.connect(self.set_use_package_state)
         self.InstallPathWidget.path_changed.connect(self.on_path_edited)
+
+        self.UI_CORE.themeManager.theme_changed.connect(self._on_theme_changed)
+
+    def _on_theme_changed(self, theme) -> None:
+        """Forwards a theme switch to every themed child widget. The QSS
+        baseline for QPushButton/QLineEdit/QLabel is already re-applied
+        app-wide by UiResources — this only covers the atoms that manage
+        their own per-instance stylesheet (state-dependent colors)."""
+        self.InstallPathWidget.set_theme(theme)
+        self.VersionStatusWidget.set_theme(theme)
+        self.BaseProgressBar.set_theme(theme)
 
     def set_use_package_state(self, checked: bool):
         self.use_package_state = checked

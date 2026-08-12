@@ -1,6 +1,7 @@
 # ui/widgets/compositions/install_path_widget.py
 
 import msl_tools.msl.ui.qt_bindings as qt
+from msl_tools.msl.core.theme import Theme, ThemeRegistry
 from msl_tools.msl.ui.widgets.atoms.paths import BasePathWidget, PathMode
 
 class InstallPathWidget(qt.QtWidgets.QWidget):
@@ -17,11 +18,24 @@ class InstallPathWidget(qt.QtWidgets.QWidget):
     use_package_folder_toggled = qt.QtCore.Signal(bool)
     path_changed               = qt.QtCore.Signal(str)
 
-    def __init__(self, *, default_path: str, package_path: str, state_checkbox: bool, parent=None):
+    def __init__(self, *, default_path: str, package_path: str, state_checkbox: bool,
+                 theme: Theme | None = None, parent=None):
+        """
+        Args:
+            default_path: Path used when the checkbox is unchecked.
+            package_path: Path used when the checkbox is checked (current
+                package location).
+            state_checkbox: Initial checkbox state.
+            theme: Theme to color the hint label and inner BasePathWidget
+                with. Defaults to ThemeRegistry.fallback() (no file I/O) so
+                this widget can be used standalone without wiring up UiResources.
+            parent: Optional parent widget.
+        """
         super().__init__(parent)
 
         self._default_path = default_path
         self._package_path = package_path
+        self._theme         = theme or ThemeRegistry.fallback()
 
         self._create_widgets(state_checkbox)
         self._create_layouts()
@@ -32,11 +46,15 @@ class InstallPathWidget(qt.QtWidgets.QWidget):
         self.path_widget = BasePathWidget(label            = "install path",
                                           placeholder_text = "Select a default install folder",
                                           initial_path     = self._default_path,
-                                          dialog_title     = "Select a Folder")
+                                          dialog_title     = "Select a Folder",
+                                          theme            = self._theme)
         self.use_package_checkbox = qt.QtWidgets.QCheckBox("use package folder as install path")
         self.use_package_checkbox.setChecked(state_checkbox)
         self.hint_label = qt.QtWidgets.QLabel()
-        self.hint_label.setStyleSheet("color: gray; font-size: 11px;")
+        self.hint_label.setStyleSheet(self._hint_style())
+
+    def _hint_style(self) -> str:
+        return f"color: {self._theme.text_secondary}; font-size: 11px;"
 
     def _create_layouts(self) -> None:
         self.main_laout = qt.QtWidgets.QVBoxLayout(self)
@@ -79,6 +97,14 @@ class InstallPathWidget(qt.QtWidgets.QWidget):
         """Returns True if the checkbox is checked (path resolved from package location)."""
         return self.use_package_checkbox.isChecked()
 
+    def set_theme(self, theme: Theme) -> None:
+        """Re-colors the hint label and forwards the theme to the inner
+        BasePathWidget. The checkbox's look comes from Qt's native style,
+        not a per-widget override, so it isn't touched here."""
+        self._theme = theme
+        self.hint_label.setStyleSheet(self._hint_style())
+        self.path_widget.set_theme(theme)
+
 
 if __name__ == "__main__":
 
@@ -92,5 +118,10 @@ if __name__ == "__main__":
     with QtApplicationContext():
 
         dialog = WidgetPlaygroundDialog()
-        dialog.add_case("InstallPathWidget", InstallPathWidget(default_path=default_path, package_path=package_path))
+        # dialog.setStyleSheet("background-color: rgb(0, 0, 0);")
+        dialog.add_case("InstallPathWidget",
+                        InstallPathWidget(default_path=default_path, package_path=package_path, state_checkbox=False))
+        dialog.add_case("InstallPathWidget (dark)",
+                        InstallPathWidget(default_path=default_path, package_path=package_path,
+                                          state_checkbox=False, theme=ThemeRegistry.fallback("dark")))
         dialog.show()

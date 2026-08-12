@@ -2,6 +2,7 @@
 
 from enum import Enum, auto
 import msl_tools.msl.ui.qt_bindings as qt
+from msl_tools.msl.core.theme import Theme, ThemeRegistry
 from pathlib import Path
 
 class PathMode(Enum):
@@ -28,13 +29,29 @@ class BasePathWidget(qt.QtWidgets.QWidget):
                  file_filter:      str        = "All Files (*)",
                  dialog_title:     str        = "Select path",
                  read_only:        bool       = False,
+                 theme:            Theme | None = None,
                  parent                       = None
                  ):
+        """
+        Args:
+            label: Optional label text shown above the path field.
+            initial_path: Path pre-filled in the field.
+            placeholder_text: Placeholder shown when the field is empty.
+            mode: Which QFileDialog variant the browse button opens.
+            file_filter: File filter passed to the dialog (FILE_OPEN/FILE_SAVE only).
+            dialog_title: Title of the browse dialog.
+            read_only: Whether the field starts read-only.
+            theme: Theme to color the label with. Defaults to
+                ThemeRegistry.fallback() (no file I/O) so this widget can be
+                used standalone without wiring up UiResources.
+            parent: Optional parent widget.
+        """
         super().__init__(parent)
 
         self._mode         = mode
         self._file_filter  = file_filter
         self._dialog_title = dialog_title
+        self._theme        = theme or ThemeRegistry.fallback()
 
         self._create_widgets(initial_path, placeholder_text, read_only)
         self._create_layouts(label)
@@ -60,6 +77,7 @@ class BasePathWidget(qt.QtWidgets.QWidget):
         self.path_layout.addWidget(self.path_field)
         self.path_layout.addWidget(self.browse_button)
 
+        self.label_widget: qt.QtWidgets.QLabel | None = None
         if label:
             self._create_label(label)
         self.main_layout.addLayout(self.path_layout)
@@ -70,9 +88,12 @@ class BasePathWidget(qt.QtWidgets.QWidget):
 
     def _create_label(self,label: str | None) -> None:
         self.label_widget = qt.QtWidgets.QLabel(label)
-        self.label_widget.setStyleSheet("color: gray;")
+        self.label_widget.setStyleSheet(self._label_style())
 
         self.main_layout.addWidget(self.label_widget)
+
+    def _label_style(self) -> str:
+        return f"color: {self._theme.text_secondary};"
 
     def _on_browse_clicked(self) -> None:
         current = self.path_field.text()
@@ -101,6 +122,16 @@ class BasePathWidget(qt.QtWidgets.QWidget):
         self.path_field.setReadOnly(read_only)
         self.browse_button.setEnabled(not read_only)
 
+    def set_theme(self, theme: Theme) -> None:
+        """Re-colors the label (if present) for a new Theme. The line edit
+        and browse button are deliberately left alone here — their look
+        comes from StylesheetBuilder's global QSS baseline, not from a
+        per-widget override, so they already follow theme changes via
+        QApplication.setStyleSheet()."""
+        self._theme = theme
+        if self.label_widget is not None:
+            self.label_widget.setStyleSheet(self._label_style())
+
 
 if __name__ == "__main__":
 
@@ -109,8 +140,9 @@ if __name__ == "__main__":
     from msl_tools.msl.ui.widgets.widget_playground_dialog import WidgetPlaygroundDialog
 
     with QtApplicationContext():
-
+        print(ThemeRegistry.fallback("dark"))
         dialog = WidgetPlaygroundDialog()
+        # dialog.setStyleSheet("background-color: rgb(0, 0, 0);")
         dialog.add_case("directory picker DIRECTORY",
                         BasePathWidget(label="install path", placeholder_text=r"C:\\...\\maya\\scripts"))
         dialog.add_case("file picker with filter FILE_OPEN",
@@ -119,5 +151,6 @@ if __name__ == "__main__":
                         BasePathWidget(placeholder_text="path to config.json",mode=PathMode.FILE_SAVE))
         dialog.add_case("read-only path DIRECTORY",
                         BasePathWidget(initial_path=r"H:\\ProjectsDev\\MSL_Others", read_only=True))
-
+        dialog.add_case("dark theme label",
+                        BasePathWidget(label="install path", theme=ThemeRegistry.fallback("dark")))
         dialog.show()

@@ -5,8 +5,14 @@ from msl_tools.msl.core.fs.manager import FileSystemManager
 from msl_tools.msl.core.version.manager import VersionManager
 from msl_tools.msl.core.network.network_client import NetworkClient
 from msl_tools.msl.core.installer import PackageInstaller, PackageInstallConfig
+from msl_tools.msl.core.theme import ThemeRegistry
 
 
+CORE_CONFIG_DEFAULTS = {
+    "theme": {
+        "name": "light",
+    }
+}
 
 class Resources(metaclass=SingletonMeta):
 
@@ -16,12 +22,18 @@ class Resources(metaclass=SingletonMeta):
         latest_release_url = "https://api.github.com/repos/MironovMSL/msl_tools/releases/latest"
 
 
-        self.fsManager      = FileSystemManager()
-        self.logManager     = LoggerManager(self.fsManager.logs)
-        self.configManager  = ConfigManager(self.fsManager.configs)
-        self.networkClient  = NetworkClient()
-        self.versionManager = VersionManager(releases_url, latest_release_url, self.networkClient, self.fsManager.msl)
-        self.packageInstaller = PackageInstaller(self.get_installer_config())
+        self.fsManager        = FileSystemManager()
+        self.logs             = LoggerManager(self.fsManager.logs)
+        self.logsMaya         = LoggerManager(self.fsManager.logsMaya)
+        self.configsCoreMng   = ConfigManager(self.fsManager.configs, logger=self.logs.get("configsCoreMng", to_file=False))
+        self.coreConfig       = self.configsCoreMng.get_config("core", defaults=CORE_CONFIG_DEFAULTS)
+
+        self.configsMayaMng   = ConfigManager(self.fsManager.configsMaya, logger=self.logs.get("configsMayaTools", to_file=False))
+        self.networkClient    = NetworkClient(logger=self.logs.get("NetworkClient", to_file=False))
+        self.versionManager   = VersionManager(releases_url, latest_release_url, self.networkClient, self.fsManager.msl,
+                                               logger=self.logs.get("VersionManager", to_file=False))
+        self.packageInstaller = PackageInstaller(self.get_installer_config(), logger=self.logs.get("PackageInstaller", to_file=False))
+        self.themeRegistry    = ThemeRegistry(self.fsManager.themes, logger=self.logs.get("ThemeRegistry", to_file=False))
 
 
     def get_installer_config(self) -> PackageInstallConfig:
@@ -44,18 +56,18 @@ if __name__ == "__main__":
     else:
         print("Singleton failed, variables contain different instances.")
 
-    renam_con = RES1.configManager.get_config("rename", ext=".json")
+    renam_con = RES1.configsMaya.get_config("rename", ext=".json")
     renam_con["test"]["test"] = "test"
 
-    modeling_cnf = RES1.configManager.get_config("modeling", ext=".ini")
+    modeling_cnf = RES1.configsMaya.get_config("modeling", ext=".ini")
     modeling_cnf["startup"]["window_geometry"] = 6
 
     # Повторный запрос того же tool_name с тем же ext -> вернёт закэшированный, ОК
-    same = RES1.configManager.get_config("rename", ext=".json")
+    same = RES1.configsMaya.get_config("rename", ext=".json")
     print(same is renam_con)  # True
 
     # Попытка запросить "rename" как .ini -> теперь падает с понятной ошибкой,
     # а не молча возвращает JsonConfig
-    RES1.configManager.get_config("rename", ext=".ini")
+    RES1.configsMaya.get_config("rename", ext=".ini")
 
     print(RES1.versionManager.check_for_update(RES1.fsManager.msl))

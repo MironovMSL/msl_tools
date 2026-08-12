@@ -1,11 +1,11 @@
 {
     "startup": {
         "name": "Installer",
-        "version": "0.0.1",
+        "version": null,
         "width": 400,
         "height": 150,
-        "default_install_path": "H:\\ProjectsDev\\Temp",
-        "package_install_path": "H:\\ProjectsDev\\MSL_Others",
+        "default_install_path": null,
+        "package_install_path": null,
         "use_package_state": false
     }
 }
