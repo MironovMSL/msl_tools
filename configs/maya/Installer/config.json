@@ -1,11 +1,11 @@
 {
     "startup": {
         "name": "Installer",
-        "version": null,
+        "version": "0.0.1",
         "width": 400,
         "height": 150,
-        "default_install_path": null,
-        "package_install_path": null,
+        "default_install_path": "C:\\Users\\s_mironov\\Documents\\maya\\scripts",
+        "package_install_path": "H:\\ProjectsDev\\MSL_Others",
         "use_package_state": false
     }
 }

@@ -32,17 +32,7 @@ class BaseProgressBar(qt.QtWidgets.QProgressBar):
     # this string. Kept at class level since the QSS shape itself never
     # changes per instance, only the colors filled into it do.
     _BASE_STYLE = (
-        "QProgressBar {{"
-        "  border: 1px solid {border};"
-        "  border-radius: 4px;"
-        "  background-color: {surface};"
-        "  text-align: center;"
-        "  color: {surface};"
-        "}}"
-        "QProgressBar::chunk {{"
-        "  background-color: {chunk_color};"
-        "  border-radius: 3px;"
-        "}}"
+        "QProgressBar::chunk {{background-color: {chunk_color};}}"
     )
 
     def __init__(self,
@@ -118,8 +108,6 @@ class BaseProgressBar(qt.QtWidgets.QProgressBar):
         }
         chunk_color = state_colors.get(self._state, self._theme.accent)
         self.setStyleSheet(self._BASE_STYLE.format(
-            border=self._theme.border,
-            surface=self._theme.surface,
             chunk_color=chunk_color,
         ))
 

@@ -45,6 +45,7 @@ class StylesheetBuilder:
             StylesheetBuilder._button_style(theme),
             StylesheetBuilder._line_edit_style(theme),
             StylesheetBuilder._label_style(theme),
+            StylesheetBuilder._progress_bar_style(theme),
         ])
 
     @staticmethod
@@ -102,6 +103,21 @@ class StylesheetBuilder:
         return (
             "QLabel {\n"
             f"  color: {theme.text_primary};\n"
+            "}\n"
+        )
+
+    @staticmethod
+    def _progress_bar_style(theme: Theme) -> str:
+        return (
+            "QProgressBar {\n"
+            f"  border: 1px solid {theme.border};\n"
+            "   border-radius: 4px;\n"
+            f"  background-color: {theme.surface};\n"
+            "   text-align: center;\n"
+            f"  color: {theme.surface};\n"
+            "}\n"
+            "QProgressBar::chunk {\n"
+            "  border-radius: 3px;\n"
             "}\n"
         )
 
