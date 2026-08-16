@@ -1,57 +1,6 @@
-# ui/widgets/base_dialog.py
-
 from enum import Enum, auto
 
 import msl_tools.msl.ui.qt_bindings as qt
-
-
-class BaseDialog(qt.QtWidgets.QDialog):
-    """Base dialog for the widget library. Provides a content_layout for subclasses
-    to extend and an optional bottom button row. Contains no DCC-specific logic —
-    parenting to Maya (or any host) is done by the caller when instantiating."""
-
-    def __init__(self, title: str = "", width: int = 480, height: int = 320,
-                 show_close_button: bool = True, parent=None):
-        super().__init__(parent)
-
-        self.setWindowTitle(title)
-        self.resize(width, height)
-
-        self._create_layouts()
-        if show_close_button:
-            self._build_button_row()
-
-    def _create_layouts(self):
-        self.main_layout = qt.QtWidgets.QVBoxLayout(self)
-        self.main_layout.setContentsMargins(5, 5, 5, 5)
-        self.main_layout.setSpacing(2)
-
-        self.content_layout = qt.QtWidgets.QVBoxLayout()
-        self.content_layout.setSpacing(2)
-
-        self.main_layout.addLayout(self.content_layout)
-        self.main_layout.addStretch()
-
-    def _build_button_row(self) -> None:
-        row = qt.QtWidgets.QHBoxLayout()
-        row.addStretch()
-
-        self.close_button = qt.QtWidgets.QPushButton("close")
-        self.close_button.clicked.connect(self.close)
-        row.addWidget(self.close_button)
-
-        self.main_layout.addLayout(row)
-
-    def add_widget(self, widget: qt.QtWidgets.QWidget) -> None:
-        """Adds a widget to the content zone. Primary way for subclasses to populate the dialog."""
-        self.content_layout.addWidget(widget)
-
-    def add_separator(self) -> None:
-        """Adds a horizontal separator line to the content zone."""
-        line = qt.QtWidgets.QFrame()
-        line.setFrameShape(qt.QtWidgets.QFrame.Shape.HLine)
-        line.setStyleSheet("color: gray;")
-        self.content_layout.addWidget(line)
 
 
 class _ResizeEdge(Enum):
@@ -66,70 +15,70 @@ class _ResizeEdge(Enum):
     BOTTOM_RIGHT = auto()
 
 
-class FramelessDialog(qt.QtWidgets.QDialog):
-    """Frameless dialog with a custom title bar instead of the native one —
-    allows embedding widgets into the header (e.g. a theme switcher) alongside
-    the centered title and close button. The header is draggable to move the
-    window, and the window edges support interactive resizing, since the
-    native title bar and frame are gone. Contains no DCC-specific logic —
-    parenting to Maya (or any host) is done by the caller when instantiating.
+class FramelessWindowMixin:
+    """Shared behavior for frameless top-level windows: draggable/resizable custom
+    chrome with a header that can host arbitrary widgets (menu bar, theme switcher,
+    search, etc.), plus minimize/maximize/restore.
+
+    Mixed into a QDialog or QMainWindow subclass, e.g.:
+        class FramelessDialog(FramelessWindowMixin, QtWidgets.QDialog): ...
+
+    Consumers must call `_init_frameless_state()` first (before anything can
+    receive mouse events), then `_build_frameless_chrome()` once their own root
+    layout exists. Contains no DCC-specific logic.
     """
 
     _EDGE_MARGIN = 6
     _MIN_WIDTH = 240
     _MIN_HEIGHT = 160
+    _DEFAULT_CORNER_RADIUS = 10
 
     _CURSOR_BY_EDGE = {
-        _ResizeEdge.LEFT: qt.QtCore.Qt.CursorShape.SizeHorCursor,
-        _ResizeEdge.RIGHT: qt.QtCore.Qt.CursorShape.SizeHorCursor,
-        _ResizeEdge.TOP: qt.QtCore.Qt.CursorShape.SizeVerCursor,
-        _ResizeEdge.BOTTOM: qt.QtCore.Qt.CursorShape.SizeVerCursor,
-        _ResizeEdge.TOP_LEFT: qt.QtCore.Qt.CursorShape.SizeFDiagCursor,
+        _ResizeEdge.LEFT        : qt.QtCore.Qt.CursorShape.SizeHorCursor,
+        _ResizeEdge.RIGHT       : qt.QtCore.Qt.CursorShape.SizeHorCursor,
+        _ResizeEdge.TOP         : qt.QtCore.Qt.CursorShape.SizeVerCursor,
+        _ResizeEdge.BOTTOM      : qt.QtCore.Qt.CursorShape.SizeVerCursor,
+        _ResizeEdge.TOP_LEFT    : qt.QtCore.Qt.CursorShape.SizeFDiagCursor,
         _ResizeEdge.BOTTOM_RIGHT: qt.QtCore.Qt.CursorShape.SizeFDiagCursor,
-        _ResizeEdge.TOP_RIGHT: qt.QtCore.Qt.CursorShape.SizeBDiagCursor,
-        _ResizeEdge.BOTTOM_LEFT: qt.QtCore.Qt.CursorShape.SizeBDiagCursor,
+        _ResizeEdge.TOP_RIGHT   : qt.QtCore.Qt.CursorShape.SizeBDiagCursor,
+        _ResizeEdge.BOTTOM_LEFT : qt.QtCore.Qt.CursorShape.SizeBDiagCursor,
     }
 
-    def __init__(self,
-                 *,
-                 title: str = "",
-                 width: int = 480,
-                 height: int = 320,
-                 show_close_button: bool = True,
-                 parent=None):
-
-        super().__init__(parent)
-
+    def _init_frameless_state(self, *, corner_radius: int = _DEFAULT_CORNER_RADIUS) -> None:
+        """Call once, first thing in __init__, before any mouse event can fire."""
         self.setWindowFlags(qt.QtCore.Qt.WindowType.FramelessWindowHint)
+        self.setAttribute(qt.QtCore.Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setMouseTracking(True)
-        self.resize(width, height)
 
         self._drag_position: qt.QtCore.QPoint | None = None
         self._resize_edge = _ResizeEdge.NONE
         self._resize_start_geometry: qt.QtCore.QRect | None = None
         self._resize_start_mouse: qt.QtCore.QPoint | None = None
+        self._maximize_button: qt.QtWidgets.QPushButton | None = None
 
-        self._build_base_ui(title, show_close_button)
+        self._corner_radius = corner_radius
+        # Placeholder until this is wired to Theme — see set_background_color().
+        self._background_color = qt.QtGui.QColor("#b07878")
 
-    def _build_base_ui(self, title: str, show_close_button: bool) -> None:
-        self._root_layout = qt.QtWidgets.QVBoxLayout(self)
-        self._root_layout.setContentsMargins(0, 0, 0, 0)
-        self._root_layout.setSpacing(0)
+    def set_background_color(self, color) -> None:
+        """Sets the fill color used for the rounded window background.
+        Intended to be driven by the active Theme once theme wiring lands."""
+        self._background_color = qt.QtGui.QColor(color)
+        self.update()
 
-        self._build_header(title, show_close_button)
-
-        self.content_layout = qt.QtWidgets.QVBoxLayout()
-        self.content_layout.setContentsMargins(12, 12, 12, 12)
-        self.content_layout.setSpacing(12)
-        self._root_layout.addLayout(self.content_layout)
-
-        self._root_layout.addStretch()
-
-    def _build_header(self, title: str, show_close_button: bool) -> None:
+    def _build_frameless_chrome(self,
+                                root_layout: qt.QtWidgets.QLayout,
+                                title: str,
+                                show_close_button: bool = True,
+                                show_minimize_button: bool = False,
+                                show_maximize_button: bool = False) -> None:
+        """Builds the header widget (title + optional minimize/maximize/close) and
+        inserts it as the first row of root_layout."""
         self.header_widget = qt.QtWidgets.QWidget()
         self.header_widget.setFixedHeight(36)
-        self.header_widget.setStyleSheet("background-color: #2b2b2b;")
+        self.header_widget.setAttribute(qt.QtCore.Qt.WidgetAttribute.WA_StyledBackground, True)
         self.header_widget.setMouseTracking(True)
+        self._apply_header_stylesheet()
 
         header_layout = qt.QtWidgets.QHBoxLayout(self.header_widget)
         header_layout.setContentsMargins(8, 0, 8, 0)
@@ -145,12 +94,12 @@ class FramelessDialog(qt.QtWidgets.QDialog):
         self.header_right_layout = qt.QtWidgets.QHBoxLayout()
         self.header_right_layout.setSpacing(6)
 
+        if show_minimize_button:
+            self._build_nav_button("–", self.showMinimized)
+        if show_maximize_button:
+            self._maximize_button = self._build_nav_button("☐", self._toggle_maximize_restore)
         if show_close_button:
-            self.close_button = qt.QtWidgets.QPushButton("×")
-            self.close_button.setFixedSize(24, 24)
-            self.close_button.setStyleSheet("color: white; border: none; font-size: 16px;")
-            self.close_button.clicked.connect(self.close)
-            self.header_right_layout.addWidget(self.close_button)
+            self._build_nav_button("×", self.close)
 
         header_layout.addLayout(self.header_left_layout)
         header_layout.addStretch()
@@ -158,11 +107,51 @@ class FramelessDialog(qt.QtWidgets.QDialog):
         header_layout.addStretch()
         header_layout.addLayout(self.header_right_layout)
 
-        self._root_layout.addWidget(self.header_widget)
+        root_layout.addWidget(self.header_widget)
+
+    def _set_corner_radius(self, radius: int) -> None:
+        if radius == self._corner_radius:
+            return
+        self._corner_radius = radius
+        self._apply_header_stylesheet()
+        self.update()
+
+    def _apply_header_stylesheet(self) -> None:
+        """Header keeps its own shade but rounds only the top corners, matching
+        the window's corner radius — the bottom edge stays square since content
+        sits directly below it."""
+        radius = self._corner_radius
+        self.header_widget.setStyleSheet(
+            "background-color: #8c8888;"
+            f"border-top-left-radius: {radius}px;"
+            f"border-top-right-radius: {radius}px;"
+        )
+
+    def _build_nav_button(self, text: str, slot) -> qt.QtWidgets.QPushButton:
+        button = qt.QtWidgets.QPushButton(text)
+        button.setFixedSize(24, 24)
+        button.setStyleSheet("color: white; border: none; font-size: 14px;")
+        button.clicked.connect(slot)
+        self.header_right_layout.addWidget(button)
+        return button
+
+    def _toggle_maximize_restore(self) -> None:
+        if self.isMaximized():
+            self.showNormal()
+            self._set_corner_radius(self._DEFAULT_CORNER_RADIUS)
+        else:
+            self.showMaximized()
+            self._set_corner_radius(0)
+        self._sync_maximize_button_icon()
+
+    def _sync_maximize_button_icon(self) -> None:
+        if self._maximize_button is None:
+            return
+        self._maximize_button.setText("❐" if self.isMaximized() else "☐")
 
     def add_header_widget(self, widget: qt.QtWidgets.QWidget, *, side: str = "left") -> None:
         """Adds a widget to the header. side is 'left' (before the title) or
-        'right' (after the title, before the close button)."""
+        'right' (after the title, before the nav buttons)."""
         if side == "left":
             self.header_left_layout.addWidget(widget)
         elif side == "right":
@@ -173,20 +162,12 @@ class FramelessDialog(qt.QtWidgets.QDialog):
     def set_title(self, title: str) -> None:
         self.title_label.setText(title)
 
-    def add_widget(self, widget: qt.QtWidgets.QWidget) -> None:
-        """Adds a widget to the content zone. Primary way for subclasses to populate the dialog."""
-        self.content_layout.addWidget(widget)
-
-    def add_separator(self) -> None:
-        """Adds a horizontal separator line to the content zone."""
-        line = qt.QtWidgets.QFrame()
-        line.setFrameShape(qt.QtWidgets.QFrame.Shape.HLine)
-        line.setStyleSheet("color: gray;")
-        self.content_layout.addWidget(line)
-
     # --- Edge detection for interactive resize ---
 
     def _edge_at(self, pos: qt.QtCore.QPoint) -> _ResizeEdge:
+        if self.isMaximized():
+            return _ResizeEdge.NONE
+
         margin = self._EDGE_MARGIN
         rect = self.rect()
 
@@ -290,14 +271,21 @@ class FramelessDialog(qt.QtWidgets.QDialog):
         self._resize_start_mouse = None
         super().mouseReleaseEvent(event)
 
+    def mouseDoubleClickEvent(self, event: qt.QtGui.QMouseEvent) -> None:
+        if (event.button() == qt.QtCore.Qt.MouseButton.LeftButton
+                and self._maximize_button is not None
+                and self.header_widget.geometry().contains(event.position().toPoint())):
+            self._toggle_maximize_restore()
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
 
-if __name__ == '__main__':
-    from msl_tools.msl.ui.app.application_context import QtApplicationContext
+    def paintEvent(self, event: qt.QtGui.QPaintEvent) -> None:
+        painter = qt.QtGui.QPainter(self)
+        painter.setRenderHint(qt.QtGui.QPainter.RenderHint.Antialiasing)
 
-    with QtApplicationContext():
-        # window = FramelessDialog(title="FramelessDialog")
-        window = FramelessDialog(title="BaseDialog")
-        window.add_widget(qt.QtWidgets.QPushButton("test"))
-        window.add_widget(qt.QtWidgets.QPushButton("test2"))
-        window.add_separator()
-        window.show()
+        path = qt.QtGui.QPainterPath()
+        path.addRoundedRect(
+            qt.QtCore.QRectF(self.rect()), self._corner_radius, self._corner_radius
+        )
+        painter.fillPath(path, self._background_color)
