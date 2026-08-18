@@ -11,8 +11,8 @@ class UiResources(metaclass=SingletonMeta):
     """Qt-dependent composition root, sibling to core.Resources."""
 
     def __init__(self):
-        self.core        = Resources()
-        self.iconManager = IconManager(self.core.fsManager.icons, logger=self.core.logs.get("IconManager", to_file=False))
+        self.core         = Resources()
+        self.iconManager  = IconManager(self.core.fsManager.icons, logger=self.core.logs.get("IconManager", to_file=False))
         self.themeManager = ThemeManager(self.core.themeRegistry, initial_theme=self.core.coreConfig["theme"]["name"])
 
         self.create_connections()
