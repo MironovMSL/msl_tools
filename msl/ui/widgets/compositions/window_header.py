@@ -173,7 +173,7 @@ if __name__ == '__main__':
 
         # overlay = qt.QtGui.QColor(qt.QtGui.QColor(0, 0, 0, 30))
         overlay = qt.QtGui.QColor(qt.QtGui.QColor(255, 255, 255, 25))
-        # overlay.setAlpha(28)
+
 
         minimize_icon = ui_core.iconManager.get_icon("minimize", sub_folder="window", color=theme_color)
         maximize_icon = ui_core.iconManager.get_icon("maximize", sub_folder="window", color=theme_color)
