@@ -3,6 +3,7 @@ from msl_tools.msl.ui.widgets.atoms.header.base_nav_button import BaseNavButton
 from msl_tools.msl.ui.widgets.atoms.header.close_nav_button import CloseNavButton
 from msl_tools.msl.ui.widgets.atoms.header.minimize_nav_button import MinimizeNavButton
 from msl_tools.msl.ui.widgets.atoms.header.maximize_nav_button import MaximizeNavButton
+from msl_tools.msl.core.theme import Theme
 
 
 class WindowHeader(qt.QtWidgets.QWidget):
@@ -30,8 +31,9 @@ class WindowHeader(qt.QtWidgets.QWidget):
 
         self.corner_radius = 0
         self.corner_button: BaseNavButton | None = None
+        self._chrome_background: str | None = None
 
-        self.set_corner_radius(0)
+        self._apply_stylesheet()
 
         self.create_widgets(title)
         self.create_layouts()
@@ -43,10 +45,11 @@ class WindowHeader(qt.QtWidgets.QWidget):
         self.icon_label.hide()
 
         self.title_label = qt.QtWidgets.QLabel(title)
-        self.title_label.setStyleSheet("color: white; font-weight: 600; font-size: 12px;")
+        self.title_label.setStyleSheet("font-weight: 600; font-size: 12px;")  # color comes from QSS (QLabel -> text_primary)
 
         self.subtitle_label = qt.QtWidgets.QLabel()
-        self.subtitle_label.setStyleSheet("color: #8a8a8a; font-size: 12px;")
+        self.subtitle_label.setObjectName("headerSubtitle")  # targeted by StylesheetBuilder for text_secondary
+        self.subtitle_label.setStyleSheet("font-size: 12px;")
         self.subtitle_label.hide()
 
     def create_layouts(self):
@@ -145,16 +148,31 @@ class WindowHeader(qt.QtWidgets.QWidget):
 
     def set_corner_radius(self, radius: int) -> None:
         self.corner_radius = radius
-        self.setStyleSheet(
-            "WindowHeader {"
-            "    background-color: #3f4652;"
-            # "    background-color: #EDF1F5;"
-            f"   border-top-left-radius: {radius}px;"
-            f"   border-top-right-radius: {radius}px;"
-            "}"
-        )
+        self._apply_stylesheet()
         if self.corner_button is not None:
             self.corner_button.set_corner_radius(radius, top_right=True)
+
+    def set_theme(self, theme: Theme) -> None:
+        """Sets only the background — text color for title/subtitle is left to
+        the global StylesheetBuilder QSS (QLabel -> text_primary,
+        QLabel#headerSubtitle -> text_secondary), since that cross-level cascade
+        works fine without a local override. Background can't go through the
+        global QSS alone here because this widget's own setStyleSheet() is
+        already required locally for the corner radius (runtime maximize/restore
+        state, not a theme value) — a second independent setStyleSheet() call
+        for background would just wipe that out."""
+        self._chrome_background = theme.chrome_background
+        self._apply_stylesheet()
+
+    def _apply_stylesheet(self) -> None:
+        background_rule = f"background-color: {self._chrome_background};" if self._chrome_background else ""
+        self.setStyleSheet(
+            "WindowHeader {"
+            f"   {background_rule}"
+            f"   border-top-left-radius: {self.corner_radius}px;"
+            f"   border-top-right-radius: {self.corner_radius}px;"
+            "}"
+        )
 
 
 if __name__ == '__main__':

@@ -35,6 +35,7 @@ class Theme:
     text_secondary: str
     border: str
     surface: str
+    chrome_background: str
     accent: str
     success: str
     warning: str

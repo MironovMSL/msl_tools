@@ -31,21 +31,13 @@ class StylesheetBuilder:
 
     @staticmethod
     def build(theme: Theme) -> str:
-        """Builds the full QSS string for `theme`.
-
-        Args:
-            theme: Theme whose tokens populate the stylesheet.
-
-        Returns:
-            A QSS string ready for `QWidget.setStyleSheet()` /
-            `QApplication.setStyleSheet()`.
-        """
         return "\n".join([
             StylesheetBuilder._dialog_style(theme),
             StylesheetBuilder._button_style(theme),
             StylesheetBuilder._line_edit_style(theme),
             StylesheetBuilder._label_style(theme),
             StylesheetBuilder._progress_bar_style(theme),
+            StylesheetBuilder._window_header_style(theme),
         ])
 
     @staticmethod
@@ -118,6 +110,14 @@ class StylesheetBuilder:
             "}\n"
             "QProgressBar::chunk {\n"
             "  border-radius: 3px;\n"
+            "}\n"
+        )
+
+    @staticmethod
+    def _window_header_style(theme: Theme) -> str:
+        return (
+            "QLabel#headerSubtitle {\n"
+            f"  color: {theme.text_secondary};\n"
             "}\n"
         )
 

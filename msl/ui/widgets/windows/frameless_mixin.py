@@ -1,6 +1,7 @@
 from enum import Enum, auto
 
 import msl_tools.msl.ui.qt_bindings as qt
+from msl_tools.msl.ui.widgets.compositions.window_header import WindowHeader
 
 
 class _ResizeEdge(Enum):
@@ -17,8 +18,8 @@ class _ResizeEdge(Enum):
 
 class FramelessWindowMixin:
     """Shared behavior for frameless top-level windows: draggable/resizable custom
-    chrome with a header that can host arbitrary widgets (menu bar, theme switcher,
-    search, etc.), plus minimize/maximize/restore.
+    chrome with a header (WindowHeader) that can host arbitrary widgets, plus
+    minimize/maximize/restore.
 
     Mixed into a QDialog or QMainWindow subclass, e.g.:
         class FramelessDialog(FramelessWindowMixin, QtWidgets.QDialog): ...
@@ -26,6 +27,12 @@ class FramelessWindowMixin:
     Consumers must call `_init_frameless_state()` first (before anything can
     receive mouse events), then `_build_frameless_chrome()` once their own root
     layout exists. Contains no DCC-specific logic.
+
+    The window's own background (behind the header) is custom-painted via
+    paintEvent — same reason as BaseNavButton's icons: WA_TranslucentBackground
+    means QSS can't paint the rounded shape, so set_background_color() must be
+    called explicitly by the owning window (from its theme handler), it's not
+    reachable through StylesheetBuilder.
     """
 
     _EDGE_MARGIN = 6
@@ -54,86 +61,68 @@ class FramelessWindowMixin:
         self._resize_edge = _ResizeEdge.NONE
         self._resize_start_geometry: qt.QtCore.QRect | None = None
         self._resize_start_mouse: qt.QtCore.QPoint | None = None
-        self._maximize_button: qt.QtWidgets.QPushButton | None = None
+
+        self._minimize_button: qt.QtWidgets.QAbstractButton | None = None
+        self._maximize_button: qt.QtWidgets.QAbstractButton | None = None
+        self._close_button: qt.QtWidgets.QAbstractButton | None = None
 
         self._corner_radius = corner_radius
-        # Placeholder until this is wired to Theme — see set_background_color().
+        # Placeholder until the owning window's _apply_theme() calls
+        # set_background_color(theme.surface).
         self._background_color = qt.QtGui.QColor("#b07878")
 
     def set_background_color(self, color) -> None:
         """Sets the fill color used for the rounded window background.
-        Intended to be driven by the active Theme once theme wiring lands."""
+        Called by the owning window's theme handler — see FramelessDialog/
+        FramelessMainWindow._apply_theme()."""
         self._background_color = qt.QtGui.QColor(color)
         self.update()
 
-    def _build_frameless_chrome(self,
-                                root_layout: qt.QtWidgets.QLayout,
-                                title: str,
-                                show_close_button: bool = True,
-                                show_minimize_button: bool = False,
-                                show_maximize_button: bool = False) -> None:
-        """Builds the header widget (title + optional minimize/maximize/close) and
-        inserts it as the first row of root_layout."""
-        self.header_widget = qt.QtWidgets.QWidget()
-        self.header_widget.setFixedHeight(36)
-        self.header_widget.setAttribute(qt.QtCore.Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.header_widget.setMouseTracking(True)
-        self._apply_header_stylesheet()
+    def _build_frameless_chrome(self, root_layout, title,
+                                 *, icon=None, subtitle=None,
+                                 show_close_button=True,
+                                 show_minimize_button=False,
+                                 show_maximize_button=False) -> None:
+        self.header = WindowHeader(title=title)
+        self.header.set_corner_radius(self._corner_radius)
 
-        header_layout = qt.QtWidgets.QHBoxLayout(self.header_widget)
-        header_layout.setContentsMargins(8, 0, 8, 0)
-        header_layout.setSpacing(6)
+        if icon is not None:
+            self.header.set_icon(icon)
+        if subtitle is not None:
+            self.header.set_subtitle(subtitle)
 
-        self.header_left_layout = qt.QtWidgets.QHBoxLayout()
-        self.header_left_layout.setSpacing(6)
+        if show_minimize_button and show_maximize_button:
+            self._minimize_button, self._maximize_button, self._close_button = (
+                self.header.add_window_controls(
+                    minimize_slot=self.showMinimized,
+                    maximize_slot=self._toggle_maximize_restore,
+                    close_slot=self.close,
+                )
+            )
+        elif show_minimize_button:
+            self._minimize_button, self._close_button = (
+                self.header.add_close_minimize_controls(
+                    minimize_slot=self.showMinimized,
+                    close_slot=self.close,
+                )
+            )
+        elif show_close_button:
+            self._close_button = self.header.add_close_only_controls(self.close)
 
-        self.title_label = qt.QtWidgets.QLabel(title)
-        self.title_label.setAlignment(qt.QtCore.Qt.AlignmentFlag.AlignCenter)
-        self.title_label.setStyleSheet("color: white; font-weight: 500;")
+        root_layout.addWidget(self.header)
 
-        self.header_right_layout = qt.QtWidgets.QHBoxLayout()
-        self.header_right_layout.setSpacing(6)
+    def add_header_widget(self, widget, *, side: str = "left") -> None:
+        """Adds a widget to the header. side is 'left' (before the title) or
+        'right' (after the title, before the nav buttons)."""
+        if side == "left":
+            self.header.add_leading_widget(widget)
+        elif side == "right":
+            self.header.add_trailing_widget(widget)
+        else:
+            raise ValueError(f"Unknown header side: {side!r}")
 
-        if show_minimize_button:
-            self._build_nav_button("–", self.showMinimized)
-        if show_maximize_button:
-            self._maximize_button = self._build_nav_button("☐", self._toggle_maximize_restore)
-        if show_close_button:
-            self._build_nav_button("×", self.close)
-
-        header_layout.addLayout(self.header_left_layout)
-        header_layout.addStretch()
-        header_layout.addWidget(self.title_label)
-        header_layout.addStretch()
-        header_layout.addLayout(self.header_right_layout)
-
-        root_layout.addWidget(self.header_widget)
-
-    def _set_corner_radius(self, radius: int) -> None:
-        if radius == self._corner_radius:
-            return
-        self._corner_radius = radius
-        self._apply_header_stylesheet()
-        self.update()
-
-    def _apply_header_stylesheet(self) -> None:
-        """Header keeps its own shade but rounds only the top corners, matching
-        the window's corner radius — the bottom edge stays square since content
-        sits directly below it."""
-        radius = self._corner_radius
-        self.header_widget.setStyleSheet(
-            "background-color: #8c8888;"
-            f"border-top-left-radius: {radius}px;"
-            f"border-top-right-radius: {radius}px;"
-        )
-
-    def _build_nav_button(self, text: str, slot) -> qt.QtWidgets.QPushButton:
-        button = qt.QtWidgets.QPushButton(text)
-        button.setFixedSize(24, 24)
-        button.setStyleSheet("color: white; border: none; font-size: 14px;")
-        button.clicked.connect(slot)
-        self.header_right_layout.addWidget(button)
-        return button
+    def set_title(self, title: str) -> None:
+        self.header.set_title(title)
 
     def _toggle_maximize_restore(self) -> None:
         if self.isMaximized():
@@ -142,25 +131,15 @@ class FramelessWindowMixin:
         else:
             self.showMaximized()
             self._set_corner_radius(0)
-        self._sync_maximize_button_icon()
+        if self._maximize_button is not None:
+            self._maximize_button.set_maximized(self.isMaximized())
 
-    def _sync_maximize_button_icon(self) -> None:
-        if self._maximize_button is None:
+    def _set_corner_radius(self, radius: int) -> None:
+        if radius == self._corner_radius:
             return
-        self._maximize_button.setText("❐" if self.isMaximized() else "☐")
-
-    def add_header_widget(self, widget: qt.QtWidgets.QWidget, *, side: str = "left") -> None:
-        """Adds a widget to the header. side is 'left' (before the title) or
-        'right' (after the title, before the nav buttons)."""
-        if side == "left":
-            self.header_left_layout.addWidget(widget)
-        elif side == "right":
-            self.header_right_layout.insertWidget(0, widget)
-        else:
-            raise ValueError(f"Unknown header side: {side!r}")
-
-    def set_title(self, title: str) -> None:
-        self.title_label.setText(title)
+        self._corner_radius = radius
+        self.header.set_corner_radius(radius)
+        self.update()
 
     # --- Edge detection for interactive resize ---
 
@@ -240,7 +219,7 @@ class FramelessWindowMixin:
             event.accept()
             return
 
-        if self.header_widget.geometry().contains(pos):
+        if self.header.geometry().contains(pos):
             self._drag_position = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
             event.accept()
             return
@@ -274,7 +253,7 @@ class FramelessWindowMixin:
     def mouseDoubleClickEvent(self, event: qt.QtGui.QMouseEvent) -> None:
         if (event.button() == qt.QtCore.Qt.MouseButton.LeftButton
                 and self._maximize_button is not None
-                and self.header_widget.geometry().contains(event.position().toPoint())):
+                and self.header.geometry().contains(event.position().toPoint())):
             self._toggle_maximize_restore()
             event.accept()
             return
