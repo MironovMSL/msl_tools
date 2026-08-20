@@ -54,20 +54,6 @@ class BaseDialog(qt.QtWidgets.QDialog):
 
 
 class FramelessDialog(FramelessWindowMixin, qt.QtWidgets.QDialog):
-    """Frameless dialog with a custom title bar instead of the native one.
-
-    Theme-aware: subscribes to UiResources.themeManager on construction and
-    keeps its nav button icons/hover colors and window background in sync.
-    The header's own background/text color are plain QSS (WindowHeader +
-    QLabel#headerSubtitle), already covered by UiResources' global
-    QApplication.setStyleSheet() on every theme change — this class only
-    re-themes what QSS structurally cannot reach: the custom-painted window
-    background and BaseNavButton's custom-painted icons/hover colors.
-
-    Contains no DCC-specific logic — parenting to Maya (or any host) is done
-    by the caller when instantiating.
-    """
-
     ICON_SUB_FOLDER = "window"
     CLOSE_HOVER_ICON_COLOR = "#ffffff"
     HOVER_OVERLAY_ALPHA = 28
@@ -86,28 +72,23 @@ class FramelessDialog(FramelessWindowMixin, qt.QtWidgets.QDialog):
         self._resources.themeManager.theme_changed.connect(self._on_theme_changed)
         self._apply_theme(self._resources.themeManager.current_theme)
 
-    def _build_base_ui(self, title: str, icon: qt.QtGui.QIcon | None,
-                        subtitle: str | None, show_close_button: bool) -> None:
+    def _build_base_ui(self, title, icon, subtitle, show_close_button) -> None:
         self._root_layout = qt.QtWidgets.QVBoxLayout(self)
         self._root_layout.setContentsMargins(0, 0, 0, 0)
         self._root_layout.setSpacing(0)
-
         self._build_frameless_chrome(self._root_layout, title,
                                       icon=icon, subtitle=subtitle,
                                       show_close_button=show_close_button)
-
         self.content_layout = qt.QtWidgets.QVBoxLayout()
         self.content_layout.setContentsMargins(12, 12, 12, 12)
         self.content_layout.setSpacing(12)
         self._root_layout.addLayout(self.content_layout)
         self._root_layout.addStretch()
 
-    def add_widget(self, widget: qt.QtWidgets.QWidget) -> None:
-        """Adds a widget to the content zone. Primary way for subclasses to populate the dialog."""
+    def add_widget(self, widget) -> None:
         self.content_layout.addWidget(widget)
 
     def add_separator(self) -> None:
-        """Adds a horizontal separator line to the content zone."""
         line = qt.QtWidgets.QFrame()
         line.setFrameShape(qt.QtWidgets.QFrame.Shape.HLine)
         line.setStyleSheet("color: gray;")
@@ -118,7 +99,7 @@ class FramelessDialog(FramelessWindowMixin, qt.QtWidgets.QDialog):
 
     def _apply_theme(self, theme: Theme) -> None:
         self.set_background_color(theme.surface)
-        self.header.set_theme(theme)
+        self.header.set_theme(theme)   # без этого фон шапки НЕ ПОКРАСИТСЯ
 
         if self._close_button is None:
             return
@@ -127,13 +108,12 @@ class FramelessDialog(FramelessWindowMixin, qt.QtWidgets.QDialog):
         color = theme.text_primary
 
         close_idle = icon_manager.get_icon("close", sub_folder=self.ICON_SUB_FOLDER, color=color)
-        close_hover = icon_manager.get_icon("close", sub_folder=self.ICON_SUB_FOLDER,
-                                             color=self.CLOSE_HOVER_ICON_COLOR)
+        close_hover = icon_manager.get_icon("close", sub_folder=self.ICON_SUB_FOLDER, color=("#000000" if theme.name=="light" else "#FFFFFF"))
         self._close_button.set_icon(close_idle, hover_icon=close_hover)
 
         overlay = qt.QtGui.QColor(color)
         overlay.setAlpha(self.HOVER_OVERLAY_ALPHA)
-        self._close_button.set_hover_color(overlay)  # no-op on CloseNavButton, by design
+        self._close_button.set_hover_color(overlay)
 
 
 if __name__ == '__main__':

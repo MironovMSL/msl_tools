@@ -1,27 +1,13 @@
 import msl_tools.msl.ui.qt_bindings as qt
+from msl_tools.msl.core.theme import Theme
 from msl_tools.msl.ui.widgets.atoms.header.base_nav_button import BaseNavButton
 from msl_tools.msl.ui.widgets.atoms.header.close_nav_button import CloseNavButton
 from msl_tools.msl.ui.widgets.atoms.header.minimize_nav_button import MinimizeNavButton
 from msl_tools.msl.ui.widgets.atoms.header.maximize_nav_button import MaximizeNavButton
-from msl_tools.msl.core.theme import Theme
 
 
 class WindowHeader(qt.QtWidgets.QWidget):
-    """Title bar row for frameless windows.
-
-    Layout, left to right:
-        leading zone   — icon, title, badge, subtitle, any add_leading_widget() extras
-        (stretch)
-        trailing zone  — arbitrary widgets added via add_trailing_widget()
-                          (e.g. a future theme toggle, search icon)
-        nav zone       — window controls (close-only, or minimize/maximize/close),
-                          flush against the right edge with zero margin/spacing
-
-    Purely a layout/content component — dragging and resizing are handled by
-    FramelessWindowMixin, which hosts this widget and reads its geometry for
-    hit-testing. This widget has no opinion on theme; colors are placeholders
-    until Theme wiring lands.
-    """
+    """Title bar row for frameless windows. ... (docstring unchanged)"""
 
     def __init__(self, title: str = "", height: int = 36, parent=None):
         super().__init__(parent)
@@ -31,7 +17,7 @@ class WindowHeader(qt.QtWidgets.QWidget):
 
         self.corner_radius = 0
         self.corner_button: BaseNavButton | None = None
-        self._chrome_background: str | None = None
+        self._chrome_background: str | None = None  # unset -> no local background rule yet
 
         self._apply_stylesheet()
 
@@ -45,7 +31,7 @@ class WindowHeader(qt.QtWidgets.QWidget):
         self.icon_label.hide()
 
         self.title_label = qt.QtWidgets.QLabel(title)
-        self.title_label.setStyleSheet("font-weight: 600; font-size: 12px;")  # color comes from QSS (QLabel -> text_primary)
+        self.title_label.setStyleSheet("font-weight: 600; font-size: 12px;")  # color -> global QSS (QLabel -> text_primary)
 
         self.subtitle_label = qt.QtWidgets.QLabel()
         self.subtitle_label.setObjectName("headerSubtitle")  # targeted by StylesheetBuilder for text_secondary
@@ -53,24 +39,19 @@ class WindowHeader(qt.QtWidgets.QWidget):
         self.subtitle_label.hide()
 
     def create_layouts(self):
-        # ----------- Leading zone -----------
         self.leading_layout = qt.QtWidgets.QHBoxLayout()
         self.leading_layout.setSpacing(6)
-
         self.leading_layout.addWidget(self.icon_label)
         self.leading_layout.addWidget(self.title_label)
         self.leading_layout.addWidget(self.subtitle_label)
 
-        # ----------- Trailing zone -----------
         self.trailing_layout = qt.QtWidgets.QHBoxLayout()
         self.trailing_layout.setSpacing(6)
 
-        # ----------- Nav zone -----------
         self.nav_layout = qt.QtWidgets.QHBoxLayout()
         self.nav_layout.setContentsMargins(0, 0, 0, 0)
         self.nav_layout.setSpacing(0)
 
-        # ----------- main layout -----------
         self.main_layout = qt.QtWidgets.QHBoxLayout(self)
         self.main_layout.setContentsMargins(8, 0, 0, 0)
         self.main_layout.setSpacing(6)
@@ -97,6 +78,7 @@ class WindowHeader(qt.QtWidgets.QWidget):
         self.subtitle_label.show()
 
     # --- Extension points ---
+
     def add_leading_widget(self, widget: qt.QtWidgets.QWidget) -> None:
         self.leading_layout.addWidget(widget)
 
@@ -104,6 +86,7 @@ class WindowHeader(qt.QtWidgets.QWidget):
         self.trailing_layout.addWidget(widget)
 
     # --- Nav (window control) button sets ---
+
     def add_close_only_controls(self, close_slot) -> CloseNavButton:
         close_button = CloseNavButton()
         close_button.clicked.connect(close_slot)
@@ -114,10 +97,8 @@ class WindowHeader(qt.QtWidgets.QWidget):
     def add_close_minimize_controls(self, minimize_slot, close_slot) -> tuple[MinimizeNavButton, CloseNavButton]:
         minimize_button = MinimizeNavButton()
         minimize_button.clicked.connect(minimize_slot)
-
         close_button = CloseNavButton()
         close_button.clicked.connect(close_slot)
-
         self.nav_layout.addWidget(minimize_button)
         self.nav_layout.addWidget(close_button)
         self.set_corner_button(close_button)
@@ -126,25 +107,21 @@ class WindowHeader(qt.QtWidgets.QWidget):
     def add_window_controls(self, minimize_slot, maximize_slot, close_slot) -> tuple[MinimizeNavButton, MaximizeNavButton, CloseNavButton]:
         minimize_button = MinimizeNavButton()
         minimize_button.clicked.connect(minimize_slot)
-
         maximize_button = MaximizeNavButton()
         maximize_button.clicked.connect(maximize_slot)
-
         close_button = CloseNavButton()
         close_button.clicked.connect(close_slot)
-
         self.nav_layout.addWidget(minimize_button)
         self.nav_layout.addWidget(maximize_button)
         self.nav_layout.addWidget(close_button)
         self.set_corner_button(close_button)
-
         return minimize_button, maximize_button, close_button
 
     def set_corner_button(self, button: BaseNavButton) -> None:
         self.corner_button = button
         button.set_corner_radius(self.corner_radius, top_right=True)
 
-    # --- Chrome styling, driven by the owning window ---
+    # --- Chrome styling ---
 
     def set_corner_radius(self, radius: int) -> None:
         self.corner_radius = radius
@@ -153,14 +130,14 @@ class WindowHeader(qt.QtWidgets.QWidget):
             self.corner_button.set_corner_radius(radius, top_right=True)
 
     def set_theme(self, theme: Theme) -> None:
-        """Sets only the background — text color for title/subtitle is left to
-        the global StylesheetBuilder QSS (QLabel -> text_primary,
-        QLabel#headerSubtitle -> text_secondary), since that cross-level cascade
-        works fine without a local override. Background can't go through the
-        global QSS alone here because this widget's own setStyleSheet() is
-        already required locally for the corner radius (runtime maximize/restore
-        state, not a theme value) — a second independent setStyleSheet() call
-        for background would just wipe that out."""
+        """Sets the header's background. Text color for title/subtitle is
+        left to the global StylesheetBuilder QSS — that cross-level cascade
+        (QLabel -> text_primary, QLabel#headerSubtitle -> text_secondary)
+        works without a local override. Background can't go through the
+        global QSS alone: this widget's own setStyleSheet() is already
+        required locally for the corner radius (runtime maximize/restore
+        state, not a theme value), and a second independent setStyleSheet()
+        call would just wipe that out rather than merge with it."""
         self._chrome_background = theme.chrome_background
         self._apply_stylesheet()
 

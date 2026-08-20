@@ -17,22 +17,21 @@ class _ResizeEdge(Enum):
 
 
 class FramelessWindowMixin:
-    """Shared behavior for frameless top-level windows: draggable/resizable custom
-    chrome with a header (WindowHeader) that can host arbitrary widgets, plus
+    """Shared behavior for frameless top-level windows: draggable/resizable
+    custom chrome with a WindowHeader that can host arbitrary widgets, plus
     minimize/maximize/restore.
 
     Mixed into a QDialog or QMainWindow subclass, e.g.:
         class FramelessDialog(FramelessWindowMixin, QtWidgets.QDialog): ...
 
     Consumers must call `_init_frameless_state()` first (before anything can
-    receive mouse events), then `_build_frameless_chrome()` once their own root
-    layout exists. Contains no DCC-specific logic.
+    receive mouse events), then `_build_frameless_chrome()` once their own
+    root layout exists. Contains no DCC-specific logic.
 
     The window's own background (behind the header) is custom-painted via
-    paintEvent — same reason as BaseNavButton's icons: WA_TranslucentBackground
-    means QSS can't paint the rounded shape, so set_background_color() must be
-    called explicitly by the owning window (from its theme handler), it's not
-    reachable through StylesheetBuilder.
+    paintEvent — WA_TranslucentBackground means QSS can't paint the rounded
+    shape, so set_background_color() must be called explicitly by the owning
+    window's theme handler, same reasoning as WindowHeader.set_theme().
     """
 
     _EDGE_MARGIN = 6
@@ -67,14 +66,9 @@ class FramelessWindowMixin:
         self._close_button: qt.QtWidgets.QAbstractButton | None = None
 
         self._corner_radius = corner_radius
-        # Placeholder until the owning window's _apply_theme() calls
-        # set_background_color(theme.surface).
-        self._background_color = qt.QtGui.QColor("#b07878")
+        self._background_color = qt.QtGui.QColor("#b07878")  # placeholder until _apply_theme() calls set_background_color
 
     def set_background_color(self, color) -> None:
-        """Sets the fill color used for the rounded window background.
-        Called by the owning window's theme handler — see FramelessDialog/
-        FramelessMainWindow._apply_theme()."""
         self._background_color = qt.QtGui.QColor(color)
         self.update()
 
@@ -112,8 +106,6 @@ class FramelessWindowMixin:
         root_layout.addWidget(self.header)
 
     def add_header_widget(self, widget, *, side: str = "left") -> None:
-        """Adds a widget to the header. side is 'left' (before the title) or
-        'right' (after the title, before the nav buttons)."""
         if side == "left":
             self.header.add_leading_widget(widget)
         elif side == "right":
@@ -146,84 +138,61 @@ class FramelessWindowMixin:
     def _edge_at(self, pos: qt.QtCore.QPoint) -> _ResizeEdge:
         if self.isMaximized():
             return _ResizeEdge.NONE
-
         margin = self._EDGE_MARGIN
         rect = self.rect()
-
         on_left = pos.x() <= margin
         on_right = pos.x() >= rect.width() - margin
         on_top = pos.y() <= margin
         on_bottom = pos.y() >= rect.height() - margin
-
-        if on_top and on_left:
-            return _ResizeEdge.TOP_LEFT
-        if on_top and on_right:
-            return _ResizeEdge.TOP_RIGHT
-        if on_bottom and on_left:
-            return _ResizeEdge.BOTTOM_LEFT
-        if on_bottom and on_right:
-            return _ResizeEdge.BOTTOM_RIGHT
-        if on_left:
-            return _ResizeEdge.LEFT
-        if on_right:
-            return _ResizeEdge.RIGHT
-        if on_top:
-            return _ResizeEdge.TOP
-        if on_bottom:
-            return _ResizeEdge.BOTTOM
+        if on_top and on_left: return _ResizeEdge.TOP_LEFT
+        if on_top and on_right: return _ResizeEdge.TOP_RIGHT
+        if on_bottom and on_left: return _ResizeEdge.BOTTOM_LEFT
+        if on_bottom and on_right: return _ResizeEdge.BOTTOM_RIGHT
+        if on_left: return _ResizeEdge.LEFT
+        if on_right: return _ResizeEdge.RIGHT
+        if on_top: return _ResizeEdge.TOP
+        if on_bottom: return _ResizeEdge.BOTTOM
         return _ResizeEdge.NONE
 
     def _apply_resize(self, global_pos: qt.QtCore.QPoint) -> None:
         if self._resize_start_geometry is None or self._resize_start_mouse is None:
             return
-
         delta = global_pos - self._resize_start_mouse
         geometry = qt.QtCore.QRect(self._resize_start_geometry)
-
         if self._resize_edge in (_ResizeEdge.LEFT, _ResizeEdge.TOP_LEFT, _ResizeEdge.BOTTOM_LEFT):
             new_left = geometry.left() + delta.x()
             if geometry.right() - new_left >= self._MIN_WIDTH:
                 geometry.setLeft(new_left)
-
         if self._resize_edge in (_ResizeEdge.RIGHT, _ResizeEdge.TOP_RIGHT, _ResizeEdge.BOTTOM_RIGHT):
             new_right = geometry.right() + delta.x()
             if new_right - geometry.left() >= self._MIN_WIDTH:
                 geometry.setRight(new_right)
-
         if self._resize_edge in (_ResizeEdge.TOP, _ResizeEdge.TOP_LEFT, _ResizeEdge.TOP_RIGHT):
             new_top = geometry.top() + delta.y()
             if geometry.bottom() - new_top >= self._MIN_HEIGHT:
                 geometry.setTop(new_top)
-
         if self._resize_edge in (_ResizeEdge.BOTTOM, _ResizeEdge.BOTTOM_LEFT, _ResizeEdge.BOTTOM_RIGHT):
             new_bottom = geometry.bottom() + delta.y()
             if new_bottom - geometry.top() >= self._MIN_HEIGHT:
                 geometry.setBottom(new_bottom)
-
         self.setGeometry(geometry)
-
-    # --- Mouse events: resize takes priority over header drag ---
 
     def mousePressEvent(self, event: qt.QtGui.QMouseEvent) -> None:
         if event.button() != qt.QtCore.Qt.MouseButton.LeftButton:
             super().mousePressEvent(event)
             return
-
         pos = event.position().toPoint()
         edge = self._edge_at(pos)
-
         if edge is not _ResizeEdge.NONE:
             self._resize_edge = edge
             self._resize_start_geometry = self.geometry()
             self._resize_start_mouse = event.globalPosition().toPoint()
             event.accept()
             return
-
         if self.header.geometry().contains(pos):
             self._drag_position = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
             event.accept()
             return
-
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: qt.QtGui.QMouseEvent) -> None:
@@ -231,16 +200,13 @@ class FramelessWindowMixin:
             self._apply_resize(event.globalPosition().toPoint())
             event.accept()
             return
-
         if self._drag_position is not None and event.buttons() & qt.QtCore.Qt.MouseButton.LeftButton:
             self.move(event.globalPosition().toPoint() - self._drag_position)
             event.accept()
             return
-
         if not event.buttons():
             edge = self._edge_at(event.position().toPoint())
             self.setCursor(self._CURSOR_BY_EDGE.get(edge, qt.QtCore.Qt.CursorShape.ArrowCursor))
-
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: qt.QtGui.QMouseEvent) -> None:
@@ -262,9 +228,6 @@ class FramelessWindowMixin:
     def paintEvent(self, event: qt.QtGui.QPaintEvent) -> None:
         painter = qt.QtGui.QPainter(self)
         painter.setRenderHint(qt.QtGui.QPainter.RenderHint.Antialiasing)
-
         path = qt.QtGui.QPainterPath()
-        path.addRoundedRect(
-            qt.QtCore.QRectF(self.rect()), self._corner_radius, self._corner_radius
-        )
+        path.addRoundedRect(qt.QtCore.QRectF(self.rect()), self._corner_radius, self._corner_radius)
         painter.fillPath(path, self._background_color)
