@@ -12,8 +12,8 @@ class CloseNavButton(BaseNavButton):
     DEFAULT_HOVER_COLOR = qt.QtGui.QColor("#E81123")
     DEFAULT_PRESSED_COLOR = qt.QtGui.QColor("#C42B1C")
 
-    def __init__(self, parent=None):
-        super().__init__(parent=parent)
+    def __init__(self, width: int = 36, parent=None):
+        super().__init__(width, parent=parent)
 
     def set_hover_color(self, color: qt.QtGui.QColor) -> None:
         pass

@@ -1,6 +1,5 @@
-from enum import Enum, auto
-
 import msl_tools.msl.ui.qt_bindings as qt
+from enum import Enum, auto
 from msl_tools.msl.ui.widgets.compositions.window_header import WindowHeader
 
 
@@ -20,24 +19,12 @@ class FramelessWindowMixin:
     """Shared behavior for frameless top-level windows: draggable/resizable
     custom chrome with a WindowHeader that can host arbitrary widgets, plus
     minimize/maximize/restore.
-
-    Mixed into a QDialog or QMainWindow subclass, e.g.:
-        class FramelessDialog(FramelessWindowMixin, QtWidgets.QDialog): ...
-
-    Consumers must call `_init_frameless_state()` first (before anything can
-    receive mouse events), then `_build_frameless_chrome()` once their own
-    root layout exists. Contains no DCC-specific logic.
-
-    The window's own background (behind the header) is custom-painted via
-    paintEvent — WA_TranslucentBackground means QSS can't paint the rounded
-    shape, so set_background_color() must be called explicitly by the owning
-    window's theme handler, same reasoning as WindowHeader.set_theme().
     """
 
     _EDGE_MARGIN = 6
     _MIN_WIDTH = 240
     _MIN_HEIGHT = 160
-    _DEFAULT_CORNER_RADIUS = 10
+    DEFAULT_CORNER_RADIUS = 10
 
     _CURSOR_BY_EDGE = {
         _ResizeEdge.LEFT        : qt.QtCore.Qt.CursorShape.SizeHorCursor,
@@ -50,7 +37,7 @@ class FramelessWindowMixin:
         _ResizeEdge.BOTTOM_LEFT : qt.QtCore.Qt.CursorShape.SizeBDiagCursor,
     }
 
-    def _init_frameless_state(self, *, corner_radius: int = _DEFAULT_CORNER_RADIUS) -> None:
+    def _init_frameless_state(self, corner_radius: int = DEFAULT_CORNER_RADIUS) -> None:
         """Call once, first thing in __init__, before any mouse event can fire."""
         self.setWindowFlags(qt.QtCore.Qt.WindowType.FramelessWindowHint)
         self.setAttribute(qt.QtCore.Qt.WidgetAttribute.WA_TranslucentBackground, True)
@@ -63,7 +50,7 @@ class FramelessWindowMixin:
 
         self._minimize_button: qt.QtWidgets.QAbstractButton | None = None
         self._maximize_button: qt.QtWidgets.QAbstractButton | None = None
-        self._close_button: qt.QtWidgets.QAbstractButton | None = None
+        self._close_button:    qt.QtWidgets.QAbstractButton | None = None
 
         self._corner_radius = corner_radius
         self._background_color = qt.QtGui.QColor("#b07878")  # placeholder until _apply_theme() calls set_background_color
@@ -119,7 +106,7 @@ class FramelessWindowMixin:
     def _toggle_maximize_restore(self) -> None:
         if self.isMaximized():
             self.showNormal()
-            self._set_corner_radius(self._DEFAULT_CORNER_RADIUS)
+            self._set_corner_radius(self.DEFAULT_CORNER_RADIUS)
         else:
             self.showMaximized()
             self._set_corner_radius(0)

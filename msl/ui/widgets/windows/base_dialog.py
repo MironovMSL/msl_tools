@@ -1,7 +1,4 @@
 import msl_tools.msl.ui.qt_bindings as qt
-from msl_tools.msl.core.theme import Theme
-from msl_tools.msl.ui.ui_resources import UiResources
-from msl_tools.msl.ui.widgets.windows.frameless_mixin import FramelessWindowMixin
 
 
 class BaseDialog(qt.QtWidgets.QDialog):
@@ -51,77 +48,3 @@ class BaseDialog(qt.QtWidgets.QDialog):
         line.setFrameShape(qt.QtWidgets.QFrame.Shape.HLine)
         line.setStyleSheet("color: gray;")
         self.content_layout.addWidget(line)
-
-
-class FramelessDialog(FramelessWindowMixin, qt.QtWidgets.QDialog):
-    ICON_SUB_FOLDER = "window"
-    CLOSE_HOVER_ICON_COLOR = "#ffffff"
-    HOVER_OVERLAY_ALPHA = 28
-
-    def __init__(self, *, title: str = "", width: int = 480, height: int = 320,
-                 icon: qt.QtGui.QIcon | None = None, subtitle: str | None = None,
-                 show_close_button: bool = True,
-                 resources: UiResources | None = None, parent=None):
-        super().__init__(parent)
-        self._resources = resources or UiResources()
-
-        self._init_frameless_state()
-        self.resize(width, height)
-        self._build_base_ui(title, icon, subtitle, show_close_button)
-
-        self._resources.themeManager.theme_changed.connect(self._on_theme_changed)
-        self._apply_theme(self._resources.themeManager.current_theme)
-
-    def _build_base_ui(self, title, icon, subtitle, show_close_button) -> None:
-        self._root_layout = qt.QtWidgets.QVBoxLayout(self)
-        self._root_layout.setContentsMargins(0, 0, 0, 0)
-        self._root_layout.setSpacing(0)
-        self._build_frameless_chrome(self._root_layout, title,
-                                      icon=icon, subtitle=subtitle,
-                                      show_close_button=show_close_button)
-        self.content_layout = qt.QtWidgets.QVBoxLayout()
-        self.content_layout.setContentsMargins(12, 12, 12, 12)
-        self.content_layout.setSpacing(12)
-        self._root_layout.addLayout(self.content_layout)
-        self._root_layout.addStretch()
-
-    def add_widget(self, widget) -> None:
-        self.content_layout.addWidget(widget)
-
-    def add_separator(self) -> None:
-        line = qt.QtWidgets.QFrame()
-        line.setFrameShape(qt.QtWidgets.QFrame.Shape.HLine)
-        line.setStyleSheet("color: gray;")
-        self.content_layout.addWidget(line)
-
-    def _on_theme_changed(self, theme: Theme) -> None:
-        self._apply_theme(theme)
-
-    def _apply_theme(self, theme: Theme) -> None:
-        self.set_background_color(theme.surface)
-        self.header.set_theme(theme)   # без этого фон шапки НЕ ПОКРАСИТСЯ
-
-        if self._close_button is None:
-            return
-
-        icon_manager = self._resources.iconManager
-        color = theme.text_primary
-
-        close_idle = icon_manager.get_icon("close", sub_folder=self.ICON_SUB_FOLDER, color=color)
-        close_hover = icon_manager.get_icon("close", sub_folder=self.ICON_SUB_FOLDER, color=("#000000" if theme.name=="light" else "#FFFFFF"))
-        self._close_button.set_icon(close_idle, hover_icon=close_hover)
-
-        overlay = qt.QtGui.QColor(color)
-        overlay.setAlpha(self.HOVER_OVERLAY_ALPHA)
-        self._close_button.set_hover_color(overlay)
-
-
-if __name__ == '__main__':
-    from msl_tools.msl.ui.app.application_context import QtApplicationContext
-
-    with QtApplicationContext():
-        window = FramelessDialog(title="BaseDialog", subtitle="theme demo")
-        window.add_widget(qt.QtWidgets.QPushButton("test"))
-        window.add_widget(qt.QtWidgets.QPushButton("test2"))
-        window.add_separator()
-        window.show()

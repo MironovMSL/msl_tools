@@ -99,7 +99,6 @@ class FramelessMainWindow(FramelessWindowMixin, qt.QtWidgets.QMainWindow):
 
     def _apply_theme(self, theme: Theme) -> None:
         self.set_background_color(theme.surface)
-        self.header.set_theme(theme)
 
         icon_manager = self._resources.iconManager
         color = theme.text_primary
@@ -120,8 +119,7 @@ class FramelessMainWindow(FramelessWindowMixin, qt.QtWidgets.QMainWindow):
 
         if self._close_button is not None:
             close_idle = icon_manager.get_icon("close", sub_folder=self.ICON_SUB_FOLDER, color=color)
-            close_hover = icon_manager.get_icon("close", sub_folder=self.ICON_SUB_FOLDER,
-                                                 color=self.CLOSE_HOVER_ICON_COLOR)
+            close_hover = icon_manager.get_icon("close", sub_folder=self.ICON_SUB_FOLDER, color=("#FFFFFF" if theme.name=="light" else "#000000"))
             self._close_button.set_icon(close_idle, hover_icon=close_hover)
             self._close_button.set_hover_color(overlay)  # no-op on CloseNavButton, by design
 
@@ -135,9 +133,7 @@ if __name__ == '__main__':
         theme_checkbox = qt.QtWidgets.QCheckBox("dark theme")
         resources = window._resources
         theme_checkbox.setChecked(resources.themeManager.current_theme.name == "dark")
-        theme_checkbox.toggled.connect(
-            lambda checked: resources.themeManager.set_theme("dark" if checked else "light")
-        )
+        theme_checkbox.toggled.connect(lambda checked: resources.themeManager.set_theme("dark" if checked else "light"))
         window.add_header_widget(theme_checkbox, side="right")
 
         menu_bar = qt.QtWidgets.QMenuBar()

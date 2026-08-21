@@ -88,6 +88,7 @@ class WindowHeader(qt.QtWidgets.QWidget):
     # --- Nav (window control) button sets ---
 
     def add_close_only_controls(self, close_slot) -> CloseNavButton:
+
         close_button = CloseNavButton()
         close_button.clicked.connect(close_slot)
         self.nav_layout.addWidget(close_button)
@@ -129,23 +130,9 @@ class WindowHeader(qt.QtWidgets.QWidget):
         if self.corner_button is not None:
             self.corner_button.set_corner_radius(radius, top_right=True)
 
-    def set_theme(self, theme: Theme) -> None:
-        """Sets the header's background. Text color for title/subtitle is
-        left to the global StylesheetBuilder QSS — that cross-level cascade
-        (QLabel -> text_primary, QLabel#headerSubtitle -> text_secondary)
-        works without a local override. Background can't go through the
-        global QSS alone: this widget's own setStyleSheet() is already
-        required locally for the corner radius (runtime maximize/restore
-        state, not a theme value), and a second independent setStyleSheet()
-        call would just wipe that out rather than merge with it."""
-        self._chrome_background = theme.chrome_background
-        self._apply_stylesheet()
-
     def _apply_stylesheet(self) -> None:
-        background_rule = f"background-color: {self._chrome_background};" if self._chrome_background else ""
         self.setStyleSheet(
             "WindowHeader {"
-            f"   {background_rule}"
             f"   border-top-left-radius: {self.corner_radius}px;"
             f"   border-top-right-radius: {self.corner_radius}px;"
             "}"

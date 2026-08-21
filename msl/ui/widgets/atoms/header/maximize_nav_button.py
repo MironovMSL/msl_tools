@@ -10,8 +10,8 @@ class MaximizeNavButton(BaseNavButton):
     this button (e.g. double-click on the header) — this is the single source
     of truth for the toggle, so the button is deliberately not checkable."""
 
-    def __init__(self, parent=None):
-        super().__init__(parent=parent)
+    def __init__(self, width: int = 36, parent=None):
+        super().__init__(width, parent=parent)
         self._maximize_icon: qt.QtGui.QIcon | None = None
         self._restore_icon: qt.QtGui.QIcon | None = None
         self._is_maximized = False

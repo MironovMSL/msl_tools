@@ -12,7 +12,7 @@ class BaseNavButton(qt.QtWidgets.QAbstractButton):
     FADE_IN_MS  = 120
     FADE_OUT_MS = 220
 
-    def __init__(self, width: int = 36, parent=None):
+    def __init__(self, width: int = 46, parent=None):
         super().__init__(parent)
 
         self.setFixedWidth(width)
