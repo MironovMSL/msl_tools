@@ -21,10 +21,12 @@ class FramelessWindowMixin:
     minimize/maximize/restore.
     """
 
-    _EDGE_MARGIN = 6
-    _MIN_WIDTH = 240
-    _MIN_HEIGHT = 160
-    DEFAULT_CORNER_RADIUS = 10
+    _EDGE_MARGIN           = 6
+    _OUTER_MARGIN          = 8
+    _MIN_WIDTH             = 240
+    _MIN_HEIGHT            = 160
+    _DEFAULT_CORNER_RADIUS = 10
+    _HIT_TEST_ALPHA        = 150
 
     _CURSOR_BY_EDGE = {
         _ResizeEdge.LEFT        : qt.QtCore.Qt.CursorShape.SizeHorCursor,
@@ -37,7 +39,10 @@ class FramelessWindowMixin:
         _ResizeEdge.BOTTOM_LEFT : qt.QtCore.Qt.CursorShape.SizeBDiagCursor,
     }
 
-    def _init_frameless_state(self, corner_radius: int = DEFAULT_CORNER_RADIUS) -> None:
+    def _init_frameless_state(self,
+                              corner_radius: int = _DEFAULT_CORNER_RADIUS,
+                              outer_margin:  int = _OUTER_MARGIN) -> None:
+
         """Call once, first thing in __init__, before any mouse event can fire."""
         self.setWindowFlags(qt.QtCore.Qt.WindowType.FramelessWindowHint)
         self.setAttribute(qt.QtCore.Qt.WidgetAttribute.WA_TranslucentBackground, True)
@@ -53,17 +58,26 @@ class FramelessWindowMixin:
         self._close_button:    qt.QtWidgets.QAbstractButton | None = None
 
         self._corner_radius = corner_radius
-        self._background_color = qt.QtGui.QColor("#b07878")  # placeholder until _apply_theme() calls set_background_color
+        self._outer_margin_normal = outer_margin   # restored on un-maximize
+        self._outer_margin = outer_margin
+        self._root_layout: qt.QtWidgets.QLayout | None = None
+        self._background_color = qt.QtGui.QColor("#b07878")
+
+    def content_margins(self) -> tuple[int, int, int, int]:
+        m = self._outer_margin
+        return (m, m, m, m)
 
     def set_background_color(self, color) -> None:
         self._background_color = qt.QtGui.QColor(color)
         self.update()
 
     def _build_frameless_chrome(self, root_layout, title,
-                                 *, icon=None, subtitle=None,
+                                 icon=None, subtitle=None,
                                  show_close_button=True,
                                  show_minimize_button=False,
                                  show_maximize_button=False) -> None:
+        self._root_layout = root_layout
+
         self.header = WindowHeader(title=title)
         self.header.set_corner_radius(self._corner_radius)
 
@@ -92,7 +106,7 @@ class FramelessWindowMixin:
 
         root_layout.addWidget(self.header)
 
-    def add_header_widget(self, widget, *, side: str = "left") -> None:
+    def add_header_widget(self, widget, side: str = "left") -> None:
         if side == "left":
             self.header.add_leading_widget(widget)
         elif side == "right":
@@ -103,13 +117,23 @@ class FramelessWindowMixin:
     def set_title(self, title: str) -> None:
         self.header.set_title(title)
 
+    def _set_outer_margin(self, margin: int) -> None:
+        if margin == self._outer_margin:
+            return
+        self._outer_margin = margin
+        if self._root_layout is not None:
+            self._root_layout.setContentsMargins(*self.content_margins())
+        self.update()
+
     def _toggle_maximize_restore(self) -> None:
         if self.isMaximized():
             self.showNormal()
-            self._set_corner_radius(self.DEFAULT_CORNER_RADIUS)
+            self._set_corner_radius(self._DEFAULT_CORNER_RADIUS)
+            self._set_outer_margin(self._outer_margin_normal)
         else:
             self.showMaximized()
             self._set_corner_radius(0)
+            self._set_outer_margin(0)
         if self._maximize_button is not None:
             self._maximize_button.set_maximized(self.isMaximized())
 
@@ -125,7 +149,7 @@ class FramelessWindowMixin:
     def _edge_at(self, pos: qt.QtCore.QPoint) -> _ResizeEdge:
         if self.isMaximized():
             return _ResizeEdge.NONE
-        margin = self._EDGE_MARGIN
+        margin = self._outer_margin + self._EDGE_MARGIN   # <-- band now extends outward too
         rect = self.rect()
         on_left = pos.x() <= margin
         on_right = pos.x() >= rect.width() - margin
@@ -140,6 +164,15 @@ class FramelessWindowMixin:
         if on_top: return _ResizeEdge.TOP
         if on_bottom: return _ResizeEdge.BOTTOM
         return _ResizeEdge.NONE
+
+
+    def _resize_to_visible_size(self, width: int, height: int) -> None:
+        """Resize the widget so that the *visible* chrome (background rect,
+        header, content) ends up at (width, height). The real widget is
+        larger by 2*outer_margin per axis — that margin is a transparent
+        band reserved for easier edge/corner resize grabbing and must stay
+        an implementation detail, not something callers account for."""
+        self.resize(width + 2 * self._outer_margin, height + 2 * self._outer_margin)
 
     def _apply_resize(self, global_pos: qt.QtCore.QPoint) -> None:
         if self._resize_start_geometry is None or self._resize_start_mouse is None:
@@ -215,6 +248,12 @@ class FramelessWindowMixin:
     def paintEvent(self, event: qt.QtGui.QPaintEvent) -> None:
         painter = qt.QtGui.QPainter(self)
         painter.setRenderHint(qt.QtGui.QPainter.RenderHint.Antialiasing)
+
+        painter.fillRect(self.rect(), qt.QtGui.QColor(0, 0, 0, self._HIT_TEST_ALPHA))
+
         path = qt.QtGui.QPainterPath()
-        path.addRoundedRect(qt.QtCore.QRectF(self.rect()), self._corner_radius, self._corner_radius)
+        inner_rect = qt.QtCore.QRectF(self.rect()).adjusted(
+            self._outer_margin, self._outer_margin, -self._outer_margin, -self._outer_margin
+        )
+        path.addRoundedRect(inner_rect, self._corner_radius, self._corner_radius)
         painter.fillPath(path, self._background_color)

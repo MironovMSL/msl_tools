@@ -8,10 +8,6 @@ class FramelessDialog(FramelessWindowMixin, qt.QtWidgets.QDialog):
 
     ICON_SUB_FOLDER = "window"
 
-    CLOSE_HOVER_ICON_COLOR_LIGHT = "#ffffff"
-    CLOSE_HOVER_ICON_COLOR_DARK  = "#000000"
-
-
     def __init__(self,
                  title: str = "",
                  width: int = 480,
@@ -24,8 +20,8 @@ class FramelessDialog(FramelessWindowMixin, qt.QtWidgets.QDialog):
 
         self._resources = resources or UiResources()
 
-        self._init_frameless_state(corner_radius=15)
-        self.resize(width, height)
+        self._init_frameless_state()
+        self._resize_to_visible_size(width, height)
         self._build_base_ui(title, icon, subtitle, show_close_button)
 
         self._resources.themeManager.theme_changed.connect(self._on_theme_changed)
@@ -33,14 +29,14 @@ class FramelessDialog(FramelessWindowMixin, qt.QtWidgets.QDialog):
 
     def _build_base_ui(self, title, icon, subtitle, show_close_button) -> None:
         self._root_layout = qt.QtWidgets.QVBoxLayout(self)
-        self._root_layout.setContentsMargins(0, 0, 0, 0)
+        self._root_layout.setContentsMargins(*self.content_margins())
         self._root_layout.setSpacing(0)
         self._build_frameless_chrome(self._root_layout,
                                      title,
                                      icon=icon,
                                      subtitle=subtitle,
                                      show_minimize_button=True,
-                                     show_maximize_button=False,
+                                     show_maximize_button=True,
                                      show_close_button=show_close_button)
         self.content_layout = qt.QtWidgets.QVBoxLayout()
         self.content_layout.setContentsMargins(12, 12, 12, 12)
@@ -68,12 +64,14 @@ class FramelessDialog(FramelessWindowMixin, qt.QtWidgets.QDialog):
         close_hover_icon_color = "#ffffff" if theme.name == "light" else "#000000"
 
         icon_manager = self._resources.iconManager
-        color = theme.text_primary
+        color        = theme.text_primary
 
         hover_alpha   = 15 if theme.name == "light" else 30
         pressed_alpha = 30 if theme.name == "light" else 15
+
         overlay = qt.QtGui.QColor(color)
         overlay.setAlpha(hover_alpha)
+
         pressed_overlay = qt.QtGui.QColor(color)
         pressed_overlay.setAlpha(pressed_alpha)
 
@@ -108,7 +106,7 @@ if __name__ == '__main__':
         theme_checkbox.toggled.connect(lambda checked: resources.themeManager.set_theme("dark" if checked else "light"))
         window.add_header_widget(theme_checkbox, side="right")
 
-        window.add_widget(qt.QtWidgets.QPushButton("test"))
-        window.add_widget(qt.QtWidgets.QPushButton("test2"))
-        window.add_separator()
+        # window.add_widget(qt.QtWidgets.QPushButton("test"))
+        # window.add_widget(qt.QtWidgets.QPushButton("test2"))
+        # window.add_separator()
         window.show()
