@@ -1,7 +1,7 @@
 import msl_tools.msl.ui.qt_bindings as qt
 from enum import Enum, auto
 from msl_tools.msl.ui.widgets.compositions.window_header import WindowHeader
-
+from msl_tools.msl.ui.widgets.windows.snap_layout_flyout import SnapLayoutFlyout
 
 class _ResizeEdge(Enum):
     NONE         = auto()
@@ -22,11 +22,13 @@ class FramelessWindowMixin:
     """
 
     _EDGE_MARGIN           = 6
-    _OUTER_MARGIN          = 8
+    _OUTER_MARGIN          = 6
     _MIN_WIDTH             = 240
     _MIN_HEIGHT            = 160
     _DEFAULT_CORNER_RADIUS = 10
-    _HIT_TEST_ALPHA        = 150
+    _HIT_TEST_ALPHA        = 1
+    _ANIMATION_DURATION_MS = 180
+    _ANIMATION_EASING      = qt.QtCore.QEasingCurve.Type.OutCubic
 
     _CURSOR_BY_EDGE = {
         _ResizeEdge.LEFT        : qt.QtCore.Qt.CursorShape.SizeHorCursor,
@@ -48,20 +50,34 @@ class FramelessWindowMixin:
         self.setAttribute(qt.QtCore.Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setMouseTracking(True)
 
-        self._drag_position: qt.QtCore.QPoint | None = None
+        self._drag_position:              qt.QtCore.QPoint | None = None
+        self._arranged_drag_press_global: qt.QtCore.QPoint | None = None
+        self._arranged_drag_press_local:  qt.QtCore.QPoint | None = None
+
         self._resize_edge = _ResizeEdge.NONE
-        self._resize_start_geometry: qt.QtCore.QRect | None = None
-        self._resize_start_mouse: qt.QtCore.QPoint | None = None
+        self._resize_start_geometry: qt.QtCore.QRect  | None = None
+        self._resize_start_mouse:    qt.QtCore.QPoint | None = None
 
         self._minimize_button: qt.QtWidgets.QAbstractButton | None = None
         self._maximize_button: qt.QtWidgets.QAbstractButton | None = None
         self._close_button:    qt.QtWidgets.QAbstractButton | None = None
+
+        self._is_pseudo_maximized = False
+        self._normal_geometry:    qt.QtCore.QRect              | None = None
+        self._maximize_animation: qt.QtCore.QPropertyAnimation | None = None
 
         self._corner_radius = corner_radius
         self._outer_margin_normal = outer_margin   # restored on un-maximize
         self._outer_margin = outer_margin
         self._root_layout: qt.QtWidgets.QLayout | None = None
         self._background_color = qt.QtGui.QColor("#b07878")
+
+        self._is_snapped = False
+        self._snap_flyout: SnapLayoutFlyout | None = None
+        self._snap_flyout_timer = qt.QtCore.QTimer(self)
+        self._snap_flyout_timer.setSingleShot(True)
+        self._snap_flyout_timer.setInterval(500)  # matches native Win11 hover delay
+        self._snap_flyout_timer.timeout.connect(self._show_snap_flyout)
 
     def content_margins(self) -> tuple[int, int, int, int]:
         m = self._outer_margin
@@ -71,11 +87,15 @@ class FramelessWindowMixin:
         self._background_color = qt.QtGui.QColor(color)
         self.update()
 
+    def isMaximized(self) -> bool:
+        return self._is_pseudo_maximized
+
     def _build_frameless_chrome(self, root_layout, title,
                                  icon=None, subtitle=None,
                                  show_close_button=True,
                                  show_minimize_button=False,
                                  show_maximize_button=False) -> None:
+
         self._root_layout = root_layout
 
         self.header = WindowHeader(title=title)
@@ -106,6 +126,43 @@ class FramelessWindowMixin:
 
         root_layout.addWidget(self.header)
 
+        if self._maximize_button is not None:
+            self._maximize_button.installEventFilter(self)
+
+    def _show_snap_flyout(self) -> None:
+        if self._maximize_button is None:
+            return
+        if self._snap_flyout is None:
+            self._snap_flyout = SnapLayoutFlyout(parent=self)
+            self._snap_flyout.zone_chosen.connect(self._snap_to_zone)
+        self._snap_flyout.show_near(self._maximize_button)
+
+    def _snap_to_zone(self, zone_fractions: tuple[float, float, float, float]) -> None:
+        screen = self.screen() or qt.QtWidgets.QApplication.primaryScreen()
+        available = screen.availableGeometry()
+        x_frac, y_frac, w_frac, h_frac = zone_fractions
+
+        target_rect = qt.QtCore.QRect(
+            available.x() + round(x_frac * available.width()),
+            available.y() + round(y_frac * available.height()),
+            round(w_frac * available.width()),
+            round(h_frac * available.height()),
+        )
+
+        self._capture_normal_geometry_if_needed()
+
+        self._is_pseudo_maximized = False
+        self._is_snapped = True
+        if self._maximize_button is not None:
+            self._maximize_button.set_maximized(False)
+
+        # Unlike full maximize, a zone-snapped window keeps its normal rounded
+        # corners and outer margin — it's still a regular floating window,
+        # just resized/repositioned to a screen zone, not a flush edge-to-edge
+        # maximize.
+        self._run_geometry_animation(self.geometry(), target_rect)
+
+
     def add_header_widget(self, widget, side: str = "left") -> None:
         if side == "left":
             self.header.add_leading_widget(widget)
@@ -126,16 +183,72 @@ class FramelessWindowMixin:
         self.update()
 
     def _toggle_maximize_restore(self) -> None:
-        if self.isMaximized():
-            self.showNormal()
+        if self._is_pseudo_maximized:
+            self._animate_to_restored()
+        else:
+            self._animate_to_maximized()
+
+    def _animate_to_maximized(self) -> None:
+        self._capture_normal_geometry_if_needed()
+        target_rect = self._maximized_target_geometry()
+
+        self._is_pseudo_maximized = True
+        self._is_snapped = False
+        if self._maximize_button is not None:
+            self._maximize_button.set_maximized(True)
+
+        self._set_corner_radius(0)
+        self._set_outer_margin(0)
+        self._run_geometry_animation(self.geometry(), target_rect)
+
+    def _animate_to_restored(self) -> None:
+        target_rect = self._normal_geometry or self._default_restore_geometry()
+        self._normal_geometry = None
+
+        self._is_pseudo_maximized = False
+        self._is_snapped = False
+        if self._maximize_button is not None:
+            self._maximize_button.set_maximized(False)
+
+        def _on_finished() -> None:
             self._set_corner_radius(self._DEFAULT_CORNER_RADIUS)
             self._set_outer_margin(self._outer_margin_normal)
-        else:
-            self.showMaximized()
-            self._set_corner_radius(0)
-            self._set_outer_margin(0)
-        if self._maximize_button is not None:
-            self._maximize_button.set_maximized(self.isMaximized())
+
+        self._run_geometry_animation(self.geometry(), target_rect, on_finished=_on_finished)
+
+    def _maximized_target_geometry(self) -> qt.QtCore.QRect:
+        screen = self.screen() or qt.QtWidgets.QApplication.primaryScreen()
+        return screen.availableGeometry()
+
+    def _default_restore_geometry(self) -> qt.QtCore.QRect:
+        """Fallback if _normal_geometry was never captured (e.g. window
+        somehow starts out pseudo-maximized)."""
+        return self.geometry()
+
+    def _run_geometry_animation(self, start_rect, end_rect, on_finished=None) -> None:
+        self._stop_maximize_animation()
+
+        animation = qt.QtCore.QPropertyAnimation(self, b"geometry", self)
+        animation.setDuration(self._ANIMATION_DURATION_MS)
+        animation.setEasingCurve(self._ANIMATION_EASING)
+        animation.setStartValue(start_rect)
+        animation.setEndValue(end_rect)
+
+        animation.finished.connect(self._clear_maximize_animation_ref)
+        if on_finished is not None:
+            animation.finished.connect(on_finished)
+
+        self._maximize_animation = animation
+        animation.start(qt.QtCore.QAbstractAnimation.DeletionPolicy.DeleteWhenStopped)
+
+    def _clear_maximize_animation_ref(self) -> None:
+        self._maximize_animation = None
+
+    def _stop_maximize_animation(self) -> None:
+        animation = self._maximize_animation
+        self._maximize_animation = None
+        if animation is not None and qt.shiboken.isValid(animation):
+            animation.stop()
 
     def _set_corner_radius(self, radius: int) -> None:
         if radius == self._corner_radius:
@@ -165,13 +278,7 @@ class FramelessWindowMixin:
         if on_bottom: return _ResizeEdge.BOTTOM
         return _ResizeEdge.NONE
 
-
     def _resize_to_visible_size(self, width: int, height: int) -> None:
-        """Resize the widget so that the *visible* chrome (background rect,
-        header, content) ends up at (width, height). The real widget is
-        larger by 2*outer_margin per axis — that margin is a transparent
-        band reserved for easier edge/corner resize grabbing and must stay
-        an implementation detail, not something callers account for."""
         self.resize(width + 2 * self._outer_margin, height + 2 * self._outer_margin)
 
     def _apply_resize(self, global_pos: qt.QtCore.QPoint) -> None:
@@ -179,23 +286,57 @@ class FramelessWindowMixin:
             return
         delta = global_pos - self._resize_start_mouse
         geometry = qt.QtCore.QRect(self._resize_start_geometry)
+
         if self._resize_edge in (_ResizeEdge.LEFT, _ResizeEdge.TOP_LEFT, _ResizeEdge.BOTTOM_LEFT):
             new_left = geometry.left() + delta.x()
-            if geometry.right() - new_left >= self._MIN_WIDTH:
-                geometry.setLeft(new_left)
+            geometry.setLeft(min(new_left, geometry.right() - self._MIN_WIDTH))
         if self._resize_edge in (_ResizeEdge.RIGHT, _ResizeEdge.TOP_RIGHT, _ResizeEdge.BOTTOM_RIGHT):
             new_right = geometry.right() + delta.x()
-            if new_right - geometry.left() >= self._MIN_WIDTH:
-                geometry.setRight(new_right)
+            geometry.setRight(max(new_right, geometry.left() + self._MIN_WIDTH))
         if self._resize_edge in (_ResizeEdge.TOP, _ResizeEdge.TOP_LEFT, _ResizeEdge.TOP_RIGHT):
             new_top = geometry.top() + delta.y()
-            if geometry.bottom() - new_top >= self._MIN_HEIGHT:
-                geometry.setTop(new_top)
+            geometry.setTop(min(new_top, geometry.bottom() - self._MIN_HEIGHT))
         if self._resize_edge in (_ResizeEdge.BOTTOM, _ResizeEdge.BOTTOM_LEFT, _ResizeEdge.BOTTOM_RIGHT):
             new_bottom = geometry.bottom() + delta.y()
-            if new_bottom - geometry.top() >= self._MIN_HEIGHT:
-                geometry.setBottom(new_bottom)
+            geometry.setBottom(max(new_bottom, geometry.top() + self._MIN_HEIGHT))
+
         self.setGeometry(geometry)
+
+    def _capture_normal_geometry_if_needed(self) -> None:
+        if self._normal_geometry is None and not self._is_pseudo_maximized and not self._is_snapped:
+            self._normal_geometry = self.geometry()
+
+    def _restore_from_maximized_drag(self, press_local: qt.QtCore.QPoint, global_pos: qt.QtCore.QPoint) -> None:
+        self._stop_maximize_animation()
+
+        maximized_width = self.width()
+        ratio_x = press_local.x() / maximized_width if maximized_width else 0.0
+
+        self._is_pseudo_maximized = False
+        if self._maximize_button is not None:
+            self._maximize_button.set_maximized(False)
+
+        self._set_corner_radius(self._DEFAULT_CORNER_RADIUS)
+        self._set_outer_margin(self._outer_margin_normal)
+
+        target_size = self._normal_geometry.size() if self._normal_geometry is not None else self.size()
+        self._normal_geometry = None
+        restored_width, restored_height = target_size.width(), target_size.height()
+
+        new_x = global_pos.x() - int(ratio_x * restored_width)
+        new_y = global_pos.y() - press_local.y()
+        self.setGeometry(new_x, new_y, restored_width, restored_height)
+
+        self._drag_position = global_pos - self.frameGeometry().topLeft()
+
+    def eventFilter(self, watched, event) -> bool:
+        if watched is self._maximize_button:
+            if event.type() == qt.QtCore.QEvent.Type.Enter:
+                self._snap_flyout_timer.start()
+            elif event.type() == qt.QtCore.QEvent.Type.Leave:
+                self._snap_flyout_timer.stop()
+        return super().eventFilter(watched, event)
+
 
     def mousePressEvent(self, event: qt.QtGui.QMouseEvent) -> None:
         if event.button() != qt.QtCore.Qt.MouseButton.LeftButton:
@@ -210,7 +351,11 @@ class FramelessWindowMixin:
             event.accept()
             return
         if self.header.geometry().contains(pos):
-            self._drag_position = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            if self._maximize_button is not None and (self.isMaximized() or self._is_snapped):
+                self._arranged_drag_press_global = event.globalPosition().toPoint()
+                self._arranged_drag_press_local = pos
+            else:
+                self._drag_position = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
             event.accept()
             return
         super().mousePressEvent(event)
@@ -220,6 +365,20 @@ class FramelessWindowMixin:
             self._apply_resize(event.globalPosition().toPoint())
             event.accept()
             return
+
+        if (self._maximize_button is not None
+                and self._arranged_drag_press_global is not None
+                and event.buttons() & qt.QtCore.Qt.MouseButton.LeftButton):
+
+            global_pos = event.globalPosition().toPoint()
+            delta = global_pos - self._arranged_drag_press_global
+            if delta.manhattanLength() >= qt.QtWidgets.QApplication.startDragDistance():
+                self._restore_from_arranged_drag(self._arranged_drag_press_local, global_pos)
+                self._arranged_drag_press_global = None
+                self._arranged_drag_press_local = None
+            event.accept()
+            return
+
         if self._drag_position is not None and event.buttons() & qt.QtCore.Qt.MouseButton.LeftButton:
             self.move(event.globalPosition().toPoint() - self._drag_position)
             event.accept()
@@ -229,8 +388,40 @@ class FramelessWindowMixin:
             self.setCursor(self._CURSOR_BY_EDGE.get(edge, qt.QtCore.Qt.CursorShape.ArrowCursor))
         super().mouseMoveEvent(event)
 
+    def _restore_from_arranged_drag(self, press_local: qt.QtCore.QPoint, global_pos: qt.QtCore.QPoint) -> None:
+        """Tear a maximized OR zone-snapped window off the moment a header
+        drag actually starts, re-anchoring it so the cursor stays over the
+        same relative point on the header (matches native OS "tear off"
+        behavior for both maximize and Snap). Stays instant (no easing
+        animation) since the drag gesture itself already drives the motion
+        frame by frame."""
+        self._stop_maximize_animation()
+
+        current_width = self.width()
+        ratio_x = press_local.x() / current_width if current_width else 0.0
+
+        self._is_pseudo_maximized = False
+        self._is_snapped = False
+        if self._maximize_button is not None:
+            self._maximize_button.set_maximized(False)
+
+        self._set_corner_radius(self._DEFAULT_CORNER_RADIUS)
+        self._set_outer_margin(self._outer_margin_normal)
+
+        target_size = self._normal_geometry.size() if self._normal_geometry is not None else self.size()
+        self._normal_geometry = None
+        restored_width, restored_height = target_size.width(), target_size.height()
+
+        new_x = global_pos.x() - int(ratio_x * restored_width)
+        new_y = global_pos.y() - press_local.y()
+        self.setGeometry(new_x, new_y, restored_width, restored_height)
+
+        self._drag_position = global_pos - self.frameGeometry().topLeft()
+
     def mouseReleaseEvent(self, event: qt.QtGui.QMouseEvent) -> None:
         self._drag_position = None
+        self._arranged_drag_press_global = None
+        self._arranged_drag_press_local = None
         self._resize_edge = _ResizeEdge.NONE
         self._resize_start_geometry = None
         self._resize_start_mouse = None
@@ -240,6 +431,7 @@ class FramelessWindowMixin:
         if (event.button() == qt.QtCore.Qt.MouseButton.LeftButton
                 and self._maximize_button is not None
                 and self.header.geometry().contains(event.position().toPoint())):
+
             self._toggle_maximize_restore()
             event.accept()
             return
@@ -252,8 +444,6 @@ class FramelessWindowMixin:
         painter.fillRect(self.rect(), qt.QtGui.QColor(0, 0, 0, self._HIT_TEST_ALPHA))
 
         path = qt.QtGui.QPainterPath()
-        inner_rect = qt.QtCore.QRectF(self.rect()).adjusted(
-            self._outer_margin, self._outer_margin, -self._outer_margin, -self._outer_margin
-        )
+        inner_rect = qt.QtCore.QRectF(self.rect()).adjusted(self._outer_margin, self._outer_margin, -self._outer_margin, -self._outer_margin)
         path.addRoundedRect(inner_rect, self._corner_radius, self._corner_radius)
         painter.fillPath(path, self._background_color)
