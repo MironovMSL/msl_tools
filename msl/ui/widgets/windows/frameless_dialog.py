@@ -57,14 +57,15 @@ class FramelessDialog(FramelessWindowMixin, qt.QtWidgets.QDialog):
         self._apply_theme(theme)
 
     def _apply_theme(self, theme: Theme) -> None:
+        color = theme.text_primary
         self.set_background_color(theme.surface)
+        self._apply_snap_flyout_colors(theme, color)
+
         if self._close_button is None:
             return
 
         close_hover_icon_color = "#ffffff" if theme.name == "light" else "#000000"
-
         icon_manager = self._resources.iconManager
-        color        = theme.text_primary
 
         hover_alpha   = 15 if theme.name == "light" else 30
         pressed_alpha = 30 if theme.name == "light" else 15
@@ -93,6 +94,31 @@ class FramelessDialog(FramelessWindowMixin, qt.QtWidgets.QDialog):
             close_hover = icon_manager.get_icon("close", sub_folder=self.ICON_SUB_FOLDER, color=close_hover_icon_color)
             self._close_button.set_icon(close_idle, hover_icon=close_hover)
 
+    def _apply_snap_flyout_colors(self, theme: Theme, color) -> None:
+        """Split out of _apply_theme() for readability, and so it's obvious
+        this call must stay above the close-button early return."""
+        zone_border = qt.QtGui.QColor(color)
+        zone_border.setAlpha(80)
+        zone_border_pressed = qt.QtGui.QColor(color)
+        zone_border_pressed.setAlpha(140)
+
+        zone_idle = qt.QtGui.QColor(color)
+        zone_idle.setAlpha(20)
+        zone_hover = qt.QtGui.QColor(color)
+        zone_hover.setAlpha(45)
+        zone_pressed = qt.QtGui.QColor(color)
+        zone_pressed.setAlpha(70)
+
+        self.apply_snap_flyout_theme(
+            background=theme.surface,
+            border=zone_border,
+            zone_idle=zone_idle,
+            zone_hover=zone_hover,
+            zone_pressed=zone_pressed,
+            zone_border=zone_border,
+            zone_border_pressed=zone_border_pressed,
+        )
+
 
 if __name__ == '__main__':
     from msl_tools.msl.ui.app.application_context import QtApplicationContext
@@ -106,7 +132,4 @@ if __name__ == '__main__':
         theme_checkbox.toggled.connect(lambda checked: resources.themeManager.set_theme("dark" if checked else "light"))
         window.add_header_widget(theme_checkbox, side="right")
 
-        # window.add_widget(qt.QtWidgets.QPushButton("test"))
-        # window.add_widget(qt.QtWidgets.QPushButton("test2"))
-        # window.add_separator()
         window.show()
