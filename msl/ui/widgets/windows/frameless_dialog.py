@@ -2,6 +2,9 @@ import msl_tools.msl.ui.qt_bindings as qt
 from msl_tools.msl.core.theme import Theme
 from msl_tools.msl.ui.ui_resources import UiResources
 from msl_tools.msl.ui.widgets.windows.frameless_mixin import FramelessWindowMixin
+# from msl_tools.msl.ui.widgets.atoms.toggles.sun_moon_toggle import SunMoonToggle
+# from msl_tools.msl.ui.widgets.atoms.toggles.orbit_theme_toggle import OrbitThemeToggle
+
 
 
 class FramelessDialog(FramelessWindowMixin, qt.QtWidgets.QDialog):
@@ -15,6 +18,7 @@ class FramelessDialog(FramelessWindowMixin, qt.QtWidgets.QDialog):
                  icon: qt.QtGui.QIcon | None = None,
                  subtitle: str | None = None,
                  show_close_button: bool = True,
+                 show_theme_toggle: bool = False,
                  resources: UiResources | None = None, parent=None):
         super().__init__(parent)
 
@@ -22,22 +26,29 @@ class FramelessDialog(FramelessWindowMixin, qt.QtWidgets.QDialog):
 
         self._init_frameless_state()
         self._resize_to_visible_size(width, height)
-        self._build_base_ui(title, icon, subtitle, show_close_button)
+        self._build_base_ui(title, icon, subtitle, show_close_button, show_theme_toggle)
 
         self._resources.themeManager.theme_changed.connect(self._on_theme_changed)
         self._apply_theme(self._resources.themeManager.current_theme)
 
-    def _build_base_ui(self, title, icon, subtitle, show_close_button) -> None:
+    def _build_base_ui(self, title, icon, subtitle, show_close_button, show_theme_toggle) -> None:
         self._root_layout = qt.QtWidgets.QVBoxLayout(self)
         self._root_layout.setContentsMargins(*self.content_margins())
         self._root_layout.setSpacing(0)
+
+
         self._build_frameless_chrome(self._root_layout,
                                      title,
                                      icon=icon,
                                      subtitle=subtitle,
-                                     show_minimize_button=True,
-                                     show_maximize_button=True,
-                                     show_close_button=show_close_button)
+                                     show_minimize_button=False,
+                                     show_maximize_button=False,
+                                     show_close_button=show_close_button,
+                                     show_theme_toggle=show_theme_toggle)
+
+        if self._theme_toggle is not None:
+            self._theme_toggle.set_checked_immediate(self._resources.themeManager.current_theme.name == "dark")
+
         self.content_layout = qt.QtWidgets.QVBoxLayout()
         self.content_layout.setContentsMargins(12, 12, 12, 12)
         self.content_layout.setSpacing(12)
@@ -53,6 +64,9 @@ class FramelessDialog(FramelessWindowMixin, qt.QtWidgets.QDialog):
         line.setStyleSheet("color: gray;")
         self.content_layout.addWidget(line)
 
+    def _on_theme_toggle_toggled(self, is_dark: bool) -> None:
+        self._resources.themeManager.set_theme("dark" if is_dark else "light")
+
     def _on_theme_changed(self, theme: Theme) -> None:
         self._apply_theme(theme)
 
@@ -60,6 +74,12 @@ class FramelessDialog(FramelessWindowMixin, qt.QtWidgets.QDialog):
         color = theme.text_primary
         self.set_background_color(theme.surface)
         self._apply_snap_flyout_colors(theme, color)
+        self.apply_theme_toggle_colors(color)
+
+        if self._theme_toggle is not None:
+            self._theme_toggle.blockSignals(True)
+            self._theme_toggle.setChecked(theme.name == "dark")
+            self._theme_toggle.blockSignals(False)
 
         if self._close_button is None:
             return
@@ -121,15 +141,9 @@ class FramelessDialog(FramelessWindowMixin, qt.QtWidgets.QDialog):
 
 
 if __name__ == '__main__':
+
     from msl_tools.msl.ui.app.application_context import QtApplicationContext
 
     with QtApplicationContext():
-        window = FramelessDialog(title="BaseDialog", subtitle="theme demo")
-
-        theme_checkbox = qt.QtWidgets.QCheckBox("dark theme")
-        resources = window._resources
-        theme_checkbox.setChecked(resources.themeManager.current_theme.name == "dark")
-        theme_checkbox.toggled.connect(lambda checked: resources.themeManager.set_theme("dark" if checked else "light"))
-        window.add_header_widget(theme_checkbox, side="right")
-
+        window = FramelessDialog(title="BaseDialog", subtitle="theme demo", show_theme_toggle=True)
         window.show()

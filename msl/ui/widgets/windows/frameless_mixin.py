@@ -2,6 +2,7 @@ import msl_tools.msl.ui.qt_bindings as qt
 from enum import Enum, auto
 from msl_tools.msl.ui.widgets.compositions.window_header import WindowHeader
 from msl_tools.msl.ui.widgets.windows.snap_layout_flyout import SnapLayoutFlyout
+from msl_tools.msl.ui.widgets.atoms.toggles.sun_moon_toggle import SunMoonToggle
 
 
 class _ResizeEdge(Enum):
@@ -68,6 +69,8 @@ class FramelessWindowMixin:
         self._maximize_button: qt.QtWidgets.QAbstractButton | None = None
         self._close_button:    qt.QtWidgets.QAbstractButton | None = None
 
+        self._theme_toggle: SunMoonToggle | None = None
+
         self._is_pseudo_maximized = False
         self._normal_geometry:    qt.QtCore.QRect              | None = None
         self._maximize_animation: qt.QtCore.QPropertyAnimation | None = None
@@ -106,10 +109,17 @@ class FramelessWindowMixin:
     # ------------------------------------------------------------------
 
     def _build_frameless_chrome(self, root_layout, title,
-                                 icon=None, subtitle=None,
-                                 show_close_button=True,
-                                 show_minimize_button=False,
-                                 show_maximize_button=False) -> None:
+                                icon=None, subtitle=None,
+                                show_close_button=True,
+                                show_minimize_button=False,
+                                show_maximize_button=False,
+                                show_theme_toggle=None) -> None:
+        """theme_toggle_factory: optional zero-arg callable returning a
+        BaseToggle instance (e.g. `lambda: SunMoonToggle(size=22)` or
+        `lambda: OrbitThemeToggle(size=28)`). None (default) means no
+        built-in theme toggle in the header. Kept as a factory, not a
+        concrete class import here, so the mixin stays decoupled from any
+        specific toggle implementation while still owning where it's placed."""
 
         self._root_layout = root_layout
 
@@ -120,6 +130,11 @@ class FramelessWindowMixin:
             self.header.set_icon(icon)
         if subtitle is not None:
             self.header.set_subtitle(subtitle)
+
+        if show_theme_toggle is not None:
+            self._theme_toggle = SunMoonToggle(size=20)
+            self._theme_toggle.toggled.connect(self._on_theme_toggle_toggled)
+            self.header.add_trailing_widget(self._theme_toggle)
 
         if show_minimize_button and show_maximize_button:
             self._minimize_button, self._maximize_button, self._close_button = (
@@ -143,6 +158,17 @@ class FramelessWindowMixin:
 
         if self._maximize_button is not None:
             self._maximize_button.installEventFilter(self)
+
+    def _on_theme_toggle_toggled(self, is_dark: bool) -> None:
+        """No-op by default — the mixin deliberately has zero
+        ThemeManager/UiResources coupling. Override in a host class (see
+        FramelessDialog) to actually switch the theme when the built-in
+        toggle is clicked."""
+        pass
+
+    def apply_theme_toggle_colors(self, icon_color) -> None:
+        if self._theme_toggle is not None:
+            self._theme_toggle.set_icon_color(icon_color)
 
     def add_header_widget(self, widget, side: str = "left") -> None:
         if side == "left":
