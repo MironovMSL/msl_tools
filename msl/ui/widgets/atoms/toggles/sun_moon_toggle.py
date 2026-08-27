@@ -25,16 +25,19 @@ class SunMoonToggle(BaseToggle):
     pattern as the minimize/maximize/close nav icons) so it stays
     contrasted against the header on any theme."""
 
-    _VIEWBOX = 20.0
+    _VIEWBOX = 20
+    _IDLE_OPACITY = 0.4
 
     _RAY_POSITIONS = [
         (18.0, 10.0), (14.0, 16.928), (6.0, 16.928),
         (2.0, 10.0), (6.0, 3.1718), (14.0, 3.1718),
     ]
 
-    def __init__(self, size: int = 28, parent=None):
+    def __init__(self, size: int =20, parent=None):
         super().__init__(parent)
-        self.setFixedSize(size, size)
+        # self.setFixedSize(size, size)
+        self.setFixedWidth(size)
+        self.setSizePolicy(qt.QtWidgets.QSizePolicy.Policy.Fixed, qt.QtWidgets.QSizePolicy.Policy.Expanding)
         self._icon_color = qt.QtGui.QColor("#bbbbbb")
 
     def set_icon_color(self, color) -> None:
@@ -42,14 +45,13 @@ class SunMoonToggle(BaseToggle):
         self.update()
 
     def paintEvent(self, event) -> None:
-        # progress: 0 = unchecked (light/sun), 1 = checked (dark/moon).
-        # The underlying paint math was authored/tested with the opposite
-        # convention (0=moon, 1=sun), so invert once here rather than
-        # re-deriving every lerp endpoint.
         visual_t = 1.0 - self.progress
 
         painter = qt.QtGui.QPainter(self)
         painter.setRenderHint(qt.QtGui.QPainter.RenderHint.Antialiasing)
+
+        # DEBUG: показать реальную hit-area виджета — убрать после проверки
+        # painter.fillRect(self.rect(), qt.QtGui.QColor(255, 0, 0, 80))
 
         painter.save()
         scale = min(self.width(), self.height()) / self._VIEWBOX
@@ -57,8 +59,6 @@ class SunMoonToggle(BaseToggle):
         painter.scale(scale, scale)
         painter.translate(-self._VIEWBOX / 2, -self._VIEWBOX / 2)
 
-        # Overall group rotation (matches the CSS 40deg -> 90deg spin),
-        # pivoting around the SVG's own center (10, 10).
         angle = self.lerp(40.0, 90.0, visual_t)
         painter.translate(10.0, 10.0)
         painter.rotate(angle)
@@ -66,6 +66,7 @@ class SunMoonToggle(BaseToggle):
 
         painter.setPen(qt.QtCore.Qt.PenStyle.NoPen)
         painter.setBrush(self._icon_color)
+        painter.setOpacity(self.lerp(self._IDLE_OPACITY, 1.0, self.hoverProgress))
 
         self._paint_sun_moon(painter, visual_t)
         self._paint_rays(painter, visual_t)

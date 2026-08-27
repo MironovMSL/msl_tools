@@ -117,7 +117,7 @@ class StylesheetBuilder:
     def _window_header_style(theme: Theme) -> str:
         return (
             "WindowHeader {\n"
-            f"  background-color: {theme.chrome_background};\n"
+            # f"  background-color: {theme.chrome_background};\n"
             "}\n"
             "QLabel#headerSubtitle {\n"
             f"  color: {theme.text_secondary};\n"

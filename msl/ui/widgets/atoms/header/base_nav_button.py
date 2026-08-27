@@ -6,7 +6,7 @@ class BaseNavButton(qt.QtWidgets.QAbstractButton):
     DEFAULT_HOVER_COLOR   = qt.QtGui.QColor(255, 255, 255, 25)
     DEFAULT_PRESSED_COLOR = qt.QtGui.QColor(255, 255, 255, 15)
 
-    ICON_IDLE_OPACITY = 0.40
+    ICON_IDLE_OPACITY = 0.4
     ICON_SIZE         = 16
 
     FADE_IN_MS  = 120

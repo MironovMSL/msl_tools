@@ -2,14 +2,13 @@ import msl_tools.msl.ui.qt_bindings as qt
 from msl_tools.msl.core.theme import Theme
 from msl_tools.msl.ui.ui_resources import UiResources
 from msl_tools.msl.ui.widgets.windows.frameless_mixin import FramelessWindowMixin
-# from msl_tools.msl.ui.widgets.atoms.toggles.sun_moon_toggle import SunMoonToggle
-# from msl_tools.msl.ui.widgets.atoms.toggles.orbit_theme_toggle import OrbitThemeToggle
-
+from msl_tools.msl.ui.widgets.atoms.surfaces import BasePanel
 
 
 class FramelessDialog(FramelessWindowMixin, qt.QtWidgets.QDialog):
 
     ICON_SUB_FOLDER = "window"
+    CORNER_RADIUS = 8
 
     def __init__(self,
                  title: str = "",
@@ -24,7 +23,7 @@ class FramelessDialog(FramelessWindowMixin, qt.QtWidgets.QDialog):
 
         self._resources = resources or UiResources()
 
-        self._init_frameless_state()
+        self._init_frameless_state(corner_radius=self.CORNER_RADIUS)
         self._resize_to_visible_size(width, height)
         self._build_base_ui(title, icon, subtitle, show_close_button, show_theme_toggle)
 
@@ -46,17 +45,21 @@ class FramelessDialog(FramelessWindowMixin, qt.QtWidgets.QDialog):
                                      show_close_button=show_close_button,
                                      show_theme_toggle=show_theme_toggle)
 
+        self.content_surface = BasePanel(corner_radius=self.CORNER_RADIUS)
+
         if self._theme_toggle is not None:
             self._theme_toggle.set_checked_immediate(self._resources.themeManager.current_theme.name == "dark")
 
-        self.content_layout = qt.QtWidgets.QVBoxLayout()
-        self.content_layout.setContentsMargins(12, 12, 12, 12)
-        self.content_layout.setSpacing(12)
-        self._root_layout.addLayout(self.content_layout)
-        self._root_layout.addStretch()
+        outer_layout = qt.QtWidgets.QVBoxLayout()
+        outer_layout.setContentsMargins(2, 0, 2, 2)
+        outer_layout.setSpacing(12)
+        outer_layout.addWidget(self.content_surface)
+
+        self._root_layout.addLayout(outer_layout)
+        # self._root_layout.addStretch()
 
     def add_widget(self, widget) -> None:
-        self.content_layout.addWidget(widget)
+        self.content_surface.content_layout().addWidget(widget)
 
     def add_separator(self) -> None:
         line = qt.QtWidgets.QFrame()
@@ -72,9 +75,12 @@ class FramelessDialog(FramelessWindowMixin, qt.QtWidgets.QDialog):
 
     def _apply_theme(self, theme: Theme) -> None:
         color = theme.text_primary
-        self.set_background_color(theme.surface)
+        color2 = theme.accent
+        # self.set_background_color(theme.surface)
+        self.set_background_color(theme.chrome_background)
         self._apply_snap_flyout_colors(theme, color)
-        self.apply_theme_toggle_colors(color)
+        self._apply_theme_toggle_colors(color)
+        self.content_surface.set_background_color(theme.surface)
 
         if self._theme_toggle is not None:
             self._theme_toggle.blockSignals(True)

@@ -17,7 +17,8 @@ class WindowHeader(qt.QtWidgets.QWidget):
 
         self.corner_radius = 0
         self.corner_button: BaseNavButton | None = None
-        self._chrome_background: str | None = None  # unset -> no local background rule yet
+        self._chrome_background: str | None = None
+        self._border_color: str | None = None  # new
 
         self._apply_stylesheet()
 

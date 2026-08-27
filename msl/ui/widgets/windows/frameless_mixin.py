@@ -132,7 +132,8 @@ class FramelessWindowMixin:
             self.header.set_subtitle(subtitle)
 
         if show_theme_toggle is not None:
-            self._theme_toggle = SunMoonToggle(size=20)
+            self._theme_toggle = SunMoonToggle()
+            # self._theme_toggle = SunMoonToggle(size=20)
             self._theme_toggle.toggled.connect(self._on_theme_toggle_toggled)
             self.header.add_trailing_widget(self._theme_toggle)
 
@@ -166,7 +167,7 @@ class FramelessWindowMixin:
         toggle is clicked."""
         pass
 
-    def apply_theme_toggle_colors(self, icon_color) -> None:
+    def _apply_theme_toggle_colors(self, icon_color) -> None:
         if self._theme_toggle is not None:
             self._theme_toggle.set_icon_color(icon_color)
 
