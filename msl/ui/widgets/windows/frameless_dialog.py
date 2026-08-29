@@ -9,6 +9,7 @@ class FramelessDialog(FramelessWindowMixin, qt.QtWidgets.QDialog):
 
     ICON_SUB_FOLDER = "window"
     CORNER_RADIUS = 8
+    DRAG_OPACITY = 0.7
 
     def __init__(self,
                  title: str = "",
@@ -40,19 +41,20 @@ class FramelessDialog(FramelessWindowMixin, qt.QtWidgets.QDialog):
                                      title,
                                      icon=icon,
                                      subtitle=subtitle,
-                                     show_minimize_button=False,
-                                     show_maximize_button=False,
+                                     show_minimize_button=True,
+                                     show_maximize_button=True,
                                      show_close_button=show_close_button,
                                      show_theme_toggle=show_theme_toggle)
 
         self.content_surface = BasePanel(corner_radius=self.CORNER_RADIUS)
+        self.content_surface.setCursor(qt.QtCore.Qt.CursorShape.ArrowCursor)
 
         if self._theme_toggle is not None:
             self._theme_toggle.set_checked_immediate(self._resources.themeManager.current_theme.name == "dark")
 
         outer_layout = qt.QtWidgets.QVBoxLayout()
         outer_layout.setContentsMargins(2, 0, 2, 2)
-        outer_layout.setSpacing(12)
+        outer_layout.setSpacing(0)
         outer_layout.addWidget(self.content_surface)
 
         self._root_layout.addLayout(outer_layout)
@@ -147,9 +149,12 @@ class FramelessDialog(FramelessWindowMixin, qt.QtWidgets.QDialog):
 
 
 if __name__ == '__main__':
-
     from msl_tools.msl.ui.app.application_context import QtApplicationContext
 
     with QtApplicationContext():
         window = FramelessDialog(title="BaseDialog", subtitle="theme demo", show_theme_toggle=True)
+
         window.show()
+        #
+        # qt.QtCore.QTimer.singleShot(2000, lambda: window.set_blurred(True))
+        # qt.QtCore.QTimer.singleShot(5000, lambda: window.set_blurred(False))

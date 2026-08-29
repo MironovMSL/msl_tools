@@ -24,7 +24,7 @@ class FramelessWindowMixin:
     11-style Snap Layouts, and interactive edge/corner resize.
     """
 
-    _EDGE_MARGIN           = 6
+    _EDGE_MARGIN           = 4
     _OUTER_MARGIN          = 6
     _MIN_WIDTH             = 240
     _MIN_HEIGHT            = 160
@@ -32,6 +32,8 @@ class FramelessWindowMixin:
     _HIT_TEST_ALPHA        = 1
     _ANIMATION_DURATION_MS = 180
     _ANIMATION_EASING      = qt.QtCore.QEasingCurve.Type.OutCubic
+    _DRAG_OPACITY          = 0.7
+    _OPACITY_ANIMATION_DURATION_MS = 150
 
     _CURSOR_BY_EDGE = {
         _ResizeEdge.LEFT        : qt.QtCore.Qt.CursorShape.SizeHorCursor,
@@ -50,12 +52,19 @@ class FramelessWindowMixin:
 
     def _init_frameless_state(self,
                               corner_radius: int = _DEFAULT_CORNER_RADIUS,
-                              outer_margin:  int = _OUTER_MARGIN) -> None:
+                              outer_margin:  int = _OUTER_MARGIN,
+                              drag_opacity:  float | None = _DRAG_OPACITY) -> None:
 
         """Call once, first thing in __init__, before any mouse event can fire."""
         self.setWindowFlags(qt.QtCore.Qt.WindowType.FramelessWindowHint)
         self.setAttribute(qt.QtCore.Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setMouseTracking(True)
+
+        self._drag_opacity       = drag_opacity
+        self._is_header_dragging = False
+        self._blur_overlay:                 qt.QtWidgets.QLabel | None = None
+        self._blur_fade_animation: qt.QtCore.QPropertyAnimation | None = None
+        self._opacity_animation:   qt.QtCore.QPropertyAnimation | None = None
 
         self._drag_position:              qt.QtCore.QPoint | None = None
         self._arranged_drag_press_global: qt.QtCore.QPoint | None = None
@@ -75,9 +84,9 @@ class FramelessWindowMixin:
         self._normal_geometry:    qt.QtCore.QRect              | None = None
         self._maximize_animation: qt.QtCore.QPropertyAnimation | None = None
 
-        self._corner_radius = corner_radius
-        self._outer_margin_normal = outer_margin   # restored on un-maximize
-        self._outer_margin = outer_margin
+        self._corner_radius       = corner_radius
+        self._outer_margin_normal = outer_margin
+        self._outer_margin        = outer_margin
         self._root_layout: qt.QtWidgets.QLayout | None = None
         self._background_color = qt.QtGui.QColor("#b07878")
 
@@ -85,10 +94,128 @@ class FramelessWindowMixin:
         self._snap_flyout: SnapLayoutFlyout | None = None
         self._snap_flyout_timer = qt.QtCore.QTimer(self)
         self._snap_flyout_timer.setSingleShot(True)
-        self._snap_flyout_timer.setInterval(500)  # matches native Win11 hover delay
+        self._snap_flyout_timer.setInterval(500)
         self._snap_flyout_timer.timeout.connect(self._show_snap_flyout)
         self._snap_flyout_colors: tuple | None = None
 
+    def set_blurred(self, enabled: bool, blur_radius: float = 5.0, dim_alpha: int = 5,
+                    fade_duration_ms: int = 200) -> None:
+        if enabled:
+            if self._blur_overlay is not None:
+                return
+
+            header_bottom = self.header.geometry().bottom() + 1
+            blur_rect = qt.QtCore.QRect(
+                self._outer_margin, header_bottom,
+                self.width() - 2 * self._outer_margin,
+                self.height() - header_bottom - self._outer_margin,
+            )
+
+            snapshot = self.grab(blur_rect)
+
+            flattened = qt.QtGui.QPixmap(snapshot.size())
+            flattened.fill(self._background_color)
+            flat_painter = qt.QtGui.QPainter(flattened)
+            flat_painter.drawPixmap(0, 0, snapshot)
+            flat_painter.fillRect(flattened.rect(), qt.QtGui.QColor(0, 0, 0, dim_alpha))
+            flat_painter.end()
+
+            blurred = self._bake_blur(flattened, blur_radius)
+
+            overlay = qt.QtWidgets.QLabel(self)
+            overlay.setPixmap(blurred)
+            overlay.setGeometry(blur_rect)
+            overlay.show()
+            overlay.raise_()
+            self._blur_overlay = overlay
+
+            self._fade_blur_overlay(overlay, target_opacity=1.0, duration_ms=fade_duration_ms)
+        else:
+            overlay = self._blur_overlay
+            if overlay is None:
+                return
+            self._blur_overlay = None  # claim immediately so a second set_blurred(False) is a no-op
+
+            def _on_fade_out_finished() -> None:
+                if qt.shiboken.isValid(overlay):
+                    overlay.hide()
+                    overlay.deleteLater()
+
+            self._fade_blur_overlay(overlay, target_opacity=0.0, duration_ms=fade_duration_ms,
+                                    on_finished=_on_fade_out_finished)
+
+    def _fade_blur_overlay(self, overlay: qt.QtWidgets.QLabel, target_opacity: float,
+                           duration_ms: int, on_finished=None) -> None:
+        opacity_effect = qt.QtWidgets.QGraphicsOpacityEffect(overlay)
+        opacity_effect.setOpacity(0.0 if target_opacity == 1.0 else 1.0)
+        overlay.setGraphicsEffect(opacity_effect)
+
+        animation = qt.QtCore.QPropertyAnimation(opacity_effect, b"opacity", overlay)
+        animation.setDuration(duration_ms)
+        animation.setEasingCurve(qt.QtCore.QEasingCurve.Type.OutCubic)
+        animation.setStartValue(opacity_effect.opacity())
+        animation.setEndValue(target_opacity)
+
+        def _clear_ref() -> None:
+            self._blur_fade_animation = None
+
+        animation.finished.connect(_clear_ref)
+        if on_finished is not None:
+            animation.finished.connect(on_finished)
+
+        self._blur_fade_animation = animation
+        animation.start(qt.QtCore.QAbstractAnimation.DeletionPolicy.DeleteWhenStopped)
+
+    def _bake_blur(self, source: qt.QtGui.QPixmap, blur_radius: float) -> qt.QtGui.QPixmap:
+        """Renders a QGraphicsBlurEffect into a flat pixmap via an offscreen
+        QGraphicsScene. Needed because setGraphicsEffect() on a plain QWidget/
+        QLabel does not reliably rasterize the effect on every Qt/driver
+        combination — routing through a scene's render() forces it to bake."""
+        scene = qt.QtWidgets.QGraphicsScene()
+        item = qt.QtWidgets.QGraphicsPixmapItem(source)
+
+        effect = qt.QtWidgets.QGraphicsBlurEffect()
+        effect.setBlurRadius(blur_radius)
+        effect.setBlurHints(qt.QtWidgets.QGraphicsBlurEffect.BlurHint.QualityHint)
+        item.setGraphicsEffect(effect)
+
+        scene.addItem(item)
+        scene.setSceneRect(0, 0, source.width(), source.height())
+
+        result = qt.QtGui.QPixmap(source.size())
+        result.fill(qt.QtCore.Qt.GlobalColor.transparent)
+
+        result_painter = qt.QtGui.QPainter(result)
+        result_painter.setRenderHint(qt.QtGui.QPainter.RenderHint.Antialiasing)
+        scene.render(result_painter)
+        result_painter.end()
+
+        return result
+
+    def _apply_drag_opacity(self) -> None:
+        if self._drag_opacity is not None:
+            self._animate_window_opacity(self._drag_opacity)
+
+    def _restore_opacity(self) -> None:
+        if self._drag_opacity is not None:
+            self._animate_window_opacity(1.0)
+
+    def _animate_window_opacity(self, target: float) -> None:
+        if self._opacity_animation is not None and qt.shiboken.isValid(self._opacity_animation):
+            self._opacity_animation.stop()
+
+        animation = qt.QtCore.QPropertyAnimation(self, b"windowOpacity", self)
+        animation.setDuration(self._OPACITY_ANIMATION_DURATION_MS)
+        animation.setEasingCurve(qt.QtCore.QEasingCurve.Type.OutCubic)
+        animation.setStartValue(self.windowOpacity())
+        animation.setEndValue(target)
+
+        def _clear_ref() -> None:
+            self._opacity_animation = None
+
+        animation.finished.connect(_clear_ref)
+        self._opacity_animation = animation
+        animation.start(qt.QtCore.QAbstractAnimation.DeletionPolicy.DeleteWhenStopped)
     # ------------------------------------------------------------------
     # Simple public accessors
     # ------------------------------------------------------------------
@@ -472,10 +599,16 @@ class FramelessWindowMixin:
                 self._restore_from_arranged_drag(self._arranged_drag_press_local, global_pos)
                 self._arranged_drag_press_global = None
                 self._arranged_drag_press_local = None
+                if not self._is_header_dragging:
+                    self._is_header_dragging = True
+                    self._apply_drag_opacity()
             event.accept()
             return
 
         if self._drag_position is not None and event.buttons() & qt.QtCore.Qt.MouseButton.LeftButton:
+            if not self._is_header_dragging:
+                self._is_header_dragging = True
+                self._apply_drag_opacity()
             self.move(event.globalPosition().toPoint() - self._drag_position)
             event.accept()
             return
@@ -485,6 +618,9 @@ class FramelessWindowMixin:
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: qt.QtGui.QMouseEvent) -> None:
+        if self._is_header_dragging:
+            self._is_header_dragging = False
+            self._restore_opacity()
         self._drag_position = None
         self._arranged_drag_press_global = None
         self._arranged_drag_press_local = None
