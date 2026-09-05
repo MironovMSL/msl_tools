@@ -12,26 +12,29 @@ class FramelessDialog(FramelessWindowMixin, qt.QtWidgets.QDialog):
     DRAG_OPACITY = 0.7
 
     def __init__(self,
-                 title: str = "",
-                 width: int = 480,
-                 height: int = 320,
-                 icon: qt.QtGui.QIcon | None = None,
-                 subtitle: str | None = None,
-                 show_close_button: bool = True,
-                 show_theme_toggle: bool = False,
-                 resources: UiResources | None = None, parent=None):
+                 title:                 str = "",
+                 width:                 int = 480,
+                 height:                int = 320,
+                 icon:qt.QtGui.QIcon | None = None,
+                 subtitle:       str | None = None,
+                 show_minimize_button: bool = True,
+                 show_maximize_button: bool = True,
+                 show_close_button:    bool = True,
+                 show_theme_toggle:    bool = True,
+                 resources: UiResources | None = None,
+                 parent                     = None):
         super().__init__(parent)
 
-        self._resources = resources or UiResources()
+        self._ui_resources = resources or UiResources()
 
         self._init_frameless_state(corner_radius=self.CORNER_RADIUS)
         self._resize_to_visible_size(width, height)
-        self._build_base_ui(title, icon, subtitle, show_close_button, show_theme_toggle)
+        self._build_base_ui(title, icon, subtitle,show_minimize_button, show_maximize_button, show_close_button, show_theme_toggle)
 
-        self._resources.themeManager.theme_changed.connect(self._on_theme_changed)
-        self._apply_theme(self._resources.themeManager.current_theme)
+        self._ui_resources.themeManager.theme_changed.connect(self._on_theme_changed)
+        self._apply_theme(self._ui_resources.themeManager.current_theme)
 
-    def _build_base_ui(self, title, icon, subtitle, show_close_button, show_theme_toggle) -> None:
+    def _build_base_ui(self, title, icon, subtitle,show_minimize_button, show_maximize_button, show_close_button, show_theme_toggle) -> None:
         self._root_layout = qt.QtWidgets.QVBoxLayout(self)
         self._root_layout.setContentsMargins(*self.content_margins())
         self._root_layout.setSpacing(0)
@@ -41,8 +44,8 @@ class FramelessDialog(FramelessWindowMixin, qt.QtWidgets.QDialog):
                                      title,
                                      icon=icon,
                                      subtitle=subtitle,
-                                     show_minimize_button=True,
-                                     show_maximize_button=True,
+                                     show_minimize_button=show_minimize_button,
+                                     show_maximize_button=show_maximize_button,
                                      show_close_button=show_close_button,
                                      show_theme_toggle=show_theme_toggle)
 
@@ -50,7 +53,7 @@ class FramelessDialog(FramelessWindowMixin, qt.QtWidgets.QDialog):
         self.content_surface.setCursor(qt.QtCore.Qt.CursorShape.ArrowCursor)
 
         if self._theme_toggle is not None:
-            self._theme_toggle.set_checked_immediate(self._resources.themeManager.current_theme.name == "dark")
+            self._theme_toggle.set_checked_immediate(self._ui_resources.themeManager.current_theme.name == "dark")
 
         outer_layout = qt.QtWidgets.QVBoxLayout()
         outer_layout.setContentsMargins(2, 0, 2, 2)
@@ -70,7 +73,7 @@ class FramelessDialog(FramelessWindowMixin, qt.QtWidgets.QDialog):
         self.content_layout.addWidget(line)
 
     def _on_theme_toggle_toggled(self, is_dark: bool) -> None:
-        self._resources.themeManager.set_theme("dark" if is_dark else "light")
+        self._ui_resources.themeManager.set_theme("dark" if is_dark else "light")
 
     def _on_theme_changed(self, theme: Theme) -> None:
         self._apply_theme(theme)
@@ -93,7 +96,7 @@ class FramelessDialog(FramelessWindowMixin, qt.QtWidgets.QDialog):
             return
 
         close_hover_icon_color = "#ffffff" if theme.name == "light" else "#000000"
-        icon_manager = self._resources.iconManager
+        icon_manager = self._ui_resources.iconManager
 
         hover_alpha   = 15 if theme.name == "light" else 30
         pressed_alpha = 30 if theme.name == "light" else 15
@@ -153,8 +156,14 @@ if __name__ == '__main__':
 
     with QtApplicationContext():
         window = FramelessDialog(title="BaseDialog", subtitle="theme demo", show_theme_toggle=True)
+        leable = qt.QtWidgets.QLabel()
+        leable.setText("Heloo Dmitry")
+        window.add_widget(leable)
+
 
         window.show()
-        #
-        # qt.QtCore.QTimer.singleShot(2000, lambda: window.set_blurred(True))
-        # qt.QtCore.QTimer.singleShot(5000, lambda: window.set_blurred(False))
+
+
+
+        qt.QtCore.QTimer.singleShot(2000, lambda: window.set_blurred(True))
+        qt.QtCore.QTimer.singleShot(5000, lambda: window.set_blurred(False))

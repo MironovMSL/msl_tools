@@ -15,8 +15,8 @@ class BasePanel(qt.QtWidgets.QWidget):
         # self.setSizePolicy(qt.QtWidgets.QSizePolicy.Policy.Expanding, qt.QtWidgets.QSizePolicy.Policy.Expanding)
 
         self._layout = qt.QtWidgets.QVBoxLayout(self)
-        self._layout.setContentsMargins(2, 2, 2, 2)
-        self._layout.setSpacing(5)
+        self._layout.setContentsMargins(5, 5, 5, 5)
+        self._layout.setSpacing(0)
 
     def content_layout(self) -> qt.QtWidgets.QVBoxLayout:
         return self._layout

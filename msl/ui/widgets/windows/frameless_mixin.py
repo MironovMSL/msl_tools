@@ -98,8 +98,7 @@ class FramelessWindowMixin:
         self._snap_flyout_timer.timeout.connect(self._show_snap_flyout)
         self._snap_flyout_colors: tuple | None = None
 
-    def set_blurred(self, enabled: bool, blur_radius: float = 5.0, dim_alpha: int = 5,
-                    fade_duration_ms: int = 200) -> None:
+    def set_blurred(self, enabled: bool, blur_radius: float = 5.0, dim_alpha: int = 5, fade_duration_ms: int = 200) -> None:
         if enabled:
             if self._blur_overlay is not None:
                 return
@@ -236,11 +235,11 @@ class FramelessWindowMixin:
     # ------------------------------------------------------------------
 
     def _build_frameless_chrome(self, root_layout, title,
-                                icon=None, subtitle=None,
-                                show_close_button=True,
-                                show_minimize_button=False,
-                                show_maximize_button=False,
-                                show_theme_toggle=None) -> None:
+                                icon=None, subtitle = None,
+                                show_close_button   = True,
+                                show_minimize_button= False,
+                                show_maximize_button= False,
+                                show_theme_toggle   = False) -> None:
         """theme_toggle_factory: optional zero-arg callable returning a
         BaseToggle instance (e.g. `lambda: SunMoonToggle(size=22)` or
         `lambda: OrbitThemeToggle(size=28)`). None (default) means no
@@ -258,7 +257,7 @@ class FramelessWindowMixin:
         if subtitle is not None:
             self.header.set_subtitle(subtitle)
 
-        if show_theme_toggle is not None:
+        if show_theme_toggle:
             self._theme_toggle = SunMoonToggle()
             # self._theme_toggle = SunMoonToggle(size=20)
             self._theme_toggle.toggled.connect(self._on_theme_toggle_toggled)

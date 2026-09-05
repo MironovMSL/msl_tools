@@ -3,6 +3,7 @@
 import msl_tools.msl.ui.qt_bindings as qt
 from msl_tools.msl.core.theme import Theme, ThemeRegistry
 from msl_tools.msl.ui.widgets.atoms.paths import BasePathWidget, PathMode
+from msl_tools.msl.ui.widgets.atoms.checkboxes import BaseCheckbox
 
 class InstallPathWidget(qt.QtWidgets.QWidget):
     """Composition of BasePathWidget with a checkbox that toggles between
@@ -42,19 +43,23 @@ class InstallPathWidget(qt.QtWidgets.QWidget):
         self._create_connections()
         self._apply_state(use_package_folder=state_checkbox)
 
-    def _create_widgets(self,state_checkbox) -> None:
-        self.path_widget = BasePathWidget(label            = "install path",
-                                          placeholder_text = "Select a default install folder",
-                                          initial_path     = self._default_path,
-                                          dialog_title     = "Select a Folder",
-                                          theme            = self._theme)
-        self.use_package_checkbox = qt.QtWidgets.QCheckBox("use package folder as install path")
+    def _create_widgets(self, state_checkbox) -> None:
+        self.path_widget = BasePathWidget(label="install path",
+                                          placeholder_text="Select a default install folder",
+                                          initial_path=self._default_path,
+                                          dialog_title="Select a Folder",
+                                          theme=self._theme)
+        self.use_package_checkbox = BaseCheckbox("use package folder as install path", theme=self._theme)
         self.use_package_checkbox.setChecked(state_checkbox)
+        # self.use_package_checkbox.setStyleSheet(self._checkbox_style())
         self.hint_label = qt.QtWidgets.QLabel()
         self.hint_label.setStyleSheet(self._hint_style())
 
     def _hint_style(self) -> str:
         return f"color: {self._theme.text_secondary}; font-size: 11px;"
+
+    def _checkbox_style(self) -> str:
+        return f"QCheckBox {{ color: {self._theme.text_primary}; }}"
 
     def _create_layouts(self) -> None:
         self.main_laout = qt.QtWidgets.QVBoxLayout(self)
@@ -98,11 +103,9 @@ class InstallPathWidget(qt.QtWidgets.QWidget):
         return self.use_package_checkbox.isChecked()
 
     def set_theme(self, theme: Theme) -> None:
-        """Re-colors the hint label and forwards the theme to the inner
-        BasePathWidget. The checkbox's look comes from Qt's native style,
-        not a per-widget override, so it isn't touched here."""
         self._theme = theme
         self.hint_label.setStyleSheet(self._hint_style())
+        self.use_package_checkbox.set_theme(theme)
         self.path_widget.set_theme(theme)
 
 

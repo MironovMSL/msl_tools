@@ -1,10 +1,11 @@
 """
-View тула установки. Чистый UI без бизнес-логики.
+View installation tool. Clean UI without business logic.
 """
 from pathlib import Path
 
 from msl_tools.msl.core.resources import Resources
 from msl_tools.msl.ui.ui_resources import UiResources
+from msl_tools.msl.ui.widgets.windows.frameless_dialog import FramelessDialog
 from msl_tools.msl.ui.widgets.compositions.install_path_widget import InstallPathWidget
 from msl_tools.msl.ui.widgets.atoms.status import VersionStatusWidget
 from msl_tools.msl.ui.widgets.atoms.progress import BaseProgressBar, ProgressState
@@ -26,7 +27,7 @@ default_config = {
 }
 
 
-class InstallerView(qt.QtWidgets.QDialog):
+class InstallerView(FramelessDialog):
     """Installer window: lets the user pick an install path and install /
     uninstall the package. Contains no business logic itself — every action
     delegates to Resources().packageInstaller / versionManager and this view
@@ -36,38 +37,45 @@ class InstallerView(qt.QtWidgets.QDialog):
     NAME = 'Installer'
 
     def __init__(self, version: str, parent=None):
-        super().__init__(parent=parent)
         self.CORE    = Resources()
         self.UI_CORE = UiResources()
         self.CONFIG  = self.CORE.configsMayaMng.get_config(self.NAME, defaults=default_config)
         self.LOG     = self.CORE.logsMaya.get(self.NAME)
-        self.WINDOW_ICON = self.UI_CORE.iconManager.get_icon(self.NAME)
 
         self.installer_version = version
         self.msl_tool_version  = self.CORE.versionManager.core_raw_version
 
-        pref_maya_path     = self.CORE.fsManager.mayaPaths.get_preferences_root() / "scripts"
-        root_package_path  = self.CORE.fsManager.PARENT_DIR
+        pref_maya_path    = self.CORE.fsManager.mayaPaths.get_preferences_root() / "scripts"
+        root_package_path = self.CORE.fsManager.PARENT_DIR
         self.default_install_path = str(self.CONFIG["startup"]["default_install_path"] or pref_maya_path)
         self.package_install_path = str(self.CONFIG["startup"]["package_install_path"] or root_package_path)
-        self.use_package_state    = self.CONFIG["startup"]["use_package_state"]
+        self.use_package_state    =     self.CONFIG["startup"]["use_package_state"]
 
-        self.width_window  = self.CONFIG["startup"]["width"]
-        self.height_window = self.CONFIG["startup"]["height"]
+        window_title = self.CONFIG["startup"]["name"] or self.NAME
+        window_icon  = self.UI_CORE.iconManager.get_icon(self.NAME)
 
-        self.setWindowTitle(self.CONFIG["startup"]["name"] or self.NAME)
-        self.setWindowIcon(self.WINDOW_ICON)
-        self.resize(self.width_window, self.height_window)
+        super().__init__(
+            title    = window_title,
+            width    = self.CONFIG["startup"]["width"],
+            height   = self.CONFIG["startup"]["height"],
+            icon     = window_icon,
+            resources= self.UI_CORE,
+            show_minimize_button = False,
+            show_maximize_button = False,
+            show_close_button    = True,
+            show_theme_toggle    = True,
+            parent   = parent,
+        )
 
         self._worker: CallableWorker | None = None
 
         self.install_info = self.CORE.versionManager.check_install_status(
-            self.package_install_path if self.use_package_state else self.default_install_path
-        )
+            self.package_install_path if self.use_package_state else self.default_install_path)
 
         self.create_widgets()
         self.create_layouts()
         self.create_connections()
+        self._apply_installer_theme(self.UI_CORE.themeManager.current_theme)
 
     def create_widgets(self):
         self.btn_install   = qt.QtWidgets.QPushButton("install")
@@ -76,13 +84,13 @@ class InstallerView(qt.QtWidgets.QDialog):
         current_theme = self.UI_CORE.themeManager.current_theme
 
         self.InstallPathWidget = InstallPathWidget(default_path=self.default_install_path,
-                                                    package_path=self.package_install_path,
-                                                    state_checkbox=self.use_package_state,
-                                                    theme=current_theme)
+                                                   package_path=self.package_install_path,
+                                                   state_checkbox=self.use_package_state,
+                                                   theme=current_theme)
 
         self.VersionStatusWidget = VersionStatusWidget(package_version=self.msl_tool_version,
-                                                         info=self.install_info,
-                                                         theme=current_theme)
+                                                       info=self.install_info,
+                                                       theme=current_theme)
 
         self.BaseProgressBar = BaseProgressBar(theme=current_theme)
 
@@ -100,15 +108,16 @@ class InstallerView(qt.QtWidgets.QDialog):
         progress_layout = qt.QtWidgets.QHBoxLayout()
         progress_layout.addWidget(self.BaseProgressBar)
 
-        main_layout = qt.QtWidgets.QVBoxLayout(self)
-        main_layout.setAlignment(qt.QtCore.Qt.AlignTop)
-        main_layout.setContentsMargins(5, 5, 5, 5)
-        main_layout.setSpacing(5)
+        # Content now lives inside FramelessDialog's rounded content
+        # surface instead of directly on `self`.
+        content_layout = self.content_surface.content_layout()
+        content_layout.setAlignment(qt.QtCore.Qt.AlignTop)
+        content_layout.setSpacing(5)
 
-        main_layout.addLayout(button_layout)
-        main_layout.addLayout(install_path_layout)
-        main_layout.addLayout(version_status_layout)
-        main_layout.addLayout(progress_layout)
+        content_layout.addLayout(button_layout)
+        content_layout.addLayout(install_path_layout)
+        content_layout.addLayout(version_status_layout)
+        content_layout.addLayout(progress_layout)
 
     def create_connections(self):
         self.btn_install.clicked.connect(self.on_click_install)
@@ -117,13 +126,15 @@ class InstallerView(qt.QtWidgets.QDialog):
         self.InstallPathWidget.use_package_folder_toggled.connect(self.set_use_package_state)
         self.InstallPathWidget.path_changed.connect(self.on_path_edited)
 
-        self.UI_CORE.themeManager.theme_changed.connect(self._on_theme_changed)
+        # Deliberately NOT named _on_theme_changed — that name is owned by
+        # FramelessDialog and connecting to it here would shadow the base
+        # class's chrome theming (see class docstring notes above).
+        self.UI_CORE.themeManager.theme_changed.connect(self._apply_installer_theme)
 
-    def _on_theme_changed(self, theme) -> None:
-        """Forwards a theme switch to every themed child widget. The QSS
-        baseline for QPushButton/QLineEdit/QLabel is already re-applied
-        app-wide by UiResources — this only covers the atoms that manage
-        their own per-instance stylesheet (state-dependent colors)."""
+    def _apply_installer_theme(self, theme) -> None:
+        """Forwards a theme switch to every themed child widget owned by
+        this view. FramelessDialog's own theme_changed handler (chrome,
+        buttons, snap flyout) runs independently via its own connection."""
         self.InstallPathWidget.set_theme(theme)
         self.VersionStatusWidget.set_theme(theme)
         self.BaseProgressBar.set_theme(theme)
@@ -141,16 +152,13 @@ class InstallerView(qt.QtWidgets.QDialog):
 
     def on_click_install(self):
         if self.use_package_state:
-            # Running directly from the package folder — nothing to copy,
-            # just refresh the displayed status.
             self._refresh_status(self.package_install_path)
             return
 
         target_path = self.default_install_path
         self._run_busy(
             target=lambda: self.CORE.packageInstaller.install_package(self.package_install_path, target_path),
-            checked_path=target_path,
-        )
+            checked_path=target_path)
 
     def on_click_uninstall(self):
         if self.use_package_state:
@@ -160,19 +168,9 @@ class InstallerView(qt.QtWidgets.QDialog):
         target_path = self.default_install_path
         self._run_busy(
             target=lambda: self.CORE.packageInstaller.uninstall_package(target_path),
-            checked_path=target_path,
-        )
+            checked_path=target_path)
 
     def _run_busy(self, target, checked_path: str) -> None:
-        """Runs `target` on a background thread while the progress bar shows
-        an indeterminate ("busy") state, then reflects the boolean result in
-        the UI once the thread finishes.
-
-        We deliberately don't fake a percentage: PackageInstaller doesn't
-        report granular progress, and a number that doesn't track real work
-        is misleading. Indeterminate mode communicates "working" honestly,
-        and running on a QThread keeps the window responsive while it does.
-        """
         self.btn_install.setEnabled(False)
         self.btn_uninstall.setEnabled(False)
 
@@ -188,10 +186,6 @@ class InstallerView(qt.QtWidgets.QDialog):
         self._worker.start()
 
     def _store_worker_error(self, error: Exception | None) -> None:
-        """Captures an exception raised inside the worker's target callable,
-        so _on_operation_finished can include it in the warning it logs.
-        `failed` always fires before `finished_with_result`, so this value is
-        ready by the time it's read."""
         self._last_error = error
 
     def _on_operation_finished(self, success: bool, checked_path: str) -> None:
@@ -205,8 +199,6 @@ class InstallerView(qt.QtWidgets.QDialog):
 
         self._refresh_status(checked_path)
 
-        # Path/state prefs are saved regardless of outcome so the user
-        # doesn't lose what they typed; only warn on failure.
         self.CONFIG["startup"]["default_install_path"] = self.default_install_path
         self.CONFIG["startup"]["package_install_path"] = self.package_install_path
         self.CONFIG["startup"]["use_package_state"]    = self.use_package_state

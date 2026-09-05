@@ -36,6 +36,7 @@ class StylesheetBuilder:
             StylesheetBuilder._button_style(theme),
             StylesheetBuilder._line_edit_style(theme),
             StylesheetBuilder._label_style(theme),
+            # StylesheetBuilder._checkbox_style(theme),
             StylesheetBuilder._progress_bar_style(theme),
             StylesheetBuilder._window_header_style(theme),
         ])
@@ -121,6 +122,32 @@ class StylesheetBuilder:
             "}\n"
             "QLabel#headerSubtitle {\n"
             f"  color: {theme.text_secondary};\n"
+            "}\n"
+        )
+
+    @staticmethod
+    def _checkbox_style(theme: Theme) -> str:
+        return (
+            "QCheckBox {\n"
+            f"  color: {theme.text_primary};\n"
+            "  spacing: 6px;\n"
+            "}\n"
+            "QCheckBox:disabled {\n"
+            f"  color: {theme.text_secondary};\n"
+            "}\n"
+            "QCheckBox::indicator {\n"
+            "  width: 13px;\n"
+            "  height: 13px;\n"
+            "  border-radius: 2px;\n"
+            f"  border: 1px solid {theme.border};\n"
+            f"  background-color: {theme.surface};\n"
+            "}\n"
+            "QCheckBox::indicator:hover {\n"
+            f"  border: 1px solid {theme.accent};\n"
+            "}\n"
+            "QCheckBox::indicator:checked {\n"
+            f"  background-color: {theme.accent};\n"
+            f"  border: 1px solid {theme.accent};\n"
             "}\n"
         )
 
