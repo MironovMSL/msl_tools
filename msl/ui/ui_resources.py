@@ -4,7 +4,7 @@ from msl_tools.msl.core.resources import Resources
 from msl_tools.msl.core.pattern.singleton import SingletonMeta
 from msl_tools.msl.core.theme import Theme
 from msl_tools.msl.ui.icon_manager import IconManager
-from msl_tools.msl.ui.theme import ThemeManager, StylesheetBuilder
+from msl_tools.msl.ui.theme import ThemeManager
 
 
 class UiResources(metaclass=SingletonMeta):
@@ -23,23 +23,20 @@ class UiResources(metaclass=SingletonMeta):
         self.themeManager.theme_changed.connect(self._on_theme_changed)
 
     def _on_theme_changed(self, theme: Theme) -> None:
-        """Reacts to a theme switch: updates icon lookup, re-applies the
-        global QSS baseline, and persists the choice for next launch."""
+        """Reacts to a theme switch: updates icon lookup and persists the
+        choice for next launch.
+
+        Does NOT touch QApplication: the QSS baseline is applied per window
+        (see FramelessWindowMixin), because inside Maya the QApplication is
+        Maya's own and a global stylesheet would restyle its whole UI."""
         self.iconManager.set_theme(theme.name)
-
-        app = qt.QtWidgets.QApplication.instance()
-        if app is not None:
-            app.setStyleSheet(StylesheetBuilder.build(theme))
-        else:
-
-            pass
-
         self.core.coreConfig["theme"]["name"] = theme.name
 
 
 if __name__ == '__main__':
 
     from msl_tools.msl.ui.app.application_context import QtApplicationContext
+    from msl_tools.msl.ui.theme import StylesheetBuilder
     from msl_tools.msl.ui.widgets.widget_playground_dialog import WidgetPlaygroundDialog
     from msl_tools.msl.ui.widgets.atoms.progress import BaseProgressBar, ProgressState
     from msl_tools.msl.ui.widgets.atoms.status import VersionStatusWidget
@@ -51,6 +48,12 @@ if __name__ == '__main__':
 
         dialog = WidgetPlaygroundDialog(parent=context.get_parent())
         dialog.setWindowTitle("Theme demo")
+
+        # The playground is not a themed window, so bind the QSS baseline to it by hand.
+        def apply_baseline(theme):
+            dialog.setStyleSheet(StylesheetBuilder.build(theme))
+        apply_baseline(uiCore.themeManager.current_theme)
+        uiCore.themeManager.theme_changed.connect(apply_baseline)
 
         # --- переключатель темы ---
         theme_checkbox = qt.QtWidgets.QCheckBox("dark theme")

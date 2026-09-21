@@ -79,6 +79,7 @@ class FramelessDialog(FramelessWindowMixin, qt.QtWidgets.QDialog):
         self._apply_theme(theme)
 
     def _apply_theme(self, theme: Theme) -> None:
+        self._apply_baseline_stylesheet(theme)
         color = theme.text_primary
         color2 = theme.accent
         # self.set_background_color(theme.surface)

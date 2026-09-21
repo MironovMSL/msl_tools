@@ -10,11 +10,11 @@ class FramelessMainWindow(FramelessWindowMixin, qt.QtWidgets.QMainWindow):
 
     Theme-aware: subscribes to UiResources.themeManager on construction and
     keeps its nav button icons/hover colors and window background in sync.
-    The header's own background/text color are plain QSS, already covered by
-    UiResources' global QApplication.setStyleSheet() on every theme change —
-    this class only re-themes what QSS structurally cannot reach: the
-    custom-painted window background and BaseNavButton's custom-painted
-    icons/hover colors.
+    The header's own background/text color are plain QSS, covered by the
+    window-scoped baseline stylesheet (see FramelessWindowMixin) that is
+    re-applied on every theme change — this class only re-themes what QSS
+    structurally cannot reach: the custom-painted window background and
+    BaseNavButton's custom-painted icons/hover colors.
 
     A nested QMainWindow is used purely as an internal "body" — this lets
     setMenuBar()/addToolBar()/setStatusBar()/setCentralWidget() keep working
@@ -98,6 +98,7 @@ class FramelessMainWindow(FramelessWindowMixin, qt.QtWidgets.QMainWindow):
         self._apply_theme(theme)
 
     def _apply_theme(self, theme: Theme) -> None:
+        self._apply_baseline_stylesheet(theme)
         self.set_background_color(theme.surface)
 
         icon_manager = self._resources.iconManager

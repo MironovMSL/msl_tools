@@ -17,8 +17,8 @@ class WindowHeader(qt.QtWidgets.QWidget):
 
         self.corner_radius = 0
         self.corner_button: BaseNavButton | None = None
-        self._chrome_background: str | None = None
-        self._border_color: str | None = None  # new
+        self._chrome_background:      str | None = None
+        self._border_color:           str | None = None
 
         self._apply_stylesheet()
 
@@ -29,14 +29,17 @@ class WindowHeader(qt.QtWidgets.QWidget):
         self.icon_label = qt.QtWidgets.QLabel()
         self.icon_label.setFixedSize(16, 16)
         self.icon_label.setScaledContents(True)
+        self.icon_label.setAttribute(qt.QtCore.Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self.icon_label.hide()
 
         self.title_label = qt.QtWidgets.QLabel(title)
         self.title_label.setStyleSheet("font-weight: 600; font-size: 12px;")  # color -> global QSS (QLabel -> text_primary)
+        self.title_label.setAttribute(qt.QtCore.Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
 
         self.subtitle_label = qt.QtWidgets.QLabel()
         self.subtitle_label.setObjectName("headerSubtitle")  # targeted by StylesheetBuilder for text_secondary
         self.subtitle_label.setStyleSheet("font-size: 12px;")
+        self.subtitle_label.setAttribute(qt.QtCore.Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self.subtitle_label.hide()
 
     def create_layouts(self):
@@ -188,6 +191,9 @@ if __name__ == '__main__':
 
         toggle_button = qt.QtWidgets.QPushButton("😅")
         header_full.add_trailing_widget(toggle_button)
+
+        toggle_button2 = qt.QtWidgets.QPushButton("😅")
+        header_full.add_leading_widget(toggle_button2)
 
         min_btn, max_btn, close_btn = header_full.add_window_controls(
             minimize_slot=lambda: print("minimize"),

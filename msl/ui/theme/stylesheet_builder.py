@@ -9,8 +9,10 @@ class StylesheetBuilder:
     reference rather than instantiated (same pattern as core.fs.Paths). Theme
     in, QSS string out; no I/O, no Qt object held, nothing to construct.
 
-    Meant to be applied once per theme change, e.g.:
-        QApplication.instance().setStyleSheet(StylesheetBuilder.build(theme))
+    Meant to be applied per top-level window on every theme change, e.g.:
+        window.setStyleSheet(StylesheetBuilder.build(theme))
+    Never on QApplication: inside Maya that is Maya's own application object,
+    and a global stylesheet would restyle Maya's whole UI.
 
     Scope is intentionally limited to the shared, static baseline for common
     controls (QDialog, QPushButton, QLineEdit, QLabel) actually used in the

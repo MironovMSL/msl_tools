@@ -1,5 +1,7 @@
 import msl_tools.msl.ui.qt_bindings as qt
 from enum import Enum, auto
+from msl_tools.msl.core.theme import Theme
+from msl_tools.msl.ui.theme import StylesheetBuilder
 from msl_tools.msl.ui.widgets.compositions.window_header import WindowHeader
 from msl_tools.msl.ui.widgets.windows.snap_layout_flyout import SnapLayoutFlyout
 from msl_tools.msl.ui.widgets.atoms.toggles.sun_moon_toggle import SunMoonToggle
@@ -25,7 +27,7 @@ class FramelessWindowMixin:
     """
 
     _EDGE_MARGIN           = 4
-    _OUTER_MARGIN          = 6
+    _OUTER_MARGIN          = 4
     _MIN_WIDTH             = 240
     _MIN_HEIGHT            = 160
     _DEFAULT_CORNER_RADIUS = 10
@@ -56,7 +58,7 @@ class FramelessWindowMixin:
                               drag_opacity:  float | None = _DRAG_OPACITY) -> None:
 
         """Call once, first thing in __init__, before any mouse event can fire."""
-        self.setWindowFlags(qt.QtCore.Qt.WindowType.FramelessWindowHint)
+        self.setWindowFlags(self.windowFlags() | qt.QtCore.Qt.WindowType.FramelessWindowHint)
         self.setAttribute(qt.QtCore.Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setMouseTracking(True)
 
@@ -97,6 +99,43 @@ class FramelessWindowMixin:
         self._snap_flyout_timer.setInterval(500)
         self._snap_flyout_timer.timeout.connect(self._show_snap_flyout)
         self._snap_flyout_colors: tuple | None = None
+
+    # ------------------------------------------------------------------
+    # Theming
+    # ------------------------------------------------------------------
+
+    def _apply_baseline_stylesheet(self, theme: Theme) -> None:
+        """Applies the shared QSS baseline to this window's widget tree only.
+
+        Deliberately NOT QApplication.setStyleSheet(): inside Maya the QApplication
+        is Maya itself, so an application-wide stylesheet restyles Maya's own UI
+        (shelves, tear-off menus, panels). A stylesheet set on a widget cascades to
+        its children (including child popups such as the snap flyout) but never
+        to its parent. Call it first in every `_apply_theme()`, before any early return.
+        """
+        self.setStyleSheet(StylesheetBuilder.build(theme))
+
+    # ------------------------------------------------------------------
+    # Focus
+    # ------------------------------------------------------------------
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._park_focus_on_window()
+
+    def _park_focus_on_window(self) -> None:
+        """Keeps Qt from auto-focusing the first input widget when the window is activated.
+
+        When a window becomes active and nothing inside it has focus, Qt hands focus to the
+        first child that accepts it - typically a QLineEdit, which then lights up with its
+        `:focus` border although the user never touched it. In Maya this is very visible,
+        because the window is deactivated/re-activated every time the user clicks Maya itself.
+        Parking focus on the window makes Qt treat it as "already focused", so clicking the
+        header no longer highlights a field. A field the user has focused stays focused.
+        """
+        focus_widget = self.focusWidget()
+        if focus_widget is None or focus_widget is self:
+            self.setFocus(qt.QtCore.Qt.FocusReason.OtherFocusReason)
 
     def set_blurred(self, enabled: bool, blur_radius: float = 5.0, dim_alpha: int = 5, fade_duration_ms: int = 200) -> None:
         if enabled:
@@ -282,6 +321,7 @@ class FramelessWindowMixin:
             self._close_button = self.header.add_close_only_controls(self.close)
 
         root_layout.addWidget(self.header)
+        self.header.installEventFilter(self)
 
         if self._maximize_button is not None:
             self._maximize_button.installEventFilter(self)
@@ -551,13 +591,13 @@ class FramelessWindowMixin:
             elif event_type == qt.QtCore.QEvent.Type.Leave:
                 self._snap_flyout_timer.stop()
             elif event_type == qt.QtCore.QEvent.Type.MouseButtonPress:
-                # A click must always resolve as an immediate, uninterrupted
-                # maximize/restore via the button's own press+release cycle.
-                # Never let the flyout's timer fire mid-press — Qt.WindowType.Popup
-                # implicitly grabs the pointer on show(), which would swallow
-                # the button's mouseReleaseEvent and leave it stuck showing a
-                # pressed/hover state forever (clicked never fires either).
                 self._snap_flyout_timer.stop()
+
+        elif watched is self.header:
+            if event.type() == qt.QtCore.QEvent.Type.MouseMove and not event.buttons():
+                local_pos = self.header.mapToParent(event.position().toPoint())
+                edge = self._edge_at(local_pos)
+                self.setCursor(self._CURSOR_BY_EDGE.get(edge, qt.QtCore.Qt.CursorShape.ArrowCursor))
         return super().eventFilter(watched, event)
 
     def mousePressEvent(self, event: qt.QtGui.QMouseEvent) -> None:
