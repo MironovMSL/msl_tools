@@ -19,11 +19,17 @@ class MenuAction:
             at click time, so building the menu never imports the tool itself.
         tooltip: Annotation shown in Maya's help line on hover.
         enabled: When False the item is rendered greyed out.
+        icon: Absolute path to a raster icon (png), or None for no icon. Maya's classic
+            menu image is drawn from a file path, not a QIcon - resolve it with a plain
+            pathlib lookup (see menu_definition.py's `_icon()`), never through the Qt
+            IconManager. Pulling that in here would mean importing PySide6 just to build
+            the main menu, which is exactly the slow-startup cost this module avoids.
     """
-    label: str
-    target: str
-    tooltip: str = ""
-    enabled: bool = True
+    label:   str
+    target:  str
+    tooltip: str        = ""
+    enabled: bool       = True
+    icon:    str | None = None
 
 
 @dataclass(frozen=True)
@@ -43,9 +49,15 @@ class SubMenu:
     Attributes:
         label: Text shown in the parent menu.
         items: Child entries. Use a tuple to keep the spec truly immutable.
+        icon: Absolute path to a raster icon (png), or None for no icon. See MenuAction.icon.
+        tear_off: Lets the user drag this submenu off into its own floating window, same as
+            the root menu already does. True by default - there's no real downside to it for
+            a submenu, and it's the more discoverable default for anyone new to the menu.
     """
-    label: str
-    items: tuple["MenuEntry", ...] = ()
+    label:    str
+    items:    tuple["MenuEntry", ...] = ()
+    icon:     str | None              = None
+    tear_off: bool                    = True
 
 
 MenuEntry = MenuAction | MenuDivider | SubMenu
@@ -62,5 +74,5 @@ class MenuSpec:
         items: Top-level entries. Use a tuple to keep the spec truly immutable.
     """
     menu_id: str
-    label: str
-    items: tuple[MenuEntry, ...] = ()
+    label:   str
+    items:   tuple[MenuEntry, ...] = ()

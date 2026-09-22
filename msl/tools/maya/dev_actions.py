@@ -20,3 +20,21 @@ def print_environment() -> None:
     print(f"  Maya state   : {MayaEnvironment.get_state().value}")
     print(f"  Python       : {sys.version.split()[0]}")
     print(f"  Package path : {Path(__file__).resolve().parents[2]}")  # .../msl
+
+
+def reload_package() -> None:
+    """Drops msl_tools from sys.modules and rebuilds the MSL menu, so edits made to .py files
+    on disk since Maya started take effect without restarting Maya.
+
+    Only affects code reached *after* this runs (menu clicks, newly opened windows). An already
+    open window (e.g. the Installer, if it's open right now) keeps running the code it was built
+    from - close and reopen it to pick up its own edits. See module_reloader.unload_package for
+    the mechanism and its caveats.
+    """
+    from msl_tools.msl.core.reflection.module_reloader import unload_package
+
+    removed = unload_package("msl_tools")
+    print(f"MSL: reloaded {len(removed)} module(s).")
+
+    from msl_tools.msl.startup import rebuild_menu  # re-imported fresh, see unload_package() above
+    rebuild_menu()

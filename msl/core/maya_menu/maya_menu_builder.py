@@ -81,15 +81,25 @@ class MayaMenuBuilder:
 
         for entry in entries:
             if isinstance(entry, SubMenu):
-                sub_menu = cmds.menuItem(label=entry.label, subMenu=True, parent=parent)
+                sub_menu = cmds.menuItem(label=entry.label, subMenu=True, tearOff=entry.tear_off,
+                                         parent=parent, **self._image_kwarg(entry.icon))
                 self._add_entries(sub_menu, entry.items)
             elif isinstance(entry, MenuDivider):
                 cmds.menuItem(divider=True, dividerLabel=entry.label, parent=parent)
             elif isinstance(entry, MenuAction):
                 cmds.menuItem(label=entry.label, annotation=entry.tooltip, enable=entry.enabled,
-                              command=self._make_command(entry), parent=parent)
+                              command=self._make_command(entry), parent=parent,
+                              **self._image_kwarg(entry.icon))
             else:
                 self._logger.warning(f'Unknown menu entry skipped: {entry!r}')
+
+    def _image_kwarg(self, icon: str | None) -> dict:
+        """Returns {"image": icon} if `icon` is set, else {}.
+
+        cmds.menuItem's `image` flag wants an actual string - passing image=None raises,
+        so a missing icon must be an *absent* kwarg, not a None-valued one.
+        """
+        return {"image": icon} if icon else {}
 
     def _make_command(self, action: MenuAction):
         """Returns the callable Maya invokes on click. It only carries the action, not the tool."""

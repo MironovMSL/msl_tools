@@ -6,12 +6,12 @@ logger = logging.getLogger(__name__)
 
 
 class Reflection:
-    """Низкоуровневые утилиты интроспекции и динамической загрузки Python-объектов.
-    Не знает ничего о Maya/Qt — годится для использования где угодно, включая ConfigManager/Resources."""
+    """Low-level introspection and dynamic-import utilities for Python objects.
+    Knows nothing about Maya/Qt - safe to use anywhere, including ConfigManager/Resources."""
 
     @classmethod
     def import_from_path(cls, path: str):
-        """Динамически импортирует модуль или объект по полному пути (e.g. "pkg.module.ClassName")."""
+        """Dynamically imports a module or object from its full path (e.g. "pkg.module.ClassName")."""
         try:
             module_path, object_name = path.rsplit(".", 1)
             module = importlib.import_module(module_path)
@@ -22,7 +22,7 @@ class Reflection:
 
     @classmethod
     def get_function_arguments(cls, func, kwargs_as_dict: bool = False):
-        """Возвращает (args, kwargs) для переданной функции."""
+        """Returns (args, kwargs) for the given function."""
         signature = inspect.signature(func)
         args, kwargs, kwargs_dict = [], [], {}
         for name, param in signature.parameters.items():
@@ -49,9 +49,9 @@ class Reflection:
     @classmethod
     def create_object(cls, class_name: str, *args, namespace: dict | None = None,
                        module_path: str | None = None, raise_errors: bool = True, **kwargs):
-        """Создаёт инстанс класса по имени.
-        namespace: явное пространство имён для поиска (например, вызвать с namespace=globals() из места вызова).
-        module_path: путь модуля для динамического импорта (альтернатива namespace)."""
+        """Creates a class instance by name.
+        namespace: explicit namespace to look the class up in (e.g. call with namespace=globals() from the call site).
+        module_path: module path for dynamic import (alternative to namespace)."""
         class_obj = None
 
         if module_path:
@@ -93,7 +93,7 @@ class Reflection:
     @classmethod
     def execute_code(cls, code: str, *, exec_globals: dict | None = None,
                       raise_errors: bool = False) -> bool:
-        """Выполняет строку Python-кода. Возвращает True при успехе."""
+        """Executes a string of Python code. Returns True on success."""
         _globals = exec_globals if isinstance(exec_globals, dict) else {}
         try:
             exec(code, _globals)

@@ -20,6 +20,13 @@ class WindowHeader(qt.QtWidgets.QWidget):
         self._chrome_background:      str | None = None
         self._border_color:           str | None = None
 
+        # Dims the whole header (icon, title, subtitle, nav buttons) when the window is not
+        # the active one - one effect on the header rather than per-label color juggling, so
+        # it dims custom-painted nav icons too, not just the QSS-styled text.
+        self._inactive_opacity_effect = qt.QtWidgets.QGraphicsOpacityEffect(self)
+        self._inactive_opacity_effect.setOpacity(1.0)
+        self.setGraphicsEffect(self._inactive_opacity_effect)
+
         self._apply_stylesheet()
 
         self.create_widgets(title)
@@ -128,6 +135,11 @@ class WindowHeader(qt.QtWidgets.QWidget):
 
     # --- Chrome styling ---
 
+    def set_active(self, is_active: bool, inactive_opacity: float = 0.55) -> None:
+        """Dims (True->1.0, False->`inactive_opacity`) to signal the parent window
+        lost focus (e.g. the user clicked back into Maya)."""
+        self._inactive_opacity_effect.setOpacity(1.0 if is_active else inactive_opacity)
+
     def set_corner_radius(self, radius: int) -> None:
         self.corner_radius = radius
         self._apply_stylesheet()
@@ -211,4 +223,3 @@ if __name__ == '__main__':
         dialog.add_case("WindowHeader — full controls", header_full)
 
         dialog.show()
-

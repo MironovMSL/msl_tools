@@ -30,6 +30,8 @@ class FileSystemManager:
     icons    = assets / 'icons'
     themes   = assets / 'themes'
 
+    PACKAGE_ROOT = f"{ROOT_DIR.name}.{msl.name}" # msl_tools.msl
+
     def __init__(self, logger: logging.Logger | None = None):
         self._logger = logger or logging.getLogger(__name__)
 

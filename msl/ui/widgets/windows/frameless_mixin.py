@@ -27,7 +27,7 @@ class FramelessWindowMixin:
     """
 
     _EDGE_MARGIN           = 4
-    _OUTER_MARGIN          = 4
+    _OUTER_MARGIN          = 6
     _MIN_WIDTH             = 240
     _MIN_HEIGHT            = 160
     _DEFAULT_CORNER_RADIUS = 10
@@ -35,6 +35,7 @@ class FramelessWindowMixin:
     _ANIMATION_DURATION_MS = 180
     _ANIMATION_EASING      = qt.QtCore.QEasingCurve.Type.OutCubic
     _DRAG_OPACITY          = 0.7
+    _INACTIVE_OPACITY      = 0.92
     _OPACITY_ANIMATION_DURATION_MS = 150
 
     _CURSOR_BY_EDGE = {
@@ -49,21 +50,99 @@ class FramelessWindowMixin:
     }
 
     # ------------------------------------------------------------------
+    # Theming
+    # ------------------------------------------------------------------
+
+    def _apply_baseline_stylesheet(self, theme: Theme) -> None:
+        """Applies the shared QSS baseline to this window's widget tree only.
+
+        Deliberately NOT QApplication.setStyleSheet(): inside Maya the QApplication
+        is Maya itself, so an application-wide stylesheet restyles Maya's own UI
+        (shelves, tear-off menus, panels). A stylesheet set on a widget cascades to
+        its children (including child popups such as the snap flyout) but never
+        to its parent. Call it first in every `_apply_theme()`, before any early return.
+        """
+        self.setStyleSheet(StylesheetBuilder.build(theme))
+
+    # ------------------------------------------------------------------
+    # Focus
+    # ------------------------------------------------------------------
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._park_focus_on_window()
+        self._sync_active_state(animate=False)
+
+    def changeEvent(self, event) -> None:
+        super().changeEvent(event)
+        if event.type() == qt.QtCore.QEvent.Type.ActivationChange:
+            self._sync_active_state(animate=True)
+
+    def _sync_active_state(self, animate: bool) -> None:
+        """Reconciles opacity/header dimming with `isActiveWindow()`.
+
+        Called on every activation flip and once from showEvent to correctly initialize state
+        for a window that appears already inactive (rare, but possible - e.g. restored from a
+        session where another window was frontmost).
+        """
+        is_active = self.isActiveWindow()
+        if is_active == self._is_window_active:
+            return
+        self._is_window_active = is_active
+
+        if self.header is not None:
+            self.header.set_active(is_active)
+
+        if self._is_header_dragging:
+            return  # drag opacity owns windowOpacity right now; _restore_opacity() will settle it
+
+        target = self._base_opacity_for_active_state()
+        if animate:
+            self._animate_window_opacity(target)
+        else:
+            self.setWindowOpacity(target)
+
+    def _park_focus_on_window(self) -> None:
+        """Keeps Qt from auto-focusing the first input widget when the window is activated.
+
+        When a window becomes active and nothing inside it has focus, Qt hands focus to the
+        first child that accepts it - typically a QLineEdit, which then lights up with its
+        `:focus` border although the user never touched it. In Maya this is very visible,
+        because the window is deactivated/re-activated every time the user clicks Maya itself.
+        Parking focus on the window makes Qt treat it as "already focused", so clicking the
+        header no longer highlights a field. A field the user has focused stays focused.
+        """
+        focus_widget = self.focusWidget()
+        if focus_widget is None or focus_widget is self:
+            self.setFocus(qt.QtCore.Qt.FocusReason.OtherFocusReason)
+
+    # ------------------------------------------------------------------
     # Setup
     # ------------------------------------------------------------------
 
     def _init_frameless_state(self,
-                              corner_radius: int = _DEFAULT_CORNER_RADIUS,
-                              outer_margin:  int = _OUTER_MARGIN,
-                              drag_opacity:  float | None = _DRAG_OPACITY) -> None:
+                              corner_radius:   int = _DEFAULT_CORNER_RADIUS,
+                              outer_margin:    int = _OUTER_MARGIN,
+                              drag_opacity:    float | None = _DRAG_OPACITY,
+                              inactive_opacity: float | None = _INACTIVE_OPACITY) -> None:
 
         """Call once, first thing in __init__, before any mouse event can fire."""
+        # OR the hint into the existing flags - never replace them. The window *type* bits
+        # (Qt.Dialog for QDialog, Qt.Window for QMainWindow) live in the same flags value;
+        # replacing it turns a window that has a parent (e.g. Maya's main window) into an
+        # embedded child widget: clipped to the parent, not movable out of it, and see-through
+        # over Maya's viewport. Without a parent it still looks fine, which hides the bug.
         self.setWindowFlags(self.windowFlags() | qt.QtCore.Qt.WindowType.FramelessWindowHint)
         self.setAttribute(qt.QtCore.Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setMouseTracking(True)
 
         self._drag_opacity       = drag_opacity
+        self._inactive_opacity   = inactive_opacity
         self._is_header_dragging = False
+        # Qt has not fired an ActivationChange event yet at construction time, and the window
+        # isn't shown yet either, so there's nothing to dim against - assume active until the
+        # first real state sync (see showEvent -> _sync_active_state) says otherwise.
+        self._is_window_active   = True
         self._blur_overlay:                 qt.QtWidgets.QLabel | None = None
         self._blur_fade_animation: qt.QtCore.QPropertyAnimation | None = None
         self._opacity_animation:   qt.QtCore.QPropertyAnimation | None = None
@@ -99,43 +178,6 @@ class FramelessWindowMixin:
         self._snap_flyout_timer.setInterval(500)
         self._snap_flyout_timer.timeout.connect(self._show_snap_flyout)
         self._snap_flyout_colors: tuple | None = None
-
-    # ------------------------------------------------------------------
-    # Theming
-    # ------------------------------------------------------------------
-
-    def _apply_baseline_stylesheet(self, theme: Theme) -> None:
-        """Applies the shared QSS baseline to this window's widget tree only.
-
-        Deliberately NOT QApplication.setStyleSheet(): inside Maya the QApplication
-        is Maya itself, so an application-wide stylesheet restyles Maya's own UI
-        (shelves, tear-off menus, panels). A stylesheet set on a widget cascades to
-        its children (including child popups such as the snap flyout) but never
-        to its parent. Call it first in every `_apply_theme()`, before any early return.
-        """
-        self.setStyleSheet(StylesheetBuilder.build(theme))
-
-    # ------------------------------------------------------------------
-    # Focus
-    # ------------------------------------------------------------------
-
-    def showEvent(self, event) -> None:
-        super().showEvent(event)
-        self._park_focus_on_window()
-
-    def _park_focus_on_window(self) -> None:
-        """Keeps Qt from auto-focusing the first input widget when the window is activated.
-
-        When a window becomes active and nothing inside it has focus, Qt hands focus to the
-        first child that accepts it - typically a QLineEdit, which then lights up with its
-        `:focus` border although the user never touched it. In Maya this is very visible,
-        because the window is deactivated/re-activated every time the user clicks Maya itself.
-        Parking focus on the window makes Qt treat it as "already focused", so clicking the
-        header no longer highlights a field. A field the user has focused stays focused.
-        """
-        focus_widget = self.focusWidget()
-        if focus_widget is None or focus_widget is self:
-            self.setFocus(qt.QtCore.Qt.FocusReason.OtherFocusReason)
 
     def set_blurred(self, enabled: bool, blur_radius: float = 5.0, dim_alpha: int = 5, fade_duration_ms: int = 200) -> None:
         if enabled:
@@ -235,8 +277,18 @@ class FramelessWindowMixin:
             self._animate_window_opacity(self._drag_opacity)
 
     def _restore_opacity(self) -> None:
+        # Not necessarily 1.0: if the window is still inactive when the drag ends (e.g. it was
+        # dragged by grabbing the header of an already-inactive window), it should settle back
+        # to the dimmed level, not snap to fully opaque and then re-dim on the next event.
         if self._drag_opacity is not None:
-            self._animate_window_opacity(1.0)
+            self._animate_window_opacity(self._base_opacity_for_active_state())
+
+    def _base_opacity_for_active_state(self) -> float:
+        """Opacity target while idle (not being dragged): full when this window is the
+        active one, dimmed when some other window (e.g. Maya itself) has focus."""
+        if self._is_window_active or self._inactive_opacity is None:
+            return 1.0
+        return self._inactive_opacity
 
     def _animate_window_opacity(self, target: float) -> None:
         if self._opacity_animation is not None and qt.shiboken.isValid(self._opacity_animation):
@@ -321,7 +373,6 @@ class FramelessWindowMixin:
             self._close_button = self.header.add_close_only_controls(self.close)
 
         root_layout.addWidget(self.header)
-        self.header.installEventFilter(self)
 
         if self._maximize_button is not None:
             self._maximize_button.installEventFilter(self)
@@ -591,13 +642,13 @@ class FramelessWindowMixin:
             elif event_type == qt.QtCore.QEvent.Type.Leave:
                 self._snap_flyout_timer.stop()
             elif event_type == qt.QtCore.QEvent.Type.MouseButtonPress:
+                # A click must always resolve as an immediate, uninterrupted
+                # maximize/restore via the button's own press+release cycle.
+                # Never let the flyout's timer fire mid-press — Qt.WindowType.Popup
+                # implicitly grabs the pointer on show(), which would swallow
+                # the button's mouseReleaseEvent and leave it stuck showing a
+                # pressed/hover state forever (clicked never fires either).
                 self._snap_flyout_timer.stop()
-
-        elif watched is self.header:
-            if event.type() == qt.QtCore.QEvent.Type.MouseMove and not event.buttons():
-                local_pos = self.header.mapToParent(event.position().toPoint())
-                edge = self._edge_at(local_pos)
-                self.setCursor(self._CURSOR_BY_EDGE.get(edge, qt.QtCore.Qt.CursorShape.ArrowCursor))
         return super().eventFilter(watched, event)
 
     def mousePressEvent(self, event: qt.QtGui.QMouseEvent) -> None:
