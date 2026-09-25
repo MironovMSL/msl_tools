@@ -131,12 +131,6 @@ if __name__ == '__main__':
     with QtApplicationContext() as context:
         window = FramelessMainWindow(title="FramelessMainWindow", subtitle="theme demo")
 
-        theme_checkbox = qt.QtWidgets.QCheckBox("dark theme")
-        resources = window._resources
-        theme_checkbox.setChecked(resources.themeManager.current_theme.name == "dark")
-        theme_checkbox.toggled.connect(lambda checked: resources.themeManager.set_theme("dark" if checked else "light"))
-        window.add_header_widget(theme_checkbox, side="right")
-
         menu_bar = qt.QtWidgets.QMenuBar()
         menu_bar.addMenu("File")
         menu_bar.addMenu("Edit")

@@ -15,7 +15,7 @@ class StylesheetBuilder:
     and a global stylesheet would restyle Maya's whole UI.
 
     Scope is intentionally limited to the shared, static baseline for common
-    controls (QDialog, QPushButton, QLineEdit, QLabel) actually used in the
+    controls (QDialog, QPushButton, QLineEdit, QComboBox, QLabel) actually used in the
     codebase today. QDialog is styled specifically — not a blanket QWidget
     rule — so nested QWidget containers inside composed widgets (e.g. the
     inner containers in InstallPathWidget/VersionStatusWidget) stay
@@ -37,8 +37,9 @@ class StylesheetBuilder:
             StylesheetBuilder._dialog_style(theme),
             StylesheetBuilder._button_style(theme),
             StylesheetBuilder._line_edit_style(theme),
+            StylesheetBuilder._combo_box_style(theme),
             StylesheetBuilder._label_style(theme),
-            # StylesheetBuilder._checkbox_style(theme),
+            StylesheetBuilder._checkbox_style(theme),
             StylesheetBuilder._progress_bar_style(theme),
             StylesheetBuilder._window_header_style(theme),
         ])
@@ -90,6 +91,44 @@ class StylesheetBuilder:
             "}\n"
             "QLineEdit:read-only {\n"
             f"  color: {theme.text_secondary};\n"
+            "}\n"
+        )
+
+    @staticmethod
+    def _combo_box_style(theme: Theme) -> str:
+        return (
+            "QComboBox {\n"
+            f"  background-color: {theme.surface};\n"
+            f"  color: {theme.text_primary};\n"
+            f"  border: 1px solid {theme.border};\n"
+            "  border-radius: 3px;\n"
+            "  padding: 2px 4px;\n"
+            "}\n"
+            "QComboBox:hover, QComboBox:focus {\n"
+            f"  border: 1px solid {theme.accent};\n"
+            "}\n"
+            "QComboBox:disabled {\n"
+            f"  color: {theme.text_secondary};\n"
+            f"  border: 1px solid {theme.text_secondary};\n"
+            "}\n"
+            "QComboBox::drop-down {\n"
+            "  border: none;\n"
+            "  width: 16px;\n"
+            "}\n"
+            "QComboBox::down-arrow {\n"
+            "  width: 0;\n"
+            "  height: 0;\n"
+            "  border-left: 4px solid transparent;\n"
+            "  border-right: 4px solid transparent;\n"
+            f"  border-top: 5px solid {theme.text_primary};\n"
+            "}\n"
+            "QComboBox QAbstractItemView {\n"
+            f"  background-color: {theme.surface};\n"
+            f"  color: {theme.text_primary};\n"
+            f"  border: 1px solid {theme.border};\n"
+            f"  selection-background-color: {theme.accent};\n"
+            f"  selection-color: {theme.surface};\n"
+            "  outline: 0;\n"
             "}\n"
         )
 

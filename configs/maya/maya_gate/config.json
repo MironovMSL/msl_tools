@@ -1,0 +1,30 @@
+{
+    "<default>": {},
+    "Stable": {
+        "MAYA_MODULE_PATH": "йцауйцуа"
+    },
+    "Dev": {
+        "MAYA_SHELF_PATH": "",
+        "MAYA_ICON_PATH": "",
+        "MAYA_APP_DIR": "",
+        "MAYA_MODULE_PATH": "",
+        "MAYA_SHADER_PATH": ""
+    },
+    "Additional": {
+        "йцафывафывяяячсйфыва": "",
+        "йцафывафывяяячс": "",
+        "й": "",
+        "йц": "",
+        "йццаууаайцуайцуа": "",
+        "йццау": "",
+        "йццаууа": "",
+        "йццаууаа": "",
+        "йццаууаайцуа": ""
+    },
+    "_ui": {
+        "collapsed": {
+            "environment": false,
+            "additional": false
+        }
+    }
+}

@@ -21,13 +21,20 @@ class FramelessDialog(FramelessWindowMixin, qt.QtWidgets.QDialog):
                  show_maximize_button: bool = True,
                  show_close_button:    bool = True,
                  show_theme_toggle:    bool = True,
+                 fade_when_inactive:   bool = True,
                  resources: UiResources | None = None,
                  parent                     = None):
+        """`fade_when_inactive=False` keeps the whole window fully opaque when it loses
+        focus (only the header still dims) - meant for standalone desktop apps like the hub,
+        where see-through-when-unfocused is distracting rather than useful."""
         super().__init__(parent)
 
         self._ui_resources = resources or UiResources()
 
-        self._init_frameless_state(corner_radius=self.CORNER_RADIUS)
+        init_kwargs = {"corner_radius": self.CORNER_RADIUS}
+        if not fade_when_inactive:
+            init_kwargs["inactive_opacity"] = None
+        self._init_frameless_state(**init_kwargs)
         self._resize_to_visible_size(width, height)
         self._build_base_ui(title, icon, subtitle,show_minimize_button, show_maximize_button, show_close_button, show_theme_toggle)
 
@@ -70,7 +77,7 @@ class FramelessDialog(FramelessWindowMixin, qt.QtWidgets.QDialog):
         line = qt.QtWidgets.QFrame()
         line.setFrameShape(qt.QtWidgets.QFrame.Shape.HLine)
         line.setStyleSheet("color: gray;")
-        self.content_layout.addWidget(line)
+        self.add_widget(line)
 
     def _on_theme_toggle_toggled(self, is_dark: bool) -> None:
         self._ui_resources.themeManager.set_theme("dark" if is_dark else "light")
