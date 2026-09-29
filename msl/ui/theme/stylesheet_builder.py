@@ -1,201 +1,112 @@
 # ui/theme/stylesheet_builder.py
+import logging
+import re
+from pathlib import Path
+
 from msl_tools.msl.core.theme import Theme
+
+_LOGGER  = logging.getLogger(__name__)
+
+_COMMENT = re.compile(r"/\*.*?\*/", re.DOTALL)
+_VAR     = re.compile(r"var\(\s*--([A-Za-z0-9_-]+)\s*\)")
+_ALPHA   = re.compile(r"alpha\(\s*(#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{3})\s*,\s*(\d+(?:\.\d+)?)\s*%\s*\)")
 
 
 class StylesheetBuilder:
-    """Builds a global Qt stylesheet (QSS) string from a Theme.
+    """Builds the global Qt stylesheet (QSS) for a Theme from the templates
+    ui/theme/base.qss (plain Qt controls) + ui/theme/widgets.qss (custom
+    widgets' qproperty colors and state selectors) + any tool templates
+    added with register_template().
 
-    Stateless by design — a plain namespace of staticmethods, held as a class
-    reference rather than instantiated (same pattern as core.fs.Paths). Theme
-    in, QSS string out; no I/O, no Qt object held, nothing to construct.
+    The templates hold all rules; colors in them are only `var(--token)`
+    references, resolved against `theme.tokens` (the theme's palette file,
+    assets/themes/<name>.css). QSS itself has no variables — this is the
+    small preprocessor that adds them:
+      - /* comments */ are stripped;
+      - var(--token) -> the palette value (unknown token: logged, and
+        replaced by `transparent` — an unresolved var() would make Qt
+        reject the whole stylesheet);
+      - alpha(<#hex>, <n>%) -> rgba(r, g, b, a), for translucent variants.
+
+    Stateless by design — a plain namespace (same pattern as core.fs.Paths).
+    The template is read once and cached; invalidate_template() drops the
+    cache (ThemeHotReloader does that when a template is saved).
 
     Meant to be applied per top-level window on every theme change, e.g.:
         window.setStyleSheet(StylesheetBuilder.build(theme))
     Never on QApplication: inside Maya that is Maya's own application object,
     and a global stylesheet would restyle Maya's whole UI.
-
-    Scope is intentionally limited to the shared, static baseline for common
-    controls (QDialog, QPushButton, QLineEdit, QComboBox, QLabel) actually used in the
-    codebase today. QDialog is styled specifically — not a blanket QWidget
-    rule — so nested QWidget containers inside composed widgets (e.g. the
-    inner containers in InstallPathWidget/VersionStatusWidget) stay
-    transparent and inherit their parent's background, instead of every
-    single container suddenly becoming an opaque, theme-colored panel.
-
-    Widgets with their own semantic/state-driven coloring —
-    BaseProgressBar's NORMAL/SUCCESS/ERROR states, VersionStatusWidget's
-    per-status colors — are out of scope here on purpose: those read Theme
-    tokens directly to build their own small stylesheet snippets, since a
-    single global QSS block can't express "color depends on this widget's
-    current state". This class only establishes what every plain button,
-    field, and label falls back to before any widget-specific override.
     """
 
-    @staticmethod
-    def build(theme: Theme) -> str:
-        return "\n".join([
-            StylesheetBuilder._dialog_style(theme),
-            StylesheetBuilder._button_style(theme),
-            StylesheetBuilder._line_edit_style(theme),
-            StylesheetBuilder._combo_box_style(theme),
-            StylesheetBuilder._label_style(theme),
-            StylesheetBuilder._checkbox_style(theme),
-            StylesheetBuilder._progress_bar_style(theme),
-            StylesheetBuilder._window_header_style(theme),
-        ])
+    # Concatenated in this order: plain Qt controls first, then the custom
+    # widgets' rules (qproperty-* colors, state selectors) — see ui/theme/qss.py.
+    TEMPLATE_PATHS = (
+        Path(__file__).resolve().with_name("base.qss"),
+        Path(__file__).resolve().with_name("widgets.qss"),
+    )
+    _extra_templates: list[Path] = []
+    _template: str | None = None
+
+    @classmethod
+    def register_template(cls, path: str | Path) -> None:
+        """Adds a tool's own QSS template (e.g. tools/desktop/maya_gate/
+        maya_gate.qss) after the built-in ones — so tool-specific rules
+        live with the tool, not in ui/. Register at import time, before the
+        first window builds its stylesheet. Idempotent."""
+        path = Path(path).resolve()
+        if path not in cls._extra_templates:
+            cls._extra_templates.append(path)
+            cls.invalidate_template()
+
+    @classmethod
+    def template_paths(cls) -> list[Path]:
+        """Every template build() concatenates, in order."""
+        return [*cls.TEMPLATE_PATHS, *cls._extra_templates]
+
+    @classmethod
+    def build(cls, theme: Theme) -> str:
+        return cls.render(cls._load_template(), theme)
 
     @staticmethod
-    def _dialog_style(theme: Theme) -> str:
-        return (
-            "QDialog {\n"
-            f"  background-color: {theme.surface};\n"
-            f"  color: {theme.text_primary};\n"
-            "}\n"
-        )
+    def render(template: str, theme: Theme) -> str:
+        """Resolves a QSS template against `theme`."""
+        unknown: set[str] = set()
+
+        def resolve_var(match: re.Match) -> str:
+            value = theme.tokens.get(match.group(1))
+            if value is None:
+                unknown.add(match.group(1))
+                return "transparent"
+            return value
+
+        qss = _VAR.sub(resolve_var, _COMMENT.sub("", template))
+        qss = _ALPHA.sub(StylesheetBuilder._resolve_alpha, qss)
+        if unknown:
+            _LOGGER.warning(f'Theme "{theme.name}" has no token(s) {sorted(unknown)} used in the stylesheet.')
+        return qss
+
+    @classmethod
+    def invalidate_template(cls) -> None:
+        """Drops the cached templates; the next build() re-reads them."""
+        cls._template = None
+
+    @classmethod
+    def _load_template(cls) -> str:
+        if cls._template is None:
+            cls._template = "\n".join(path.read_text(encoding="utf-8") for path in cls.template_paths())
+        return cls._template
 
     @staticmethod
-    def _button_style(theme: Theme) -> str:
-        return (
-            "QPushButton {\n"
-            f"  background-color: {theme.surface};\n"
-            f"  color: {theme.text_primary};\n"
-            f"  border: 1px solid {theme.border};\n"
-            "  border-radius: 3px;\n"
-            "  padding: 4px 10px;\n"
-            "}\n"
-            "QPushButton:hover {\n"
-            f"  border: 1px solid {theme.accent};\n"
-            "}\n"
-            "QPushButton:pressed {\n"
-            f"  background-color: {theme.accent};\n"
-            f"  color: {theme.surface};\n"
-            "}\n"
-            "QPushButton:disabled {\n"
-            f"  color: {theme.text_secondary};\n"
-            f"  border: 1px solid {theme.text_secondary};\n"
-            "}\n"
-        )
-
-    @staticmethod
-    def _line_edit_style(theme: Theme) -> str:
-        return (
-            "QLineEdit {\n"
-            f"  background-color: {theme.surface};\n"
-            f"  color: {theme.text_primary};\n"
-            f"  border: 1px solid {theme.border};\n"
-            "  border-radius: 3px;\n"
-            "  padding: 2px 4px;\n"
-            "}\n"
-            "QLineEdit:focus {\n"
-            f"  border: 1px solid {theme.accent};\n"
-            "}\n"
-            "QLineEdit:read-only {\n"
-            f"  color: {theme.text_secondary};\n"
-            "}\n"
-        )
-
-    @staticmethod
-    def _combo_box_style(theme: Theme) -> str:
-        return (
-            "QComboBox {\n"
-            f"  background-color: {theme.surface};\n"
-            f"  color: {theme.text_primary};\n"
-            f"  border: 1px solid {theme.border};\n"
-            "  border-radius: 3px;\n"
-            "  padding: 2px 4px;\n"
-            "}\n"
-            "QComboBox:hover, QComboBox:focus {\n"
-            f"  border: 1px solid {theme.accent};\n"
-            "}\n"
-            "QComboBox:disabled {\n"
-            f"  color: {theme.text_secondary};\n"
-            f"  border: 1px solid {theme.text_secondary};\n"
-            "}\n"
-            "QComboBox::drop-down {\n"
-            "  border: none;\n"
-            "  width: 16px;\n"
-            "}\n"
-            "QComboBox::down-arrow {\n"
-            "  width: 0;\n"
-            "  height: 0;\n"
-            "  border-left: 4px solid transparent;\n"
-            "  border-right: 4px solid transparent;\n"
-            f"  border-top: 5px solid {theme.text_primary};\n"
-            "}\n"
-            "QComboBox QAbstractItemView {\n"
-            f"  background-color: {theme.surface};\n"
-            f"  color: {theme.text_primary};\n"
-            f"  border: 1px solid {theme.border};\n"
-            f"  selection-background-color: {theme.accent};\n"
-            f"  selection-color: {theme.surface};\n"
-            "  outline: 0;\n"
-            "}\n"
-        )
-
-    @staticmethod
-    def _label_style(theme: Theme) -> str:
-        return (
-            "QLabel {\n"
-            f"  color: {theme.text_primary};\n"
-            "}\n"
-        )
-
-    @staticmethod
-    def _progress_bar_style(theme: Theme) -> str:
-        return (
-            "QProgressBar {\n"
-            f"  border: 1px solid {theme.border};\n"
-            "   border-radius: 4px;\n"
-            f"  background-color: {theme.surface};\n"
-            "   text-align: center;\n"
-            f"  color: {theme.surface};\n"
-            "}\n"
-            "QProgressBar::chunk {\n"
-            "  border-radius: 3px;\n"
-            "}\n"
-        )
-
-    @staticmethod
-    def _window_header_style(theme: Theme) -> str:
-        return (
-            "WindowHeader {\n"
-            # f"  background-color: {theme.chrome_background};\n"
-            "}\n"
-            "QLabel#headerSubtitle {\n"
-            f"  color: {theme.text_secondary};\n"
-            "}\n"
-        )
-
-    @staticmethod
-    def _checkbox_style(theme: Theme) -> str:
-        return (
-            "QCheckBox {\n"
-            f"  color: {theme.text_primary};\n"
-            "  spacing: 6px;\n"
-            "}\n"
-            "QCheckBox:disabled {\n"
-            f"  color: {theme.text_secondary};\n"
-            "}\n"
-            "QCheckBox::indicator {\n"
-            "  width: 13px;\n"
-            "  height: 13px;\n"
-            "  border-radius: 2px;\n"
-            f"  border: 1px solid {theme.border};\n"
-            f"  background-color: {theme.surface};\n"
-            "}\n"
-            "QCheckBox::indicator:hover {\n"
-            f"  border: 1px solid {theme.accent};\n"
-            "}\n"
-            "QCheckBox::indicator:checked {\n"
-            f"  background-color: {theme.accent};\n"
-            f"  border: 1px solid {theme.accent};\n"
-            "}\n"
-        )
+    def _resolve_alpha(match: re.Match) -> str:
+        hex_digits = match.group(1)[1:]
+        if len(hex_digits) == 3:
+            hex_digits = "".join(digit * 2 for digit in hex_digits)
+        red, green, blue = (int(hex_digits[i:i + 2], 16) for i in (0, 2, 4))
+        alpha = round(255 * min(float(match.group(2)), 100.0) / 100.0)
+        return f"rgba({red}, {green}, {blue}, {alpha})"
 
 
 if __name__ == "__main__":
-    from pathlib import Path
     from msl_tools.msl.core.theme import ThemeRegistry
 
-    registry = ThemeRegistry(Path(__file__).resolve().parents[3] / "assets" / "themes")
-    print(StylesheetBuilder.build(registry.get("dark")))
+    print(StylesheetBuilder.build(ThemeRegistry(ThemeRegistry.BUNDLED_THEMES_DIR).get("dark")))

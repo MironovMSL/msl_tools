@@ -3,7 +3,6 @@ import math
 from pathlib import Path
 
 import msl_tools.msl.ui.qt_bindings as qt
-from msl_tools.msl.core.theme import Theme, ThemeRegistry
 
 
 class ApplicationButton(qt.QtWidgets.QWidget):
@@ -17,9 +16,8 @@ class ApplicationButton(qt.QtWidgets.QWidget):
     Maya versions show their own distinct icon without us maintaining one.
 
     Ported from MSL_MayaGate's ApplicationButtonWdg: shake-on-hover and
-    pulse-on-click kept as-is, adapted to the qt_bindings shim and given
-    explicit theme support for the label color (previously inherited
-    whatever the app-wide palette happened to be).
+    pulse-on-click kept as-is, adapted to the qt_bindings shim. The label
+    color comes from the window stylesheet's QLabel rule (ui/theme/base.qss).
 
     Exposes graphicsEffect() as a QGraphicsOpacityEffect on purpose — a
     parent composition (e.g. a row of these buttons) animates this
@@ -40,22 +38,17 @@ class ApplicationButton(qt.QtWidgets.QWidget):
 
     clicked = qt.QtCore.Signal(str)
 
-    def __init__(self, name: str, application_path: str | Path,
-                 theme: Theme | None = None, parent=None):
+    def __init__(self, name: str, application_path: str | Path, parent=None):
         """
         Args:
             name: Display name shown under the icon (e.g. "Maya 2025").
             application_path: Path to the executable this button launches.
                 Also what `clicked` emits and what the OS icon is read from.
-            theme: Theme to color the label with. Defaults to
-                ThemeRegistry.fallback() (no file I/O) so this widget can
-                be used standalone without wiring up UiResources.
             parent: Optional parent widget.
         """
         super().__init__(parent)
         self.name = name
         self.application_path = str(application_path)
-        self._theme = theme or ThemeRegistry.fallback()
 
         self._shake_phase = 0.0
         self._original_pos: qt.QtCore.QPoint | None = None
@@ -63,7 +56,6 @@ class ApplicationButton(qt.QtWidgets.QWidget):
         self._build_widgets()
         self._build_layout()
         self._build_animations()
-        self._apply_theme_colors()
 
     def __repr__(self) -> str:
         return f"<{self.__class__.__name__} {self.name}>"
@@ -120,12 +112,6 @@ class ApplicationButton(qt.QtWidgets.QWidget):
 
     # --- theming -----------------------------------------------------------
 
-    def set_theme(self, theme: Theme) -> None:
-        self._theme = theme
-        self._apply_theme_colors()
-
-    def _apply_theme_colors(self) -> None:
-        self._label.setStyleSheet(f"color: {self._theme.text_primary};")
 
     # --- hover shake ---------------------------------------------------
 

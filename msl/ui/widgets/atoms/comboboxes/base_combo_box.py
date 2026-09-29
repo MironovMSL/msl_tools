@@ -8,8 +8,8 @@ class BaseComboBox(qt.QtWidgets.QComboBox):
 
     No theming of its own — QComboBox is a plain control styled by the
     window's global stylesheet (StylesheetBuilder), the same way
-    QPushButton/QLineEdit are. Only widgets with state-driven custom
-    painting (BaseCheckbox, BaseToggle) carry their own set_theme().
+    QPushButton/QLineEdit are. Custom-painted widgets get their colors
+    from the same stylesheet, via qproperty-* (ui/theme/widgets.qss).
 
     Wheel-disable exists because a combo box sitting in a scrollable
     page silently changes its value when the user scrolls past it —

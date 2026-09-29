@@ -158,17 +158,18 @@ class Paths:
 
 
 if __name__ == '__main__':
-    print(Paths.get_system())
-    print("Корень проекта:", Paths.ROOT_DIR)
-    print("Папка логов:", Paths.logs)
+    # Demo of Paths' own helpers. OS detection lives in SystemInfo; the project's
+    # folders (root, logs, core, ...) live on FileSystemManager, not here.
+    from msl_tools.msl.core.fs.system_info import SystemInfo
 
-    manager_path = Paths.core / "config" / "manager.py"
-    print("Путь к менеджеру:", manager_path)
+    print("System:", SystemInfo.get_system())
+    print("Home:", Paths.get_home_dir())
+    print("Temp:", Paths.get_temp_dir())
 
-    temp_file_log = Paths.logs / "temp_debug" / "log.log"
-    Paths.make_file(temp_file_log)
-    print("Создан файл:", temp_file_log.exists())
+    temp_dir = Paths.get_temp_dir() / "msl_paths_demo"
+    temp_file = temp_dir / "log.log"
+    Paths.make_file(temp_file)
+    print("File created:", temp_file.exists())
 
-    temp_dir = Paths.logs / "temp_debug"
     Paths.delete(temp_dir)
-    print("Папка удалена:", not temp_dir.exists())
+    print("Folder deleted:", not temp_dir.exists())

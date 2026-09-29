@@ -1,6 +1,18 @@
 # tools/desktop/maya_gate/variable_group.py
+from pathlib import Path
+from typing import Callable, Sequence
+
 import msl_tools.msl.ui.qt_bindings as qt
-from msl_tools.msl.ui.widgets.compositions import DraggableList, EnvVarRow
+from msl_tools.msl.core.theme import ThemeRegistry
+from msl_tools.msl.ui.theme import StylesheetBuilder
+from msl_tools.msl.ui.theme.qss import color_property, make_rounded_popup
+from msl_tools.msl.ui.ui_resources import UiResources
+from msl_tools.msl.ui.widgets.compositions import BrowseMode, BulkActionBar, DraggableList, EnvVarRow
+from msl_tools.msl.ui.widgets.windows.confirm_dialog import ConfirmDialog
+
+# Maya Gate's own style rules (qproperty colors of its tool-specific widgets)
+# live next to the tool, not in ui/theme/widgets.qss.
+StylesheetBuilder.register_template(Path(__file__).with_name("maya_gate.qss"))
 
 _QWIDGETSIZE_MAX = 16777215
 
@@ -97,13 +109,17 @@ class _ClipBody(qt.QtWidgets.QWidget):
 
 
 class _GroupHeader(qt.QtWidgets.QWidget):
-    """Private: clickable header row — fold arrow, title, row count."""
+    """Private: clickable header row — fold arrow, title, row count, and the
+    bulk-action bar that fades in next to them while rows are selected.
+    Clicks on the bar's own buttons are consumed by them, so they never
+    toggle the fold."""
 
     HEIGHT = 24
+    BULK_BAR_GAP = 16
 
     clicked = qt.QtCore.Signal()
 
-    def __init__(self, parent=None):
+    def __init__(self, left_inset: int = 4, parent=None):
         super().__init__(parent)
         self.setFixedHeight(self.HEIGHT)
         self.setCursor(qt.QtCore.Qt.CursorShape.PointingHandCursor)
@@ -112,13 +128,17 @@ class _GroupHeader(qt.QtWidgets.QWidget):
         self._title_label = qt.QtWidgets.QLabel()
         self._count_label = qt.QtWidgets.QLabel()
         self._count_label.setEnabled(False)  # dimmed: secondary info
+        self.bulk_bar = BulkActionBar()
+        self.bulk_bar.setCursor(qt.QtCore.Qt.CursorShape.ArrowCursor)
 
         layout = qt.QtWidgets.QHBoxLayout(self)
-        layout.setContentsMargins(4, 0, 4, 0)
+        layout.setContentsMargins(left_inset, 0, 4, 0)
         layout.setSpacing(4)
         layout.addWidget(self._arrow)
         layout.addWidget(self._title_label)
         layout.addWidget(self._count_label)
+        layout.addSpacing(self.BULK_BAR_GAP)
+        layout.addWidget(self.bulk_bar)
         layout.addStretch()
 
     def set_title(self, title: str) -> None:
@@ -136,11 +156,10 @@ class _GroupHeader(qt.QtWidgets.QWidget):
         super().mouseReleaseEvent(event)
 
 
-class CollapsibleVariableGroup(qt.QtWidgets.QGroupBox):
-    """One collapsible section of Maya Gate's advanced environment editor
-    — a clickable header (fold arrow, title, row count) over a
-    drag-reorderable list of EnvVarRow for one config section (e.g. "Dev",
-    "Additional").
+class CollapsibleVariableGroup(qt.QtWidgets.QWidget):
+    """One collapsible section of Maya Gate's "Variables" tab — a clickable
+    header (fold arrow, "title · section", row count) over a drag-reorderable
+    list of EnvVarRow for one config section (e.g. the "Dev" environment).
 
     Owns variable persistence: listens to DraggableList's generic signals
     and writes through the JsonConfig section it's given. Ported from
@@ -148,10 +167,8 @@ class CollapsibleVariableGroup(qt.QtWidgets.QGroupBox):
     mechanics moved out to DraggableList/EnvVarRow (ui/widgets/
     compositions/), which know nothing about config.
 
-    Visibility used to be driven by an attribute (`self.environment_vis`)
-    read once at construction, then poked directly from OUTSIDE whenever
-    the "advanced" toggle changed — a stale-on-toggle bug. Replaced with
-    set_advanced_visible(), an explicit method the owner calls.
+    Visible only while its section has variables (an empty group would be
+    just a header with nothing to fold).
 
     Sizing: no scroll area of its own and no row cap — the box always
     grows to fit every row, and the page's single scroll area scrolls the
@@ -162,11 +179,29 @@ class CollapsibleVariableGroup(qt.QtWidgets.QGroupBox):
     Collapsed state is NOT persisted here: the box takes the initial state
     and emits collapsed_changed(bool); the owner decides where to store it.
 
+    Selection & bulk actions: each row's hover-menu checkbox selects it;
+    while anything is selected, the header shows a BulkActionBar
+    ("N selected · ➜ · 🗑 · ×"). More bulk operations: add them in
+    _build_bulk_actions() — the bar itself is operation-agnostic.
+    Selection is per section and resets on section switch.
+
+    "Copy to…" (➜) copies the selected variables, values included, into
+    another section of the same config (one of `copy_targets`, e.g. from
+    Dev to Stable); names that already exist there with a different value
+    are replaced or skipped, as the user chooses. copy_items_to() is the
+    non-interactive core.
+
     Signals:
         collapsed_changed(bool)
     """
 
     CONTENT_MARGIN = 4
+    # Column LEFT of the frame for the rows' drag handles (Notion's
+    # page-margin handles). The frame is painted from this x; owners that
+    # want other content to line up with the frame indent it by this much.
+    SELECTION_GUTTER = 22
+    FRAME_RADIUS = 5
+    NAME_COLUMN_MAX_WIDTH = 260    # longer names are clipped (full name in the tooltip)
     # Fold animation (see _run_fold_animation). Stagger shrinks for long lists
     # so the whole cascade never takes longer than MAX_TOTAL_STAGGER_MS + one row.
     ROW_ANIMATION_MS = 280
@@ -186,28 +221,38 @@ class CollapsibleVariableGroup(qt.QtWidgets.QGroupBox):
 
     collapsed_changed = qt.QtCore.Signal(bool)
 
-    def __init__(self, title: str, section: str, config, collapsed: bool = False, parent=None):
+    frameColor = color_property("_frame_color")   # set by maya_gate.qss
+
+    def __init__(self, title: str, section: str, config, collapsed: bool = False,
+                 copy_targets: Sequence[str] = (),
+                 browse_mode_for: Callable[[str], BrowseMode] | None = None, parent=None):
         """
         Args:
-            title: Display title prefix (e.g. "Maya Environment"). When
-                it's exactly "Additional", the section name isn't
-                appended to it (matches the original's special-case).
+            title: Display title prefix (e.g. "Maya Variables"); shown as
+                "<title> · <section>".
             section: Config section this group edits (e.g. "Dev").
-            config: The JsonConfig (or ConfigNode) to read/write —
-                supplied by the owner, not looked up here.
+            config: The JsonConfig (or ConfigNode) whose sections this group
+                reads/writes — supplied by the owner, not looked up here.
             collapsed: Initial fold state.
+            browse_mode_for: Variable name -> its row's BrowseMode (what
+                browsing does: replace / append to a path list / nothing).
+                None = every row replaces.
+            copy_targets: Sections "Copy to…" offers (the current one is
+                always left out). Empty = no copy action.
             parent: Optional parent widget.
         """
         super().__init__(parent)
         self._title = title
         self._section = section
         self._config = config
-        self._advanced_visible = False
+        self._copy_targets = list(copy_targets)
+        self._browse_mode_for = browse_mode_for or (lambda _name: BrowseMode.REPLACE)
+        self._frame_color = qt.QtGui.QColor(ThemeRegistry.fallback().border)  # until QSS applies
         self._collapsed = collapsed
+        self._selected: set[str] = set()
         self._fold_animation: qt.QtCore.QParallelAnimationGroup | None = None
 
         self.setSizePolicy(qt.QtWidgets.QSizePolicy.Policy.Preferred, qt.QtWidgets.QSizePolicy.Policy.Fixed)
-        self.hide()
 
         self._build_widgets()
         self._build_layout()
@@ -216,8 +261,10 @@ class CollapsibleVariableGroup(qt.QtWidgets.QGroupBox):
         self.set_section(section)
 
     def _build_widgets(self) -> None:
-        self._header = _GroupHeader()
+        self._header = _GroupHeader(left_inset=self.SELECTION_GUTTER + self.CONTENT_MARGIN)
+        self._build_bulk_actions()
         self.list = DraggableList(draggable=True)
+        self.list.set_drop_indicator_inset(self.SELECTION_GUTTER + 2)  # keep "Drop Here" inside the frame
 
         # The list sits in a clipping body so collapsing can animate the
         # body's height while the list itself keeps its full size.
@@ -226,7 +273,9 @@ class CollapsibleVariableGroup(qt.QtWidgets.QGroupBox):
     def _build_layout(self) -> None:
         layout = qt.QtWidgets.QVBoxLayout(self)
         margin = self.CONTENT_MARGIN
-        layout.setContentsMargins(margin, margin, margin, margin)
+        # No left margin: rows start at x=0 so their drag handles land in the
+        # gutter, outside the frame painted at x=SELECTION_GUTTER.
+        layout.setContentsMargins(0, margin, margin, margin)
         layout.setSpacing(0)
         layout.addWidget(self._header)
         layout.addWidget(self._body)
@@ -234,6 +283,19 @@ class CollapsibleVariableGroup(qt.QtWidgets.QGroupBox):
         # pass later; without this, that transient slack gets split around the
         # items and the header visibly drifts down during a collapse.
         layout.addStretch()
+
+    def _build_bulk_actions(self) -> None:
+        """Registers every bulk operation on the header's BulkActionBar —
+        add new ones here (one add_action() + one handler each)."""
+        bar = self._header.bulk_bar
+        if self._copy_targets:
+            self._copy_button = bar.add_action("➜", "Copy selected to another environment…")
+            self._copy_button.set_icon(UiResources().iconManager.get_icon("arrow_right", sub_folder="actions"))
+            self._copy_button.clicked.connect(self._show_copy_menu)
+        delete_button = bar.add_action("\U0001f5d1", "Delete selected")
+        delete_button.set_icon(UiResources().iconManager.get_icon("delete", sub_folder="actions"))
+        delete_button.clicked.connect(self._delete_selected)
+        bar.clear_requested.connect(self.clear_selection)
 
     def _build_connections(self) -> None:
         self._header.clicked.connect(self.toggle_collapsed)
@@ -249,6 +311,8 @@ class CollapsibleVariableGroup(qt.QtWidgets.QGroupBox):
         self._section = section
         variables = list(self._config[section].keys())
 
+        self._selected.clear()
+        self._header.bulk_bar.set_count(0)
         self.list.clear()
         self._update_title(section)
         for var_name in variables:
@@ -267,10 +331,6 @@ class CollapsibleVariableGroup(qt.QtWidgets.QGroupBox):
         if self._collapsed:
             self.set_collapsed(False)
 
-    def set_advanced_visible(self, visible: bool) -> None:
-        self._advanced_visible = visible
-        self._update_state()
-
     def is_collapsed(self) -> bool:
         return self._collapsed
 
@@ -284,12 +344,129 @@ class CollapsibleVariableGroup(qt.QtWidgets.QGroupBox):
     def toggle_collapsed(self) -> None:
         self.set_collapsed(not self._collapsed)
 
+    def selected_items(self) -> list[str]:
+        """Selected variable names, in their current list order."""
+        return [item_id for item_id in self.list.current_order() if item_id in self._selected]
+
+    def clear_selection(self) -> None:
+        for row in self._rows():
+            row.set_selected(False)  # each emits selection_changed -> _on_row_selection_changed
+
+    def paintEvent(self, event) -> None:
+        """Draws the group frame starting at SELECTION_GUTTER, so the rows'
+        drag-handle column visually sits outside it."""
+        painter = qt.QtGui.QPainter(self)
+        painter.setRenderHint(qt.QtGui.QPainter.RenderHint.Antialiasing)
+        painter.setPen(qt.QtGui.QPen(self._frame_color, 1))
+        painter.setBrush(qt.QtCore.Qt.BrushStyle.NoBrush)
+        frame = qt.QtCore.QRectF(self.rect()).adjusted(self.SELECTION_GUTTER + 0.5, 0.5, -0.5, -0.5)
+        painter.drawRoundedRect(frame, self.FRAME_RADIUS, self.FRAME_RADIUS)
+        painter.end()
+
     # --- rows / persistence --------------------------------------------------
 
+    def _align_name_column(self) -> None:
+        """Gives every row the same name-column width (the longest name,
+        capped), so value fields start at one x instead of zig-zagging."""
+        rows = self._rows()
+        if not rows:
+            return
+        width = min(max(row.name_width_hint() for row in rows), self.NAME_COLUMN_MAX_WIDTH)
+        for row in rows:
+            row.set_name_width(width)
+
+    def _rows(self) -> list:
+        # From the layout, not findChildren(): rows removed with deleteLater()
+        # are still children until the event loop gets to them.
+        layout = self.list.main_layout
+        widgets = (layout.itemAt(i).widget() for i in range(layout.count()))
+        return [w for w in widgets if isinstance(w, EnvVarRow)]
+
     def _append_row(self, var_name: str, value: str) -> None:
-        row = EnvVarRow(var_name, value, draggable=True)
+        row = EnvVarRow(var_name, value, draggable=True,
+                        selection_gutter=self.SELECTION_GUTTER,
+                        browse_mode=self._browse_mode_for(var_name))
         row.value_changed.connect(self._on_value_changed)
+        row.selection_changed.connect(self._on_row_selection_changed)
         self.list.append_widget(var_name, row)
+
+    def _on_row_selection_changed(self, var_name: str, selected: bool) -> None:
+        if selected:
+            self._selected.add(var_name)
+        else:
+            self._selected.discard(var_name)
+        self._header.bulk_bar.set_count(len(self._selected))
+
+    def _delete_selected(self) -> None:
+        for var_name in self.selected_items():
+            self.list.remove_item(var_name)  # -> item_removed -> _on_item_removed (config + selection)
+
+    # --- copy to another section ---------------------------------------------
+
+    def copy_items_to(self, names: Sequence[str], target: str,
+                      replace_existing: bool) -> tuple[list[str], list[str]]:
+        """Copies variables `names` (with their values) from the current
+        section into section `target` of the same config.
+
+        A name already in `target` with the SAME value counts as copied (no
+        change needed); with a DIFFERENT value it's overwritten only when
+        `replace_existing` is True, otherwise left alone.
+
+        Returns:
+            (copied, skipped) name lists.
+        """
+        source = self._config[self._section]
+        destination = self._config[target]
+        copied, skipped = [], []
+        for name in names:
+            value = source[name]
+            if name in destination and destination[name] != value and not replace_existing:
+                skipped.append(name)
+                continue
+            destination[name] = value
+            copied.append(name)
+        return copied, skipped
+
+    def copy_target_choices(self) -> list[str]:
+        """Sections "Copy to…" offers right now (every target but the current one)."""
+        return [target for target in self._copy_targets if target != self._section]
+
+    def _show_copy_menu(self) -> None:
+        menu = make_rounded_popup(qt.QtWidgets.QMenu(self))  # QSS border-radius shows
+        for target in self.copy_target_choices():
+            menu.addAction(target).triggered.connect(lambda _=False, t=target: self._copy_selected_to(t))
+        menu.exec(self._copy_button.mapToGlobal(qt.QtCore.QPoint(0, self._copy_button.height())))
+
+    def _ask_conflict_resolution(self, target: str, conflicts: list[str]) -> str | None:
+        """Asks what to do with names already in `target` with a different
+        value. Returns "replace", "skip", or None (cancel / window closed)."""
+        choice = ConfirmDialog.ask(
+            self, "Copy variables",
+            f'{len(conflicts)} of the selected variables already exist in "{target}" '
+            f"with a different value:",
+            details=", ".join(conflicts),
+            choices=[("replace", "Replace"), ("skip", "Skip existing"), ("cancel", "Cancel")])
+        return choice if choice in ("replace", "skip") else None
+
+    def _copy_selected_to(self, target: str) -> None:
+        """Interactive copy: resolves conflicts with the user, then copies
+        and reports."""
+        names = self.selected_items()
+        destination = self._config[target]
+        source = self._config[self._section]
+        conflicts = [name for name in names if name in destination and destination[name] != source[name]]
+
+        replace = False
+        if conflicts:
+            choice = self._ask_conflict_resolution(target, conflicts)
+            if choice is None:
+                return
+            replace = choice == "replace"
+
+        copied, skipped = self.copy_items_to(names, target, replace_existing=replace)
+        self.clear_selection()
+        message = f"Copied {len(copied)} to {target}" + (f", skipped {len(skipped)}" if skipped else "")
+        qt.QtWidgets.QToolTip.showText(qt.QtGui.QCursor.pos(), message, self)
 
     def _on_value_changed(self, var_name: str, value: str) -> None:
         self._config[self._section][var_name] = value
@@ -299,6 +476,8 @@ class CollapsibleVariableGroup(qt.QtWidgets.QGroupBox):
 
     def _on_item_removed(self, var_name: str) -> None:
         del self._config[self._section][var_name]
+        self._selected.discard(var_name)
+        self._header.bulk_bar.set_count(len(self._selected))
         self._update_state()
 
     def _on_item_moved(self, var_name: str, direction: int) -> None:
@@ -311,15 +490,18 @@ class CollapsibleVariableGroup(qt.QtWidgets.QGroupBox):
 
     def _update_title(self, section: str) -> None:
         self.setObjectName(f"CollapsibleVariableGroup_{section}")
-        if self._title == "Additional":
-            self._header.set_title(self._title)
-        else:
-            self._header.set_title(f"{self._title} \u00b7 {section}")
+        self._header.set_title(f"{self._title} \u00b7 {section}")
 
     def _update_state(self) -> None:
+        self._align_name_column()
         count = len(list(self._config[self._section].keys()))
         self._header.set_count(count)
-        self.setVisible(self._advanced_visible and count > 0)
+        if count == 0:
+            self.hide()
+        elif self.parentWidget() is not None:
+            # show() on a still-parentless widget would pop it up as its own
+            # window; not being explicitly hidden, it shows with its parent.
+            self.show()
 
     # --- fold animation ---------------------------------------------------------
     #
@@ -351,9 +533,7 @@ class CollapsibleVariableGroup(qt.QtWidgets.QGroupBox):
         self._run_fold_animation(rows)
 
     def _visible_rows(self) -> list:
-        layout = self.list.main_layout
-        widgets = (layout.itemAt(i).widget() for i in range(layout.count()))
-        return [w for w in widgets if isinstance(w, EnvVarRow) and not w.isHidden()]
+        return [row for row in self._rows() if not row.isHidden()]
 
     def _run_fold_animation(self, rows: list) -> None:
         collapsing = self._collapsed
@@ -466,8 +646,7 @@ if __name__ == "__main__":
                          "PYTHONPATH", "XBMLANGPATH", "TEMP"):
                 config["Playground"][name] = f"H:/Demo/{name.lower()}"
 
-        group = CollapsibleVariableGroup("Maya Environment", "Playground", config)
-        group.set_advanced_visible(True)
+        group = CollapsibleVariableGroup("Maya Variables", "Playground", config)
 
         def curve_combo(names, default):
             combo = qt.QtWidgets.QComboBox()

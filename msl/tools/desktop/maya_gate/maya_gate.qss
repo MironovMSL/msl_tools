@@ -1,0 +1,9 @@
+/*
+ * Maya Gate tool styles (template) — registered with
+ * StylesheetBuilder.register_template() by variable_group.py and appended
+ * after ui/theme/base.qss + widgets.qss. Same var()/alpha() syntax.
+ */
+
+CollapsibleVariableGroup {
+    qproperty-frameColor: var(--border);
+}

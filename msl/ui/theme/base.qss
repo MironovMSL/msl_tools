@@ -1,0 +1,228 @@
+/*
+ * msl_tools baseline stylesheet (template).
+ *
+ * Colors are never written here — only var(--token), resolved against the
+ * active theme's palette (assets/themes/<theme>.css) by StylesheetBuilder.
+ * Also available: alpha(<color>, <percent>%) -> rgba(), e.g.
+ *     alpha(var(--accent), 15%)
+ *
+ * Applied per top-level window, never on QApplication (inside Maya that is
+ * Maya's own application object).
+ *
+ * Deliberately NO blanket `QWidget { background: ... }` rule: nested
+ * container widgets must stay transparent and show their parent's
+ * background. The window background comes from the QDialog rule.
+ *
+ * Widgets with state-driven coloring (BaseProgressBar's states,
+ * VersionStatusWidget, custom-painted atoms) are out of scope here — they
+ * read Theme tokens in code.
+ */
+
+/* --- window ---------------------------------------------------------------- */
+
+QDialog {
+    background-color: var(--surface);
+    color: var(--text-primary);
+}
+
+/* --- buttons ----------------------------------------------------------------- */
+
+QPushButton {
+    background-color: var(--surface);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 4px 10px;
+}
+QPushButton:hover {
+    border: 1px solid var(--accent);
+}
+QPushButton:pressed {
+    background-color: var(--accent);
+    color: var(--surface);
+}
+QPushButton:disabled {
+    color: var(--text-secondary);
+    border: 1px solid var(--text-secondary);
+}
+
+/* --- line edits ---------------------------------------------------------------- */
+
+QLineEdit {
+    background-color: var(--surface);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 2px 4px;
+}
+QLineEdit:focus {
+    border: 1px solid var(--accent);
+}
+QLineEdit:read-only {
+    color: var(--text-secondary);
+}
+
+/* --- combo boxes ----------------------------------------------------------------- */
+
+QComboBox {
+    background-color: var(--surface);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 2px 4px;
+}
+QComboBox:hover, QComboBox:focus {
+    border: 1px solid var(--accent);
+}
+QComboBox:disabled {
+    color: var(--text-secondary);
+    border: 1px solid var(--text-secondary);
+}
+QComboBox::drop-down {
+    border: none;
+    width: 16px;
+}
+/* Border-drawn triangle: stand-in until a real SVG arrow asset exists. */
+QComboBox::down-arrow {
+    width: 0;
+    height: 0;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-top: 5px solid var(--text-primary);
+}
+QComboBox QAbstractItemView {
+    background-color: var(--surface);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    selection-background-color: var(--accent);
+    selection-color: var(--surface);
+    outline: 0;
+}
+
+/* --- labels ------------------------------------------------------------------------ */
+
+QLabel {
+    color: var(--text-primary);
+}
+
+/* --- native check boxes (BaseCheckbox paints itself) ------------------------------- */
+
+QCheckBox {
+    color: var(--text-primary);
+    spacing: 6px;
+}
+QCheckBox:disabled {
+    color: var(--text-secondary);
+}
+QCheckBox::indicator {
+    width: 13px;
+    height: 13px;
+    border-radius: 2px;
+    border: 1px solid var(--border);
+    background-color: var(--surface);
+}
+QCheckBox::indicator:hover {
+    border: 1px solid var(--accent);
+}
+QCheckBox::indicator:checked {
+    background-color: var(--accent);
+    border: 1px solid var(--accent);
+}
+
+/* --- progress bars -------------------------------------------------------------------- */
+
+QProgressBar {
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background-color: var(--surface);
+    text-align: center;
+    color: var(--surface);
+}
+QProgressBar::chunk {
+    border-radius: 3px;
+}
+
+/* --- popups: menus and message boxes ---------------------------------------------------- */
+
+/* Popups are separate windows, but ones created with a parent inside a styled
+   window (QMenu(self), QMessageBox(self)) inherit that window's stylesheet.
+   Always pass a parent — a parentless popup stays native.
+   QMenu's border-radius only shows on menus passed through
+   ui/theme/qss.py:make_rounded_popup() (translucent window); on a plain
+   opaque menu the corners stay square. */
+QMenu {
+    background-color: var(--surface);
+    color: var(--text-primary);
+    border: 1px solid alpha(var(--border), 60%);
+    border-radius: 8px;
+    padding: 4px;
+}
+QMenu::item {
+    background-color: transparent;
+    padding: 5px 24px 5px 12px;
+    border-radius: 4px;
+}
+QMenu::item:selected {
+    background-color: alpha(var(--accent), 18%);
+    color: var(--text-primary);
+}
+QMenu::item:disabled {
+    color: var(--text-secondary);
+}
+QMenu::separator {
+    height: 1px;
+    background-color: alpha(var(--border), 40%);
+    margin: 4px 6px;
+}
+
+QMessageBox {
+    background-color: var(--surface);
+}
+QMessageBox QLabel {
+    color: var(--text-primary);
+}
+/* No min-width on QMessageBox buttons: QMessageBox then pins EVERY button to
+   exactly that width and clips longer labels ("Skip existing"). */
+
+/* --- tabs -------------------------------------------------------------------------------- */
+
+/* Underline tabs: no boxes, a thin rule under the bar, the selected tab marked
+   by an accent underline. No bold on :selected — it would widen the tab and
+   make its neighbours jump on every switch. */
+QTabWidget::pane {
+    border: none;
+    border-top: 1px solid alpha(var(--border), 30%);
+    top: -1px;
+}
+QTabBar {
+    qproperty-drawBase: 0;
+    background: transparent;
+}
+QTabBar::tab {
+    background: transparent;
+    color: var(--text-secondary);
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: 5px 12px;
+    margin-right: 4px;
+}
+QTabBar::tab:hover {
+    color: var(--text-primary);
+    border-bottom: 2px solid alpha(var(--text-primary), 20%);
+}
+QTabBar::tab:selected {
+    color: var(--text-primary);
+    border-bottom: 2px solid var(--accent);
+}
+QTabBar::tab:disabled {
+    color: alpha(var(--text-secondary), 50%);
+}
+
+/* --- window header ---------------------------------------------------------------------- */
+
+WindowHeader {
+    /* background-color: var(--chrome-background); */
+}
+QLabel#headerSubtitle {
+    color: var(--text-secondary);
+}

@@ -72,17 +72,14 @@ if __name__ == '__main__':
         dialog.add_case("BasePathWidget / QLineEdit (global QSS)", base_path_demo)
         # dialog.add_widget(qt.QtWidgets.QLineEdit("plain QLineEdit"))
 
-        # --- state-виджеты: сами подписаны на theme_changed ---
-        progress = BaseProgressBar(theme=uiCore.themeManager.current_theme)
+        # --- custom widgets: colored by the window QSS (qproperty/state selectors) ---
+        progress = BaseProgressBar()
         progress.set_progress(65)
         progress.set_state(ProgressState.SUCCESS)
-        uiCore.themeManager.theme_changed.connect(progress.set_theme)
         dialog.add_case("BaseProgressBar (SUCCESS state)", progress)
 
         demo_info = UpdateInfo(status=UpdateStatus.UPDATE_AVAILABLE, current_version="0.0.1", latest_version="0.0.2")
-        version_widget = VersionStatusWidget(package_version="0.0.1", info=demo_info,
-                                             theme=uiCore.themeManager.current_theme)
-        uiCore.themeManager.theme_changed.connect(version_widget.set_theme)
+        version_widget = VersionStatusWidget(package_version="0.0.1", info=demo_info)
         dialog.add_case("VersionStatusWidget (UPDATE_AVAILABLE)", version_widget)
 
         dialog.show()

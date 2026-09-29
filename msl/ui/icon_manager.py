@@ -11,6 +11,27 @@ _ColoredIconCacheKey = tuple[str, str, str | None, str]
 _PixmapCacheKey = tuple[str, str, int, str | None, str | None]
 
 
+def tint_icon(icon: qt.QtGui.QIcon, side: int, ratio: float,
+              color: qt.QtGui.QColor) -> qt.QtGui.QPixmap:
+    """`icon` rendered at `side` px (device pixel ratio `ratio`) as a ONE-COLOR
+    shape: every opaque pixel painted `color` (SourceIn keeps only the shape).
+
+    Lets monochrome icons take their color from QSS-driven widget properties
+    (GlyphButton's glyph colors, IconPushButton's iconColor) instead of from
+    per-theme files or IconManager's color= substitution.
+    """
+    source = icon.pixmap(qt.QtCore.QSize(side, side), ratio)
+    tinted = qt.QtGui.QPixmap(source.size())
+    tinted.setDevicePixelRatio(source.devicePixelRatio())
+    tinted.fill(qt.QtCore.Qt.GlobalColor.transparent)
+    painter = qt.QtGui.QPainter(tinted)
+    painter.drawPixmap(0, 0, source)
+    painter.setCompositionMode(qt.QtGui.QPainter.CompositionMode.CompositionMode_SourceIn)
+    painter.fillRect(tinted.rect(), color)
+    painter.end()
+    return tinted
+
+
 class IconManager:
     """Resolves icon names to theme-aware QIcon/QPixmap instances.
 

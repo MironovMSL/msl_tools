@@ -1,7 +1,6 @@
 # ui/widgets/compositions/install_path_widget.py
 
 import msl_tools.msl.ui.qt_bindings as qt
-from msl_tools.msl.core.theme import Theme, ThemeRegistry
 from msl_tools.msl.ui.widgets.atoms.paths import BasePathWidget, PathMode
 from msl_tools.msl.ui.widgets.atoms.checkboxes import BaseCheckbox
 
@@ -20,23 +19,19 @@ class InstallPathWidget(qt.QtWidgets.QWidget):
     path_changed               = qt.QtCore.Signal(str)
 
     def __init__(self, *, default_path: str, package_path: str, state_checkbox: bool,
-                 theme: Theme | None = None, parent=None):
+                 parent=None):
         """
         Args:
             default_path: Path used when the checkbox is unchecked.
             package_path: Path used when the checkbox is checked (current
                 package location).
             state_checkbox: Initial checkbox state.
-            theme: Theme to color the hint label and inner BasePathWidget
-                with. Defaults to ThemeRegistry.fallback() (no file I/O) so
-                this widget can be used standalone without wiring up UiResources.
             parent: Optional parent widget.
         """
         super().__init__(parent)
 
         self._default_path = default_path
         self._package_path = package_path
-        self._theme         = theme or ThemeRegistry.fallback()
 
         self._create_widgets(state_checkbox)
         self._create_layouts()
@@ -47,19 +42,11 @@ class InstallPathWidget(qt.QtWidgets.QWidget):
         self.path_widget = BasePathWidget(label="install path",
                                           placeholder_text="Select a default install folder",
                                           initial_path=self._default_path,
-                                          dialog_title="Select a Folder",
-                                          theme=self._theme)
-        self.use_package_checkbox = BaseCheckbox("use package folder as install path", theme=self._theme)
+                                          dialog_title="Select a Folder")
+        self.use_package_checkbox = BaseCheckbox("use package folder as install path")
         self.use_package_checkbox.setChecked(state_checkbox)
-        # self.use_package_checkbox.setStyleSheet(self._checkbox_style())
         self.hint_label = qt.QtWidgets.QLabel()
-        self.hint_label.setStyleSheet(self._hint_style())
-
-    def _hint_style(self) -> str:
-        return f"color: {self._theme.text_secondary}; font-size: 11px;"
-
-    def _checkbox_style(self) -> str:
-        return f"QCheckBox {{ color: {self._theme.text_primary}; }}"
+        self.hint_label.setObjectName("installHint")
 
     def _create_layouts(self) -> None:
         self.main_laout = qt.QtWidgets.QVBoxLayout(self)
@@ -102,29 +89,19 @@ class InstallPathWidget(qt.QtWidgets.QWidget):
         """Returns True if the checkbox is checked (path resolved from package location)."""
         return self.use_package_checkbox.isChecked()
 
-    def set_theme(self, theme: Theme) -> None:
-        self._theme = theme
-        self.hint_label.setStyleSheet(self._hint_style())
-        self.use_package_checkbox.set_theme(theme)
-        self.path_widget.set_theme(theme)
-
 
 if __name__ == "__main__":
 
 
     from msl_tools.msl.ui.app.application_context import QtApplicationContext
-    from msl_tools.msl.ui.widgets.widget_playground_dialog import WidgetPlaygroundDialog
+    from msl_tools.msl.ui.widgets.themed_widget_playground_dialog import ThemedWidgetPlaygroundDialog
 
     default_path = r"C:\Users\s_mironov\Documents\maya\scripts"
     package_path = r"H:\ProjectsDev\MSL_Others"
 
     with QtApplicationContext():
 
-        dialog = WidgetPlaygroundDialog()
-        # dialog.setStyleSheet("background-color: rgb(0, 0, 0);")
+        dialog = ThemedWidgetPlaygroundDialog()
         dialog.add_case("InstallPathWidget",
                         InstallPathWidget(default_path=default_path, package_path=package_path, state_checkbox=False))
-        dialog.add_case("InstallPathWidget (dark)",
-                        InstallPathWidget(default_path=default_path, package_path=package_path,
-                                          state_checkbox=False, theme=ThemeRegistry.fallback("dark")))
         dialog.show()

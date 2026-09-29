@@ -1,18 +1,41 @@
 # ui/widgets/compositions/draggable_list.py
 import msl_tools.msl.ui.qt_bindings as qt
+from msl_tools.msl.core.theme import ThemeRegistry
+from msl_tools.msl.ui.theme.qss import color_property
 
 
-class _DragTargetIndicator(qt.QtWidgets.QLabel):
-    """Private: the dashed drop-zone placeholder shown while dragging."""
+class _DragTargetIndicator(qt.QtWidgets.QWidget):
+    """Private: the dashed drop-zone placeholder shown while dragging.
+
+    Painted by hand (not a styled QLabel) so it can leave a left inset
+    empty — a layout can't give one item its own margin, and items may
+    reserve a leading column that sits outside their owner's frame.
+    """
+
+    BORDER_COLOR = qt.QtGui.QColor(136, 136, 136)
+    FILL_COLOR = qt.QtGui.QColor(100, 100, 255, 40)
+    TEXT = "Drop Here"
+    TEXT_INDENT = 8
+    CORNER_RADIUS = 4
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setContentsMargins(25, 5, 25, 5)
-        self.setStyleSheet(
-            "QLabel { border: 2px dashed #888; "
-            "background-color: rgba(100, 100, 255, 40); text-align: center; }"
-        )
-        self.setText("Drop Here")
+        self.left_inset = 0
+
+    def paintEvent(self, event) -> None:
+        painter = qt.QtGui.QPainter(self)
+        painter.setRenderHint(qt.QtGui.QPainter.RenderHint.Antialiasing)
+        rect = qt.QtCore.QRectF(self.rect()).adjusted(self.left_inset + 1, 1, -1, -1)
+
+        pen = qt.QtGui.QPen(self.BORDER_COLOR, 1.5, qt.QtCore.Qt.PenStyle.DashLine)
+        painter.setPen(pen)
+        painter.setBrush(self.FILL_COLOR)
+        painter.drawRoundedRect(rect, self.CORNER_RADIUS, self.CORNER_RADIUS)
+
+        painter.setPen(self.palette().color(qt.QtGui.QPalette.ColorRole.WindowText))
+        painter.drawText(rect.adjusted(self.TEXT_INDENT, 0, 0, 0),
+                         int(qt.QtCore.Qt.AlignmentFlag.AlignVCenter), self.TEXT)
+        painter.end()
 
 
 class DraggableList(qt.QtWidgets.QWidget):
@@ -62,15 +85,23 @@ class DraggableList(qt.QtWidgets.QWidget):
     item_moved_down = qt.QtCore.Signal(str)
 
     REORDER_ANIMATION_MS = 300
-    DRAG_REFLOW_ANIMATION_MS = 300
+    DRAG_REFLOW_ANIMATION_MS = 200
     DRAG_START_DISTANCE_FALLBACK = 10
 
     AUTO_SCROLL_MARGIN = 36      # px from the viewport edge where auto-scroll kicks in
     AUTO_SCROLL_MAX_STEP = 16    # px per tick right at the edge
     AUTO_SCROLL_INTERVAL_MS = 16
 
+    DRAG_CARD_RADIUS = 5
+    # Card the dragged item is drawn on — set by ui/theme/widgets.qss.
+    dragBackgroundColor = color_property("_drag_background_color", None)
+    dragBorderColor = color_property("_drag_border_color", None)
+
     def __init__(self, draggable: bool = False, parent=None):
         super().__init__(parent)
+        fallback = ThemeRegistry.fallback()  # until QSS applies
+        self._drag_background_color = qt.QtGui.QColor(fallback.surface)
+        self._drag_border_color = qt.QtGui.QColor(fallback.accent)
         self._animations: list = []
         self._draggable = False
         self._dragging_widget = None
@@ -98,6 +129,13 @@ class DraggableList(qt.QtWidgets.QWidget):
             self._drag_target_indicator = _DragTargetIndicator()
             self._drag_target_indicator.hide()
 
+    def set_drop_indicator_inset(self, pixels: int) -> None:
+        """Leaves `pixels` empty at the left of the drop placeholder — for
+        items whose leading column sits outside the owner's frame, so the
+        placeholder stays inside that frame."""
+        if self._drag_target_indicator is not None:
+            self._drag_target_indicator.left_inset = pixels
+
     # --- items -------------------------------------------------------
 
     def append_widget(self, item_id: str, widget: qt.QtWidgets.QWidget) -> None:
@@ -106,11 +144,15 @@ class DraggableList(qt.QtWidgets.QWidget):
         signals the widget happens to expose — none are required."""
         widget._dl_item_id = item_id  # noqa: SLF001 — this class's own bookkeeping, not the widget's
 
-        if self._draggable and getattr(widget, "drag_handle", None) is not None:
-            widget.drag_handle.installEventFilter(self)
+        handle = getattr(widget, "drag_handle", None)
+        if self._draggable and handle is not None:
+            # The handle may sit at any depth inside the item (e.g. in a hover
+            # menu), so remember which item it drags instead of using parent().
+            handle._dl_owner = widget  # noqa: SLF001
+            handle.installEventFilter(self)
 
         if hasattr(widget, "remove_requested"):
-            widget.remove_requested.connect(lambda i=item_id: self._on_item_removed(i))
+            widget.remove_requested.connect(lambda i=item_id: self.remove_item(i))
         if hasattr(widget, "move_up_requested"):
             widget.move_up_requested.connect(lambda i=item_id: self._on_item_moved(i, -1))
         if hasattr(widget, "move_down_requested"):
@@ -140,7 +182,8 @@ class DraggableList(qt.QtWidgets.QWidget):
 
     # --- explicit move / remove requests --------------------------------
 
-    def _on_item_removed(self, item_id: str) -> None:
+    def remove_item(self, item_id: str) -> None:
+        """Removes and deletes the item under `item_id`, then emits item_removed."""
         for i in range(self.main_layout.count()):
             widget = self.main_layout.itemAt(i).widget()
             if getattr(widget, "_dl_item_id", None) == item_id:
@@ -211,33 +254,46 @@ class DraggableList(qt.QtWidgets.QWidget):
     # --- drag start (from a row's drag handle) --------------------------
 
     def eventFilter(self, obj, event) -> bool:
-        if self._draggable and obj is getattr(obj.parent(), "drag_handle", None):
+        owner = getattr(obj, "_dl_owner", None)
+        if self._draggable and owner is not None:
             event_type = event.type()
+            # Enter/Leave pass through (return False) so the handle can still draw its own hover state.
             if event_type == qt.QtCore.QEvent.Type.Enter:
                 obj.setCursor(qt.QtCore.Qt.CursorShape.OpenHandCursor)
-                return True
+                return False
             elif event_type == qt.QtCore.QEvent.Type.Leave:
                 obj.unsetCursor()
-                return True
+                return False
             elif event_type == qt.QtCore.QEvent.Type.MouseButtonPress and event.button() == qt.QtCore.Qt.MouseButton.LeftButton:
                 obj.setCursor(qt.QtCore.Qt.CursorShape.ClosedHandCursor)
-                self._dragging_widget = obj.parentWidget()
+                self._set_handle_down(obj, True)
+                self._dragging_widget = owner
                 self._drag_start_pos = event.position().toPoint()
                 return True
             elif event_type == qt.QtCore.QEvent.Type.MouseMove and self._drag_start_pos:
                 distance = (event.position().toPoint() - self._drag_start_pos).manhattanLength()
                 if distance > qt.QtWidgets.QApplication.startDragDistance():
                     self._start_drag(obj)
+                    self._set_handle_down(obj, False)  # QDrag.exec() swallowed the release
                     self._dragging_widget = None
                     self._drag_start_pos = None
                 return True
             elif event_type == qt.QtCore.QEvent.Type.MouseButtonRelease:
                 obj.setCursor(qt.QtCore.Qt.CursorShape.OpenHandCursor)
+                self._set_handle_down(obj, False)
                 self._dragging_widget = None
                 self._drag_start_pos = None
                 return True
 
         return super().eventFilter(obj, event)
+
+    @staticmethod
+    def _set_handle_down(handle: qt.QtWidgets.QWidget, down: bool) -> None:
+        """Mirrors the press onto a button-type handle. This filter consumes
+        the handle's mouse press (it starts the drag), so the button itself
+        never sees it and would never draw its pressed state."""
+        if isinstance(handle, qt.QtWidgets.QAbstractButton):
+            handle.setDown(down)
 
     def _start_drag(self, drag_handle: qt.QtWidgets.QWidget) -> None:
         """Runs a whole drag-and-drop gesture (QDrag.exec() blocks until drop/cancel).
@@ -253,7 +309,7 @@ class DraggableList(qt.QtWidgets.QWidget):
 
         drag = qt.QtGui.QDrag(source)
         drag.setMimeData(qt.QtCore.QMimeData())
-        drag.setPixmap(source.grab())
+        drag.setPixmap(self._drag_pixmap(source))
         drag.setHotSpot(drag_handle.mapTo(source, self._drag_start_pos))
 
         start_index = self.main_layout.indexOf(source)
@@ -274,6 +330,35 @@ class DraggableList(qt.QtWidgets.QWidget):
             self.main_layout.insertWidget(start_index, source)
             source.show()
             self._animate_reorder(self.DRAG_REFLOW_ANIMATION_MS, qt.QtCore.QEasingCurve.Type.InOutCubic)
+
+    def _drag_pixmap(self, widget: qt.QtWidgets.QWidget) -> qt.QtGui.QPixmap:
+        """Snapshot of `widget` for the drag cursor: the widget drawn on a
+        rounded card (dragBackgroundColor + dragBorderColor, from the QSS),
+        so it reads as a solid "lifted" item in any theme.
+
+        Not QWidget.grab(): that fills every spot the widget doesn't paint
+        itself with its palette's window color — a light system default the
+        QSS never sets (it styles the window, not each row) — a white block
+        behind the labels in a dark theme. Here the card is painted first and
+        the widget rendered on top WITHOUT its window background. The device
+        pixel ratio keeps it sharp on HiDPI.
+        """
+        ratio = widget.devicePixelRatioF()
+        pixmap = qt.QtGui.QPixmap(widget.size() * ratio)
+        pixmap.setDevicePixelRatio(ratio)
+        pixmap.fill(qt.QtCore.Qt.GlobalColor.transparent)
+
+        painter = qt.QtGui.QPainter(pixmap)
+        painter.setRenderHint(qt.QtGui.QPainter.RenderHint.Antialiasing)
+        card = qt.QtCore.QRectF(widget.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        painter.setPen(qt.QtGui.QPen(self._drag_border_color, 1))
+        painter.setBrush(self._drag_background_color)
+        painter.drawRoundedRect(card, self.DRAG_CARD_RADIUS, self.DRAG_CARD_RADIUS)
+        painter.end()
+
+        widget.render(pixmap, qt.QtCore.QPoint(), qt.QtGui.QRegion(),
+                      qt.QtWidgets.QWidget.RenderFlag.DrawChildren)
+        return pixmap
 
     # --- drop target -----------------------------------------------------
 

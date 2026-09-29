@@ -42,6 +42,15 @@ class ThemeManager(qt.QtCore.QObject):
         self._current_theme = theme
         self.theme_changed.emit(theme)
 
+    def reload(self) -> None:
+        """Re-reads the palette files and re-announces the CURRENT theme —
+        theme_changed fires even though the name didn't change, so every
+        subscriber (windows' QSS, custom-painted widgets) repaints with the
+        edited colors. Used by ThemeHotReloader."""
+        self._registry.reload()
+        self._current_theme = self._registry.get(self._current_theme.name)
+        self.theme_changed.emit(self._current_theme)
+
     def available_themes(self) -> list[str]:
         return self._registry.list_themes()
 

@@ -3,7 +3,7 @@
 from enum import Enum, auto
 
 import msl_tools.msl.ui.qt_bindings as qt
-from msl_tools.msl.core.theme import Theme, ThemeRegistry
+from msl_tools.msl.ui.theme.qss import repolish
 
 
 class ProgressState(Enum):
@@ -17,46 +17,33 @@ class BaseProgressBar(qt.QtWidgets.QProgressBar):
     """Base progress bar atom. Other files in this subfolder inherit from this class only.
 
     Wraps QProgressBar with:
-      - a semantic ProgressState (NORMAL / SUCCESS / ERROR) mapped to color via stylesheet
+      - a semantic ProgressState (NORMAL / SUCCESS / ERROR), exposed as the
+        dynamic property `state` ("normal" / "success" / "error"); the window
+        stylesheet (ui/theme/widgets.qss) picks the chunk color per state:
+            BaseProgressBar[state="error"]::chunk { background-color: var(--error); }
       - a convenience indeterminate ("busy") mode toggle, using Qt's native
         min == max == 0 trick (no manual animation/timer needed)
       - optional percentage text visibility
-      - theme-aware coloring: colors come from a Theme instance, not hardcoded
-        hex values, so switching themes just means calling set_theme()
 
     Contains no domain logic (install/download/task progress) — the caller drives
-    it entirely via set_progress() / set_state() / set_indeterminate() / set_theme().
+    it entirely via set_progress() / set_state() / set_indeterminate().
     """
-
-    # Structural template only — token VALUES come from self._theme, not from
-    # this string. Kept at class level since the QSS shape itself never
-    # changes per instance, only the colors filled into it do.
-    _BASE_STYLE = (
-        "QProgressBar::chunk {{background-color: {chunk_color};}}"
-    )
 
     def __init__(self,
                  minimum: int = 0,
                  maximum: int = 100,
                  show_percentage: bool = False,
-                 theme: Theme | None = None,
                  parent=None):
         """
         Args:
             minimum: Minimum progress value.
             maximum: Maximum progress value.
             show_percentage: Whether the numeric percentage is drawn on the bar.
-            theme: Theme to color this bar with. Defaults to
-                ThemeRegistry.fallback() (no file I/O) so this widget can be
-                used standalone — e.g. in the __main__ playground below —
-                without wiring up UiResources. Real tool views should pass
-                the active theme explicitly and call set_theme() on changes.
             parent: Optional parent widget.
         """
         super().__init__(parent)
 
         self._state = ProgressState.NORMAL
-        self._theme = theme or ThemeRegistry.fallback()
         self._cached_range = (minimum, maximum)
 
         self.setFixedHeight(5)
@@ -65,7 +52,7 @@ class BaseProgressBar(qt.QtWidgets.QProgressBar):
         self.setTextVisible(show_percentage)
         self.setValue(minimum)
 
-        self._apply_state_style()
+        self.setProperty("state", self._state.name.lower())
 
     def set_progress(self, value: int) -> None:
         """Sets the current progress value, clamped to [minimum, maximum]."""
@@ -84,12 +71,9 @@ class BaseProgressBar(qt.QtWidgets.QProgressBar):
     def set_state(self, state: ProgressState) -> None:
         """Updates the semantic state (color) without touching the numeric value."""
         self._state = state
-        self._apply_state_style()
+        self.setProperty("state", state.name.lower())  # "normal" / "success" / "error"
+        repolish(self)
 
-    def set_theme(self, theme: Theme) -> None:
-        """Re-colors the bar for a new Theme, preserving its current state."""
-        self._theme = theme
-        self._apply_state_style()
 
     def set_percentage_visible(self, visible: bool) -> None:
         """Toggles whether the percentage text is shown."""
@@ -100,22 +84,11 @@ class BaseProgressBar(qt.QtWidgets.QProgressBar):
         self.set_state(ProgressState.NORMAL)
         self.setValue(self.minimum())
 
-    def _apply_state_style(self) -> None:
-        state_colors = {
-            ProgressState.NORMAL:  self._theme.accent,
-            ProgressState.SUCCESS: self._theme.success,
-            ProgressState.ERROR:   self._theme.error,
-        }
-        chunk_color = state_colors.get(self._state, self._theme.accent)
-        self.setStyleSheet(self._BASE_STYLE.format(
-            chunk_color=chunk_color,
-        ))
-
 
 if __name__ == "__main__":
 
     from msl_tools.msl.ui.app.application_context import QtApplicationContext
-    from msl_tools.msl.ui.widgets.widget_playground_dialog import WidgetPlaygroundDialog
+    from msl_tools.msl.ui.widgets.themed_widget_playground_dialog import ThemedWidgetPlaygroundDialog
 
     with QtApplicationContext():
         bar_normal = BaseProgressBar()
@@ -132,14 +105,9 @@ if __name__ == "__main__":
         bar_busy = BaseProgressBar(show_percentage=False)
         bar_busy.set_indeterminate(True)
 
-        bar_dark = BaseProgressBar(theme=ThemeRegistry.fallback("dark"))
-        bar_dark.set_progress(65)
-
-        dialog = WidgetPlaygroundDialog()
-        # dialog.setStyleSheet("background-color: rgb(0, 0, 0);")
+        dialog = ThemedWidgetPlaygroundDialog()
         dialog.add_case("Normal", bar_normal)
         dialog.add_case("Success", bar_success)
         dialog.add_case("Error", bar_error)
         dialog.add_case("Indeterminate", bar_busy)
-        dialog.add_case("Dark theme", bar_dark)
         dialog.show()

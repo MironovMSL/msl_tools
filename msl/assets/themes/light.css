@@ -1,0 +1,28 @@
+/*
+ * msl_tools theme palette: "light" (theme name = file name).
+ *
+ * The single source of truth for this theme's colors. Only `--name: value;`
+ * declarations are read; selectors, comments and anything else are ignored,
+ * so the file stays valid CSS and editors show color swatches + a picker.
+ *
+ * Tokens are named by UI role, not appearance. Any token here can be used in
+ * ui/theme/base.qss as var(--name); tokens that Python widgets read directly
+ * are also fields of core/theme/theme.py:Theme (--text-primary <-> text_primary).
+ * A token missing here falls back to the "light" palette's value.
+ */
+:root {
+    /* text */
+    --text-primary:      #0a0a0a;
+    --text-secondary:    #878787;
+
+    /* surfaces & lines */
+    --surface:           #ffffff;
+    --chrome-background: #dae5f1;
+    --border:            #3a3a3a;
+
+    /* brand & semantic */
+    --accent:            #2f7dd1;
+    --success:           #4caf50;
+    --warning:           #ff9800;
+    --error:             #f44336;
+}

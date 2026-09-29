@@ -1,5 +1,4 @@
 import msl_tools.msl.ui.qt_bindings as qt
-from msl_tools.msl.core.theme import Theme
 from msl_tools.msl.ui.widgets.atoms.header.base_nav_button import BaseNavButton
 from msl_tools.msl.ui.widgets.atoms.header.close_nav_button import CloseNavButton
 from msl_tools.msl.ui.widgets.atoms.header.minimize_nav_button import MinimizeNavButton

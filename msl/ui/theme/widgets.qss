@@ -1,0 +1,149 @@
+/*
+ * msl_tools custom-widget styles (template) — appended after base.qss.
+ *
+ * Custom-painted widgets expose their colors as Qt properties
+ * (ui/theme/qss.py:color_property); `qproperty-<name>` sets them. Qt re-applies
+ * these on every stylesheet change, so theme switches and hot reload repaint
+ * these widgets with no set_theme() calls.
+ *
+ * State lives in dynamic properties selected with [name="value"]; widgets
+ * call repolish() after changing one.
+ *
+ * Type selectors are Python class names and also match subclasses
+ * (a BaseCheckbox rule styles every BaseCheckbox subclass).
+ */
+
+/* --- GlyphButton ------------------------------------------------------------ */
+
+GlyphButton {
+    qproperty-glyphColor:            var(--text-secondary);
+    qproperty-activeGlyphColor:      var(--text-primary);
+    qproperty-highlightColor:        alpha(var(--text-primary), 11%);
+    qproperty-pressedHighlightColor: alpha(var(--text-primary), 21.6%);
+}
+
+/* --- IconPushButton: framed button with a QSS-tinted one-color icon ------------ */
+
+IconPushButton {
+    qproperty-iconColor: var(--text-primary);
+    padding: 0px;   /* the base 4px 10px leaves no room for an icon in a ~26px button */
+}
+
+/* --- BaseCheckbox ------------------------------------------------------------ */
+
+BaseCheckbox {
+    qproperty-boxColor:         var(--surface);
+    qproperty-borderColor:      var(--border);
+    qproperty-hoverBorderColor: var(--accent);
+    qproperty-fillColor:        var(--accent);
+    qproperty-checkmarkColor:   var(--surface);
+    qproperty-textColor:        var(--text-primary);
+}
+
+/* --- BaseProgressBar: chunk color per `state` -------------------------------- */
+
+BaseProgressBar::chunk                  { background-color: var(--accent); }
+BaseProgressBar[state="success"]::chunk { background-color: var(--success); }
+BaseProgressBar[state="error"]::chunk   { background-color: var(--error); }
+
+/* --- VersionStatusWidget: status color per `status` -------------------------- */
+
+VersionStatusWidget QLabel#versionPrefix {
+    color: var(--text-secondary);
+    font-size: 12px;
+}
+VersionStatusWidget QLabel#versionValue,
+VersionStatusWidget QLabel#versionStatus {
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 600;
+}
+VersionStatusWidget QLabel#versionStatus[status="up_to_date"]       { color: var(--success); }
+VersionStatusWidget QLabel#versionStatus[status="update_available"] { color: var(--warning); }
+VersionStatusWidget QLabel#versionStatus[status="not_installed"]    { color: var(--text-secondary); }
+VersionStatusWidget QLabel#versionStatus[status="unknown"]          { color: var(--error); }
+
+/* --- BasePathWidget ------------------------------------------------------------ */
+
+BasePathWidget QLabel#pathLabel {
+    color: var(--text-secondary);
+}
+
+/* --- HubWindow sidebar ----------------------------------------------------------- */
+
+/* Flat entries on the window chrome; the checked one takes the page card's
+   color (--surface), so it reads as connected to the page it opened. */
+QPushButton#hubNavButton {
+    background-color: transparent;
+    border: none;
+    border-radius: 12px;
+    padding: 6px 10px;
+    text-align: left;
+    color: var(--text-primary);
+}
+QPushButton#hubNavButton:hover {
+    background-color: alpha(var(--text-primary), 8%);
+}
+QPushButton#hubNavButton:pressed {
+    background-color: alpha(var(--text-primary), 14%);
+    color: var(--text-primary);
+}
+QPushButton#hubNavButton:checked {
+    background-color: var(--surface);
+    font-weight: 600;
+}
+
+/* --- ConfirmDialog (ui/widgets/windows/confirm_dialog.py) ----------------------- */
+
+ConfirmDialog QLabel#confirmDetails {
+    color: var(--text-secondary);
+}
+/* Primary choice: accent-filled, like a pressed button at rest. */
+ConfirmDialog QPushButton#confirmPrimary {
+    background-color: var(--accent);
+    color: var(--surface);
+    border: 1px solid var(--accent);
+}
+ConfirmDialog QPushButton#confirmPrimary:hover {
+    background-color: alpha(var(--accent), 85%);
+}
+
+/* --- compositions ------------------------------------------------------------------ */
+
+/* Card behind the item being dragged (DraggableList drag cursor image). */
+DraggableList {
+    qproperty-dragBackgroundColor: var(--surface);
+    qproperty-dragBorderColor:     alpha(var(--accent), 60%);
+}
+
+BulkActionBar QLabel#bulkCount {
+    color: var(--accent);
+}
+
+InstallPathWidget QLabel#installHint {
+    color: var(--text-secondary);
+    font-size: 11px;
+}
+
+EnvVarRow {
+    qproperty-selectedColor: alpha(var(--accent), 14.9%);
+}
+
+/* --- CodeEditor ------------------------------------------------------------------ */
+
+CodeEditor {
+    background-color: var(--surface);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    selection-background-color: var(--accent);
+
+    qproperty-keywordColor:           var(--accent);
+    qproperty-definitionColor:        var(--warning);
+    qproperty-numberColor:            var(--warning);
+    qproperty-stringColor:            var(--success);
+    qproperty-commentColor:           var(--text-secondary);
+    qproperty-lineNumberColor:        var(--text-secondary);
+    qproperty-currentLineNumberColor: var(--text-primary);
+    qproperty-currentLineColor:       alpha(var(--text-primary), 8.63%);
+}

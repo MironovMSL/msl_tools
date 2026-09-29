@@ -3,14 +3,19 @@ import shiboken6
 
 import msl_tools.msl.ui.qt_bindings as qt
 from msl_tools.msl.core.theme import Theme, ThemeRegistry
+from msl_tools.msl.ui.theme.qss import color_property
 
 
 class BaseCheckbox(qt.QtWidgets.QAbstractButton):
     """Self-painting checkbox atom: rounded box + animated fill + checkmark,
     label drawn alongside. Fully custom paint — no reliance on native
-    QCheckBox styling, so it stays visually consistent across themes without
-    depending on global QSS (see StylesheetBuilder's exclusion policy for
-    state-driven widgets).
+    QCheckBox styling.
+
+    Colors are Qt properties set by the window stylesheet (ui/theme/
+    widgets.qss): boxColor, borderColor, hoverBorderColor, fillColor,
+    checkmarkColor, textColor. Until it applies (or outside a styled window) they hold the default
+    theme's colors. The check animation stays
+    in code.
 
     Signals:
         toggled(bool) — inherited from QAbstractButton, fires on check state
@@ -23,7 +28,14 @@ class BaseCheckbox(qt.QtWidgets.QAbstractButton):
     BORDER_WIDTH  = 1.5
     ANIM_DURATION = 280
 
-    def __init__(self, text: str = "", theme: Theme | None = None, parent=None):
+    boxColor         = color_property("_box_color")
+    borderColor      = color_property("_border_color")
+    hoverBorderColor = color_property("_hover_border_color")
+    fillColor        = color_property("_fill_color")
+    checkmarkColor   = color_property("_checkmark_color")
+    textColor        = color_property("_text_color")
+
+    def __init__(self, text: str = "", parent=None):
         super().__init__(parent)
         self.setText(text)
         self.setCheckable(True)
@@ -31,7 +43,7 @@ class BaseCheckbox(qt.QtWidgets.QAbstractButton):
         self.setSizePolicy(qt.QtWidgets.QSizePolicy.Policy.Preferred,
                             qt.QtWidgets.QSizePolicy.Policy.Fixed)
 
-        self._theme = theme or ThemeRegistry.fallback()
+        self._seed_colors(ThemeRegistry.fallback())
         self._hovered = False
         self._check_progress = 1.0 if self.isChecked() else 0.0
 
@@ -87,9 +99,15 @@ class BaseCheckbox(qt.QtWidgets.QAbstractButton):
 
     # --- theming -------------------------------------------------------
 
-    def set_theme(self, theme: Theme) -> None:
-        self._theme = theme
-        self.update()
+    def _seed_colors(self, theme: Theme) -> None:
+        """Defaults until QSS applies — same mapping as widgets.qss."""
+        self._box_color          = qt.QtGui.QColor(theme.surface)
+        self._border_color       = qt.QtGui.QColor(theme.border)
+        self._hover_border_color = qt.QtGui.QColor(theme.accent)
+        self._fill_color         = qt.QtGui.QColor(theme.accent)
+        self._checkmark_color    = qt.QtGui.QColor(theme.surface)
+        self._text_color         = qt.QtGui.QColor(theme.text_primary)
+
 
     # --- geometry --------------------------------------------------------
 
@@ -128,20 +146,19 @@ class BaseCheckbox(qt.QtWidgets.QAbstractButton):
             text_rect = qt.QtCore.QRectF(
                 box_rect.right() + self.BOX_SPACING, 0,
                 self.width() - box_rect.right() - self.BOX_SPACING, self.height())
-            painter.setPen(qt.QtGui.QColor(self._theme.text_primary))
+            painter.setPen(self._text_color)
             painter.drawText(text_rect, int(qt.QtCore.Qt.AlignmentFlag.AlignVCenter), self.text())
 
         painter.end()
 
     def _paint_box(self, painter: qt.QtGui.QPainter, rect: qt.QtCore.QRectF) -> None:
-        border_color = qt.QtGui.QColor(self._theme.accent if self._hovered else self._theme.border)
+        border_color = self._hover_border_color if self._hovered else self._border_color
 
         path = qt.QtGui.QPainterPath()
         path.addRoundedRect(rect, self.CORNER_RADIUS, self.CORNER_RADIUS)
 
-        base_color = qt.QtGui.QColor(self._theme.surface)
         painter.setPen(qt.QtGui.QPen(border_color, self.BORDER_WIDTH))
-        painter.setBrush(base_color)
+        painter.setBrush(self._box_color)
         painter.drawPath(path)
 
         if self._check_progress <= 0.0:
@@ -158,7 +175,7 @@ class BaseCheckbox(qt.QtWidgets.QAbstractButton):
         fill_path.addRoundedRect(fill_rect, self.CORNER_RADIUS * scale, self.CORNER_RADIUS * scale)
 
         painter.setPen(qt.QtCore.Qt.PenStyle.NoPen)
-        painter.setBrush(qt.QtGui.QColor(self._theme.accent))
+        painter.setBrush(self._fill_color)
         painter.drawPath(fill_path)
 
     def _paint_checkmark(self, painter: qt.QtGui.QPainter, rect: qt.QtCore.QRectF) -> None:
@@ -178,9 +195,8 @@ class BaseCheckbox(qt.QtWidgets.QAbstractButton):
         check_path.lineTo(p2)
         check_path.lineTo(p3)
 
-        # Icon color mirrors QPushButton:pressed convention already in
-        # StylesheetBuilder (accent background -> theme.surface foreground).
-        pen = qt.QtGui.QPen(qt.QtGui.QColor(self._theme.surface), 2.2,
+        # Mirrors QPushButton:pressed in base.qss (accent background, surface foreground).
+        pen = qt.QtGui.QPen(self._checkmark_color, 2.2,
                              qt.QtCore.Qt.PenStyle.SolidLine,
                              qt.QtCore.Qt.PenCapStyle.RoundCap,
                              qt.QtCore.Qt.PenJoinStyle.RoundJoin)
@@ -191,13 +207,12 @@ class BaseCheckbox(qt.QtWidgets.QAbstractButton):
 
 if __name__ == "__main__":
     from msl_tools.msl.ui.app.application_context import QtApplicationContext
-    from msl_tools.msl.ui.widgets.widget_playground_dialog import WidgetPlaygroundDialog
+    from msl_tools.msl.ui.widgets.themed_widget_playground_dialog import ThemedWidgetPlaygroundDialog
 
     with QtApplicationContext():
-        dialog = WidgetPlaygroundDialog()
-        dialog.add_case("BaseCheckbox (light)",
-                         BaseCheckbox("use package folder as install path"))
-        dialog.add_case("BaseCheckbox (dark)",
-                         BaseCheckbox("use package folder as install path",
-                                      theme=ThemeRegistry.fallback("dark")))
+        dialog = ThemedWidgetPlaygroundDialog()
+        dialog.add_case("BaseCheckbox", BaseCheckbox("use package folder as install path"))
+        checked = BaseCheckbox("checked")
+        checked.set_checked_immediate(True)
+        dialog.add_case("BaseCheckbox (checked)", checked)
         dialog.show()

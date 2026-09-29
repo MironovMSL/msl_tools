@@ -1,12 +1,13 @@
 # tools/desktop/maya_gate/variable_adder.py
 import msl_tools.msl.ui.qt_bindings as qt
+from msl_tools.msl.tools.desktop.maya_gate import maya_variables
 
 
 class EnvVariableAdder(qt.QtWidgets.QWidget):
     """Row for adding a new environment variable to Maya Gate's config —
     either pick a known Maya variable (added to whichever environment is
-    currently selected) or type a custom one (always added to the fixed
-    "Additional" section, applied regardless of environment).
+    currently selected) or type a custom one (added to the CURRENT
+    environment's "Custom Variables" group).
 
     That known-vs-custom split isn't just labeling — it's real routing:
     in the original (MSL_MayaGate's EnvVariableAdder +
@@ -23,14 +24,10 @@ class EnvVariableAdder(qt.QtWidgets.QWidget):
         known_variable_added(str) — name picked from the known-variables
             dropdown; the caller adds it to the CURRENT environment.
         custom_variable_added(str) — freeform name typed by the user; the
-            caller adds it to the "Additional" section.
+            caller adds it to the current environment's "Custom Variables" group.
     """
 
-    KNOWN_VARIABLES = [
-        "MAYA_PLUG_IN_PATH", "MAYA_MODULE_PATH", "MAYA_SCRIPT_PATH", "MAYA_SHELF_PATH",
-        "XBMLANGPATH", "MAYA_APP_DIR", "MAYA_ENV_DIR", "MAYA_LOCATION", "PYTHONPATH", "TEMP",
-        "MAYA_PROJECT", "MAYA_SHADER_PATH", "MAYA_ICON_PATH",
-    ]
+    KNOWN_VARIABLES = maya_variables.KNOWN_VARIABLES  # single source: maya_variables.py
 
     HEIGHT = 25
     COMBO_WIDTH = 170
@@ -57,7 +54,7 @@ class EnvVariableAdder(qt.QtWidgets.QWidget):
         self.known_combo.setFixedWidth(self.COMBO_WIDTH)
         self.known_combo.setCurrentIndex(-1)
         self.known_combo.setEditable(True)
-        self.known_combo.lineEdit().setPlaceholderText("Maya Variables")
+        self.known_combo.lineEdit().setPlaceholderText("Maya variable…")
 
         completer = qt.QtWidgets.QCompleter(self.KNOWN_VARIABLES, self.known_combo)
         completer.setCaseSensitivity(qt.QtCore.Qt.CaseSensitivity.CaseInsensitive)
@@ -65,7 +62,7 @@ class EnvVariableAdder(qt.QtWidgets.QWidget):
         self.known_combo.setCompleter(completer)
 
         self.custom_line_edit = qt.QtWidgets.QLineEdit()
-        self.custom_line_edit.setPlaceholderText("New Variable")
+        self.custom_line_edit.setPlaceholderText("Custom variable…")
         self.custom_line_edit.setFixedWidth(self.LINE_EDIT_WIDTH)
 
         self.add_custom_button = qt.QtWidgets.QPushButton("+")

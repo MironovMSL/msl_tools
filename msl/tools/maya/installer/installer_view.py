@@ -75,24 +75,19 @@ class InstallerView(FramelessDialog):
         self.create_widgets()
         self.create_layouts()
         self.create_connections()
-        self._apply_installer_theme(self.UI_CORE.themeManager.current_theme)
 
     def create_widgets(self):
         self.btn_install   = qt.QtWidgets.QPushButton("install")
         self.btn_uninstall = qt.QtWidgets.QPushButton("uninstall")
 
-        current_theme = self.UI_CORE.themeManager.current_theme
-
         self.InstallPathWidget = InstallPathWidget(default_path=self.default_install_path,
                                                    package_path=self.package_install_path,
-                                                   state_checkbox=self.use_package_state,
-                                                   theme=current_theme)
+                                                   state_checkbox=self.use_package_state)
 
         self.VersionStatusWidget = VersionStatusWidget(package_version=self.msl_tool_version,
-                                                       info=self.install_info,
-                                                       theme=current_theme)
+                                                       info=self.install_info)
 
-        self.BaseProgressBar = BaseProgressBar(theme=current_theme)
+        self.BaseProgressBar = BaseProgressBar()
 
     def create_layouts(self):
         button_layout = qt.QtWidgets.QHBoxLayout()
@@ -125,19 +120,8 @@ class InstallerView(FramelessDialog):
 
         self.InstallPathWidget.use_package_folder_toggled.connect(self.set_use_package_state)
         self.InstallPathWidget.path_changed.connect(self.on_path_edited)
-
-        # Deliberately NOT named _on_theme_changed — that name is owned by
-        # FramelessDialog and connecting to it here would shadow the base
-        # class's chrome theming (see class docstring notes above).
-        self.UI_CORE.themeManager.theme_changed.connect(self._apply_installer_theme)
-
-    def _apply_installer_theme(self, theme) -> None:
-        """Forwards a theme switch to every themed child widget owned by
-        this view. FramelessDialog's own theme_changed handler (chrome,
-        buttons, snap flyout) runs independently via its own connection."""
-        self.InstallPathWidget.set_theme(theme)
-        self.VersionStatusWidget.set_theme(theme)
-        self.BaseProgressBar.set_theme(theme)
+        # No theme forwarding needed: the child widgets are colored by the
+        # window stylesheet, which FramelessDialog re-applies on theme changes.
 
     def set_use_package_state(self, checked: bool):
         self.use_package_state = checked

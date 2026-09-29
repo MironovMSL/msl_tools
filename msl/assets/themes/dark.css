@@ -1,0 +1,20 @@
+/*
+ * msl_tools theme palette: "dark" (theme name = file name).
+ * See light.css for how palette files work.
+ */
+:root {
+    /* text */
+    --text-primary:      #e8e8e8;
+    --text-secondary:    #9a9a9a;
+
+    /* surfaces & lines */
+    --surface:           #2b2b2b;
+    --chrome-background: #3f4652;
+    --border:            #4a4a4a;
+
+    /* brand & semantic */
+    --accent:            #4d96ff;
+    --success:           #5fbf6b;
+    --warning:           #ffab40;
+    --error:             #ff5c4d;
+}

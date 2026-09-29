@@ -1,13 +1,9 @@
 {
-    "Dev": {
-        "PYTHONPATH": "H:/Scripts",
-        "TEMP": "H:/Temp"
-    },
     "Playground": {
         "MAYA_APP_DIR": "H:/Demo/maya_app_dir",
         "MAYA_MODULE_PATH": "H:/Demo/maya_module_path",
-        "PYTHONPATH": "H:/Demo/pythonpath",
         "MAYA_SCRIPT_PATH": "H:/Demo/maya_script_path",
+        "PYTHONPATH": "H:/Demo/pythonpath",
         "XBMLANGPATH": "H:/Demo/xbmlangpath",
         "TEMP": "H:/Demo/temp"
     }

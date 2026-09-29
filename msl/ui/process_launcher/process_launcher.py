@@ -1,28 +1,44 @@
-from PySide6 import QtCore, QtGui
-from pathlib import Path
 import logging
+from pathlib import Path
 
-from msl_tools.msl.core.fs.paths import Paths
+import msl_tools.msl.ui.qt_bindings as qt
 from msl_tools.msl.core.fs.maya_paths import MayaPaths
+from msl_tools.msl.core.fs.system_info import SystemInfo
 
 logger = logging.getLogger(__name__)
 
 
 class ProcessLauncher:
+    """Starts external programs (Maya, mayapy, the file explorer, a browser).
+
+    Lives in ui/, not core/, because it is built on QProcess /
+    QDesktopServices. Callers are Qt pages anyway (the hub's tools).
+    """
 
     @classmethod
     def launch_detached(cls, program: str | Path, *, arguments: list[str] | None = None,
-                         environment: dict[str, str] | None = None,
-                         working_dir: str | Path | None = None) -> bool:
-        """Запускает внешнее приложение отдельным процессом."""
+                        environment: dict[str, str] | None = None,
+                        working_dir: str | Path | None = None) -> bool:
+        """Starts `program` as a separate, detached process.
+
+        Args:
+            program: Executable path.
+            arguments: Command-line arguments.
+            environment: Variables added on top of the system environment
+                (overriding same-named ones); None = inherit it unchanged.
+            working_dir: Working directory for the process.
+
+        Returns:
+            True if the process was started.
+        """
         program = Path(program)
         if not program.exists():
             logger.warning(f"Unable to launch process. Missing executable: {program}")
             return False
 
-        process = QtCore.QProcess()
+        process = qt.QtCore.QProcess()
         if environment is not None:
-            process_env = QtCore.QProcessEnvironment.systemEnvironment()
+            process_env = qt.QtCore.QProcessEnvironment.systemEnvironment()
             for key, value in environment.items():
                 process_env.insert(key, value)
             process.setProcessEnvironment(process_env)
@@ -40,7 +56,7 @@ class ProcessLauncher:
 
     @classmethod
     def launch_maya(cls, *, version: str | None = None, environment: dict[str, str] | None = None) -> bool:
-        """Запускает последнюю обнаруженную (или указанную) версию Maya."""
+        """Launches the given (or the latest detected) Maya version."""
         executable = MayaPaths.get_latest_executable(version) if version else MayaPaths.get_latest_executable()
         if executable is None:
             logger.warning("Unable to launch Maya. No installation detected.")
@@ -49,7 +65,7 @@ class ProcessLauncher:
 
     @classmethod
     def run_script_with_mayapy(cls, script_path: str | Path, *, version: str | None = None) -> bool:
-        """Запускает Python-скрипт через headless mayapy."""
+        """Runs a Python script with headless mayapy."""
         script_path = Path(script_path)
         if not script_path.exists():
             logger.warning(f"Unable to run script. Missing file: {script_path}")
@@ -64,18 +80,17 @@ class ProcessLauncher:
 
     @classmethod
     def open_file_explorer(cls, path: str | Path) -> bool:
-        """Открывает системный проводник/Finder на указанном пути."""
+        """Opens the system file explorer / Finder at `path` (a file is selected)."""
         path = Path(path)
         if not path.exists():
             logger.warning(f"Unable to open location. Missing path: {path}")
             return False
 
-        system = Paths.get_system()
-        if system == Paths.OS_WINDOWS:
-            explorer = Path(QtCore.QDir.toNativeSeparators(str(Path(Paths.get_home_dir().drive) / "Windows" / "explorer.exe")))
+        system = SystemInfo.get_system()
+        if system == SystemInfo.OS_WINDOWS:
             args = [str(path)] if path.is_dir() else ["/select,", str(path)]
             return cls.launch_detached(r"C:\Windows\explorer.exe", arguments=args)
-        elif system == Paths.OS_MAC:
+        elif system == SystemInfo.OS_MAC:
             return cls.launch_detached("/usr/bin/open", arguments=["-R", str(path)])
         else:
             logger.warning(f'Unable to open file explorer. Unsupported system: "{system}"')
@@ -83,5 +98,5 @@ class ProcessLauncher:
 
     @classmethod
     def open_url_in_browser(cls, url: str) -> bool:
-        """Открывает URL в браузере по умолчанию."""
-        return bool(QtGui.QDesktopServices.openUrl(QtCore.QUrl(url)))
+        """Opens `url` in the default browser."""
+        return bool(qt.QtGui.QDesktopServices.openUrl(qt.QtCore.QUrl(url)))

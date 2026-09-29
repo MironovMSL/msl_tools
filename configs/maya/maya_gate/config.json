@@ -1,30 +1,38 @@
 {
-    "<default>": {},
+    "<default>": {
+        "PYTHONPATH": "H:/ProjectsDev/MSL_Others/"
+    },
     "Stable": {
-        "MAYA_MODULE_PATH": "йцауйцуа"
+        "PYTHONPATH": "H:/ProjectsDev/MSL_Others/",
+        "MAYA_SCRIPT_PATH": "H:/ProjectsDev/MSL_Others/;H:/ProjectsDev/MSL_Others/MSL_PySide6_CustomWidgets;H:/ProjectsDev/MSL_Others/MSL_PySide6_CustomWidgets/CustomWidgets"
     },
     "Dev": {
-        "MAYA_SHELF_PATH": "",
-        "MAYA_ICON_PATH": "",
-        "MAYA_APP_DIR": "",
-        "MAYA_MODULE_PATH": "",
-        "MAYA_SHADER_PATH": ""
+        "MAYA_SCRIPT_PATH": "H:/ProjectsDev/MSL_Others/;H:/ProjectsDev/MSL_Others/MSL_PySide6_CustomWidgets;H:/ProjectsDev/MSL_Others/MSL_PySide6_CustomWidgets/CustomWidgets",
+        "PYTHONPATH": "",
+        "TEMP": "H:/ProjectsDev/MSL_Others/MSL_PySide6_CustomWidgets/CustomWidgets",
+        "MAYA_APP_DIR": ""
     },
-    "Additional": {
-        "йцафывафывяяячсйфыва": "",
-        "йцафывафывяяячс": "",
-        "й": "",
-        "йц": "",
-        "йццаууаайцуайцуа": "",
-        "йццау": "",
-        "йццаууа": "",
-        "йццаууаа": "",
-        "йццаууаайцуа": ""
+    "custom": {
+        "<default>": {
+            "Test_ą": "H:/ProjectsDev/MSL_Others/msl_tools/msl/core",
+            "Test_b": "H:/ProjectsDev/MSL_Others/msl_tools/msl/ui",
+            "Test_c": "H:/ProjectsDev/MSL_Others/msl_tools/msl/__pycache__"
+        },
+        "Stable": {
+            "Test_ą": "H:/ProjectsDev/MSL_Others/msl_tools/msl/core",
+            "Test_b": "H:/ProjectsDev/MSL_Others/msl_tools/msl/ui",
+            "Test_c": "H:/ProjectsDev/MSL_Others/msl_tools/msl/__pycache__"
+        },
+        "Dev": {
+            "Test_b": "H:/ProjectsDev/MSL_Others/msl_tools/msl/ui",
+            "Test_c": "H:/ProjectsDev/MSL_Others/msl_tools/msl/__pycache__",
+            "Test_ą": "H:/ProjectsDev/MSL_Others/msl_tools/msl/core"
+        }
     },
     "_ui": {
         "collapsed": {
-            "environment": false,
-            "additional": false
+            "maya": false,
+            "custom": false
         }
     }
 }
