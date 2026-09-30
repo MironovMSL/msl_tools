@@ -109,15 +109,21 @@ class _ClipBody(qt.QtWidgets.QWidget):
 
 
 class _GroupHeader(qt.QtWidgets.QWidget):
-    """Private: clickable header row — fold arrow, title, row count, and the
-    bulk-action bar that fades in next to them while rows are selected.
-    Clicks on the bar's own buttons are consumed by them, so they never
-    toggle the fold."""
+    """Private: clickable header row — fold arrow, title, section, a row-count
+    badge, and the bulk-action bar that fades in next to them while rows are
+    selected. Clicks on the bar's own buttons are consumed by them, so they
+    never toggle the fold.
+
+    Labels are styled by maya_gate.qss via object names: groupTitle
+    (semibold), groupSection (dimmed "· Dev"), groupCount (accent pill).
+    hovered_changed(bool) lets the group paint the header's hover tint
+    inside its frame."""
 
     HEIGHT = 24
     BULK_BAR_GAP = 16
 
     clicked = qt.QtCore.Signal()
+    hovered_changed = qt.QtCore.Signal(bool)
 
     def __init__(self, left_inset: int = 4, parent=None):
         super().__init__(parent)
@@ -126,8 +132,12 @@ class _GroupHeader(qt.QtWidgets.QWidget):
 
         self._arrow = _FoldArrow()
         self._title_label = qt.QtWidgets.QLabel()
+        self._title_label.setObjectName("groupTitle")
+        self._section_label = qt.QtWidgets.QLabel()
+        self._section_label.setObjectName("groupSection")
         self._count_label = qt.QtWidgets.QLabel()
-        self._count_label.setEnabled(False)  # dimmed: secondary info
+        self._count_label.setObjectName("groupCount")
+        self._count_label.setAlignment(qt.QtCore.Qt.AlignmentFlag.AlignCenter)
         self.bulk_bar = BulkActionBar()
         self.bulk_bar.setCursor(qt.QtCore.Qt.CursorShape.ArrowCursor)
 
@@ -136,16 +146,27 @@ class _GroupHeader(qt.QtWidgets.QWidget):
         layout.setSpacing(4)
         layout.addWidget(self._arrow)
         layout.addWidget(self._title_label)
+        layout.addWidget(self._section_label)
+        layout.addSpacing(2)
         layout.addWidget(self._count_label)
         layout.addSpacing(self.BULK_BAR_GAP)
         layout.addWidget(self.bulk_bar)
         layout.addStretch()
 
-    def set_title(self, title: str) -> None:
+    def set_title(self, title: str, section: str) -> None:
         self._title_label.setText(title)
+        self._section_label.setText(f"\u00b7 {section}")
 
     def set_count(self, count: int) -> None:
-        self._count_label.setText(f"({count})")
+        self._count_label.setText(str(count))
+
+    def enterEvent(self, event) -> None:
+        self.hovered_changed.emit(True)
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        self.hovered_changed.emit(False)
+        super().leaveEvent(event)
 
     def set_collapsed(self, collapsed: bool, animate: bool = False) -> None:
         self._arrow.set_expanded(not collapsed, animate)
@@ -199,29 +220,32 @@ class CollapsibleVariableGroup(qt.QtWidgets.QWidget):
     # Column LEFT of the frame for the rows' drag handles (Notion's
     # page-margin handles). The frame is painted from this x; owners that
     # want other content to line up with the frame indent it by this much.
-    SELECTION_GUTTER = 22
-    FRAME_RADIUS = 5
+    SELECTION_GUTTER      = 22
+    FRAME_RADIUS          = 5
     NAME_COLUMN_MAX_WIDTH = 260    # longer names are clipped (full name in the tooltip)
     # Fold animation (see _run_fold_animation). Stagger shrinks for long lists
     # so the whole cascade never takes longer than MAX_TOTAL_STAGGER_MS + one row.
-    ROW_ANIMATION_MS = 280
-    ROW_STAGGER_MS = 40
-    MAX_TOTAL_STAGGER_MS = 240
-    ROW_SLIDE_PX = 50
-    BODY_FOLD_MS = 500             # how long the empty body takes to fold shut / unfold open
-    BODY_FOLD_AFTER_ROW = 0.4      # collapse: fold starts this far (0..1) into the last row's fade
+    ROW_ANIMATION_MS       = 280
+    ROW_STAGGER_MS         = 40
+    MAX_TOTAL_STAGGER_MS   = 240
+    ROW_SLIDE_PX           = 50
+    BODY_FOLD_MS           = 500   # how long the empty body takes to fold shut / unfold open
+    BODY_FOLD_AFTER_ROW    = 0.4   # collapse: fold starts this far (0..1) into the last row's fade
     ROWS_AFTER_BODY_UNFOLD = 0.4   # expand: rows start dropping in this far (0..1) into the unfold
 
     # Easing curves — class-level so they can be tuned live (see the __main__
     # playground at the bottom of this file) or overridden per instance.
-    ROW_EXPAND_EASING = qt.QtCore.QEasingCurve.Type.OutQuint
+    ROW_EXPAND_EASING   = qt.QtCore.QEasingCurve.Type.OutQuint
     ROW_COLLAPSE_EASING = qt.QtCore.QEasingCurve.Type.InQuint
-    BODY_UNFOLD_EASING = qt.QtCore.QEasingCurve.Type.InOutQuint
-    BODY_FOLD_EASING = qt.QtCore.QEasingCurve.Type.InOutQuint
+    BODY_UNFOLD_EASING  = qt.QtCore.QEasingCurve.Type.InOutQuint
+    BODY_FOLD_EASING    = qt.QtCore.QEasingCurve.Type.InOutQuint
 
     collapsed_changed = qt.QtCore.Signal(bool)
 
     frameColor = color_property("_frame_color")   # set by maya_gate.qss
+    headerHoverColor = color_property("_header_hover_color")
+    dividerColor = color_property("_divider_color")
+    fillColor = color_property("_fill_color")     # set by maya_gate.qss
 
     def __init__(self, title: str, section: str, config, collapsed: bool = False,
                  copy_targets: Sequence[str] = (),
@@ -248,6 +272,10 @@ class CollapsibleVariableGroup(qt.QtWidgets.QWidget):
         self._copy_targets = list(copy_targets)
         self._browse_mode_for = browse_mode_for or (lambda _name: BrowseMode.REPLACE)
         self._frame_color = qt.QtGui.QColor(ThemeRegistry.fallback().border)  # until QSS applies
+        self._header_hover_color = qt.QtGui.QColor(0, 0, 0, 0)
+        self._divider_color = qt.QtGui.QColor(ThemeRegistry.fallback().border)
+        self._header_hovered = False
+        self._fill_color = qt.QtGui.QColor(0, 0, 0, 0)  # unfilled until QSS applies
         self._collapsed = collapsed
         self._selected: set[str] = set()
         self._fold_animation: qt.QtCore.QParallelAnimationGroup | None = None
@@ -262,6 +290,7 @@ class CollapsibleVariableGroup(qt.QtWidgets.QWidget):
 
     def _build_widgets(self) -> None:
         self._header = _GroupHeader(left_inset=self.SELECTION_GUTTER + self.CONTENT_MARGIN)
+        self._header.hovered_changed.connect(self._on_header_hovered)
         self._build_bulk_actions()
         self.list = DraggableList(draggable=True)
         self.list.set_drop_indicator_inset(self.SELECTION_GUTTER + 2)  # keep "Drop Here" inside the frame
@@ -353,15 +382,39 @@ class CollapsibleVariableGroup(qt.QtWidgets.QWidget):
             row.set_selected(False)  # each emits selection_changed -> _on_row_selection_changed
 
     def paintEvent(self, event) -> None:
-        """Draws the group frame starting at SELECTION_GUTTER, so the rows'
-        drag-handle column visually sits outside it."""
+        """Draws the group panel starting at SELECTION_GUTTER, so the rows'
+        drag-handle column visually sits outside it: fill, the header's hover
+        tint (clipped to the header, so it follows the frame's rounded top),
+        the frame, and — while rows show — a divider under the header."""
         painter = qt.QtGui.QPainter(self)
         painter.setRenderHint(qt.QtGui.QPainter.RenderHint.Antialiasing)
+        frame = qt.QtCore.QRectF(self.rect()).adjusted(self.SELECTION_GUTTER + 0.5, 0.5, -0.5, -0.5)
+
+        painter.setPen(qt.QtCore.Qt.PenStyle.NoPen)
+        painter.setBrush(self._fill_color)
+        painter.drawRoundedRect(frame, self.FRAME_RADIUS, self.FRAME_RADIUS)
+
+        header_bottom = self._header.geometry().bottom() + 1
+        if self._header_hovered:
+            painter.save()
+            painter.setClipRect(qt.QtCore.QRectF(frame.left(), frame.top(), frame.width(), header_bottom))
+            painter.setBrush(self._header_hover_color)
+            painter.drawRoundedRect(frame, self.FRAME_RADIUS, self.FRAME_RADIUS)
+            painter.restore()
+
         painter.setPen(qt.QtGui.QPen(self._frame_color, 1))
         painter.setBrush(qt.QtCore.Qt.BrushStyle.NoBrush)
-        frame = qt.QtCore.QRectF(self.rect()).adjusted(self.SELECTION_GUTTER + 0.5, 0.5, -0.5, -0.5)
         painter.drawRoundedRect(frame, self.FRAME_RADIUS, self.FRAME_RADIUS)
+
+        if self._body.height() > 1:  # rows (partly) showing, also mid-fold
+            y = header_bottom + 0.5
+            painter.setPen(qt.QtGui.QPen(self._divider_color, 1))
+            painter.drawLine(qt.QtCore.QPointF(frame.left() + 1, y), qt.QtCore.QPointF(frame.right() - 1, y))
         painter.end()
+
+    def _on_header_hovered(self, hovered: bool) -> None:
+        self._header_hovered = hovered
+        self.update()
 
     # --- rows / persistence --------------------------------------------------
 
@@ -490,7 +543,7 @@ class CollapsibleVariableGroup(qt.QtWidgets.QWidget):
 
     def _update_title(self, section: str) -> None:
         self.setObjectName(f"CollapsibleVariableGroup_{section}")
-        self._header.set_title(f"{self._title} \u00b7 {section}")
+        self._header.set_title(self._title, section)
 
     def _update_state(self) -> None:
         self._align_name_column()
@@ -640,7 +693,7 @@ if __name__ == "__main__":
                    "InOutBack", "Linear"]
 
     with QtApplicationContext():
-        config = Resources().configsMayaMng.get_config("maya_gate_demo", defaults={})
+        config = Resources().configsDesktopHubMng.get_config("maya_gate_demo", defaults={})
         if not list(config["Playground"].keys()):
             for name in ("MAYA_APP_DIR", "MAYA_MODULE_PATH", "MAYA_SCRIPT_PATH",
                          "PYTHONPATH", "XBMLANGPATH", "TEMP"):

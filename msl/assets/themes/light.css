@@ -9,20 +9,83 @@
  * ui/theme/base.qss as var(--name); tokens that Python widgets read directly
  * are also fields of core/theme/theme.py:Theme (--text-primary <-> text_primary).
  * A token missing here falls back to the "light" palette's value.
+ *
+ * Surfaces, by role:
+ *   chrome-background  window frame: title bar + hub sidebar
+ *   surface            the page card and plain dialogs
+ *   surface-raised     panels on the page (variable groups), menus, combo popups
+ *   field              where you type: line edits, combo boxes, check boxes;
+ *                      field-top = the shade at a line edit's top edge
+ *   editor-background  the code editor's writing area
+ *   button-*           push buttons: top-lit gradient (top/bottom, + hover pair)
+ *   primary-*          the accent gradient of a primary button
+ *   on-accent          text / marks drawn on an accent fill
  */
 :root {
     /* text */
     --text-primary:      #0a0a0a;
-    --text-secondary:    #878787;
+    --text-secondary:    #6b7078;
 
-    /* surfaces & lines */
-    --surface:           #ffffff;
+    /* surfaces */
     --chrome-background: #dae5f1;
-    --border:            #3a3a3a;
+    --surface:           #ffffff;
+    --surface-raised:    #f5f7fa;
+    --field:             #ffffff;
+    --field-top:         #f1f3f6;   /* shade at a field's top edge: looks set in */
+    --editor-background: #f8f9fb;
+
+    /* push buttons: top-lit gradients (base.qss); primary = the accent one */
+    --button-top:          #ffffff;
+    --button-bottom:       #eef1f5;
+    --button-top-hover:    #ffffff;
+    --button-bottom-hover: #e3e9f0;
+    --primary-top:         #3f8ce0;
+    --primary-bottom:      #2869bd;
+
+    /* lines */
+    --border:            #c3c9d2;
 
     /* brand & semantic */
     --accent:            #2f7dd1;
+    --on-accent:         #ffffff;
+    --danger:            #e81123;   /* destructive: the window close button's hover */
+    --danger-pressed:    #c42b1c;
+    --on-danger:         #ffffff;
     --success:           #4caf50;
     --warning:           #ff9800;
     --error:             #f44336;
+
+    /* hub sidebar entries: vertical gradients for volume (widgets.qss).
+       Selected = lit from above and fading into the page card (--surface);
+       hover = a faint version of it over the chrome. Edges: a light line on
+       top, a dark one below — the "bevel" that makes it read as raised. */
+    --nav-top:          #ffffff;
+    --nav-bottom:       #f8fafd;
+    --nav-top-hover:    #e4ebf5;
+    --nav-bottom-hover: #dfe7f2;
+    --nav-edge-top:     #ffffff;
+    --nav-edge-bottom:  #cbd6e4;
+
+    /* combo boxes: a faint top-to-bottom gradient over the field color, and
+       the line that separates the arrow (base.qss) */
+    --combo-top:        #ffffff;
+    --combo-bottom:     #f2f4f7;
+    --combo-separator:  #dde2e8;
+
+    /* segmented control (SegmentedControl): sunken track, raised pill */
+    --segment-track-top: #e3e7ed;
+    --segment-track:     #edf0f4;
+    --segment-pill-top:  #ffffff;
+    --segment-pill:      #f8f9fb;
+
+    /* code editor syntax colors (CodeEditor, widgets.qss) — after VS Code Light+ */
+    --syntax-keyword:    #af00db;
+    --syntax-constant:   #0000ff;   /* True / False / None */
+    --syntax-self:       #001080;   /* self / cls */
+    --syntax-builtin:    #267f99;
+    --syntax-function:   #795e26;   /* names after def / class */
+    --syntax-decorator:  #795e26;
+    --syntax-string:     #a31515;
+    --syntax-number:     #098658;
+    --syntax-comment:    #008000;
 }

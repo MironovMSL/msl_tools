@@ -1,5 +1,6 @@
 # ui/widgets/atoms/surfaces/stable_scroll_area.py
 import msl_tools.msl.ui.qt_bindings as qt
+from msl_tools.msl.ui.widgets.atoms.scrollbars import SlimScrollBar
 
 
 class StableScrollArea(qt.QtWidgets.QScrollArea):
@@ -23,6 +24,7 @@ class StableScrollArea(qt.QtWidgets.QScrollArea):
         self.setFrameShape(qt.QtWidgets.QFrame.Shape.NoFrame)
         self.setHorizontalScrollBarPolicy(qt.QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setVerticalScrollBarPolicy(qt.QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        self.setVerticalScrollBar(SlimScrollBar(qt.QtCore.Qt.Orientation.Vertical))  # widens on hover
         self.viewport().setAutoFillBackground(False)
 
         self.verticalScrollBar().rangeChanged.connect(self._on_range_changed)

@@ -13,6 +13,21 @@
  * (a BaseCheckbox rule styles every BaseCheckbox subclass).
  */
 
+/* --- window buttons (frameless header: minimize / maximize / close) --------- */
+
+BaseNavButton {
+    qproperty-iconColor:      var(--text-primary);
+    qproperty-hoverIconColor: var(--text-primary);
+    qproperty-hoverColor:     alpha(var(--text-primary), 10%);
+    qproperty-pressedColor:   alpha(var(--text-primary), 16%);
+}
+/* Close: the conventional destructive red, white icon on it. */
+CloseNavButton {
+    qproperty-hoverIconColor: var(--on-danger);
+    qproperty-hoverColor:     var(--danger);
+    qproperty-pressedColor:   var(--danger-pressed);
+}
+
 /* --- GlyphButton ------------------------------------------------------------ */
 
 GlyphButton {
@@ -22,6 +37,55 @@ GlyphButton {
     qproperty-pressedHighlightColor: alpha(var(--text-primary), 21.6%);
 }
 
+/* --- SegmentedControl: sunken track, raised pill that slides ------------------ */
+
+SegmentedControl {
+    qproperty-trackTopColor:    var(--segment-track-top);
+    qproperty-trackColor:       var(--segment-track);
+    qproperty-borderColor:      var(--border);
+    qproperty-focusBorderColor: var(--accent);
+    qproperty-pillTopColor:     var(--segment-pill-top);
+    qproperty-pillColor:        var(--segment-pill);
+    qproperty-pillBorderColor:  var(--border);
+    qproperty-textColor:        var(--text-secondary);
+    qproperty-hoverTextColor:   var(--text-primary);
+    qproperty-activeTextColor:  var(--text-primary);
+}
+
+/* --- BaseTabBar: painted indicator that slides between tabs ------------------ */
+
+BaseTabBar {
+    qproperty-indicatorColor: var(--accent);
+}
+/* The indicator is painted; the tab keeps only the transparent 2px as its room. */
+BaseTabBar::tab:selected {
+    border-bottom: 2px solid transparent;
+}
+
+/* --- BaseComboBox: painted, animated arrow (turns up while the list is open) --- */
+
+BaseComboBox {
+    qproperty-arrowColor:      var(--text-secondary);
+    qproperty-arrowHoverColor: var(--text-primary);
+    qproperty-arrowOpenColor:  var(--accent);
+}
+/* The widget paints the arrow itself; keep base.qss's arrow SIZE (it sets the
+   SC_ComboBoxArrow rect the painting uses), drop its image. */
+BaseComboBox::down-arrow,
+BaseComboBox::down-arrow:hover,
+BaseComboBox::down-arrow:on,
+BaseComboBox::down-arrow:disabled {
+    image: none;
+}
+
+/* --- SlimScrollBar: painted handle, same colors as base.qss's QScrollBar::handle --- */
+
+SlimScrollBar {
+    qproperty-handleColor:        alpha(var(--text-primary), 22%);
+    qproperty-handleHoverColor:   alpha(var(--text-primary), 38%);
+    qproperty-handlePressedColor: alpha(var(--accent), 75%);
+}
+
 /* --- IconPushButton: framed button with a QSS-tinted one-color icon ------------ */
 
 IconPushButton {
@@ -29,14 +93,37 @@ IconPushButton {
     padding: 0px;   /* the base 4px 10px leaves no room for an icon in a ~26px button */
 }
 
+/* --- ApplicationButton: app tile (icon over name), card on hover ------------ */
+
+ApplicationButton {
+    qproperty-hoverColor:       alpha(var(--text-primary), 6%);
+    qproperty-hoverBorderColor: alpha(var(--border), 70%);
+}
+/* The icon is the tile's picture, not a framed button. */
+ApplicationButton QToolButton {
+    background: transparent;
+    border: none;
+    padding: 0px;
+}
+ApplicationButton QLabel#appName {
+    color: var(--text-primary);
+    font-weight: 600;
+}
+ApplicationButton QLabel#appName[busy="true"] {
+    color: var(--accent);
+}
+
 /* --- BaseCheckbox ------------------------------------------------------------ */
 
+/* Unchecked = sunken like a line edit; checked = the primary button's gradient. */
 BaseCheckbox {
-    qproperty-boxColor:         var(--surface);
+    qproperty-boxColor:         var(--field);
+    qproperty-boxTopColor:      var(--field-top);
     qproperty-borderColor:      var(--border);
-    qproperty-hoverBorderColor: var(--accent);
-    qproperty-fillColor:        var(--accent);
-    qproperty-checkmarkColor:   var(--surface);
+    qproperty-hoverBorderColor: alpha(var(--accent), 55%);
+    qproperty-fillColor:        var(--primary-bottom);
+    qproperty-fillTopColor:     var(--primary-top);
+    qproperty-checkmarkColor:   var(--on-accent);
     qproperty-textColor:        var(--text-primary);
 }
 
@@ -71,26 +158,56 @@ BasePathWidget QLabel#pathLabel {
 
 /* --- HubWindow sidebar ----------------------------------------------------------- */
 
-/* Flat entries on the window chrome; the checked one takes the page card's
-   color (--surface), so it reads as connected to the page it opened. */
-QPushButton#hubNavButton {
+/* Tiles (icon over a small label) on the window chrome, with volume from vertical gradients (--nav-*):
+   idle = flat, hover = a faint raised pill, pressed flips the gradient (lit
+   from below) and the bevel, so the pill looks pushed in. The OPEN tool's
+   pill — lit from above, its bottom fading into the page card — is painted
+   by HubSidebar under the tiles (so it can slide between them); the checked
+   tile itself stays transparent.
+   Idle keeps a transparent 1px border so entries don't shift on hover.
+   Icons (IconPushButton) follow the text: secondary, primary on the open
+   tool. That's a dynamic property, not :checked — Qt applies qproperty-*
+   only from rules without pseudo-states. */
+IconTileButton#hubNavButton {
     background-color: transparent;
-    border: none;
-    border-radius: 12px;
-    padding: 6px 10px;
-    text-align: left;
+    border: 1px solid transparent;
+    border-radius: 10px;
+    padding: 7px 2px 5px 2px;
+    font-size: 11px;
+    color: var(--text-secondary);
+    qproperty-iconColor: var(--text-secondary);
+}
+IconTileButton#hubNavButton[current="true"] {
+    qproperty-iconColor: var(--text-primary);
+}
+IconTileButton#hubNavButton:hover {
+    background-color: linear-gradient(to bottom, var(--nav-top-hover), var(--nav-bottom-hover));
+    border-color: alpha(var(--nav-edge-bottom), 40%);
+    border-top-color: alpha(var(--nav-edge-top), 40%);
     color: var(--text-primary);
 }
-QPushButton#hubNavButton:hover {
-    background-color: alpha(var(--text-primary), 8%);
-}
-QPushButton#hubNavButton:pressed {
-    background-color: alpha(var(--text-primary), 14%);
+IconTileButton#hubNavButton:checked {
+    background-color: transparent;
+    border: 1px solid transparent;
     color: var(--text-primary);
-}
-QPushButton#hubNavButton:checked {
-    background-color: var(--surface);
     font-weight: 600;
+}
+HubSidebar {
+    qproperty-pillTopColor:        var(--nav-top);
+    qproperty-pillColor:           var(--nav-bottom);
+    qproperty-pillEdgeTopColor:    var(--nav-edge-top);
+    qproperty-pillEdgeBottomColor: var(--nav-edge-bottom);
+}
+/* Version under the tools. */
+QLabel#hubFooter {
+    color: alpha(var(--text-secondary), 80%);
+    font-size: 10px;
+}
+IconTileButton#hubNavButton:pressed {
+    background-color: linear-gradient(to top, var(--nav-top-hover), var(--nav-bottom-hover));
+    border-color: var(--nav-edge-top);
+    border-top-color: var(--nav-edge-bottom);
+    color: var(--text-primary);
 }
 
 /* --- ConfirmDialog (ui/widgets/windows/confirm_dialog.py) ----------------------- */
@@ -98,21 +215,13 @@ QPushButton#hubNavButton:checked {
 ConfirmDialog QLabel#confirmDetails {
     color: var(--text-secondary);
 }
-/* Primary choice: accent-filled, like a pressed button at rest. */
-ConfirmDialog QPushButton#confirmPrimary {
-    background-color: var(--accent);
-    color: var(--surface);
-    border: 1px solid var(--accent);
-}
-ConfirmDialog QPushButton#confirmPrimary:hover {
-    background-color: alpha(var(--accent), 85%);
-}
+/* The primary choice is a QPushButton[primary="true"] (base.qss). */
 
 /* --- compositions ------------------------------------------------------------------ */
 
 /* Card behind the item being dragged (DraggableList drag cursor image). */
 DraggableList {
-    qproperty-dragBackgroundColor: var(--surface);
+    qproperty-dragBackgroundColor: var(--surface-raised);
     qproperty-dragBorderColor:     alpha(var(--accent), 60%);
 }
 
@@ -127,23 +236,36 @@ InstallPathWidget QLabel#installHint {
 
 EnvVarRow {
     qproperty-selectedColor: alpha(var(--accent), 14.9%);
+    qproperty-hoverColor:    alpha(var(--text-primary), 4%);
 }
 
 /* --- CodeEditor ------------------------------------------------------------------ */
 
+/* The writing area is the deepest surface: a "well" set into the page.
+   Syntax colors come from the palettes' --syntax-* tokens; focus takes the
+   accent border like a line edit. */
 CodeEditor {
-    background-color: var(--surface);
+    background-color: var(--editor-background);
     color: var(--text-primary);
     border: 1px solid var(--border);
     border-radius: 3px;
-    selection-background-color: var(--accent);
+    selection-background-color: alpha(var(--accent), 40%);
+    selection-color: var(--text-primary);
 
-    qproperty-keywordColor:           var(--accent);
-    qproperty-definitionColor:        var(--warning);
-    qproperty-numberColor:            var(--warning);
-    qproperty-stringColor:            var(--success);
-    qproperty-commentColor:           var(--text-secondary);
-    qproperty-lineNumberColor:        var(--text-secondary);
+    qproperty-keywordColor:           var(--syntax-keyword);
+    qproperty-constantColor:          var(--syntax-constant);
+    qproperty-selfColor:              var(--syntax-self);
+    qproperty-builtinColor:           var(--syntax-builtin);
+    qproperty-definitionColor:        var(--syntax-function);
+    qproperty-decoratorColor:         var(--syntax-decorator);
+    qproperty-numberColor:            var(--syntax-number);
+    qproperty-stringColor:            var(--syntax-string);
+    qproperty-commentColor:           var(--syntax-comment);
+    qproperty-lineNumberColor:        alpha(var(--text-secondary), 65%);
     qproperty-currentLineNumberColor: var(--text-primary);
-    qproperty-currentLineColor:       alpha(var(--text-primary), 8.63%);
+    qproperty-gutterDividerColor:     alpha(var(--border), 60%);
+    qproperty-currentLineColor:       alpha(var(--text-primary), 5%);
+}
+CodeEditor:focus {
+    border: 1px solid var(--accent);
 }

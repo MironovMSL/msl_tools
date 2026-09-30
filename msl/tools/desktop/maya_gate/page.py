@@ -4,6 +4,7 @@ from msl_tools.msl.core.resources import Resources
 from msl_tools.msl.core.fs.maya_paths import MayaPaths
 from msl_tools.msl.ui.process_launcher.process_launcher import ProcessLauncher
 from msl_tools.msl.ui.widgets.atoms.surfaces import StableScrollArea
+from msl_tools.msl.ui.widgets.atoms.tabs import BaseTabWidget
 from msl_tools.msl.tools.desktop.maya_gate.toolbar import MayaGateToolbar
 from msl_tools.msl.tools.desktop.maya_gate.version_row import MayaVersionRow
 from msl_tools.msl.tools.desktop.maya_gate.variable_group import CollapsibleVariableGroup
@@ -36,9 +37,11 @@ class MayaGatePage(qt.QtWidgets.QWidget):
     - "userSetup": a Python script Maya runs at startup next to the user's
       own userSetup.py (see UserSetupStore for how it's injected).
 
-    Config-backed via Resources().configsMayaMng.get_config("maya_gate")
-    — one JsonConfig replaces MSL_MayaGate's separate config.ini +
-    json_config.json; userSetup scripts are plain .py files next to it.
+    Config-backed via Resources().configsDesktopHubMng.get_config("maya_gate")
+    (configs/desktop/maya_gate/) — one JsonConfig replaces MSL_MayaGate's
+    separate config.ini + json_config.json; userSetup scripts are plain .py
+    files next to it. The page also remembers its own state there (year,
+    environment, tab, folded groups) and restores it on the next start.
 
     Resize handling deliberately NOT ported: the original chained
     `.update_size()` calls up to resize its own standalone top-level
@@ -50,29 +53,39 @@ class MayaGatePage(qt.QtWidgets.QWidget):
     DEFAULT_ENVIRONMENT = "Dev"
     TOOL_NAME = "maya_gate"
 
-    # Config layout:
-    #   "<env>":             Maya variables of that environment ("Maya Variables" group)
-    #   "custom": {"<env>":} its custom variables ("Custom Variables" group)
-    #   "_ui":               editor state (which groups are collapsed)
-    # _launch reads only the first two, for the chosen environment.
+    # Config layout (both variable branches have the same shape):
+    #   "maya":   {"<env>": {...}}  Maya variables per environment ("Maya Variables" group)
+    #   "custom": {"<env>": {...}}  custom variables per environment ("Custom Variables" group)
+    #   "_ui":    page state restored on start: picked year / environment,
+    #             open tab, folded groups. Never part of a launch.
+    # _launch reads only "maya"."<env>" + "custom"."<env>".
+    MAYA_KEY = "maya"
     CUSTOM_KEY = "custom"
     UI_SECTION = "_ui"
-    DEFAULTS = {**{env: {} for env in ENVIRONMENTS},
+    TAB_KEYS = ("variables", "user_setup")  # tab order; stored by key, not index
+    DEFAULTS = {MAYA_KEY: {env: {} for env in ENVIRONMENTS},
                 CUSTOM_KEY: {env: {} for env in ENVIRONMENTS},
-                UI_SECTION: {"collapsed": {"maya": False, "custom": False}}}
+                UI_SECTION: {"year": "", "environment": DEFAULT_ENVIRONMENT, "tab": TAB_KEYS[0],
+                             "collapsed": {"maya": False, "custom": False}}}
 
-    # Keys renamed with the "Maya Variables" / "Custom Variables" groups;
-    # _migrate_legacy_config() moves old configs over once.
+    # Older layouts, moved over once by _migrate_legacy_config(): Maya variables
+    # sat at the top level ("<env>": {...}), custom ones under "additional",
+    # and the fold flags were named "environment"/"additional".
     _LEGACY_CUSTOM_KEY = "additional"
     _LEGACY_COLLAPSED_KEYS = {"environment": "maya", "additional": "custom"}
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        configs = Resources().configsMayaMng
+        resources = Resources()
+        configs = resources.configsDesktopHubMng
+        self._logger = resources.logsDesktopHub.get(self.TOOL_NAME)
         self._config = configs.get_config(self.TOOL_NAME, defaults=self.DEFAULTS)
         self._migrate_legacy_config()
+        self._ui = self._config[self.UI_SECTION]
         self._user_setup_store = UserSetupStore(configs.base_dir / self.TOOL_NAME)
-        self._environment = self.DEFAULT_ENVIRONMENT
+        saved_environment = self._ui.get("environment")
+        self._environment = (saved_environment if saved_environment in self.ENVIRONMENTS
+                             else self.DEFAULT_ENVIRONMENT)
 
         self._build_widgets()
         self._build_layout()
@@ -81,33 +94,37 @@ class MayaGatePage(qt.QtWidgets.QWidget):
     def _build_widgets(self) -> None:
         installs = MayaPaths.get_available_installs()
         years = sorted(installs, key=int)
-        min_year = years[0] if years else ""
+        # The saved year only while that Maya is still installed; else the earliest one.
+        saved_year = self._ui.get("year")
+        year = saved_year if saved_year in years else (years[0] if years else "")
 
-        self._version_row = MayaVersionRow(min_year=min_year)
+        self._version_row = MayaVersionRow(min_year=year)
+        self._version_row.set_environment(self._environment)
         self._toolbar = MayaGateToolbar(
             years=years,
-            current_year=min_year,
+            current_year=year,
             environments=self.ENVIRONMENTS,
             current_environment=self._environment,
         )
 
-        self._tabs = qt.QtWidgets.QTabWidget()
-        self._tabs.setDocumentMode(True)
+        self._tabs = BaseTabWidget()  # sliding accent indicator
         # Line the tab bar up with the variable groups' frames (after their gutter).
         self._tabs.setStyleSheet(
             f"QTabWidget::tab-bar {{ left: {CollapsibleVariableGroup.SELECTION_GUTTER}px; }}")
         self._tabs.addTab(self._build_variables_tab(), "Variables")
         self._user_setup_tab = UserSetupTab(self._user_setup_store, self._environment)
         self._tabs.addTab(self._indented(self._user_setup_tab), "userSetup")
+        saved_tab = self._ui.get("tab")
+        self._tabs.setCurrentIndex(self.TAB_KEYS.index(saved_tab) if saved_tab in self.TAB_KEYS else 0)
 
     def _build_variables_tab(self) -> qt.QtWidgets.QWidget:
         self._adder = EnvVariableAdder()
-        collapsed = self._config[self.UI_SECTION]["collapsed"]
+        collapsed = self._ui["collapsed"]
+        # Both groups get a branch whose sections are the environments.
         self._maya_group = CollapsibleVariableGroup(
-            "Maya Variables", self._environment, self._config,
+            "Maya Variables", self._environment, self._config[self.MAYA_KEY],
             collapsed=bool(collapsed.get("maya", False)), copy_targets=self.ENVIRONMENTS,
             browse_mode_for=_browse_mode_for)
-        # Same group, pointed at the "custom" branch: its sections are the environments too.
         self._custom_group = CollapsibleVariableGroup(
             "Custom Variables", self._environment, self._config[self.CUSTOM_KEY],
             collapsed=bool(collapsed.get("custom", False)), copy_targets=self.ENVIRONMENTS,
@@ -140,13 +157,15 @@ class MayaGatePage(qt.QtWidgets.QWidget):
         layout = qt.QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(5, 5, 5, 5)
         layout.setSpacing(5)
-        layout.addWidget(self._toolbar)
+        layout.addWidget(self._indented(self._toolbar))  # environment lines up with the row below
         layout.addWidget(self._indented(self._version_row))
         layout.addWidget(self._tabs, 1)
 
     def _build_connections(self) -> None:
         self._toolbar.year_changed.connect(self._version_row.on_min_year_changed)
+        self._toolbar.year_changed.connect(lambda year: self._save_ui("year", year))
         self._toolbar.environment_changed.connect(self._on_environment_changed)
+        self._tabs.currentChanged.connect(lambda index: self._save_ui("tab", self.TAB_KEYS[index]))
         self._version_row.clicked.connect(self._launch)
 
         self._adder.known_variable_added.connect(self._maya_group.add_variable)
@@ -158,49 +177,77 @@ class MayaGatePage(qt.QtWidgets.QWidget):
             lambda state: self._save_collapsed("custom", state))
 
     def _migrate_legacy_config(self) -> None:
-        """One-time move of configs saved before the rename: "additional"
-        (custom variables) -> "custom", and the "_ui" collapsed flags
-        "environment"/"additional" -> "maya"/"custom". A name already present
-        under the new key wins; nothing else is dropped."""
+        """One-time move of configs saved in an older layout:
+        - Maya variables at the top level ("<env>": {...}) -> "maya"."<env>";
+        - custom variables under "additional" -> "custom";
+        - "_ui" fold flags "environment"/"additional" -> "maya"/"custom".
+        A name already present under the new key wins; nothing else is
+        dropped. Top-level keys are then re-ordered maya, custom, _ui."""
         data = self._config.data
-        legacy = data.get(self._LEGACY_CUSTOM_KEY)
+        known = {self.MAYA_KEY, self.CUSTOM_KEY, self.UI_SECTION, self._LEGACY_CUSTOM_KEY}
+        legacy_maya = {key: value for key, value in data.items()
+                       if key not in known and isinstance(value, dict)}
+        legacy_custom = data.get(self._LEGACY_CUSTOM_KEY)
         collapsed = data.get(self.UI_SECTION, {}).get("collapsed", {})
         legacy_collapsed = {old: collapsed[old] for old in self._LEGACY_COLLAPSED_KEYS if old in collapsed}
-        if legacy is None and not legacy_collapsed:
+        if not legacy_maya and legacy_custom is None and not legacy_collapsed:
             return
 
         with self._config.batch():
-            if isinstance(legacy, dict):
-                custom = self._config[self.CUSTOM_KEY]
-                for environment, variables in legacy.items():
-                    if not isinstance(variables, dict):
-                        continue
-                    for name, value in variables.items():
-                        if name not in custom[environment]:
-                            custom[environment][name] = value
-            if legacy is not None:
+            self._merge_variables(self._config[self.MAYA_KEY], legacy_maya)
+            for key in legacy_maya:
+                del self._config[key]
+            if isinstance(legacy_custom, dict):
+                self._merge_variables(self._config[self.CUSTOM_KEY], legacy_custom)
+            if legacy_custom is not None:
                 del self._config[self._LEGACY_CUSTOM_KEY]
             for old, state in legacy_collapsed.items():
                 self._config[self.UI_SECTION]["collapsed"][self._LEGACY_COLLAPSED_KEYS[old]] = state
                 del self._config[self.UI_SECTION]["collapsed"][old]
 
+            # Re-insert so the file reads maya, custom, _ui (then anything else).
+            snapshot = self._config.data
+            order = [self.MAYA_KEY, self.CUSTOM_KEY, self.UI_SECTION]
+            order += [key for key in snapshot if key not in order]
+            for key in order:
+                del self._config[key]
+            for key in order:
+                self._config[key] = snapshot[key]
+
+    @staticmethod
+    def _merge_variables(target, source: dict) -> None:
+        """Copies {"<env>": {name: value}} into `target`; names already there win."""
+        for environment, variables in source.items():
+            if not isinstance(variables, dict):
+                continue
+            for name, value in variables.items():
+                if name not in target[environment]:
+                    target[environment][name] = value
+
     def _save_collapsed(self, group_key: str, collapsed: bool) -> None:
-        self._config[self.UI_SECTION]["collapsed"][group_key] = collapsed
+        self._ui["collapsed"][group_key] = collapsed
+
+    def _save_ui(self, key: str, value: str) -> None:
+        self._ui[key] = value
 
     def _on_environment_changed(self, environment: str) -> None:
         self._environment = environment
+        self._save_ui("environment", environment)
+        self._version_row.set_environment(environment)
         self._maya_group.set_section(environment)
         self._custom_group.set_section(environment)
         self._user_setup_tab.set_environment(environment)
 
     def _launch(self, year: str) -> None:
         environment_vars: dict[str, str] = {}
-        environment_vars.update(dict(self._config[self._environment]))
+        environment_vars.update(dict(self._config[self.MAYA_KEY][self._environment]))
         environment_vars.update(dict(self._config[self.CUSTOM_KEY][self._environment]))
 
         self._user_setup_tab.save()  # launch with what's on screen, not the last autosave
         environment_vars = self._user_setup_store.launch_environment(self._environment, environment_vars)
-        ProcessLauncher.launch_maya(version=year, environment=environment_vars)
+        self._logger.info(f'Launching Maya {year}, environment "{self._environment}"')
+        if not ProcessLauncher.launch_maya(version=year, environment=environment_vars):
+            self._logger.warning(f'Maya {year} did not start (environment "{self._environment}")')
 
 
 if __name__ == "__main__":

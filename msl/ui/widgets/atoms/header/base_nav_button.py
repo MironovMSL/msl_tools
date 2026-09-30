@@ -1,16 +1,32 @@
 import msl_tools.msl.ui.qt_bindings as qt
+from msl_tools.msl.core.theme import ThemeRegistry
+from msl_tools.msl.ui.icon_manager import tint_icon
+from msl_tools.msl.ui.theme.qss import color_property
 
 
 class BaseNavButton(qt.QtWidgets.QAbstractButton):
+    """Window-control button of a frameless header (minimize / maximize /
+    close): a flat cell whose background fades in on hover and whose icon
+    brightens from ICON_IDLE_OPACITY to full.
 
-    DEFAULT_HOVER_COLOR   = qt.QtGui.QColor(255, 255, 255, 25)
-    DEFAULT_PRESSED_COLOR = qt.QtGui.QColor(255, 255, 255, 15)
+    The icon is a one-color SHAPE (window/*.svg), tinted here. All colors are
+    Qt properties set by ui/theme/widgets.qss — iconColor (rest),
+    hoverIconColor (hovered; when it differs from iconColor the icon
+    cross-fades into it, e.g. white on the close button's red), hoverColor,
+    pressedColor — so theme switches and hot reload recolor it with no code.
+    Until the stylesheet applies they hold the default theme's colors.
+    """
 
     ICON_IDLE_OPACITY = 0.4
     ICON_SIZE         = 16
 
     FADE_IN_MS  = 120
     FADE_OUT_MS = 220
+
+    iconColor = color_property("_icon_color")
+    hoverIconColor = color_property("_hover_icon_color")
+    hoverColor = color_property("_hover_color")
+    pressedColor = color_property("_pressed_color")
 
     def __init__(self, width: int = 46, parent=None):
         super().__init__(parent)
@@ -20,11 +36,16 @@ class BaseNavButton(qt.QtWidgets.QAbstractButton):
         self.setCursor(qt.QtCore.Qt.CursorShape.PointingHandCursor)
         self.setFocusPolicy(qt.QtCore.Qt.FocusPolicy.NoFocus)
 
-        self._icon:       qt.QtGui.QIcon | None = None
-        self._hover_icon: qt.QtGui.QIcon | None = None
+        self._icon: qt.QtGui.QIcon | None = None
+        self._tinted: dict[tuple, qt.QtGui.QPixmap] = {}
 
-        self._hover_color   = qt.QtGui.QColor(self.DEFAULT_HOVER_COLOR)
-        self._pressed_color = qt.QtGui.QColor(self.DEFAULT_PRESSED_COLOR)
+        fallback = ThemeRegistry.fallback()  # until QSS applies
+        self._icon_color = qt.QtGui.QColor(fallback.text_primary)
+        self._hover_icon_color = qt.QtGui.QColor(fallback.text_primary)
+        self._hover_color = qt.QtGui.QColor(fallback.text_primary)
+        self._hover_color.setAlphaF(0.1)
+        self._pressed_color = qt.QtGui.QColor(fallback.text_primary)
+        self._pressed_color.setAlphaF(0.16)
 
         self._corner_radius   = 0
         self._round_top_left  = False
@@ -42,17 +63,10 @@ class BaseNavButton(qt.QtWidgets.QAbstractButton):
         self._hover_progress = value
         self.update()
 
-    def set_icon(self, icon: qt.QtGui.QIcon, hover_icon: qt.QtGui.QIcon | None = None) -> None:
-        self._icon = icon
-        self._hover_icon = hover_icon
-        self.update()
-
-    def set_hover_color(self, color: qt.QtGui.QColor) -> None:
-        self._hover_color = qt.QtGui.QColor(color)
-        self.update()
-
-    def set_pressed_color(self, color: qt.QtGui.QColor) -> None:
-        self._pressed_color = qt.QtGui.QColor(color)
+    def set_icon(self, icon: qt.QtGui.QIcon | None) -> None:
+        """The icon SHAPE (a window/*.svg); its color comes from QSS."""
+        self._icon = icon if icon is not None and not icon.isNull() else None
+        self._tinted.clear()
         self.update()
 
     def set_corner_radius(self, radius: int, *, top_left: bool = False, top_right: bool = False) -> None:
@@ -121,23 +135,29 @@ class BaseNavButton(qt.QtWidgets.QAbstractButton):
 
         self._paint_icon(painter, rect)
 
+    def _tinted_icon(self, color: qt.QtGui.QColor) -> qt.QtGui.QPixmap:
+        ratio = self.devicePixelRatioF()
+        key = (color.rgba(), ratio)
+        if key not in self._tinted:
+            self._tinted[key] = tint_icon(self._icon, self.ICON_SIZE, ratio, color)
+        return self._tinted[key]
+
     def _paint_icon(self, painter: qt.QtGui.QPainter, rect: qt.QtCore.QRectF) -> None:
         if self._icon is None:
             return
 
         size = self.ICON_SIZE
-        x = rect.center().x() - size / 2
-        y = rect.center().y() - size / 2
-        target = qt.QtCore.QRectF(x, y, size, size)
+        target = qt.QtCore.QRectF(rect.center().x() - size / 2, rect.center().y() - size / 2, size, size)
+        progress = self._hover_progress
 
-        if self._hover_icon is None:
-            painter.setOpacity(self.ICON_IDLE_OPACITY + (1.0 - self.ICON_IDLE_OPACITY) * self._hover_progress)
-            self._icon.paint(painter, target.toRect())
+        if self._hover_icon_color == self._icon_color:
+            painter.setOpacity(self.ICON_IDLE_OPACITY + (1.0 - self.ICON_IDLE_OPACITY) * progress)
+            painter.drawPixmap(target.toRect(), self._tinted_icon(self._icon_color))
         else:
-            painter.setOpacity(self.ICON_IDLE_OPACITY * (1.0 - self._hover_progress))
-            self._icon.paint(painter, target.toRect())
-
-            painter.setOpacity(self._hover_progress)
-            self._hover_icon.paint(painter, target.toRect())
+            # Cross-fade the rest color into the hover color (the close button's white on red).
+            painter.setOpacity(self.ICON_IDLE_OPACITY * (1.0 - progress))
+            painter.drawPixmap(target.toRect(), self._tinted_icon(self._icon_color))
+            painter.setOpacity(progress)
+            painter.drawPixmap(target.toRect(), self._tinted_icon(self._hover_icon_color))
 
         painter.setOpacity(1.0)

@@ -27,7 +27,6 @@ class FramelessMainWindow(FramelessWindowMixin, qt.QtWidgets.QMainWindow):
 
     ICON_SUB_FOLDER = "window"
     CLOSE_HOVER_ICON_COLOR = "#ffffff"
-    HOVER_OVERLAY_ALPHA = 28
 
     def __init__(self, *, title: str = "", width: int = 960, height: int = 640,
                  icon: qt.QtGui.QIcon | None = None, subtitle: str | None = None,
@@ -101,28 +100,15 @@ class FramelessMainWindow(FramelessWindowMixin, qt.QtWidgets.QMainWindow):
         self._apply_baseline_stylesheet(theme)
         self.set_background_color(theme.surface)
 
+        # Window buttons: icon SHAPES only — colors come from widgets.qss.
         icon_manager = self._resources.iconManager
-        color = theme.text_primary
-
-        overlay = qt.QtGui.QColor(color)
-        overlay.setAlpha(self.HOVER_OVERLAY_ALPHA)
-
         if self._minimize_button is not None:
-            minimize_icon = icon_manager.get_icon("minimize", sub_folder=self.ICON_SUB_FOLDER, color=color)
-            self._minimize_button.set_icon(minimize_icon)
-            self._minimize_button.set_hover_color(overlay)
-
+            self._minimize_button.set_icon(icon_manager.get_icon("minimize", sub_folder=self.ICON_SUB_FOLDER))
         if self._maximize_button is not None:
-            maximize_icon = icon_manager.get_icon("maximize", sub_folder=self.ICON_SUB_FOLDER, color=color)
-            restore_icon = icon_manager.get_icon("restore", sub_folder=self.ICON_SUB_FOLDER, color=color)
-            self._maximize_button.set_icons(maximize_icon, restore_icon)
-            self._maximize_button.set_hover_color(overlay)
-
+            self._maximize_button.set_icons(icon_manager.get_icon("maximize", sub_folder=self.ICON_SUB_FOLDER),
+                                            icon_manager.get_icon("restore", sub_folder=self.ICON_SUB_FOLDER))
         if self._close_button is not None:
-            close_idle = icon_manager.get_icon("close", sub_folder=self.ICON_SUB_FOLDER, color=color)
-            close_hover = icon_manager.get_icon("close", sub_folder=self.ICON_SUB_FOLDER, color=("#FFFFFF" if theme.name=="light" else "#000000"))
-            self._close_button.set_icon(close_idle, hover_icon=close_hover)
-            self._close_button.set_hover_color(overlay)  # no-op on CloseNavButton, by design
+            self._close_button.set_icon(icon_manager.get_icon("close", sub_folder=self.ICON_SUB_FOLDER))
 
 
 if __name__ == '__main__':

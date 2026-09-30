@@ -5,6 +5,9 @@
  * active theme's palette (assets/themes/<theme>.css) by StylesheetBuilder.
  * Also available: alpha(<color>, <percent>%) -> rgba(), e.g.
  *     alpha(var(--accent), 15%)
+ * and CSS linear-gradient(to bottom, <color>, <color>) -> qlineargradient.
+ * Write gradients that way, not as qlineargradient(x1:0, ...): the Qt form
+ * is a syntax error to editors that parse .qss as CSS.
  *
  * Applied per top-level window, never on QApplication (inside Maya that is
  * Maya's own application object).
@@ -27,76 +30,191 @@ QDialog {
 
 /* --- buttons ----------------------------------------------------------------- */
 
+/* Raised, top-lit (--button-* gradient). Hover brightens it and takes the
+   accent border; pressed flips the gradient (lit from below), so the button
+   looks pushed in — like the combo boxes and the hub's sidebar tiles.
+   Variants: primary (setProperty("primary", True)) = accent gradient, for
+   the one main action of a dialog; flat (setFlat(True)) = borderless and
+   transparent until hovered, for small in-row actions (the "+" buttons). */
 QPushButton {
-    background-color: var(--surface);
+    background-color: linear-gradient(to bottom, var(--button-top), var(--button-bottom));
     color: var(--text-primary);
     border: 1px solid var(--border);
-    border-radius: 3px;
-    padding: 4px 10px;
+    border-radius: 4px;
+    padding: 3px 12px;
 }
 QPushButton:hover {
+    background-color: linear-gradient(to bottom, var(--button-top-hover), var(--button-bottom-hover));
     border: 1px solid var(--accent);
 }
 QPushButton:pressed {
-    background-color: var(--accent);
-    color: var(--surface);
+    background-color: linear-gradient(to top, var(--button-top), var(--button-bottom));
+    border: 1px solid var(--accent);
 }
 QPushButton:disabled {
-    color: var(--text-secondary);
-    border: 1px solid var(--text-secondary);
+    background-color: alpha(var(--button-bottom), 50%);
+    color: alpha(var(--text-secondary), 70%);
+    border: 1px solid alpha(var(--border), 60%);
+}
+
+QPushButton[primary="true"] {
+    background-color: linear-gradient(to bottom, var(--primary-top), var(--primary-bottom));
+    color: var(--on-accent);
+    border: 1px solid var(--primary-bottom);
+}
+QPushButton[primary="true"]:hover {
+    background-color: linear-gradient(to bottom, var(--primary-top), var(--accent));
+    border: 1px solid var(--primary-bottom);
+}
+QPushButton[primary="true"]:pressed {
+    background-color: linear-gradient(to top, var(--primary-top), var(--primary-bottom));
+    border: 1px solid var(--primary-bottom);
+}
+
+QPushButton:flat {
+    background-color: transparent;
+    border: 1px solid transparent;
+    padding: 0px;
+}
+QPushButton:flat:hover {
+    background-color: alpha(var(--text-primary), 8%);
+    border: 1px solid transparent;
+}
+QPushButton:flat:pressed {
+    background-color: alpha(var(--text-primary), 14%);
+    border: 1px solid transparent;
 }
 
 /* --- line edits ---------------------------------------------------------------- */
 
+/* Sunken — the opposite of the raised buttons: a faint shade at the top edge
+   (--field-top) fading into the field color, as if set into the surface.
+   Hover takes the border half-way to the accent, focus all the way; the
+   focused field drops the shade (flat = "active"). 22px high with the
+   border, like combo boxes and buttons, so a row of them lines up. */
 QLineEdit {
-    background-color: var(--surface);
+    background-color: linear-gradient(to bottom, var(--field-top), var(--field) 40%);
     color: var(--text-primary);
     border: 1px solid var(--border);
     border-radius: 3px;
-    padding: 2px 4px;
+    padding: 0px 6px;
+    min-height: 20px;
+    selection-background-color: var(--accent);
+    selection-color: var(--on-accent);
+    placeholder-text-color: alpha(var(--text-secondary), 75%);
+}
+QLineEdit:hover {
+    border: 1px solid alpha(var(--accent), 55%);
 }
 QLineEdit:focus {
+    background-color: var(--field);
     border: 1px solid var(--accent);
 }
 QLineEdit:read-only {
     color: var(--text-secondary);
 }
+QLineEdit:disabled {
+    background-color: alpha(var(--field), 50%);
+    color: alpha(var(--text-secondary), 70%);
+    border: 1px solid alpha(var(--border), 60%);
+}
 
 /* --- combo boxes ----------------------------------------------------------------- */
 
+/* A field with a faint top-to-bottom gradient (--combo-top/-bottom) and a
+   chevron on the right, set off by a thin line (--combo-separator); the border
+   takes the accent on hover / focus / while the list is open (:on). */
 QComboBox {
-    background-color: var(--surface);
+    background-color: linear-gradient(to bottom, var(--combo-top), var(--combo-bottom));
     color: var(--text-primary);
     border: 1px solid var(--border);
     border-radius: 3px;
-    padding: 2px 4px;
+    /* Horizontal padding only: a vertical one also pads the drop-down's popup
+       window, where the native style paints a light 2px band above and below
+       the list. Height comes from min-height instead (22px with the border). */
+    padding: 0px 4px 0px 6px;
+    min-height: 20px;
 }
-QComboBox:hover, QComboBox:focus {
+QComboBox:hover, QComboBox:focus, QComboBox:on {
+    border: 1px solid var(--accent);
+}
+/* An editable combo is a place you type in: it looks like a line edit (sunken,
+   half-accent border on hover, accent while typing / open) — the selector
+   combos stay raised like buttons. */
+QComboBox:editable {
+    background-color: linear-gradient(to bottom, var(--field-top), var(--field) 40%);
+}
+QComboBox:editable:hover {
+    border: 1px solid alpha(var(--accent), 55%);
+}
+QComboBox:editable:focus, QComboBox:editable:on {
+    background-color: var(--field);
     border: 1px solid var(--accent);
 }
 QComboBox:disabled {
     color: var(--text-secondary);
-    border: 1px solid var(--text-secondary);
+    border: 1px solid alpha(var(--border), 60%);
 }
 QComboBox::drop-down {
+    subcontrol-origin: padding;
+    subcontrol-position: center right;
+    width: 18px;
     border: none;
-    width: 16px;
+    border-left: 1px solid var(--combo-separator);
+    margin: 4px 0px 4px 0px;   /* keeps the line short of the top/bottom border */
+    background: transparent;
 }
-/* Border-drawn triangle: stand-in until a real SVG arrow asset exists. */
+/* icon(): an assets/icons SVG tinted with a theme color (StylesheetBuilder).
+   A combo's sub-control states follow the combo itself (:hover, :on = open). */
 QComboBox::down-arrow {
-    width: 0;
-    height: 0;
-    border-left: 4px solid transparent;
-    border-right: 4px solid transparent;
-    border-top: 5px solid var(--text-primary);
+    image: icon(actions/chevron_down, var(--text-secondary));
+    width: 12px;
+    height: 12px;
 }
+QComboBox::down-arrow:hover {
+    image: icon(actions/chevron_down, var(--text-primary));
+}
+QComboBox::down-arrow:on {
+    image: icon(actions/chevron_down, var(--accent));
+}
+QComboBox::down-arrow:disabled {
+    image: icon(actions/chevron_down, var(--border));
+}
+/* Editable combos: the inner line edit is part of the field, not a second box
+   (its own hover/focus border would draw one inside the combo's). */
+QComboBox QLineEdit,
+QComboBox QLineEdit:hover,
+QComboBox QLineEdit:focus {
+    background: transparent;
+    border: none;
+    padding: 0px;
+    min-height: 0px;
+}
+
+/* The drop-down list (and completer lists adopted by a combo, qss.adopt_popup):
+   menu-like rows, hover/current row tinted with the accent like QMenu items.
+   The ::item rules need a QStyledItemDelegate on the view (BaseComboBox and
+   EnvVariableAdder set one; QComboBox's default delegate ignores them). */
 QComboBox QAbstractItemView {
-    background-color: var(--surface);
+    background-color: var(--surface-raised);
     color: var(--text-primary);
-    border: 1px solid var(--border);
-    selection-background-color: var(--accent);
-    selection-color: var(--surface);
+    border: 1px solid alpha(var(--border), 60%);
+    padding: 3px;
     outline: 0;
+}
+/* No side padding on rows: the text starts at the list's edge, so the list
+   (as wide as the combo box) fits entries longer than the combo shows. */
+QComboBox QAbstractItemView::item {
+    min-height: 22px;
+    padding: 0px 0px;
+    border-radius: 4px;
+}
+QComboBox QAbstractItemView::item:hover {
+    background-color: alpha(var(--accent), 12%);
+}
+QComboBox QAbstractItemView::item:selected {
+    background-color: alpha(var(--accent), 22%);
+    color: var(--text-primary);
 }
 
 /* --- labels ------------------------------------------------------------------------ */
@@ -114,19 +232,30 @@ QCheckBox {
 QCheckBox:disabled {
     color: var(--text-secondary);
 }
+/* Same look as BaseCheckbox (without its animation): sunken when off, the
+   primary gradient + a check when on. */
 QCheckBox::indicator {
-    width: 13px;
-    height: 13px;
-    border-radius: 2px;
+    width: 14px;
+    height: 14px;
+    border-radius: 4px;
     border: 1px solid var(--border);
-    background-color: var(--surface);
+    background-color: linear-gradient(to bottom, var(--field-top), var(--field) 45%);
 }
 QCheckBox::indicator:hover {
-    border: 1px solid var(--accent);
+    border: 1px solid alpha(var(--accent), 55%);
 }
 QCheckBox::indicator:checked {
-    background-color: var(--accent);
-    border: 1px solid var(--accent);
+    background-color: linear-gradient(to bottom, var(--primary-top), var(--primary-bottom));
+    border: 1px solid var(--primary-bottom);
+    image: icon(actions/check, var(--on-accent));
+}
+QCheckBox::indicator:disabled {
+    border: 1px solid alpha(var(--border), 60%);
+    background-color: alpha(var(--field), 50%);
+}
+QCheckBox::indicator:checked:disabled {
+    background-color: alpha(var(--primary-bottom), 45%);
+    border: 1px solid alpha(var(--primary-bottom), 45%);
 }
 
 /* --- progress bars -------------------------------------------------------------------- */
@@ -134,12 +263,71 @@ QCheckBox::indicator:checked {
 QProgressBar {
     border: 1px solid var(--border);
     border-radius: 4px;
-    background-color: var(--surface);
+    background-color: var(--field);
     text-align: center;
-    color: var(--surface);
+    color: var(--on-accent);
 }
 QProgressBar::chunk {
     border-radius: 3px;
+}
+
+/* --- scroll bars ------------------------------------------------------------------------- */
+
+/* Slim overlay-style bars: no arrow buttons, transparent track, a rounded
+   translucent handle that firms up on hover and takes the accent while dragged.
+   Without these rules Qt draws the native (light) Windows bar in every theme.
+   The handle is thin (4px) at rest. SlimScrollBar (StableScrollArea,
+   CodeEditor) paints its own handle and widens it smoothly while the mouse
+   is over the bar (colors: widgets.qss); on plain bars the handle below
+   widens, without animation, only while the mouse is over the handle. */
+QScrollBar:vertical {
+    background: transparent;
+    border: none;
+    width: 10px;
+    margin: 2px 0px 2px 0px;
+}
+QScrollBar:horizontal {
+    background: transparent;
+    border: none;
+    height: 10px;
+    margin: 0px 2px 0px 2px;
+}
+QScrollBar::handle:vertical {
+    background: alpha(var(--text-primary), 22%);
+    border-radius: 2px;
+    min-height: 24px;
+    margin: 0px 3px 0px 3px;
+}
+QScrollBar::handle:horizontal {
+    background: alpha(var(--text-primary), 22%);
+    border-radius: 2px;
+    min-width: 24px;
+    margin: 3px 0px 3px 0px;
+}
+QScrollBar::handle:vertical:hover {
+    border-radius: 3px;
+    margin: 0px 2px 0px 2px;
+}
+QScrollBar::handle:horizontal:hover {
+    border-radius: 3px;
+    margin: 2px 0px 2px 0px;
+}
+QScrollBar::handle:vertical:hover,
+QScrollBar::handle:horizontal:hover {
+    background: alpha(var(--text-primary), 38%);
+}
+QScrollBar::handle:vertical:pressed,
+QScrollBar::handle:horizontal:pressed {
+    background: alpha(var(--accent), 75%);
+}
+QScrollBar::add-line, QScrollBar::sub-line {
+    width: 0px;
+    height: 0px;
+    border: none;
+    background: none;
+}
+QScrollBar::add-page, QScrollBar::sub-page {
+    background: transparent;
 }
 
 /* --- popups: menus and message boxes ---------------------------------------------------- */
@@ -151,7 +339,7 @@ QProgressBar::chunk {
    ui/theme/qss.py:make_rounded_popup() (translucent window); on a plain
    opaque menu the corners stay square. */
 QMenu {
-    background-color: var(--surface);
+    background-color: var(--surface-raised);
     color: var(--text-primary);
     border: 1px solid alpha(var(--border), 60%);
     border-radius: 8px;
@@ -187,8 +375,10 @@ QMessageBox QLabel {
 /* --- tabs -------------------------------------------------------------------------------- */
 
 /* Underline tabs: no boxes, a thin rule under the bar, the selected tab marked
-   by an accent underline. No bold on :selected — it would widen the tab and
-   make its neighbours jump on every switch. */
+   by an accent underline (BaseTabBar paints a sliding one instead, see
+   widgets.qss); hovering a tab lays a soft rounded tint under it. No bold on
+   :selected — it would widen the tab and make its neighbours jump on every
+   switch. */
 QTabWidget::pane {
     border: none;
     border-top: 1px solid alpha(var(--border), 30%);
@@ -208,7 +398,11 @@ QTabBar::tab {
 }
 QTabBar::tab:hover {
     color: var(--text-primary);
-    border-bottom: 2px solid alpha(var(--text-primary), 20%);
+    background: alpha(var(--text-primary), 6%);
+    border-radius: 5px;
+}
+QTabBar::tab:selected:hover {
+    background: transparent;   /* the open tab needs no hover hint */
 }
 QTabBar::tab:selected {
     color: var(--text-primary);
@@ -223,6 +417,13 @@ QTabBar::tab:disabled {
 WindowHeader {
     /* background-color: var(--chrome-background); */
 }
+QLabel#headerTitle {
+    color: var(--text-primary);
+    font-weight: 600;
+    font-size: 12px;
+}
+/* Breadcrumb after the title ("› Maya Gate"): dimmed. */
 QLabel#headerSubtitle {
     color: var(--text-secondary);
+    font-size: 12px;
 }

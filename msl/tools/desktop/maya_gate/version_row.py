@@ -44,6 +44,7 @@ class MayaVersionRow(qt.QtWidgets.QWidget):
         self.setFixedHeight(self.HEIGHT)
         self._build_layout()
         self._populate()
+        self.set_environment("")
 
     def _build_layout(self) -> None:
         self.main_layout = qt.QtWidgets.QHBoxLayout(self)
@@ -51,8 +52,19 @@ class MayaVersionRow(qt.QtWidgets.QWidget):
         self.main_layout.setSpacing(0)
         self.main_layout.setAlignment(qt.QtCore.Qt.AlignmentFlag.AlignTop)
 
+    def set_environment(self, environment: str) -> None:
+        """Names the environment in each version's tooltip ("Launch Maya 2026
+        with the Dev environment") — the row itself launches nothing."""
+        for _, year, widget in self.maya_list:
+            suffix = f" with the {environment} environment" if environment else ""
+            widget.setToolTip(f"Launch Maya {year}{suffix}")
+
     def _populate(self) -> None:
         installs = MayaPaths.get_available_installs()
+        if not installs:
+            empty = qt.QtWidgets.QLabel("No Maya installation found")
+            empty.setObjectName("versionRowEmpty")
+            self.main_layout.addWidget(empty, alignment=qt.QtCore.Qt.AlignmentFlag.AlignVCenter)
         for idx, version in enumerate(sorted(installs, key=int)):
             year = int(version)
             executable = MayaPaths.get_executable_path(version)

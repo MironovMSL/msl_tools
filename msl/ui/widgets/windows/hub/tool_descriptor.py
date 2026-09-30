@@ -24,8 +24,15 @@ class ToolDescriptor:
             widget on demand. The hub calls this lazily, on first
             selection, so a tool the user never opens is never
             constructed.
+        icon: Optional icon name for the sidebar entry, resolved with
+            IconManager.get_icon(icon, sub_folder=icon_sub_folder). A
+            one-color SVG: the hub tints it from QSS. None = text only.
+        icon_sub_folder: Folder under assets/icons/ holding `icon`
+            (e.g. "apps" for application logos).
     """
 
     id: str
     title: str
     widget_factory: Callable[[], "qt.QtWidgets.QWidget"]
+    icon: str | None = None
+    icon_sub_folder: str | None = None

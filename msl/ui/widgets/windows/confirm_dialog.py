@@ -66,7 +66,7 @@ class ConfirmDialog(FramelessDialog):
             button = qt.QtWidgets.QPushButton(label)
             button.setCursor(qt.QtCore.Qt.CursorShape.PointingHandCursor)
             if index == 0:
-                button.setObjectName("confirmPrimary")
+                button.setProperty("primary", True)  # accent button (base.qss)
                 button.setDefault(True)  # Enter
             button.clicked.connect(lambda _=False, k=key: self._choose(k))
             buttons_layout.addWidget(button)

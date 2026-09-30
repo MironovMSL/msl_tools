@@ -2,7 +2,7 @@
 import io
 import traceback
 
-_msl_gate_script = 'H:\\ProjectsDev\\MSL_Others\\msl_tools\\configs\\maya\\maya_gate\\user_setup\\Stable.py'
+_msl_gate_script = 'H:\\ProjectsDev\\MSL_Others\\msl_tools\\configs\\desktop\\maya_gate\\user_setup\\default.py'
 try:
     with io.open(_msl_gate_script, encoding="utf-8") as _msl_gate_file:
         exec(compile(_msl_gate_file.read(), _msl_gate_script, "exec"), globals())

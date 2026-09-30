@@ -3,6 +3,7 @@ import math
 from pathlib import Path
 
 import msl_tools.msl.ui.qt_bindings as qt
+from msl_tools.msl.ui.theme.qss import color_property, repolish
 
 
 class ApplicationButton(qt.QtWidgets.QWidget):
@@ -16,8 +17,15 @@ class ApplicationButton(qt.QtWidgets.QWidget):
     Maya versions show their own distinct icon without us maintaining one.
 
     Ported from MSL_MayaGate's ApplicationButtonWdg: shake-on-hover and
-    pulse-on-click kept as-is, adapted to the qt_bindings shim. The label
-    color comes from the window stylesheet's QLabel rule (ui/theme/base.qss).
+    pulse-on-click kept as-is, adapted to the qt_bindings shim.
+
+    The whole tile (icon + name) is the target: hovering it shakes the icon
+    and lays a soft card under the tile (qproperty hoverColor /
+    hoverBorderColor, ui/theme/widgets.qss); a click anywhere on it launches.
+    After a click the tile is BUSY for BUSY_MS — name reads "Starting…" in
+    the accent, the icon greys out, further clicks are ignored — so a
+    double click can't start the application twice. The name label is
+    `QLabel#appName` (busy="true" while busy), styled in widgets.qss.
 
     Exposes graphicsEffect() as a QGraphicsOpacityEffect on purpose — a
     parent composition (e.g. a row of these buttons) animates this
@@ -35,8 +43,14 @@ class ApplicationButton(qt.QtWidgets.QWidget):
     SHAKE_AMPLITUDE_Y = 1.5
     PULSE_DURATION_MS = 160
     PULSE_SHRINK_RATIO = 0.9
+    BUSY_MS = 5000
+    BUSY_TEXT = "Starting\u2026"
+    CARD_RADIUS = 8
 
     clicked = qt.QtCore.Signal(str)
+
+    hoverColor = color_property("_hover_color")
+    hoverBorderColor = color_property("_hover_border_color")
 
     def __init__(self, name: str, application_path: str | Path, parent=None):
         """
@@ -52,6 +66,11 @@ class ApplicationButton(qt.QtWidgets.QWidget):
 
         self._shake_phase = 0.0
         self._original_pos: qt.QtCore.QPoint | None = None
+        self._hovered = False
+        self._busy = False
+        self._hover_color = qt.QtGui.QColor(0, 0, 0, 0)          # until QSS applies
+        self._hover_border_color = qt.QtGui.QColor(0, 0, 0, 0)
+        self.setCursor(qt.QtCore.Qt.CursorShape.PointingHandCursor)
 
         self._build_widgets()
         self._build_layout()
@@ -63,15 +82,14 @@ class ApplicationButton(qt.QtWidgets.QWidget):
     # --- construction ----------------------------------------------------
 
     def _build_widgets(self) -> None:
-        self._label = qt.QtWidgets.QLabel(f"<b>{self.name}</b>")
+        self._label = qt.QtWidgets.QLabel(self.name)
+        self._label.setObjectName("appName")
 
         self._button = qt.QtWidgets.QToolButton()
         self._button.setFixedSize(self.BUTTON_SIZE)
         self._button.setIcon(self._resolve_icon())
         self._button.setIconSize(self.BUTTON_SIZE)
         self._button.setCursor(qt.QtCore.Qt.CursorShape.PointingHandCursor)
-        self._button.setAttribute(qt.QtCore.Qt.WidgetAttribute.WA_Hover, True)
-        self._button.installEventFilter(self)
         self._button.clicked.connect(self._on_clicked)
 
         # Parent composition animates this via graphicsEffect() — see
@@ -115,13 +133,44 @@ class ApplicationButton(qt.QtWidgets.QWidget):
 
     # --- hover shake ---------------------------------------------------
 
-    def eventFilter(self, watched, event) -> bool:
-        if watched is self._button:
-            if event.type() == qt.QtCore.QEvent.Type.HoverEnter:
-                self._start_shake()
-            elif event.type() == qt.QtCore.QEvent.Type.HoverLeave:
-                self._stop_shake()
-        return super().eventFilter(watched, event)
+    # The whole tile hovers: Enter/Leave on it cover the icon and the label too.
+    def enterEvent(self, event) -> None:
+        self._hovered = True
+        if not self._busy:
+            self._start_shake()
+        self.update()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        self._hovered = False
+        self._stop_shake()
+        self.update()
+        super().leaveEvent(event)
+
+    def mousePressEvent(self, event) -> None:
+        # Accept the press so the matching release comes back to the tile
+        # (the name label ignores presses; unaccepted, they'd go to the row).
+        if event.button() == qt.QtCore.Qt.MouseButton.LeftButton:
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        # Clicks on the tile around the icon (e.g. the name) launch too.
+        if event.button() == qt.QtCore.Qt.MouseButton.LeftButton and self.rect().contains(event.position().toPoint()):
+            self._on_clicked()
+        super().mouseReleaseEvent(event)
+
+    def paintEvent(self, event) -> None:
+        if self._hovered:
+            painter = qt.QtGui.QPainter(self)
+            painter.setRenderHint(qt.QtGui.QPainter.RenderHint.Antialiasing)
+            painter.setPen(qt.QtGui.QPen(self._hover_border_color, 1))
+            painter.setBrush(self._hover_color)
+            rect = qt.QtCore.QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+            painter.drawRoundedRect(rect, self.CARD_RADIUS, self.CARD_RADIUS)
+            painter.end()
+        super().paintEvent(event)
 
     def _start_shake(self) -> None:
         self._original_pos = self._button.pos()
@@ -148,10 +197,29 @@ class ApplicationButton(qt.QtWidgets.QWidget):
         self._button.setIconSize(size)
 
     def _on_clicked(self) -> None:
+        if self._busy:
+            return  # already starting: a double click must not launch twice
         self._stop_shake()
         self._pulse.stop()
         self._pulse.start()
+        self._set_busy(True)
+        qt.QtCore.QTimer.singleShot(self.BUSY_MS, lambda: self._set_busy(False))
         self.clicked.emit(self.application_path)
+
+    # --- busy state ----------------------------------------------------------
+
+    def is_busy(self) -> bool:
+        return self._busy
+
+    def _set_busy(self, busy: bool) -> None:
+        self._busy = busy
+        self._label.setText(self.BUSY_TEXT if busy else self.name)
+        self._label.setProperty("busy", busy)
+        repolish(self._label)
+        self._button.setEnabled(not busy)  # greys the icon and blocks its clicks
+        self.setCursor(qt.QtCore.Qt.CursorShape.BusyCursor if busy else qt.QtCore.Qt.CursorShape.PointingHandCursor)
+        if not busy and self._hovered:
+            self._start_shake()
 
 
 if __name__ == "__main__":

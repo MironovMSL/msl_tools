@@ -39,12 +39,11 @@ class WindowHeader(qt.QtWidgets.QWidget):
         self.icon_label.hide()
 
         self.title_label = qt.QtWidgets.QLabel(title)
-        self.title_label.setStyleSheet("font-weight: 600; font-size: 12px;")  # color -> global QSS (QLabel -> text_primary)
+        self.title_label.setObjectName("headerTitle")  # font + color: base.qss
         self.title_label.setAttribute(qt.QtCore.Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
 
         self.subtitle_label = qt.QtWidgets.QLabel()
-        self.subtitle_label.setObjectName("headerSubtitle")  # targeted by StylesheetBuilder for text_secondary
-        self.subtitle_label.setStyleSheet("font-size: 12px;")
+        self.subtitle_label.setObjectName("headerSubtitle")  # dimmed: base.qss
         self.subtitle_label.setAttribute(qt.QtCore.Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self.subtitle_label.hide()
 
@@ -81,10 +80,11 @@ class WindowHeader(qt.QtWidgets.QWidget):
         self.title_label.setText(title)
 
     def set_subtitle(self, text: str | None) -> None:
+        """Shown after the title as a breadcrumb: "Title › text"."""
         if not text:
             self.subtitle_label.hide()
             return
-        self.subtitle_label.setText(f"|  {text}")
+        self.subtitle_label.setText(f"\u203a  {text}")
         self.subtitle_label.show()
 
     # --- Extension points ---
@@ -156,69 +156,35 @@ class WindowHeader(qt.QtWidgets.QWidget):
 
 if __name__ == '__main__':
     from msl_tools.msl.ui.app.application_context import QtApplicationContext
-    from msl_tools.msl.ui.widgets.widget_playground_dialog import WidgetPlaygroundDialog
+    from msl_tools.msl.ui.widgets.themed_widget_playground_dialog import ThemedWidgetPlaygroundDialog
     from msl_tools.msl.ui.ui_resources import UiResources
 
-    with QtApplicationContext() as context:
-        ui_core = UiResources()
-        icon = ui_core.iconManager.get_icon("Installer")
+    with QtApplicationContext():
+        icons = UiResources().iconManager
+        icon = icons.get_icon("hub", sub_folder="brand")
+        # Shapes only: the buttons' colors come from widgets.qss (BaseNavButton / CloseNavButton).
+        minimize_icon = icons.get_icon("minimize", sub_folder="window")
+        maximize_icon = icons.get_icon("maximize", sub_folder="window")
+        restore_icon  = icons.get_icon("restore",  sub_folder="window")
+        close_icon    = icons.get_icon("close",    sub_folder="window")
 
-        # theme_color = "#0a0a0a"
-        theme_color = "#ffffff"
-
-        # overlay = qt.QtGui.QColor(qt.QtGui.QColor(0, 0, 0, 30))
-        overlay = qt.QtGui.QColor(qt.QtGui.QColor(255, 255, 255, 25))
-
-
-        minimize_icon = ui_core.iconManager.get_icon("minimize", sub_folder="window", color=theme_color)
-        maximize_icon = ui_core.iconManager.get_icon("maximize", sub_folder="window", color=theme_color)
-        restore_icon  = ui_core.iconManager.get_icon("restore",  sub_folder="window", color=theme_color)
-        close_idle    = ui_core.iconManager.get_icon("close",    sub_folder="window", color=theme_color)
-        close_hover   = ui_core.iconManager.get_icon("close",    sub_folder="window", color="#0a0a0a")
-
-        dialog = WidgetPlaygroundDialog()
-        dialog.setWindowTitle("Header demo")
+        dialog = ThemedWidgetPlaygroundDialog()
 
         header_close_only = WindowHeader(title="Close only")
         header_close_only.set_icon(icon)
         header_close_only.set_subtitle("New BRC Queue")
-        header_close_only.set_corner_radius(12)
-        close_only_btn = header_close_only.add_close_only_controls(lambda: print("close"))
-        close_only_btn.set_icon(close_idle, hover_icon=close_hover)
+        header_close_only.add_close_only_controls(lambda: print("close")).set_icon(close_icon)
         dialog.add_case("WindowHeader — close only", header_close_only)
-
-        header_close_minimize = WindowHeader(title="Close and minimize")
-        header_close_minimize.set_icon(icon)
-        header_close_minimize.set_corner_radius(12)
-        minimize_btn2, close_btn2 = header_close_minimize.add_close_minimize_controls(minimize_slot=lambda: print("minimize"),
-                                                                                      close_slot=lambda: print("close"))
-        close_btn2.set_icon(close_idle, hover_icon=close_hover)
-        minimize_btn2.set_icon(minimize_icon)
-        dialog.add_case("WindowHeader — close minimize", header_close_minimize)
 
         header_full = WindowHeader(title="Full controls")
         header_full.set_icon(icon)
-        header_full.set_corner_radius(12)
-
-        toggle_button = qt.QtWidgets.QPushButton("😅")
-        header_full.add_trailing_widget(toggle_button)
-
-        toggle_button2 = qt.QtWidgets.QPushButton("😅")
-        header_full.add_leading_widget(toggle_button2)
-
         min_btn, max_btn, close_btn = header_full.add_window_controls(
             minimize_slot=lambda: print("minimize"),
-            maximize_slot=lambda: (print("maximize"), max_btn.set_maximized(not max_btn._is_maximized)),
+            maximize_slot=lambda: max_btn.set_maximized(not max_btn._is_maximized),
             close_slot=lambda: print("close"))
-
         min_btn.set_icon(minimize_icon)
         max_btn.set_icons(maximize_icon, restore_icon)
-        close_btn.set_icon(close_idle, hover_icon=close_hover)
-
-        min_btn.set_hover_color(overlay)
-        max_btn.set_hover_color(overlay)
-        close_btn.set_hover_color(overlay)  # no-op, ничего не изменит — специально
-
+        close_btn.set_icon(close_icon)
         dialog.add_case("WindowHeader — full controls", header_full)
 
         dialog.show()

@@ -19,9 +19,11 @@ class FileSystemManager:
 
     configs     = ROOT_DIR / 'configs'
     configsMaya = configs / 'maya'
+    configsDesktop = configs / 'desktop'
 
-    logs     = ROOT_DIR / 'logs'
-    logsMaya = logs / 'maya'
+    logs        = ROOT_DIR / 'logs'
+    logsMaya    = logs / 'maya'
+    logsDesktop = logs / 'desktop'
 
     core     = msl / 'core'
     tools    = msl / 'tools'

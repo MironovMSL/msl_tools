@@ -4,6 +4,38 @@
  * after ui/theme/base.qss + widgets.qss. Same var()/alpha() syntax.
  */
 
+/* Toolbar captions ("Environment", "From"): dimmed, the controls carry the weight. */
+MayaGateToolbar QLabel#toolbarCaption {
+    color: var(--text-secondary);
+}
+
+MayaVersionRow QLabel#versionRowEmpty {
+    color: var(--text-secondary);
+}
+
+/* Groups are panels raised off the page card; their fields sit back in (--field).
+   The header tints on hover (it folds the group) and is ruled off from the rows. */
 CollapsibleVariableGroup {
-    qproperty-frameColor: var(--border);
+    qproperty-frameColor:       var(--border);
+    qproperty-fillColor:        var(--surface-raised);
+    qproperty-headerHoverColor: alpha(var(--text-primary), 5%);
+    qproperty-dividerColor:     alpha(var(--border), 60%);
+}
+CollapsibleVariableGroup QLabel#groupTitle {
+    color: var(--text-primary);
+    font-weight: 600;
+}
+CollapsibleVariableGroup QLabel#groupSection {
+    color: var(--text-secondary);
+}
+/* Row count: a small accent pill. */
+CollapsibleVariableGroup QLabel#groupCount {
+    color: var(--accent);
+    background-color: alpha(var(--accent), 15%);
+    border-radius: 7px;
+    padding: 0px 6px;
+    min-height: 14px;
+    max-height: 14px;
+    font-size: 11px;
+    font-weight: 600;
 }

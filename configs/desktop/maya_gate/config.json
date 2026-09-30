@@ -1,0 +1,30 @@
+{
+    "maya": {
+        "<default>": {
+            "PYTHONPATH": "H:/ProjectsDev/MSL_Others/"
+        },
+        "Stable": {
+            "PYTHONPATH": "H:/ProjectsDev/MSL_Others/",
+            "MAYA_SCRIPT_PATH": "H:/ProjectsDev/MSL_Others/;H:/ProjectsDev/MSL_Others/MSL_PySide6_CustomWidgets;H:/ProjectsDev/MSL_Others/MSL_PySide6_CustomWidgets/CustomWidgets"
+        },
+        "Dev": {}
+    },
+    "custom": {
+        "<default>": {},
+        "Stable": {
+            "Test_ą": "H:/ProjectsDev/MSL_Others/msl_tools/msl/core",
+            "Test_c": "H:/ProjectsDev/MSL_Others/msl_tools/msl/__pycache__",
+            "Test_b": "H:/ProjectsDev/MSL_Others/msl_tools/msl/ui"
+        },
+        "Dev": {}
+    },
+    "_ui": {
+        "year": "2024",
+        "environment": "Dev",
+        "tab": "variables",
+        "collapsed": {
+            "maya": false,
+            "custom": false
+        }
+    }
+}

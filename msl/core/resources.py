@@ -23,12 +23,18 @@ class Resources(metaclass=SingletonMeta):
 
 
         self.fsManager        = FileSystemManager()
+
         self.logs             = LoggerManager(self.fsManager.logs)
         self.logsMaya         = LoggerManager(self.fsManager.logsMaya)
+        self.logsDesktopHub   = LoggerManager(self.fsManager.logsDesktop)
+
         self.configsCoreMng   = ConfigManager(self.fsManager.configs, logger=self.logs.get("configsCoreMng", to_file=False))
         self.coreConfig       = self.configsCoreMng.get_config("core", defaults=CORE_CONFIG_DEFAULTS)
 
         self.configsMayaMng   = ConfigManager(self.fsManager.configsMaya, logger=self.logs.get("configsMayaTools", to_file=False))
+
+        self.configsDesktopHubMng= ConfigManager(self.fsManager.configsDesktop, logger=self.logs.get("configsDesktopHub", to_file=False) )
+
         self.networkClient    = NetworkClient(logger=self.logs.get("NetworkClient", to_file=False))
         self.versionManager   = VersionManager(releases_url, latest_release_url, self.networkClient, self.fsManager.msl,
                                                logger=self.logs.get("VersionManager", to_file=False))

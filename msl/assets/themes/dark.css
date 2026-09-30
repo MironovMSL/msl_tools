@@ -1,20 +1,76 @@
 /*
  * msl_tools theme palette: "dark" (theme name = file name).
- * See light.css for how palette files work.
+ * See light.css for how palette files work and what each surface is for.
+ *
+ * Depth ladder, deepest first: editor-background, chrome-background, field,
+ * surface, surface-raised, then the raised buttons (--button-*). Steps are
+ * small, so layers read as layers without looking striped.
  */
 :root {
     /* text */
-    --text-primary:      #e8e8e8;
-    --text-secondary:    #9a9a9a;
+    --text-primary:      #e6e7e9;
+    --text-secondary:    #9a9ca1;
 
-    /* surfaces & lines */
-    --surface:           #2b2b2b;
+    /* surfaces, deepest first */
+    --editor-background: #1c1d20;
     --chrome-background: #3f4652;
-    --border:            #4a4a4a;
+    --field:             #26282c;
+    --field-top:         #1f2124;   /* shade at a field's top edge: looks set in */
+    --surface:           #2b2d31;
+    --surface-raised:    #313338;
+
+    /* push buttons: top-lit gradients (base.qss); primary = the accent one */
+    --button-top:          #3a3d43;
+    --button-bottom:       #313338;
+    --button-top-hover:    #45484f;
+    --button-bottom-hover: #393c42;
+    --primary-top:         #5a9fff;
+    --primary-bottom:      #3c84ea;
+
+    /* lines */
+    --border:            #45484e;
 
     /* brand & semantic */
     --accent:            #4d96ff;
+    --on-accent:         #ffffff;
+    --danger:            #e81123;   /* destructive: the window close button's hover */
+    --danger-pressed:    #c42b1c;
+    --on-danger:         #ffffff;
     --success:           #5fbf6b;
     --warning:           #ffab40;
     --error:             #ff5c4d;
+
+    /* hub sidebar entries: vertical gradients for volume (widgets.qss).
+       Selected = lit from above and fading into the page card (--surface);
+       hover = a faint version of it over the chrome. Edges: a light line on
+       top, a dark one below — the "bevel" that makes it read as raised. */
+    --nav-top:          #32353b;
+    --nav-bottom:       #2b2d31;
+    --nav-top-hover:    #454c59;
+    --nav-bottom-hover: #424856;
+    --nav-edge-top:     #4b5261;
+    --nav-edge-bottom:  #353a42;
+
+    /* combo boxes: a faint top-to-bottom gradient over the field color, and
+       the line that separates the arrow (base.qss) */
+    --combo-top:        #2d2f34;
+    --combo-bottom:     #25272b;
+    --combo-separator:  #3b3e44;
+
+    /* segmented control (SegmentedControl): sunken track, raised pill */
+    --segment-track-top: #1f2124;
+    --segment-track:     #26282c;
+    --segment-pill-top:  #3e4148;
+    --segment-pill:      #34373c;
+
+    /* code editor syntax colors (CodeEditor, widgets.qss) — after VS Code Dark+ */
+    --syntax-keyword:    #c586c0;
+    --syntax-constant:   #569cd6;   /* True / False / None */
+    --syntax-self:       #9cdcfe;   /* self / cls */
+    --syntax-builtin:    #4ec9b0;
+    --syntax-function:   #dcdcaa;   /* names after def / class */
+    --syntax-decorator:  #d7ba7d;
+    --syntax-string:     #ce9178;
+    --syntax-number:     #b5cea8;
+    --syntax-comment:    #6a9955;
 }

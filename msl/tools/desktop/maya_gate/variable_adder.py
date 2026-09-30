@@ -1,5 +1,10 @@
 # tools/desktop/maya_gate/variable_adder.py
 import msl_tools.msl.ui.qt_bindings as qt
+from msl_tools.msl.ui.theme.qss import adopt_popup
+from msl_tools.msl.ui.ui_resources import UiResources
+from msl_tools.msl.ui.widgets.atoms.buttons import IconPushButton
+from msl_tools.msl.ui.widgets.atoms.comboboxes.base_combo_box import BaseComboBox
+from msl_tools.msl.ui.widgets.atoms.scrollbars import SlimScrollBar
 from msl_tools.msl.tools.desktop.maya_gate import maya_variables
 
 
@@ -32,7 +37,7 @@ class EnvVariableAdder(qt.QtWidgets.QWidget):
     HEIGHT = 25
     COMBO_WIDTH = 170
     LINE_EDIT_WIDTH = 170
-    ADD_BUTTON_SIZE = qt.QtCore.QSize(25, 25)
+    ADD_BUTTON_SIZE = qt.QtCore.QSize(24, 22)  # field height, so "+" lines up with its field
 
     known_variable_added = qt.QtCore.Signal(str)
     custom_variable_added = qt.QtCore.Signal(str)
@@ -45,12 +50,10 @@ class EnvVariableAdder(qt.QtWidgets.QWidget):
         self._build_connections()
 
     def _build_widgets(self) -> None:
-        self.add_known_button = qt.QtWidgets.QPushButton("+")
-        self.add_known_button.setFixedSize(self.ADD_BUTTON_SIZE)
-        self.add_known_button.setFlat(True)
+        self.add_known_button = self._add_button("Add this Maya variable")
 
-        self.known_combo = qt.QtWidgets.QComboBox()
-        self.known_combo.addItems(self.KNOWN_VARIABLES)
+        # BaseComboBox: styled rows, slim scroll bar, animated arrow.
+        self.known_combo = BaseComboBox(self.KNOWN_VARIABLES, "")
         self.known_combo.setFixedWidth(self.COMBO_WIDTH)
         self.known_combo.setCurrentIndex(-1)
         self.known_combo.setEditable(True)
@@ -60,19 +63,31 @@ class EnvVariableAdder(qt.QtWidgets.QWidget):
         completer.setCaseSensitivity(qt.QtCore.Qt.CaseSensitivity.CaseInsensitive)
         completer.setFilterMode(qt.QtCore.Qt.MatchFlag.MatchContains)
         self.known_combo.setCompleter(completer)
+        # Typing opens the completer's own list, created parentless (so unstyled,
+        # native white even in the dark theme). Adopted by the combo box it gets
+        # the window QSS — the same `QComboBox QAbstractItemView` look as the
+        # drop-down — and the same slim scroll bar.
+        popup = adopt_popup(completer.popup(), self.known_combo)
+        popup.setItemDelegate(qt.QtWidgets.QStyledItemDelegate(popup))
+        popup.setVerticalScrollBar(SlimScrollBar(qt.QtCore.Qt.Orientation.Vertical))
 
         self.custom_line_edit = qt.QtWidgets.QLineEdit()
         self.custom_line_edit.setPlaceholderText("Custom variable…")
         self.custom_line_edit.setFixedWidth(self.LINE_EDIT_WIDTH)
 
-        self.add_custom_button = qt.QtWidgets.QPushButton("+")
-        self.add_custom_button.setFixedSize(self.ADD_BUTTON_SIZE)
-        self.add_custom_button.setFlat(True)
+        self.add_custom_button = self._add_button("Add this custom variable")
+
+    def _add_button(self, tooltip: str) -> IconPushButton:
+        """Framed "+" button (a regular button: a flat one didn't read as clickable)."""
+        button = IconPushButton(UiResources().iconManager.get_icon("add", sub_folder="actions"),
+                                tooltip, fallback_text="+")
+        button.setFixedSize(self.ADD_BUTTON_SIZE)
+        return button
 
     def _build_layout(self) -> None:
         layout = qt.QtWidgets.QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
+        layout.setSpacing(4)
 
         layout.addWidget(self.add_known_button)
         layout.addWidget(self.known_combo)

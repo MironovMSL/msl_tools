@@ -72,12 +72,13 @@ class EnvVarRow(qt.QtWidgets.QWidget):
     COPY_ICON = "copy"
     BROWSE_ICON = "browse"
     BROWSE_APPEND_ICON = "folder_add"
-    BROWSE_BUTTON_SIZE = qt.QtCore.QSize(26, 21)
+    BROWSE_BUTTON_SIZE = qt.QtCore.QSize(26, 22)  # value field height
     FRAME_INSET = 3            # gap between the frame line and the drag handle
     SELECTED_ALPHA = 38
     CORNER_RADIUS = 4
 
     selectedColor = color_property("_selected_color")
+    hoverColor = color_property("_hover_color")
 
     value_changed = qt.QtCore.Signal(str, str)
     selection_changed = qt.QtCore.Signal(str, bool)
@@ -91,6 +92,8 @@ class EnvVarRow(qt.QtWidgets.QWidget):
         self.browse_mode = browse_mode
         self._list_separator = list_separator
         self._selected_color = qt.QtGui.QColor(ThemeRegistry.fallback().accent)  # until QSS applies
+        self._hover_color = qt.QtGui.QColor(0, 0, 0, 0)  # until QSS applies
+        self._hovered = False
         self._selected_color.setAlpha(self.SELECTED_ALPHA)
         self._gutter = selection_gutter
         self.drag_handle: GlyphButton | None = None
@@ -196,11 +199,13 @@ class EnvVarRow(qt.QtWidgets.QWidget):
     # --- painting ----------------------------------------------------------
 
     def paintEvent(self, event) -> None:
-        if self.is_selected():
+        # Selected rows take the accent tint; a hovered row a faint neutral one.
+        fill = self._selected_color if self.is_selected() else (self._hover_color if self._hovered else None)
+        if fill is not None:
             painter = qt.QtGui.QPainter(self)
             painter.setRenderHint(qt.QtGui.QPainter.RenderHint.Antialiasing)
             painter.setPen(qt.QtCore.Qt.PenStyle.NoPen)
-            painter.setBrush(self._selected_color)
+            painter.setBrush(fill)
             # Highlight only the part inside the owner's frame, not the gutter.
             rect = qt.QtCore.QRectF(self.rect()).adjusted(self._gutter + 1, 0, 0, 0)
             painter.drawRoundedRect(rect, self.CORNER_RADIUS, self.CORNER_RADIUS)
@@ -256,8 +261,10 @@ class EnvVarRow(qt.QtWidgets.QWidget):
         super().leaveEvent(event)
 
     def _set_hovered(self, hovered: bool) -> None:
+        self._hovered = hovered
         self.hover_menu.set_revealed(hovered)
         self.copy_name_button.setVisible(hovered)
+        self.update()  # hover tint
 
 
 if __name__ == "__main__":

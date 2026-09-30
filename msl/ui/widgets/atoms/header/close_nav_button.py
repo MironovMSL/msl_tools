@@ -3,20 +3,11 @@ from msl_tools.msl.ui.widgets.atoms.header.base_nav_button import BaseNavButton
 
 
 class CloseNavButton(BaseNavButton):
-    """Close button — hover/pressed backgrounds are the conventional
-    destructive red family, fixed regardless of theme (both setters are
-    no-ops here on purpose). Pressed is a visibly darker red than hover,
-    not just a delta — hover is already fully opaque, so any additive
-    tweak on top of it would be invisible."""
-
-    DEFAULT_HOVER_COLOR = qt.QtGui.QColor("#E81123")
-    DEFAULT_PRESSED_COLOR = qt.QtGui.QColor("#C42B1C")
+    """Close button. Its own class so ui/theme/widgets.qss can give it the
+    conventional destructive look: a red hover (--danger), a visibly darker
+    red when pressed (--danger-pressed — hover is already opaque, so a
+    lighter tweak on top of it would be invisible), and a white icon on it
+    (--on-danger)."""
 
     def __init__(self, width: int = 36, parent=None):
         super().__init__(width, parent=parent)
-
-    def set_hover_color(self, color: qt.QtGui.QColor) -> None:
-        pass
-
-    def set_pressed_color(self, color: qt.QtGui.QColor) -> None:
-        pass

@@ -85,4 +85,22 @@ def repolish(widget: qt.QtWidgets.QWidget) -> None:
     style = widget.style()
     style.unpolish(widget)
     style.polish(widget)
-    widget.update()
+    # Unbound on purpose: item views overload update(index), hiding QWidget.update().
+    qt.QtWidgets.QWidget.update(widget)
+
+
+def adopt_popup(popup: qt.QtWidgets.QWidget, parent: qt.QtWidgets.QWidget) -> qt.QtWidgets.QWidget:
+    """Re-parents a popup that Qt created parentless (e.g. QCompleter.popup(),
+    which setPopup() detaches) under `parent`, so the window stylesheet
+    reaches it like any other popup. Returns `popup`.
+
+    Re-parenting alone isn't enough: Qt keeps the style it resolved while the
+    popup was parentless (native white list), and repolish() doesn't redo
+    that. Setting the popup's own (blank) stylesheet does — Qt then resolves
+    its style again, now through `parent`. Later theme switches cascade to it
+    like to any child.
+    """
+    popup.setParent(parent, popup.windowFlags())
+    popup.setStyleSheet(" ")
+    return popup
+

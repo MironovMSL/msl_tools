@@ -8,4 +8,6 @@ TOOL_DESCRIPTOR = ToolDescriptor(
     id="maya_gate",
     title="Maya Gate",
     widget_factory=lambda: MayaGatePage(),
+    icon="maya",
+    icon_sub_folder="apps",
 )

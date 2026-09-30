@@ -55,7 +55,7 @@ class UserSetupStore:
         """
         Args:
             tool_config_dir: The tool's own config folder (e.g.
-                configs/maya/maya_gate) — supplied by the caller, which
+                configs/desktop/maya_gate) — supplied by the caller, which
                 already knows it; nothing is created until the first write.
         """
         self._root = Path(tool_config_dir) / self.SUBDIR

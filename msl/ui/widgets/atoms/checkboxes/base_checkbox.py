@@ -11,11 +11,17 @@ class BaseCheckbox(qt.QtWidgets.QAbstractButton):
     label drawn alongside. Fully custom paint — no reliance on native
     QCheckBox styling.
 
+    Looks like the rest of the UI: unchecked, the box is SUNKEN like a line
+    edit (boxTopColor shade fading into boxColor); checked, it fills with
+    the primary button's accent gradient (fillTopColor -> fillColor),
+    growing from the center, while its border blends into the fill and the
+    checkmark is drawn in stroke by stroke. Disabled = dimmed.
+
     Colors are Qt properties set by the window stylesheet (ui/theme/
-    widgets.qss): boxColor, borderColor, hoverBorderColor, fillColor,
-    checkmarkColor, textColor. Until it applies (or outside a styled window) they hold the default
-    theme's colors. The check animation stays
-    in code.
+    widgets.qss): boxColor, boxTopColor, borderColor, hoverBorderColor,
+    fillColor, fillTopColor, checkmarkColor, textColor. Until it applies
+    (or outside a styled window) they hold the default theme's colors. The
+    check animation stays in code.
 
     Signals:
         toggled(bool) — inherited from QAbstractButton, fires on check state
@@ -27,11 +33,15 @@ class BaseCheckbox(qt.QtWidgets.QAbstractButton):
     CORNER_RADIUS = 5
     BORDER_WIDTH  = 1.5
     ANIM_DURATION = 280
+    DISABLED_OPACITY = 0.45
+    CHECK_DRAW_START = 0.35  # the checkmark starts drawing once the fill is this far in
 
     boxColor         = color_property("_box_color")
+    boxTopColor      = color_property("_box_top_color")
     borderColor      = color_property("_border_color")
     hoverBorderColor = color_property("_hover_border_color")
     fillColor        = color_property("_fill_color")
+    fillTopColor     = color_property("_fill_top_color")
     checkmarkColor   = color_property("_checkmark_color")
     textColor        = color_property("_text_color")
 
@@ -102,10 +112,12 @@ class BaseCheckbox(qt.QtWidgets.QAbstractButton):
     def _seed_colors(self, theme: Theme) -> None:
         """Defaults until QSS applies — same mapping as widgets.qss."""
         self._box_color          = qt.QtGui.QColor(theme.surface)
+        self._box_top_color      = qt.QtGui.QColor(theme.surface)
         self._border_color       = qt.QtGui.QColor(theme.border)
         self._hover_border_color = qt.QtGui.QColor(theme.accent)
         self._fill_color         = qt.QtGui.QColor(theme.accent)
-        self._checkmark_color    = qt.QtGui.QColor(theme.surface)
+        self._fill_top_color     = qt.QtGui.QColor(theme.accent)
+        self._checkmark_color    = qt.QtGui.QColor("#ffffff")
         self._text_color         = qt.QtGui.QColor(theme.text_primary)
 
 
@@ -133,6 +145,8 @@ class BaseCheckbox(qt.QtWidgets.QAbstractButton):
     def paintEvent(self, event) -> None:
         painter = qt.QtGui.QPainter(self)
         painter.setRenderHint(qt.QtGui.QPainter.RenderHint.Antialiasing)
+        if not self.isEnabled():
+            painter.setOpacity(self.DISABLED_OPACITY)
 
         inset = self.BORDER_WIDTH / 2
         box_rect = qt.QtCore.QRectF(
@@ -151,14 +165,30 @@ class BaseCheckbox(qt.QtWidgets.QAbstractButton):
 
         painter.end()
 
+    @staticmethod
+    def _blend(a: qt.QtGui.QColor, b: qt.QtGui.QColor, t: float) -> qt.QtGui.QColor:
+        t = min(max(t, 0.0), 1.0)
+        return qt.QtGui.QColor.fromRgbF(*(ca + (cb - ca) * t for ca, cb in zip(a.getRgbF(), b.getRgbF())))
+
+    @staticmethod
+    def _vertical_gradient(rect: qt.QtCore.QRectF, top: qt.QtGui.QColor, bottom: qt.QtGui.QColor,
+                           bottom_at: float = 1.0) -> qt.QtGui.QLinearGradient:
+        gradient = qt.QtGui.QLinearGradient(rect.topLeft(), rect.bottomLeft())
+        gradient.setColorAt(0.0, top)
+        gradient.setColorAt(bottom_at, bottom)
+        return gradient
+
     def _paint_box(self, painter: qt.QtGui.QPainter, rect: qt.QtCore.QRectF) -> None:
-        border_color = self._hover_border_color if self._hovered else self._border_color
+        rest_border = self._hover_border_color if self._hovered and self.isEnabled() else self._border_color
+        # The border melts into the fill as it checks, so a checked box is one solid shape.
+        border_color = self._blend(rest_border, self._fill_color, self._check_progress)
 
         path = qt.QtGui.QPainterPath()
         path.addRoundedRect(rect, self.CORNER_RADIUS, self.CORNER_RADIUS)
 
         painter.setPen(qt.QtGui.QPen(border_color, self.BORDER_WIDTH))
-        painter.setBrush(self._box_color)
+        # Sunken, like a line edit: a shade at the top edge fading into the box color.
+        painter.setBrush(self._vertical_gradient(rect, self._box_top_color, self._box_color, 0.45))
         painter.drawPath(path)
 
         if self._check_progress <= 0.0:
@@ -175,27 +205,35 @@ class BaseCheckbox(qt.QtWidgets.QAbstractButton):
         fill_path.addRoundedRect(fill_rect, self.CORNER_RADIUS * scale, self.CORNER_RADIUS * scale)
 
         painter.setPen(qt.QtCore.Qt.PenStyle.NoPen)
-        painter.setBrush(self._fill_color)
+        painter.setBrush(self._vertical_gradient(fill_rect, self._fill_top_color, self._fill_color))
         painter.drawPath(fill_path)
 
     def _paint_checkmark(self, painter: qt.QtGui.QPainter, rect: qt.QtCore.QRectF) -> None:
-        if self._check_progress <= 0.0:
+        # Drawn in, not faded in: the stroke grows from the short leg's start to the
+        # long leg's end, starting once the fill is CHECK_DRAW_START of the way in.
+        draw = (self._check_progress - self.CHECK_DRAW_START) / (1.0 - self.CHECK_DRAW_START)
+        draw = min(max(draw, 0.0), 1.0)
+        if draw <= 0.0:
             return
 
         painter.save()
-        painter.setOpacity(min(max(self._check_progress, 0.0), 1.0))
 
         s = rect.width()
         p1 = rect.topLeft() + qt.QtCore.QPointF(s * 0.28, s * 0.52)
         p2 = rect.topLeft() + qt.QtCore.QPointF(s * 0.44, s * 0.68)
         p3 = rect.topLeft() + qt.QtCore.QPointF(s * 0.74, s * 0.32)
 
+        leg1 = qt.QtCore.QLineF(p1, p2).length()
+        leg2 = qt.QtCore.QLineF(p2, p3).length()
+        drawn = draw * (leg1 + leg2)
         check_path = qt.QtGui.QPainterPath()
         check_path.moveTo(p1)
-        check_path.lineTo(p2)
-        check_path.lineTo(p3)
+        if drawn <= leg1:
+            check_path.lineTo(p1 + (p2 - p1) * (drawn / leg1))
+        else:
+            check_path.lineTo(p2)
+            check_path.lineTo(p2 + (p3 - p2) * ((drawn - leg1) / leg2))
 
-        # Mirrors QPushButton:pressed in base.qss (accent background, surface foreground).
         pen = qt.QtGui.QPen(self._checkmark_color, 2.2,
                              qt.QtCore.Qt.PenStyle.SolidLine,
                              qt.QtCore.Qt.PenCapStyle.RoundCap,

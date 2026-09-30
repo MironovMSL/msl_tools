@@ -103,35 +103,15 @@ class FramelessDialog(FramelessWindowMixin, qt.QtWidgets.QDialog):
         if self._close_button is None:
             return
 
-        close_hover_icon_color = "#ffffff" if theme.name == "light" else "#000000"
+        # Window buttons: icon SHAPES only — their colors (icon, hover, pressed,
+        # the close button's red) come from widgets.qss (BaseNavButton / CloseNavButton).
         icon_manager = self._ui_resources.iconManager
-
-        hover_alpha   = 15 if theme.name == "light" else 30
-        pressed_alpha = 30 if theme.name == "light" else 15
-
-        overlay = qt.QtGui.QColor(color)
-        overlay.setAlpha(hover_alpha)
-
-        pressed_overlay = qt.QtGui.QColor(color)
-        pressed_overlay.setAlpha(pressed_alpha)
-
         if self._minimize_button is not None:
-            minimize_icon = icon_manager.get_icon("minimize", sub_folder=self.ICON_SUB_FOLDER, color=color)
-            self._minimize_button.set_icon(minimize_icon)
-            self._minimize_button.set_hover_color(overlay)
-            self._minimize_button.set_pressed_color(pressed_overlay)
-
+            self._minimize_button.set_icon(icon_manager.get_icon("minimize", sub_folder=self.ICON_SUB_FOLDER))
         if self._maximize_button is not None:
-            maximize_icon = icon_manager.get_icon("maximize", sub_folder=self.ICON_SUB_FOLDER, color=color)
-            restore_icon = icon_manager.get_icon("restore", sub_folder=self.ICON_SUB_FOLDER, color=color)
-            self._maximize_button.set_icons(maximize_icon, restore_icon)
-            self._maximize_button.set_hover_color(overlay)
-            self._maximize_button.set_pressed_color(pressed_overlay)
-
-        if self._close_button is not None:
-            close_idle = icon_manager.get_icon("close", sub_folder=self.ICON_SUB_FOLDER, color=color)
-            close_hover = icon_manager.get_icon("close", sub_folder=self.ICON_SUB_FOLDER, color=close_hover_icon_color)
-            self._close_button.set_icon(close_idle, hover_icon=close_hover)
+            self._maximize_button.set_icons(icon_manager.get_icon("maximize", sub_folder=self.ICON_SUB_FOLDER),
+                                            icon_manager.get_icon("restore", sub_folder=self.ICON_SUB_FOLDER))
+        self._close_button.set_icon(icon_manager.get_icon("close", sub_folder=self.ICON_SUB_FOLDER))
 
     def _apply_snap_flyout_colors(self, theme: Theme, color) -> None:
         """Split out of _apply_theme() for readability, and so it's obvious

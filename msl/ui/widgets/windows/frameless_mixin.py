@@ -322,6 +322,47 @@ class FramelessWindowMixin:
         return self._is_pseudo_maximized
 
     # ------------------------------------------------------------------
+    # Remembered placement (the caller stores it; the window never does I/O)
+    # ------------------------------------------------------------------
+
+    def normal_geometry(self) -> qt.QtCore.QRect:
+        """The window's un-maximized, un-snapped geometry — what to store to
+        reopen it at the same place and size (maximize/snap are not kept)."""
+        if (self._is_pseudo_maximized or self._is_snapped) and self._normal_geometry is not None:
+            return qt.QtCore.QRect(self._normal_geometry)
+        return self.geometry()
+
+    def restore_normal_geometry(self, rect: qt.QtCore.QRect) -> bool:
+        """Places the window at a stored `normal_geometry()`.
+
+        Skipped (returns False, the window keeps its default placement) when
+        the rect is empty or its title bar would land off every screen —
+        e.g. the monitor it was on is gone. The size is clamped to the
+        target screen, so a window saved on a bigger monitor still fits.
+        """
+        if rect.isEmpty():
+            return False
+        # The header strip is what you need to reach to move the window: take the
+        # screen showing most of it; none at all = that monitor is gone.
+        header = qt.QtCore.QRect(rect.left(), rect.top() + self._outer_margin, rect.width(), 30)
+        screen, best_area = None, 0
+        for candidate in qt.QtGui.QGuiApplication.screens():
+            overlap = candidate.availableGeometry().intersected(header)
+            area = overlap.width() * overlap.height() if overlap.isValid() else 0
+            if area > best_area:
+                screen, best_area = candidate, area
+        if screen is None:
+            return False
+
+        available = screen.availableGeometry()
+        width = min(rect.width(), available.width())
+        height = min(rect.height(), available.height())
+        x = min(max(rect.x(), available.left()), available.right() - width + 1)
+        y = min(max(rect.y(), available.top()), available.bottom() - height + 1)
+        self.setGeometry(x, y, width, height)
+        return True
+
+    # ------------------------------------------------------------------
     # Chrome construction
     # ------------------------------------------------------------------
 
@@ -345,6 +386,7 @@ class FramelessWindowMixin:
 
         if icon is not None:
             self.header.set_icon(icon)
+            self.setWindowIcon(icon)  # taskbar / Alt+Tab, not just the header
         if subtitle is not None:
             self.header.set_subtitle(subtitle)
 
@@ -590,6 +632,19 @@ class FramelessWindowMixin:
     def _resize_to_visible_size(self, width: int, height: int) -> None:
         self.resize(width + 2 * self._outer_margin, height + 2 * self._outer_margin)
 
+    def _edge_under_mouse(self, event: qt.QtGui.QMouseEvent) -> _ResizeEdge:
+        """The resize edge at the mouse, from its GLOBAL position.
+
+        Not event.position(): a move/press can reach the window propagated
+        from a child, and while a popup (a combo box's list, a menu) holds
+        the mouse its coordinates needn't be this window's — the edge test
+        then saw the pointer "at" the right/bottom edge and showed a resize
+        cursor over a combo box's arrow. While any popup is open the window
+        never resizes: the popup owns the mouse."""
+        if qt.QtWidgets.QApplication.activePopupWidget() is not None:
+            return _ResizeEdge.NONE
+        return self._edge_at(self.mapFromGlobal(event.globalPosition().toPoint()))
+
     def _edge_at(self, pos: qt.QtCore.QPoint) -> _ResizeEdge:
         if self.isMaximized():
             return _ResizeEdge.NONE
@@ -655,8 +710,8 @@ class FramelessWindowMixin:
         if event.button() != qt.QtCore.Qt.MouseButton.LeftButton:
             super().mousePressEvent(event)
             return
-        pos = event.position().toPoint()
-        edge = self._edge_at(pos)
+        pos = self.mapFromGlobal(event.globalPosition().toPoint())
+        edge = self._edge_under_mouse(event)
         if edge is not _ResizeEdge.NONE:
             self._resize_edge = edge
             self._resize_start_geometry = self.geometry()
@@ -703,7 +758,7 @@ class FramelessWindowMixin:
             event.accept()
             return
         if not event.buttons():
-            edge = self._edge_at(event.position().toPoint())
+            edge = self._edge_under_mouse(event)
             self.setCursor(self._CURSOR_BY_EDGE.get(edge, qt.QtCore.Qt.CursorShape.ArrowCursor))
         super().mouseMoveEvent(event)
 
