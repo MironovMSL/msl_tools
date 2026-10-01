@@ -126,13 +126,16 @@ class HubWindow(FramelessDialog):
 
     Signals:
         tool_changed(str): id of the tool the user switched to.
+        footer_clicked(): the sidebar's footer text (the version) was clicked.
 
     Args:
         tools: Descriptors for every tool the hub should list, in order.
         current_tool_id: Tool opened on start; None or an unknown id opens
             the first one.
         footer_text: Small dimmed text at the bottom of the sidebar (run_hub
-            passes the package version, "v0.0.0"); None = no footer.
+            passes the package version, "v0.0.0"); None = no footer. It is a
+            button: clicking it emits footer_clicked (run_hub opens the
+            "What's new" dialog); `footer_tooltip` is its tooltip.
         title: Window title shown in the frameless chrome.
         icon: Window icon — shown in the header and used by the OS
             (taskbar, Alt+Tab). run_hub.py passes assets/icons/brand/hub.svg.
@@ -147,6 +150,7 @@ class HubWindow(FramelessDialog):
     CARD_PADDING = 6
 
     tool_changed = qt.QtCore.Signal(str)
+    footer_clicked = qt.QtCore.Signal()
 
     def __init__(self,
                  tools: Sequence[ToolDescriptor],
@@ -154,6 +158,7 @@ class HubWindow(FramelessDialog):
                  title: str = "MSL Tools",
                  icon: qt.QtGui.QIcon | None = None,
                  footer_text: str | None = None,
+                 footer_tooltip: str = "",
                  resources: UiResources | None = None,
                  parent=None) -> None:
         # A standalone desktop app: keep the window opaque when unfocused (header still dims).
@@ -166,7 +171,7 @@ class HubWindow(FramelessDialog):
         self._nav_group = qt.QtWidgets.QButtonGroup(self)
         self._nav_group.setExclusive(True)
 
-        self._build_body(footer_text)
+        self._build_body(footer_text, footer_tooltip)
         for descriptor in tools:
             self._add_tool_button(descriptor)
 
@@ -179,7 +184,7 @@ class HubWindow(FramelessDialog):
         if start is not None:
             start.click()
 
-    def _build_body(self, footer_text: str | None) -> None:
+    def _build_body(self, footer_text: str | None, footer_tooltip: str = "") -> None:
         self.content_surface.content_layout().setContentsMargins(0, 0, 0, 0)
 
         sidebar = HubSidebar()
@@ -190,9 +195,12 @@ class HubWindow(FramelessDialog):
         self._sidebar_layout.setSpacing(2)
         self._sidebar_layout.addStretch(1)
         if footer_text:
-            footer = qt.QtWidgets.QLabel(footer_text)
-            footer.setObjectName("hubFooter")
-            footer.setAlignment(qt.QtCore.Qt.AlignmentFlag.AlignCenter)
+            footer = qt.QtWidgets.QPushButton(footer_text)
+            footer.setObjectName("hubFooter")  # widgets.qss: a quiet text button
+            footer.setToolTip(footer_tooltip)
+            footer.setCursor(qt.QtCore.Qt.CursorShape.PointingHandCursor)
+            footer.setFocusPolicy(qt.QtCore.Qt.FocusPolicy.NoFocus)
+            footer.clicked.connect(self.footer_clicked)
             self._sidebar_layout.addWidget(footer)
 
         self._stack = qt.QtWidgets.QStackedWidget()

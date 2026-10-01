@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
-  <!-- MSL Tools hub app icon: a launcher grid of tools, the open one lit.
+  <!-- MSL Tools hub app icon: an "M" monogram (MSL = the author's initials).
        Full-color on purpose (taskbar / window icon), not a #000000 one-color icon. -->
   <defs>
     <linearGradient id="hubBackground" x1="0" y1="0" x2="0" y2="1">
@@ -8,8 +8,5 @@
     </linearGradient>
   </defs>
   <rect x="2" y="2" width="60" height="60" rx="14" fill="url(#hubBackground)"/>
-  <rect x="14" y="14" width="16" height="16" rx="4.5" fill="#ffffff"/>
-  <rect x="34" y="14" width="16" height="16" rx="4.5" fill="#ffffff" fill-opacity="0.5"/>
-  <rect x="14" y="34" width="16" height="16" rx="4.5" fill="#ffffff" fill-opacity="0.5"/>
-  <rect x="34" y="34" width="16" height="16" rx="4.5" fill="#ffffff" fill-opacity="0.5"/>
+  <path d="M17 46V19l15 18 15-18v27" fill="none" stroke="#ffffff" stroke-width="7.5" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>

@@ -51,6 +51,27 @@ class RemoteVersionChecker:
         from msl_tools.msl.core.version.version import Version
         return Version.parse(tag_name)
 
+    def get_releases(self, limit: int = 30, timeout_ms: int = 8000):
+        """Published releases with their notes, newest first
+        (list[ReleaseNote]) — or None when they couldn't be loaded (no
+        network, rate limit, unexpected response). Blocking: call it off
+        the GUI thread."""
+        from msl_tools.msl.core.version.release_notes import parse_releases
+
+        url = f"{self.config.releases_url}?per_page={limit}"
+        response, content = self._network_client.http_get_request(url, timeout_ms=timeout_ms)
+        if response is None:
+            self._logger.warning("Unable to load releases. No response from server.")
+            return None
+        if self._network_client.get_http_response_type(response.status) != "successful" or not content:
+            self._logger.warning(f"Unsuccessful response loading releases. Status: {response.status}")
+            return None
+        try:
+            return parse_releases(content)
+        except ValueError as e:
+            self._logger.warning(f"Failed to parse releases. Issue: {e}")
+            return None
+
 
 if __name__ == "__main__":
 

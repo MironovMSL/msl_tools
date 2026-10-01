@@ -36,6 +36,12 @@ GlyphButton {
     qproperty-highlightColor:        alpha(var(--text-primary), 11%);
     qproperty-pressedHighlightColor: alpha(var(--text-primary), 21.6%);
 }
+/* A destructive action (bulk delete): red while hovered / pressed. */
+GlyphButton[danger="true"] {
+    qproperty-activeGlyphColor:      var(--danger);
+    qproperty-highlightColor:        alpha(var(--danger), 13%);
+    qproperty-pressedHighlightColor: alpha(var(--danger), 24%);
+}
 
 /* --- SegmentedControl: sunken track, raised pill that slides ------------------ */
 
@@ -43,7 +49,6 @@ SegmentedControl {
     qproperty-trackTopColor:    var(--segment-track-top);
     qproperty-trackColor:       var(--segment-track);
     qproperty-borderColor:      var(--border);
-    qproperty-focusBorderColor: var(--accent);
     qproperty-pillTopColor:     var(--segment-pill-top);
     qproperty-pillColor:        var(--segment-pill);
     qproperty-pillBorderColor:  var(--border);
@@ -198,10 +203,24 @@ HubSidebar {
     qproperty-pillEdgeTopColor:    var(--nav-edge-top);
     qproperty-pillEdgeBottomColor: var(--nav-edge-bottom);
 }
-/* Version under the tools. */
-QLabel#hubFooter {
+/* Version under the tools: a quiet text button (opens "What's new"). */
+QPushButton#hubFooter {
+    background-color: transparent;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    padding: 2px 4px;
     color: alpha(var(--text-secondary), 80%);
     font-size: 10px;
+}
+QPushButton#hubFooter:hover {
+    background-color: alpha(var(--text-primary), 7%);
+    border: 1px solid transparent;
+    color: var(--text-primary);
+}
+QPushButton#hubFooter:pressed {
+    background-color: alpha(var(--text-primary), 12%);
+    border: 1px solid transparent;
+    color: var(--text-primary);
 }
 IconTileButton#hubNavButton:pressed {
     background-color: linear-gradient(to top, var(--nav-top-hover), var(--nav-bottom-hover));
@@ -212,10 +231,65 @@ IconTileButton#hubNavButton:pressed {
 
 /* --- ConfirmDialog (ui/widgets/windows/confirm_dialog.py) ----------------------- */
 
+ConfirmDialog QLabel#confirmMessage {
+    color: var(--text-primary);
+    font-weight: 600;
+}
 ConfirmDialog QLabel#confirmDetails {
     color: var(--text-secondary);
 }
-/* The primary choice is a QPushButton[primary="true"] (base.qss). */
+/* The badge's tone follows the dialog's kind. */
+ConfirmDialog ToneBadge                  { qproperty-toneColor: var(--accent); }
+ConfirmDialog[kind="warning"] ToneBadge  { qproperty-toneColor: var(--warning); }
+ConfirmDialog[kind="danger"] ToneBadge   { qproperty-toneColor: var(--danger); }
+/* The primary choice is a QPushButton[primary="true"] (base.qss); in a
+   "danger" dialog also [danger="true"] — red. */
+
+/* --- WhatsNewDialog (ui/widgets/windows/whats_new_dialog.py) -------------------- */
+
+WhatsNewDialog QLabel#releaseDate {
+    color: var(--text-primary);
+    font-size: 14px;
+    font-weight: 600;
+}
+WhatsNewDialog QLabel#releaseTitle {
+    color: var(--text-secondary);
+}
+/* Version pill: neutral; accent for versions newer than the installed one,
+   green for the installed one. */
+WhatsNewDialog QLabel#releaseVersion {
+    color: var(--text-secondary);
+    background-color: alpha(var(--text-primary), 8%);
+    border-radius: 4px;
+    padding: 1px 7px;
+    font-size: 11px;
+}
+WhatsNewDialog QLabel#releaseVersion[state="new"] {
+    color: var(--accent);
+    background-color: alpha(var(--accent), 15%);
+}
+WhatsNewDialog QLabel#releaseVersion[state="current"] {
+    color: var(--success);
+    background-color: alpha(var(--success), 15%);
+}
+WhatsNewDialog QLabel#releaseSection {
+    color: var(--text-secondary);
+    font-size: 11px;
+    font-weight: 600;
+}
+WhatsNewDialog QLabel#releaseBody {
+    color: var(--text-primary);
+}
+WhatsNewDialog QWidget#releaseDivider {
+    background-color: alpha(var(--border), 55%);
+}
+WhatsNewDialog QLabel#whatsNewStatus {
+    color: var(--text-secondary);
+}
+WhatsNewDialog QPushButton#whatsNewLink {
+    color: var(--accent);
+    padding: 2px 6px;
+}
 
 /* --- compositions ------------------------------------------------------------------ */
 
@@ -225,8 +299,17 @@ DraggableList {
     qproperty-dragBorderColor:     alpha(var(--accent), 60%);
 }
 
+/* Selection strip: one accent-tinted pill. */
+BulkActionBar {
+    qproperty-pillColor:       alpha(var(--accent), 12%);
+    qproperty-pillBorderColor: alpha(var(--accent), 35%);
+}
 BulkActionBar QLabel#bulkCount {
     color: var(--accent);
+    font-weight: 600;
+}
+BulkActionBar QWidget#bulkDivider {
+    background-color: alpha(var(--accent), 35%);
 }
 
 InstallPathWidget QLabel#installHint {
@@ -237,6 +320,15 @@ InstallPathWidget QLabel#installHint {
 EnvVarRow {
     qproperty-selectedColor: alpha(var(--accent), 14.9%);
     qproperty-hoverColor:    alpha(var(--text-primary), 4%);
+}
+/* A value whose folder doesn't exist on disk (the tooltip says which):
+   warning border, also on hover — the accent returns while typing. */
+EnvVarRow QLineEdit[pathState="missing"],
+EnvVarRow QLineEdit[pathState="missing"]:hover {
+    border: 1px solid var(--warning);
+}
+EnvVarRow QLineEdit[pathState="missing"]:focus {
+    border: 1px solid var(--accent);
 }
 
 /* --- CodeEditor ------------------------------------------------------------------ */
@@ -265,6 +357,8 @@ CodeEditor {
     qproperty-currentLineNumberColor: var(--text-primary);
     qproperty-gutterDividerColor:     alpha(var(--border), 60%);
     qproperty-currentLineColor:       alpha(var(--text-primary), 5%);
+    qproperty-errorLineColor:         alpha(var(--error), 16%);
+    qproperty-errorNumberColor:       var(--error);
 }
 CodeEditor:focus {
     border: 1px solid var(--accent);

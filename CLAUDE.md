@@ -103,7 +103,8 @@ msl_tools/                 (repo root)
     focus = accent border like a line edit; translucent selection.
   - Segmented control (`SegmentedControl`, widgets.qss): sunken track
     (`--segment-track-top/-track`), raised pill (`--segment-pill-top/-pill`)
-    that slides to the picked option. For a handful of often-switched
+    that slides to the picked option; keyboard focus is deliberately not
+    drawn (an accent border on a mere click was confusing). For a handful of often-switched
     options (Maya Gate's environments); long lists stay combo boxes.
   - Tabs: underline style (base.qss); hovering a tab lays a soft rounded
     tint under it. `BaseTabWidget` / `BaseTabBar` (atoms/tabs/) paint the
@@ -180,7 +181,12 @@ msl_tools/                 (repo root)
     into a QMenu's bottom-right corner, ignoring QSS (a dark notch). For questions use
     `ui/widgets/windows/confirm_dialog.py:ConfirmDialog.ask()` (FramelessDialog-
     based, rounded + themed; first choice = accent primary) instead of
-    QMessageBox, whose native frame can't be rounded or themed.
+    QMessageBox, whose native frame can't be rounded or themed. `kind=`
+    "question" / "warning" / "danger" sets a tone badge (ToneBadge: ? ! ×
+    in --accent / --warning / --danger) and, for "danger", a red primary
+    (`QPushButton[primary="true"][danger="true"]`) — and there Enter means
+    the LAST choice (cancel), so a stray Enter never destroys anything;
+    ask() blurs a frameless parent window (`set_blurred`) while it's open.
   - Window buttons (header minimize / maximize / close, `BaseNavButton` /
     `CloseNavButton`) are migrated: the windows only hand them icon SHAPES
     (window/*.svg); colors are qproperty iconColor / hoverIconColor /
@@ -196,10 +202,10 @@ msl_tools/                 (repo root)
     named by what the icon IS, not the gesture (`drag_handle`, not
     `dragAndDrop`). Categories: `window/` (chrome: close/maximize/...),
     `actions/` (row/toolbar actions: `drag_handle`, `copy`, `delete`,
-    `browse`, `folder_add`, `clear`, `arrow_right`, `chevron_down`, `add`, `check`; add new action icons here),
+    `browse`, `folder_add`, `clear`, `arrow_right`, `chevron_down`, `add`, `check`, `select_all`; add new action icons here),
     `apps/` (third-party application logos: `maya`; later houdini, blender...
     — named after the app, not the tool that uses it, so several tools can
-    share one), `brand/` (our own app icons: `hub` — full-color, NOT the
+    share one), `brand/` (our own app icons: `hub` — an "M" monogram, full-color, NOT the
     #000000 one-color convention: used as the window/taskbar icon, never
     tinted). Per-theme variants only when the SHAPE
     differs: `<name>_dark.svg` / `<name>_light.svg`.
@@ -266,7 +272,8 @@ NEVER runs inside Maya; it's a pure standalone desktop app. Future
   slides to a newly opened tool (qproperty pillTopColor / pillColor /
   pillEdgeTopColor / pillEdgeBottomColor from --nav-*); the checked tile
   itself is transparent. `footer_text` (run_hub: `v{msl.__version__}`) is a
-  small dimmed label at the sidebar's bottom (`QLabel#hubFooter`).
+  quiet text button at the sidebar's bottom (`QPushButton#hubFooter`);
+  clicking it emits `footer_clicked` — run_hub opens "What's new".
   Icons are tinted from QSS: `--text-secondary`, and `--text-primary`
   on the open tool via the dynamic property `current="true"` (qproperty-*
   is only applied from rules without pseudo-states, so not `:checked`).
@@ -368,14 +375,50 @@ What changed vs. the original (all deliberate, not oversights):
   raise) and never changes content, so Maya 2022+'s userSetup trust-hash
   prompt appears once, not after every edit. Must stay Python-2.7-valid
   (Maya 2020). Verified end-to-end with mayapy 2020 and 2025 standalone.
+  Every launch also puts the folder holding the msl_tools package
+  (`FileSystemManager.PARENT_DIR`) on PYTHONPATH — baked into
+  `UserSetupStore.launch_environment()`, deliberately NOT a variable in the
+  config (per-machine path; must not be editable away) — so scripts just
+  `from msl_tools...`. A never-saved script reads as
+  `UserSetupStore.DEFAULT_SCRIPT` = the 3-line `MENU_SNIPPET`
+  (`from msl_tools.msl.startup import bootstrap; bootstrap()`), so a fresh
+  install gets the msl menu in every environment; a script saved empty stays
+  empty (not injected). "Insert MSL menu" restores the snippet and rewrites
+  the old long form (the one that set MSL_PARENT_DIR / sys.path) via
+  `upgrade_menu_snippet()`. Verified with mayapy 2026.
+  The tab's status (`QLabel#userSetupStatus[state=...]`, maya_gate.qss)
+  says where the script stands: "editing" while typing, then after each
+  save / load "saved", "off" (blank — Maya starts without it) or "error"
+  (`UserSetupStore.syntax_error()`; the line is marked in the editor with
+  `CodeEditor.set_error_line()` — qproperty errorLineColor /
+  errorNumberColor; the script is saved anyway). "Edited" means the TEXT
+  differs from what's saved: QPlainTextEdit.textChanged also fires on a
+  mere re-highlight (theme switch), which must not mark the script dirty.
 
 - One scroll area for the whole Variables tab (no per-group scroll, no row
   cap); groups fold via their header instead. Fold state is persisted under
   the `_ui` key of the `maya_gate` config — never merged into a launch
   environment (`_launch` reads only `"maya"."<env>"` + `"custom"."<env>"`).
   Launches are logged to `logs/desktop/maya_gate/` (file: warnings+).
+- Widgets in a `RowHoverMenu` never take keyboard focus: they hide when the
+  pointer leaves the row, and a hidden focused widget passes focus to the
+  row's line edit, which then selects all its text.
+- Rows flag missing folders: a value (each entry of a PATH_LIST) that looks
+  like a path but doesn't exist marks its field `pathState="missing"`
+  (warning border, widgets.qss) and names the folder in the tooltip; path
+  lists get a one-entry-per-line tooltip (✓/✗). Checked on a daemon thread
+  (a row signal carries the result back; NOT a QThread — a row can be
+  deleted mid-check), on first show and 400ms after edits. Empty values
+  show an "empty" placeholder; copy buttons flash a check
+  (`GlyphButton.flash_icon()`).
+- Bulk bar: `set_count(selected, total)`; "select all" is built in (hidden
+  once everything is selected); a destructive action is added with
+  `add_action(..., danger=True)` -> `GlyphButton[danger="true"]`, red on
+  hover (widgets.qss).
 - Rows are selected via the hover-menu checkbox; removal is a BULK action
-  only (no per-row delete button), reordering is drag-and-drop only.
+  only (no per-row delete button), reordering is drag-and-drop only. Bulk
+  delete asks first — `ConfirmDialog` kind="danger" (no undo);
+  `delete_items()` is the non-interactive core, like `copy_items_to()`.
   `CollapsibleVariableGroup` paints its own frame starting at
   `SELECTION_GUTTER`, so the drag-handle column reads as sitting outside the
   frame (Notion-style); the page indents other content by the same amount. New bulk operations go in
@@ -417,10 +460,11 @@ atoms/surfaces/stable_scroll_area.py      StableScrollArea (scroll-bar column al
 compositions/draggable_list.py            DraggableList (generic drag-reorder list)
 compositions/env_var_row.py               EnvVarRow (Notion-style: hover menu at the row start, name, CopyableLineEdit value, browse)
 compositions/row_hover_menu.py            RowHoverMenu (extensible hover gutter: add_widget(), set_revealed(), set_pinned())
-compositions/bulk_action_bar.py           BulkActionBar ("N selected · actions · ×"; add_action() per bulk operation)
+compositions/bulk_action_bar.py           BulkActionBar (accent pill "N of M selected | select-all, actions | ×"; add_action(danger=) per bulk operation; select_all_requested / clear_requested)
 compositions/copyable_line_edit.py        CopyableLineEdit (copy button appears inside the field on hover)
 themed_widget_playground_dialog.py        ThemedWidgetPlaygroundDialog
 windows/confirm_dialog.py                 ConfirmDialog (themed rounded question window; ask() -> choice key or None)
+windows/whats_new_dialog.py               WhatsNewDialog (release notes per published version; show_for(parent, fetch_releases, current_version, releases_url))
 ```
 
 Bug fixes made to EXISTING framework files along the way (not new code):
@@ -446,6 +490,24 @@ override reads must be set BEFORE calling `super().__init__()`, since the
 base class's `__init__()` calls `self._apply_theme()` synchronously at the
 end of its own construction — reaching the subclass's override before the
 subclass's own `__init__` body finishes.
+
+### What's new (release notes)
+
+Clicking the version in the hub's sidebar opens `WhatsNewDialog`: one block
+per PUBLISHED GitHub release, newest first — what changed with each version,
+not every commit. The notes are the release's description on GitHub:
+- `core/version/release_notes.py` (Qt-free, no I/O): `ReleaseNote`,
+  `parse_releases(json)`, `split_sections(body)` — cuts the Markdown at its
+  headings, so write a release description as `### New` / `### Improved` /
+  `### Fixed` + bullet lists and the dialog shows labelled sections.
+- `RemoteVersionChecker.get_releases()` / `VersionManager.get_releases()`
+  fetch them (blocking; None on failure). The dialog calls its
+  `fetch_releases` on a daemon thread ("Loading…", then the list, or an
+  error with Retry). The installed version's pill reads "installed", newer
+  ones "new" (`QLabel#releaseVersion[state]`, widgets.qss).
+- Releasing: bump `msl/__init__.py:__version_tuple__`, commit, push, then
+  publish a GitHub release tagged `v<version>` with the notes. No `gh` CLI
+  on this machine — the release is created in the browser.
 
 ## Verified so far
 

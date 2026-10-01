@@ -1,6 +1,9 @@
 # tools/desktop/maya_gate/user_setup_tab.py
 import msl_tools.msl.ui.qt_bindings as qt
 from msl_tools.msl.ui.process_launcher.process_launcher import ProcessLauncher
+from msl_tools.msl.ui.theme.qss import repolish
+from msl_tools.msl.ui.ui_resources import UiResources
+from msl_tools.msl.ui.widgets.atoms.buttons import IconPushButton
 from msl_tools.msl.ui.widgets.atoms.editors import CodeEditor
 from msl_tools.msl.tools.desktop.maya_gate.user_setup import UserSetupStore
 
@@ -16,6 +19,13 @@ class UserSetupTab(qt.QtWidgets.QWidget):
     Saving is automatic (debounced while typing, flushed on environment
     switch and on hide). No file I/O at construction: the first read
     happens when the tab is first shown.
+
+    The status next to the title says where the script stands
+    (QLabel#userSetupStatus[state=...], maya_gate.qss): "editing" while
+    typing; after each save / load "saved", "off" (blank script — Maya
+    starts without it) or "error" — a syntax error, with its line marked in
+    the editor (the script is saved anyway; Maya's wrapper would only print
+    the error at startup, far from here).
     """
 
     SAVE_DELAY_MS = 600
@@ -26,6 +36,7 @@ class UserSetupTab(qt.QtWidgets.QWidget):
         self._environment = environment
         self._loaded_environment: str | None = None
         self._dirty = False
+        self._saved_text = ""  # what is on disk (or the default): the baseline for "edited"
 
         self._build_widgets()
         self._build_layout()
@@ -33,22 +44,34 @@ class UserSetupTab(qt.QtWidgets.QWidget):
         self._update_title()
 
     def _build_widgets(self) -> None:
-        self._title_label = qt.QtWidgets.QLabel()
+        self._title_label = qt.QtWidgets.QLabel("userSetup")
+        self._title_label.setObjectName("userSetupTitle")
+        self._section_label = qt.QtWidgets.QLabel()
+        self._section_label.setObjectName("userSetupSection")
         self._status_label = qt.QtWidgets.QLabel()
-        self._status_label.setEnabled(False)  # dimmed: secondary info
+        self._status_label.setObjectName("userSetupStatus")
 
-        self._insert_menu_button = qt.QtWidgets.QPushButton("Insert MSL menu")
-        self._insert_menu_button.setToolTip("Append code that loads the msl_tools main menu in Maya")
-        self._open_folder_button = qt.QtWidgets.QPushButton("Open folder")
+        icons = UiResources().iconManager
+        self._insert_menu_button = IconPushButton(icons.get_icon("add", sub_folder="actions"))
+        self._insert_menu_button.setText("Insert MSL menu")
+        self._insert_menu_button.setToolTip(
+            "Put back the code that loads the msl_tools main menu in Maya\n"
+            "(also rewrites an old, longer version of it)")
+        self._open_folder_button = IconPushButton(icons.get_icon("browse", sub_folder="actions"))
+        self._open_folder_button.setText("Open folder")
         self._open_folder_button.setToolTip("Show the script file in the file explorer")
 
         self.editor = CodeEditor()
         self.editor.setPlaceholderText("# Python run at Maya startup, next to your own userSetup.py.\n"
-                                       "# Leave empty to launch Maya without it.")
+                                       "# Leave empty to launch Maya without it.\n"
+                                       "# \"Insert MSL menu\" puts the msl_tools menu code back.")
 
         self._hint_label = qt.QtWidgets.QLabel(
-            "Runs at Maya startup together with your own userSetup.py. Empty = not injected.")
-        self._hint_label.setEnabled(False)
+            "Runs at Maya startup together with your own userSetup.py. Empty = not injected. "
+            "msl_tools is importable in Maya started from here.")
+        self._hint_label.setToolTip(
+            f"Maya Gate adds this folder to PYTHONPATH on every launch:\n{self._store.package_parent_dir()}")
+        self._hint_label.setObjectName("userSetupHint")
 
         self._save_timer = qt.QtCore.QTimer(self)
         self._save_timer.setSingleShot(True)
@@ -58,6 +81,8 @@ class UserSetupTab(qt.QtWidgets.QWidget):
         header = qt.QtWidgets.QHBoxLayout()
         header.setSpacing(8)
         header.addWidget(self._title_label)
+        header.addWidget(self._section_label)
+        header.addSpacing(6)
         header.addWidget(self._status_label)
         header.addStretch()
         header.addWidget(self._insert_menu_button)
@@ -91,9 +116,10 @@ class UserSetupTab(qt.QtWidgets.QWidget):
         self._save_timer.stop()
         if not self._dirty or self._loaded_environment is None:
             return
-        self._store.write(self._loaded_environment, self.editor.toPlainText())
+        self._saved_text = self.editor.toPlainText()
+        self._store.write(self._loaded_environment, self._saved_text)
         self._dirty = False
-        self._status_label.setText("Saved")
+        self._show_script_state(just_saved=True)
 
     # --- internals -------------------------------------------------------------
 
@@ -111,27 +137,65 @@ class UserSetupTab(qt.QtWidgets.QWidget):
         self.editor.blockSignals(True)
         self.editor.setPlainText(text)
         self.editor.blockSignals(False)
+        self._saved_text = text
         self._loaded_environment = self._environment
         self._dirty = False
-        self._status_label.setText("")
+        self._show_script_state(just_saved=False)
 
     def _on_text_changed(self) -> None:
+        # textChanged also fires when only the FORMATTING changes (a theme switch
+        # re-highlights the code) — that is not an edit: nothing to save.
+        if self.editor.toPlainText() == self._saved_text:
+            if self._dirty:  # typed, then undone back to the saved text
+                self._dirty = False
+                self._save_timer.stop()
+                self._show_script_state(just_saved=False)
+            return
         self._dirty = True
-        self._status_label.setText("Editing…")
+        self._set_status("editing", "Editing\u2026")
         self._save_timer.start()
 
     def _update_title(self) -> None:
-        self._title_label.setText(f"userSetup · {self._environment}")
+        self._section_label.setText(f"\u00b7 {self._environment}")
+
+    # --- status ----------------------------------------------------------------
+
+    def _set_status(self, state: str, text: str, tooltip: str = "") -> None:
+        self._status_label.setText(text)
+        self._status_label.setToolTip(tooltip)
+        if self._status_label.property("state") != state:
+            self._status_label.setProperty("state", state)
+            repolish(self._status_label)
+
+    def _show_script_state(self, just_saved: bool) -> None:
+        """Status + error mark for the script as it now stands (after a save
+        or a load): blank, broken, or fine."""
+        text = self.editor.toPlainText()
+        error = self._store.syntax_error(text) if text.strip() else None
+        self.editor.set_error_line(error[0] if error else None)
+        if not text.strip():
+            self._set_status("off", "Empty \u2014 Maya starts without it")
+        elif error:
+            line, message = error
+            self._set_status("error", f"Syntax error \u00b7 line {line}: {message}",
+                             "The script is saved, but Maya will fail to run it.")
+        else:
+            self._set_status("saved", "Saved" if just_saved else "")
 
     def _insert_menu_snippet(self) -> None:
-        snippet = UserSetupStore.msl_menu_snippet()
-        if snippet in self.editor.toPlainText():
+        """Makes sure the script has the menu snippet, once and in its current
+        (short) form: rewrites an old long block in place, else appends it."""
+        text = self.editor.toPlainText()
+        upgraded = UserSetupStore.upgrade_menu_snippet(text)
+        if UserSetupStore.MENU_SNIPPET not in upgraded:
+            gap = "" if not upgraded or upgraded.endswith("\n\n") else ("\n" if upgraded.endswith("\n") else "\n\n")
+            upgraded += gap + UserSetupStore.MENU_SNIPPET
+        if upgraded == text:
             return
+        # Through a cursor, not setPlainText(): stays one undoable step (Ctrl+Z).
         cursor = self.editor.textCursor()
-        cursor.movePosition(qt.QtGui.QTextCursor.MoveOperation.End)
-        prefix = "" if not self.editor.toPlainText() or self.editor.toPlainText().endswith("\n\n") else (
-            "\n" if self.editor.toPlainText().endswith("\n") else "\n\n")
-        cursor.insertText(prefix + snippet)
+        cursor.select(qt.QtGui.QTextCursor.SelectionType.Document)
+        cursor.insertText(upgraded)
         self.editor.setTextCursor(cursor)
 
     def _open_folder(self) -> None:

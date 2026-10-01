@@ -1,27 +1,30 @@
 {
     "maya": {
         "<default>": {
-            "PYTHONPATH": "H:/ProjectsDev/MSL_Others/"
+            "PYTHONPATH": "H:/ProjectsDev/MSL_Others/msl_tools/msl/assets;H:/ProjectsDev/MSL_Others/msl_tools/msl/tools",
+            "MAYA_DISABLE_CLIC_IPM": ""
         },
-        "Stable": {
-            "PYTHONPATH": "H:/ProjectsDev/MSL_Others/",
-            "MAYA_SCRIPT_PATH": "H:/ProjectsDev/MSL_Others/;H:/ProjectsDev/MSL_Others/MSL_PySide6_CustomWidgets;H:/ProjectsDev/MSL_Others/MSL_PySide6_CustomWidgets/CustomWidgets"
-        },
+        "Stable": {},
         "Dev": {}
     },
     "custom": {
-        "<default>": {},
+        "<default>": {
+            "Test_1": "H:/ProjectsDev/MSL_Others/msl_tools/msl/coreку",
+            "Test_3": "H:/ProjectsDev/MSL_Others/msl_tools/msl/__pycache__",
+            "Test_2": "",
+            "Test_4": "",
+            "Test_5": "",
+            "Test_6": ""
+        },
         "Stable": {
-            "Test_ą": "H:/ProjectsDev/MSL_Others/msl_tools/msl/core",
-            "Test_c": "H:/ProjectsDev/MSL_Others/msl_tools/msl/__pycache__",
-            "Test_b": "H:/ProjectsDev/MSL_Others/msl_tools/msl/ui"
+            "Test_1": "H:/ProjectsDev/MSL_Others/msl_tools/msl/coreку"
         },
         "Dev": {}
     },
     "_ui": {
         "year": "2024",
-        "environment": "Dev",
-        "tab": "variables",
+        "environment": "<default>",
+        "tab": "user_setup",
         "collapsed": {
             "maya": false,
             "custom": false

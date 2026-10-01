@@ -20,6 +20,7 @@ class Resources(metaclass=SingletonMeta):
         #TODO create default config 'core' where I can request any value, after I see how many parameters I need.
         releases_url       = "https://api.github.com/repos/MironovMSL/msl_tools/releases"
         latest_release_url = "https://api.github.com/repos/MironovMSL/msl_tools/releases/latest"
+        self.releasesPageUrl = "https://github.com/MironovMSL/msl_tools/releases"  # for "open in browser" links
 
 
         self.fsManager        = FileSystemManager()

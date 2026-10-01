@@ -71,6 +71,21 @@ QPushButton[primary="true"]:pressed {
     border: 1px solid var(--primary-bottom);
 }
 
+/* Destructive primary (an irreversible action's confirm button). */
+QPushButton[primary="true"][danger="true"] {
+    background-color: linear-gradient(to bottom, var(--danger), var(--danger-pressed));
+    color: var(--on-danger);
+    border: 1px solid var(--danger-pressed);
+}
+QPushButton[primary="true"][danger="true"]:hover {
+    background-color: var(--danger);
+    border: 1px solid var(--danger-pressed);
+}
+QPushButton[primary="true"][danger="true"]:pressed {
+    background-color: var(--danger-pressed);
+    border: 1px solid var(--danger-pressed);
+}
+
 QPushButton:flat {
     background-color: transparent;
     border: 1px solid transparent;

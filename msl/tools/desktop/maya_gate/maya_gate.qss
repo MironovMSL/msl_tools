@@ -13,6 +13,27 @@ MayaVersionRow QLabel#versionRowEmpty {
     color: var(--text-secondary);
 }
 
+/* userSetup tab: title like a group header, a status that says where the script stands. */
+UserSetupTab QLabel#userSetupTitle {
+    color: var(--text-primary);
+    font-weight: 600;
+}
+UserSetupTab QLabel#userSetupSection,
+UserSetupTab QLabel#userSetupStatus {
+    color: var(--text-secondary);
+}
+UserSetupTab QLabel#userSetupStatus[state="editing"] { color: var(--accent); }
+UserSetupTab QLabel#userSetupStatus[state="off"]     { color: var(--warning); }
+UserSetupTab QLabel#userSetupStatus[state="error"]   { color: var(--error); font-weight: 600; }
+UserSetupTab QLabel#userSetupHint {
+    color: var(--text-secondary);
+    font-size: 11px;
+}
+/* Icon + text buttons: IconPushButton zeroes the padding for icon-only use. */
+UserSetupTab IconPushButton {
+    padding: 3px 10px 3px 8px;
+}
+
 /* Groups are panels raised off the page card; their fields sit back in (--field).
    The header tints on hover (it folds the group) and is ruled off from the rows. */
 CollapsibleVariableGroup {

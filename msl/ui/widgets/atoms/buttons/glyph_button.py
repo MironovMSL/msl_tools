@@ -42,6 +42,11 @@ class GlyphButton(qt.QtWidgets.QAbstractButton):
         super().__init__(parent)
         self._glyph = glyph
         self._icon: qt.QtGui.QIcon | None = None
+        self._regular_icon: qt.QtGui.QIcon | None = None   # what a flash goes back to
+        self._flashing = False
+        self._flash_timer = qt.QtCore.QTimer(self)
+        self._flash_timer.setSingleShot(True)
+        self._flash_timer.timeout.connect(self._end_flash)
         self._hovered = False
         self._seed_colors(ThemeRegistry.fallback())
 
@@ -65,7 +70,25 @@ class GlyphButton(qt.QtWidgets.QAbstractButton):
 
     def set_icon(self, icon: "qt.QtGui.QIcon | None") -> None:
         """Draws `icon` instead of the glyph (None goes back to the glyph)."""
+        self._regular_icon = icon
+        if not self._flashing:
+            self._icon = icon
+            self.update()
+
+    def flash_icon(self, icon: "qt.QtGui.QIcon | None", duration_ms: int = 1200) -> None:
+        """Shows `icon` for a moment, then the regular one again — quick
+        feedback for an action with no other visible result ("copied": a
+        check mark). No-op without an icon."""
+        if icon is None or icon.isNull():
+            return
+        self._flashing = True
         self._icon = icon
+        self.update()
+        self._flash_timer.start(duration_ms)
+
+    def _end_flash(self) -> None:
+        self._flashing = False
+        self._icon = self._regular_icon
         self.update()
 
 

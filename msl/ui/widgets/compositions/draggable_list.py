@@ -188,6 +188,7 @@ class DraggableList(qt.QtWidgets.QWidget):
             widget = self.main_layout.itemAt(i).widget()
             if getattr(widget, "_dl_item_id", None) == item_id:
                 self.main_layout.removeWidget(widget)  # deleteLater() alone defers this — current_order() would still see it
+                widget.hide()  # out of the layout it would sit over its neighbours until actually deleted
                 widget.deleteLater()
                 break
         self.item_removed.emit(item_id)

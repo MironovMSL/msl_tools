@@ -12,11 +12,13 @@ class SegmentedControl(qt.QtWidgets.QWidget):
     combo box stays the choice for long lists.
 
     Keyboard: Left / Right move the selection while focused (Tab focus).
+    Focus is not drawn: a click focuses the control, and an accent border
+    appearing on a mere click read as "something is wrong / selected".
 
     Colors are Qt properties set by ui/theme/widgets.qss: trackTopColor ->
-    trackColor (sunken gradient), borderColor, focusBorderColor, pillTopColor
-    -> pillColor (raised gradient), pillBorderColor, textColor,
-    hoverTextColor, activeTextColor.
+    trackColor (sunken gradient), borderColor, pillTopColor -> pillColor
+    (raised gradient), pillBorderColor, textColor, hoverTextColor,
+    activeTextColor.
 
     Signals:
         current_changed(str) — the picked option (not on set_current()).
@@ -33,7 +35,6 @@ class SegmentedControl(qt.QtWidgets.QWidget):
     trackColor = color_property("_track_color")
     trackTopColor = color_property("_track_top_color")
     borderColor = color_property("_border_color")
-    focusBorderColor = color_property("_focus_border_color")
     pillColor = color_property("_pill_color")
     pillTopColor = color_property("_pill_top_color")
     pillBorderColor = color_property("_pill_border_color")
@@ -51,7 +52,6 @@ class SegmentedControl(qt.QtWidgets.QWidget):
         self._track_color = qt.QtGui.QColor(fallback.surface)
         self._track_top_color = qt.QtGui.QColor(fallback.surface)
         self._border_color = qt.QtGui.QColor(fallback.border)
-        self._focus_border_color = qt.QtGui.QColor(fallback.accent)
         self._pill_color = qt.QtGui.QColor(fallback.surface)
         self._pill_top_color = qt.QtGui.QColor(fallback.surface)
         self._pill_border_color = qt.QtGui.QColor(fallback.border)
@@ -171,14 +171,6 @@ class SegmentedControl(qt.QtWidgets.QWidget):
         if 0 <= index < len(self._options):
             self._select(index, animate=True, emit=True)
 
-    def focusInEvent(self, event) -> None:
-        super().focusInEvent(event)
-        self.update()
-
-    def focusOutEvent(self, event) -> None:
-        super().focusOutEvent(event)
-        self.update()
-
     # --- painting ---------------------------------------------------------------
 
     @staticmethod
@@ -195,8 +187,7 @@ class SegmentedControl(qt.QtWidgets.QWidget):
 
         # Track: sunken like a field.
         track = qt.QtCore.QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
-        border = self._focus_border_color if self.hasFocus() else self._border_color
-        painter.setPen(qt.QtGui.QPen(border, 1))
+        painter.setPen(qt.QtGui.QPen(self._border_color, 1))
         painter.setBrush(self._vertical(track, self._track_top_color, self._track_color, 0.45))
         painter.drawRoundedRect(track, self.RADIUS, self.RADIUS)
 

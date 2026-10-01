@@ -19,6 +19,7 @@ from msl_tools.msl.ui.theme import ThemeHotReloader
 from msl_tools.msl.ui.ui_resources import UiResources
 from msl_tools.msl.tools.desktop.registry import TOOLS
 from msl_tools.msl.ui.widgets.windows.hub import HubWindow
+from msl_tools.msl.ui.widgets.windows.whats_new_dialog import WhatsNewDialog
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 # "window": the hub's last un-maximized geometry, {} until the first close
@@ -43,7 +44,9 @@ def main() -> None:
         hub_config = Resources().configsDesktopHubMng.get_config("hub", defaults=HUB_CONFIG_DEFAULTS)
         icon = UiResources().iconManager.get_icon("hub", sub_folder="brand")
         window = HubWindow(tools=TOOLS, current_tool_id=hub_config["current_tool"], icon=icon,
-                           footer_text=f"v{__version__}")
+                           footer_text=f"v{__version__}", footer_tooltip="What\u2019s new")
+        window.footer_clicked.connect(lambda: WhatsNewDialog.show_for(
+            window, Resources().versionManager.get_releases, __version__, Resources().releasesPageUrl))
 
         def remember_tool(tool_id: str) -> None:
             hub_config["current_tool"] = tool_id

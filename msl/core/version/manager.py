@@ -85,6 +85,12 @@ class VersionManager:
             return UpdateInfo(status=UpdateStatus.UPDATE_AVAILABLE, current_version=current_version, latest_version=latest)
         return UpdateInfo(status=UpdateStatus.UP_TO_DATE, current_version=current_version)
 
+    def get_releases(self):
+        """Published releases with their notes (list[ReleaseNote], newest
+        first), or None when they couldn't be loaded. A network request —
+        call it off the GUI thread."""
+        return self._remote_checker.get_releases()
+
     def check_install_status(self, install_root: str | Path) -> UpdateInfo:
         """install_root — корневая папка установки (например, Documents\\maya\\scripts
         или H:\\ProjectsDev\\MSL_Others), а не путь до самого пакета.

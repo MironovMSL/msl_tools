@@ -202,7 +202,9 @@ class CollapsibleVariableGroup(qt.QtWidgets.QWidget):
 
     Selection & bulk actions: each row's hover-menu checkbox selects it;
     while anything is selected, the header shows a BulkActionBar
-    ("N selected · ➜ · 🗑 · ×"). More bulk operations: add them in
+    ("N of M selected | select-all ➜ 🗑 | ×"). Delete asks first (a "danger"
+    ConfirmDialog — there is no undo); delete_items() is the
+    non-interactive core. More bulk operations: add them in
     _build_bulk_actions() — the bar itself is operation-agnostic.
     Selection is per section and resets on section switch.
 
@@ -321,10 +323,11 @@ class CollapsibleVariableGroup(qt.QtWidgets.QWidget):
             self._copy_button = bar.add_action("➜", "Copy selected to another environment…")
             self._copy_button.set_icon(UiResources().iconManager.get_icon("arrow_right", sub_folder="actions"))
             self._copy_button.clicked.connect(self._show_copy_menu)
-        delete_button = bar.add_action("\U0001f5d1", "Delete selected")
+        delete_button = bar.add_action("\U0001f5d1", "Delete selected", danger=True)
         delete_button.set_icon(UiResources().iconManager.get_icon("delete", sub_folder="actions"))
         delete_button.clicked.connect(self._delete_selected)
         bar.clear_requested.connect(self.clear_selection)
+        bar.select_all_requested.connect(self.select_all)
 
     def _build_connections(self) -> None:
         self._header.clicked.connect(self.toggle_collapsed)
@@ -341,7 +344,6 @@ class CollapsibleVariableGroup(qt.QtWidgets.QWidget):
         variables = list(self._config[section].keys())
 
         self._selected.clear()
-        self._header.bulk_bar.set_count(0)
         self.list.clear()
         self._update_title(section)
         for var_name in variables:
@@ -376,6 +378,10 @@ class CollapsibleVariableGroup(qt.QtWidgets.QWidget):
     def selected_items(self) -> list[str]:
         """Selected variable names, in their current list order."""
         return [item_id for item_id in self.list.current_order() if item_id in self._selected]
+
+    def select_all(self) -> None:
+        for row in self._rows():
+            row.set_selected(True)  # each emits selection_changed -> _on_row_selection_changed
 
     def clear_selection(self) -> None:
         for row in self._rows():
@@ -448,11 +454,35 @@ class CollapsibleVariableGroup(qt.QtWidgets.QWidget):
             self._selected.add(var_name)
         else:
             self._selected.discard(var_name)
-        self._header.bulk_bar.set_count(len(self._selected))
+        self._update_bulk_bar()
+
+    def _update_bulk_bar(self) -> None:
+        """"N of <rows> selected" in the header's bulk bar."""
+        self._header.bulk_bar.set_count(len(self._selected), len(list(self._config[self._section].keys())))
+
+    def delete_items(self, names: Sequence[str]) -> None:
+        """Removes variables `names` from the current section (rows and
+        config). The non-interactive core of the bulk delete."""
+        for var_name in names:
+            self.list.remove_item(var_name)  # -> item_removed -> _on_item_removed (config + selection)
+
+    def _confirm_delete(self, names: Sequence[str]) -> bool:
+        """Asks before deleting: there is no undo, the values are gone."""
+        count = len(names)
+        what = f'variable "{names[0]}"' if count == 1 else f"{count} variables"
+        choice = ConfirmDialog.ask(
+            self, "Delete variables",
+            f'Delete {what} from "{self._section}"? This can\u2019t be undone.',
+            details=None if count == 1 else ", ".join(names),
+            choices=[("delete", "Delete"), ("cancel", "Cancel")],
+            kind="danger")
+        return choice == "delete"
 
     def _delete_selected(self) -> None:
-        for var_name in self.selected_items():
-            self.list.remove_item(var_name)  # -> item_removed -> _on_item_removed (config + selection)
+        """Interactive bulk delete: confirms, then removes the selection."""
+        names = self.selected_items()
+        if names and self._confirm_delete(names):
+            self.delete_items(names)
 
     # --- copy to another section ---------------------------------------------
 
@@ -498,7 +528,8 @@ class CollapsibleVariableGroup(qt.QtWidgets.QWidget):
             f'{len(conflicts)} of the selected variables already exist in "{target}" '
             f"with a different value:",
             details=", ".join(conflicts),
-            choices=[("replace", "Replace"), ("skip", "Skip existing"), ("cancel", "Cancel")])
+            choices=[("replace", "Replace"), ("skip", "Skip existing"), ("cancel", "Cancel")],
+            kind="warning")  # replacing overwrites values
         return choice if choice in ("replace", "skip") else None
 
     def _copy_selected_to(self, target: str) -> None:
@@ -530,7 +561,6 @@ class CollapsibleVariableGroup(qt.QtWidgets.QWidget):
     def _on_item_removed(self, var_name: str) -> None:
         del self._config[self._section][var_name]
         self._selected.discard(var_name)
-        self._header.bulk_bar.set_count(len(self._selected))
         self._update_state()
 
     def _on_item_moved(self, var_name: str, direction: int) -> None:
@@ -549,6 +579,7 @@ class CollapsibleVariableGroup(qt.QtWidgets.QWidget):
         self._align_name_column()
         count = len(list(self._config[self._section].keys()))
         self._header.set_count(count)
+        self._update_bulk_bar()  # the total may have changed
         if count == 0:
             self.hide()
         elif self.parentWidget() is not None:

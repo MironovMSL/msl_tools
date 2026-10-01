@@ -30,7 +30,14 @@ class RowHoverMenu(qt.QtWidgets.QWidget):
         self._layout.setSpacing(self.SPACING)
 
     def add_widget(self, widget: qt.QtWidgets.QWidget) -> qt.QtWidgets.QWidget:
-        """Appends `widget` to the menu (left to right) and returns it."""
+        """Appends `widget` to the menu (left to right) and returns it.
+
+        The widget never takes keyboard focus: menu widgets hide when the
+        pointer leaves the row, and a HIDDEN focused widget hands focus to the
+        next one in the chain — the row's line edit, which then selects all of
+        its text (clicking the checkbox off and moving away did exactly that).
+        """
+        widget.setFocusPolicy(qt.QtCore.Qt.FocusPolicy.NoFocus)
         policy = widget.sizePolicy()
         policy.setRetainSizeWhenHidden(True)
         widget.setSizePolicy(policy)

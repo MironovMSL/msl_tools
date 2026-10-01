@@ -1,10 +1,11 @@
 # ui/widgets/compositions/env_var_row.py
 import os
+import threading
 from enum import Enum, auto
 
 import msl_tools.msl.ui.qt_bindings as qt
 from msl_tools.msl.core.theme import ThemeRegistry
-from msl_tools.msl.ui.theme.qss import color_property
+from msl_tools.msl.ui.theme.qss import color_property, repolish
 from msl_tools.msl.ui.ui_resources import UiResources
 from msl_tools.msl.ui.widgets.atoms.buttons import GlyphButton, IconPushButton
 from msl_tools.msl.ui.widgets.atoms.checkboxes.base_checkbox import BaseCheckbox
@@ -17,6 +18,12 @@ class BrowseMode(Enum):
     REPLACE = auto()  # the value is one folder: the pick replaces it
     APPEND = auto()   # the value is a folder LIST: the pick is added (if new)
     NONE = auto()     # the value isn't a path: no browse button
+
+
+def _looks_like_path(text: str) -> bool:
+    """True for values worth checking on disk: anything with a path
+    separator ("C:/x", "\\\\server\\share", "./rel") — not plain values like "1"."""
+    return "/" in text or "\\" in text
 
 
 class _RowCheckbox(BaseCheckbox):
@@ -59,6 +66,16 @@ class EnvVarRow(qt.QtWidgets.QWidget):
     The selected-row highlight is the `selectedColor` property, set by the
     window stylesheet (ui/theme/widgets.qss).
 
+    Missing folders: a value (or, in APPEND mode, each entry of the list)
+    that LOOKS like a path but doesn't exist on disk marks the field
+    pathState="missing" (a warning border, widgets.qss) and names the
+    missing folder(s) in the field's tooltip — a mistyped path otherwise
+    fails silently in the launched application. Values that aren't paths
+    ("1") and NONE-mode rows aren't checked. The check runs on a background
+    thread (an unreachable network drive can block for seconds), first when
+    the row is shown, then PATH_CHECK_DELAY_MS after each edit. For path
+    lists the tooltip also lays the entries out one per line.
+
     Signals:
         value_changed(str, str) — (item_id, new_value)
         selection_changed(str, bool) — (item_id, selected)
@@ -76,12 +93,16 @@ class EnvVarRow(qt.QtWidgets.QWidget):
     FRAME_INSET = 3            # gap between the frame line and the drag handle
     SELECTED_ALPHA = 38
     CORNER_RADIUS = 4
+    PATH_CHECK_DELAY_MS = 400
+    EMPTY_PLACEHOLDER = "empty"
+    COPIED_ICON = "check"
 
     selectedColor = color_property("_selected_color")
     hoverColor = color_property("_hover_color")
 
     value_changed = qt.QtCore.Signal(str, str)
     selection_changed = qt.QtCore.Signal(str, bool)
+    _paths_checked = qt.QtCore.Signal(int, list)  # (check id, missing entries), from the check thread
 
     def __init__(self, item_id: str, value: str, draggable: bool = False,
                  selection_gutter: int = 0, browse_mode: BrowseMode = BrowseMode.REPLACE,
@@ -97,6 +118,14 @@ class EnvVarRow(qt.QtWidgets.QWidget):
         self._selected_color.setAlpha(self.SELECTED_ALPHA)
         self._gutter = selection_gutter
         self.drag_handle: GlyphButton | None = None
+        self._missing_paths: list[str] = []
+        self._path_check_id = 0                           # newest check; older results are dropped
+        self._path_checked_once = False
+        self._path_check_timer = qt.QtCore.QTimer(self)
+        self._path_check_timer.setSingleShot(True)
+        self._path_check_timer.setInterval(self.PATH_CHECK_DELAY_MS)
+        self._path_check_timer.timeout.connect(self._check_paths)
+        self._paths_checked.connect(self._on_paths_checked)
 
         self.setFixedHeight(self.HEIGHT)
         self._build_widgets(draggable)
@@ -136,6 +165,7 @@ class EnvVarRow(qt.QtWidgets.QWidget):
         self.copy_name_button.setSizePolicy(policy)
 
         self.value_field = CopyableLineEdit(self.value)
+        self.value_field.setPlaceholderText(self.EMPTY_PLACEHOLDER)
 
         # Framed button (base.qss), icon tinted by QSS iconColor; "..." if the asset is missing.
         # Its padding is zeroed in widgets.qss — the base 4px 10px leaves no room at this size.
@@ -217,6 +247,7 @@ class EnvVarRow(qt.QtWidgets.QWidget):
     def _on_value_changed(self, text: str) -> None:
         self.value = text
         self.value_changed.emit(self.item_id, text)
+        self._path_check_timer.start()  # re-check once the typing pauses
 
     def _on_browse(self) -> None:
         entries = self._list_entries()
@@ -246,7 +277,73 @@ class EnvVarRow(qt.QtWidgets.QWidget):
 
     def _on_copy_name(self) -> None:
         qt.QtGui.QGuiApplication.clipboard().setText(self.item_id)
-        qt.QtWidgets.QToolTip.showText(qt.QtGui.QCursor.pos(), "Copied!", self.copy_name_button)
+        self.copy_name_button.flash_icon(UiResources().iconManager.get_icon(
+            self.COPIED_ICON, sub_folder=self.ICON_SUB_FOLDER))
+
+    # --- missing folders -----------------------------------------------------
+
+    def missing_paths(self) -> list[str]:
+        """Path entries of the value that don't exist (as of the last check)."""
+        return list(self._missing_paths)
+
+    def _path_entries(self) -> list[str]:
+        """The value's entries worth checking: the path-looking ones."""
+        if self.browse_mode is BrowseMode.NONE:
+            return []
+        if self.browse_mode is BrowseMode.APPEND:
+            entries = [entry.strip() for entry in self.value.split(self._list_separator)]
+        else:
+            entries = [self.value.strip()]
+        return [entry for entry in entries if entry and _looks_like_path(entry)]
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        if not self._path_checked_once:  # lazily: no disk access at construction
+            self._path_checked_once = True
+            self._check_paths()
+
+    def _check_paths(self) -> None:
+        """Starts a background existence check of the current entries."""
+        entries = self._path_entries()
+        self._path_check_id += 1
+        check_id = self._path_check_id
+        if not entries:
+            self._apply_path_state([])
+            return
+
+        def check() -> None:
+            missing = [entry for entry in entries if not os.path.exists(entry)]
+            try:
+                self._paths_checked.emit(check_id, missing)  # queued to the GUI thread
+            except RuntimeError:
+                pass  # the row was deleted while the check ran
+
+        # A plain daemon thread, not a QThread: the row may be deleted mid-check,
+        # and a QThread destroyed while running crashes Qt.
+        threading.Thread(target=check, daemon=True).start()
+
+    def _on_paths_checked(self, check_id: int, missing: list) -> None:
+        if check_id == self._path_check_id:  # else the value changed since: a newer check is coming
+            self._apply_path_state(missing)
+
+    def _apply_path_state(self, missing: list[str]) -> None:
+        self._missing_paths = list(missing)
+        state = "missing" if missing else ""
+        if self.value_field.property("pathState") != state:
+            self.value_field.setProperty("pathState", state)
+            repolish(self.value_field)
+
+        entries = self._path_entries()
+        if len(entries) > 1:   # a path list: one entry per line, marked
+            lines = [("\u2717  " if entry in missing else "\u2713  ") + entry for entry in entries]
+            if missing:
+                lines.append("")
+                lines.append(f"{len(missing)} folder(s) not found")
+            self.value_field.setToolTip("\n".join(lines))
+        elif missing:
+            self.value_field.setToolTip(f"Folder not found:\n{missing[0]}")
+        else:
+            self.value_field.setToolTip("")
 
     # --- hover -------------------------------------------------------------
     # Enter/Leave on the row itself cover all of its children: Qt does not send

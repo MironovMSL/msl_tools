@@ -83,7 +83,8 @@ class CodeEditor(qt.QtWidgets.QPlainTextEdit):
     the frame/background as `CodeEditor`: keywordColor, constantColor,
     selfColor, builtinColor, definitionColor, decoratorColor, numberColor,
     stringColor, commentColor; gutter: lineNumberColor,
-    currentLineNumberColor, gutterDividerColor; currentLineColor.
+    currentLineNumberColor, gutterDividerColor; currentLineColor; and for
+    set_error_line(): errorLineColor, errorNumberColor.
     Until it applies (or outside a styled window) they hold the default
     theme's colors.
 
@@ -109,6 +110,8 @@ class CodeEditor(qt.QtWidgets.QPlainTextEdit):
     builtinColor = color_property("_builtin_color", "_on_syntax_colors_changed")
     decoratorColor = color_property("_decorator_color", "_on_syntax_colors_changed")
     gutterDividerColor = color_property("_gutter_divider_color", "_on_gutter_colors_changed")
+    errorLineColor = color_property("_error_line_color", "_highlight_current_line")
+    errorNumberColor = color_property("_error_number_color", "_on_gutter_colors_changed")
     lineNumberColor = color_property("_line_number_color", "_on_gutter_colors_changed")
     currentLineNumberColor = color_property("_current_line_number_color", "_on_gutter_colors_changed")
     currentLineColor = color_property("_current_line_color", "_highlight_current_line")
@@ -117,6 +120,7 @@ class CodeEditor(qt.QtWidgets.QPlainTextEdit):
         super().__init__(parent)
         self._highlighter = None  # property setters can run before it exists
         self._line_numbers = None
+        self._error_line: int | None = None  # 1-based; see set_error_line()
         self._seed_colors(ThemeRegistry.fallback())
 
         font = self._code_font()
@@ -150,6 +154,9 @@ class CodeEditor(qt.QtWidgets.QPlainTextEdit):
         self._builtin_color = qt.QtGui.QColor(theme.accent)
         self._decorator_color = qt.QtGui.QColor(theme.warning)
         self._gutter_divider_color = qt.QtGui.QColor(theme.border)
+        self._error_line_color = qt.QtGui.QColor(theme.error)
+        self._error_line_color.setAlphaF(0.16)
+        self._error_number_color = qt.QtGui.QColor(theme.error)
         self._line_number_color = qt.QtGui.QColor(theme.text_secondary)
         self._current_line_number_color = qt.QtGui.QColor(theme.text_primary)
         self._current_line_color = qt.QtGui.QColor(theme.text_primary)
@@ -224,7 +231,10 @@ class CodeEditor(qt.QtWidgets.QPlainTextEdit):
         while block.isValid() and top <= event.rect().bottom():
             if block.isVisible():
                 is_current = block.blockNumber() == current
-                painter.setPen(self._current_line_number_color if is_current else self._line_number_color)
+                if block.blockNumber() + 1 == self._error_line:
+                    painter.setPen(self._error_number_color)
+                else:
+                    painter.setPen(self._current_line_number_color if is_current else self._line_number_color)
                 painter.drawText(0, top, width, height, int(qt.QtCore.Qt.AlignmentFlag.AlignRight),
                                  str(block.blockNumber() + 1))
             top += round(self.blockBoundingRect(block).height())
@@ -239,8 +249,26 @@ class CodeEditor(qt.QtWidgets.QPlainTextEdit):
         selection.format.setProperty(qt.QtGui.QTextFormat.Property.FullWidthSelection, True)
         selection.cursor = self.textCursor()
         selection.cursor.clearSelection()
-        self.setExtraSelections([selection])
+        selections = [selection]
+
+        error_block = self.document().findBlockByNumber(self._error_line - 1) if self._error_line else None
+        if error_block is not None and error_block.isValid():
+            error = qt.QtWidgets.QTextEdit.ExtraSelection()
+            error.format.setBackground(self._error_line_color)
+            error.format.setProperty(qt.QtGui.QTextFormat.Property.FullWidthSelection, True)
+            error.cursor = qt.QtGui.QTextCursor(error_block)
+            selections.append(error)  # after the current line: wins where both apply
+
+        self.setExtraSelections(selections)
         self._line_numbers.update()
+
+    def set_error_line(self, line: int | None) -> None:
+        """Marks line `line` (1-based) as the one with an error — tinted
+        background and a red line number (qproperty errorLineColor /
+        errorNumberColor) — or clears the mark with None."""
+        if line != self._error_line:
+            self._error_line = line
+            self._highlight_current_line()
 
     # --- editing -------------------------------------------------------------------
 

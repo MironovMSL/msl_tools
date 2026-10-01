@@ -48,7 +48,8 @@ class CopyableLineEdit(qt.QtWidgets.QLineEdit):
 
     def _on_copy(self) -> None:
         qt.QtGui.QGuiApplication.clipboard().setText(self.text())
-        qt.QtWidgets.QToolTip.showText(qt.QtGui.QCursor.pos(), "Copied!", self._copy_button)
+        # The button itself confirms: a check mark for a moment.
+        self._copy_button.flash_icon(UiResources().iconManager.get_icon("check", sub_folder="actions"))
         self.copied.emit(self.text())
 
 
