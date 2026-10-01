@@ -520,8 +520,8 @@ not every commit. The notes are the release's description on GitHub:
   Qt's Markdown lists, whose indent, bullets and code font can't be styled.
   `ReleaseNote.display_title` drops a leading version from the release name
   ("v0.1.0 — Desktop hub" -> "Desktop hub").
-- On start run_hub checks for a newer release on a daemon thread
-  (`_watch_for_update`) and, if there is one, calls
+- On start, then every 30 minutes, run_hub checks for a newer release on a
+  daemon thread (`_watch_for_update`) and, if there is one, calls
   `HubWindow.set_update_available(version)`: an `UpdateButton`
   (atoms/header/ — download arrow dipping into a tray, pop-in + a ring
   pulse every few seconds; qproperty iconColor / ringColor / hoverColor /

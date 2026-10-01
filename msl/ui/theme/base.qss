@@ -86,6 +86,13 @@ QPushButton[primary="true"][danger="true"]:pressed {
     border: 1px solid var(--danger-pressed);
 }
 
+/* A primary button that can't be clicked right now ("Updating…") reads as waiting, not as active. */
+QPushButton[primary="true"]:disabled {
+    background-color: alpha(var(--accent), 35%);
+    color: alpha(var(--on-accent), 80%);
+    border: 1px solid transparent;
+}
+
 QPushButton:flat {
     background-color: transparent;
     border: 1px solid transparent;

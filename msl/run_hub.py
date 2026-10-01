@@ -29,6 +29,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 # "window": the hub's last un-maximized geometry, {} until the first close
 # (first start = default placement).
 HUB_CONFIG_DEFAULTS = {"current_tool": "", "window": {}}
+UPDATE_CHECK_INTERVAL_MS = 30 * 60 * 1000  # a hub left open for days still learns about a new release
 
 
 def _use_own_taskbar_icon() -> None:
@@ -47,21 +48,31 @@ class _UpdateNotifier(qt.QtCore.QObject):
 
 def _watch_for_update(window: HubWindow) -> None:
     """Checks GitHub for a newer release in the background (a network request
-    must not delay the window) and, if there is one, has the hub announce it
-    (header button + marked sidebar version). Silent on failure: no network
-    is not worth a message."""
+    must not delay the window) — on start, then every UPDATE_CHECK_INTERVAL_MS
+    — and, if there is one, has the hub announce it (header button + marked
+    sidebar version). Silent on failure: no network is not worth a message."""
     notifier = _UpdateNotifier(window)
     notifier.update_available.connect(window.set_update_available)  # queued: the window lives in the GUI thread
+    announced = []  # versions already announced (one announcement per version)
 
     def check() -> None:
         try:
             info = Resources().versionManager.check_for_remote_update()
-            if info.has_update:
-                notifier.update_available.emit(str(info.latest_version))
+            version = str(info.latest_version) if info.has_update else ""
+            if version and version not in announced:
+                announced.append(version)
+                notifier.update_available.emit(version)
         except Exception:
             pass  # includes RuntimeError: the window was closed meanwhile
 
-    threading.Thread(target=check, daemon=True).start()
+    def start_check() -> None:
+        threading.Thread(target=check, daemon=True).start()
+
+    start_check()
+    timer = qt.QtCore.QTimer(window)
+    timer.setInterval(UPDATE_CHECK_INTERVAL_MS)
+    timer.timeout.connect(start_check)
+    timer.start()
 
 
 def main() -> None:
