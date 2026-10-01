@@ -44,6 +44,9 @@ BoostTab QLabel#boostSummary,
 BoostTab QLabel#boostEmpty {
     color: var(--text-secondary);
 }
+BoostTab QLabel#boostTiming {
+    color: var(--text-secondary);
+}
 BoostTab QLabel#boostHint {
     color: var(--text-secondary);
     font-size: 11px;

@@ -16,6 +16,7 @@ GATE_ENVIRONMENT = "MSL_GATE_ENVIRONMENT"
 GATE_VARIABLES = "MSL_GATE_VARIABLES"      # os.pathsep-joined names of the variables Maya Gate set
 BOOST_SKIP = "MSL_GATE_BOOST_SKIP"
 BOOST_REPORT = "MSL_GATE_BOOST_REPORT"
+LAUNCH_FILE = "MSL_GATE_LAUNCH_FILE"       # this launch's record; the loader adds the startup time to it
 
 # Variables shown besides every MAYA_* / MSL_* one.
 _EXTRA_VARIABLES = ("PYTHONPATH", "XBMLANGPATH", "OCIO", "TEMP", "TMP", "PYTHONDONTWRITEBYTECODE")
@@ -89,6 +90,15 @@ def build_launch_report() -> str:
         lines.append(f"  environment  : {environment}")
     boosted = BOOST_SKIP in environ
     lines.append(f"  boost start  : {'ON' if boosted else 'off'}")
+    try:
+        launch = json.loads(Path(environ.get(LAUNCH_FILE, "")).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        launch = {}
+    if "ready_seconds" in launch:
+        plugins = f"  (plug-ins {launch['plugin_seconds']} s)" if "plugin_seconds" in launch else ""
+        lines.append(f"  startup time : {launch['ready_seconds']} s from the click in Maya Gate until Maya was idle{plugins}")
+    elif LAUNCH_FILE in environ:
+        lines.append("  startup time : not measured (Maya's side did not report it)")
 
     # --- preferences -----------------------------------------------------------------
     lines.append(_title("Preferences"))

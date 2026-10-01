@@ -222,6 +222,13 @@ class BoostTab(qt.QtWidgets.QWidget):
         self._hint_label.setObjectName("boostHint")
         self._hint_label.setWordWrap(True)
 
+        # How long the last start took (measured by the loader inside Maya), boost vs. normal.
+        self._timing_label = qt.QtWidgets.QLabel()
+        self._timing_label.setObjectName("boostTiming")
+        self._timing_label.setWordWrap(True)
+        self._timing_label.setTextFormat(qt.QtCore.Qt.TextFormat.RichText)
+        self._timing_label.hide()
+
     def _build_layout(self) -> None:
         header = qt.QtWidgets.QHBoxLayout()
         header.setContentsMargins(0, 0, 0, 0)
@@ -242,6 +249,7 @@ class BoostTab(qt.QtWidgets.QWidget):
         layout.addLayout(header)
         layout.addWidget(self._notice)
         layout.addWidget(self._scroll, 1)
+        layout.addWidget(self._timing_label)
         layout.addWidget(self._hint_label)
 
     def _build_connections(self) -> None:
@@ -329,6 +337,32 @@ class BoostTab(qt.QtWidgets.QWidget):
         self._apply_reports()
         self._update_notice(app_dir)
         self._update_summary()
+        self._update_timing()
+
+    def _update_timing(self) -> None:
+        """"Last start: Maya 2025 - 18.2 s with boost (plug-ins 3.6 s) - 33.0 s without" for the
+        current environment (and the filtered version), from the launches Maya's side timed."""
+        log = self._store.launch_log()
+        last = log.last_measured(self._environment, self._year)
+        if last is None:
+            self._timing_label.hide()
+            return
+        year = str(last.get("year", ""))
+
+        def describe(entry: dict) -> str:
+            text = f"<b>{float(entry['ready_seconds']):.1f} s</b> " + ("with boost" if entry.get("boosted") else "without boost")
+            if entry.get("boosted") and "plugin_seconds" in entry:
+                text += f" (plug-ins {float(entry['plugin_seconds']):.1f} s)"
+            return text
+
+        parts = [describe(last)]
+        other = log.last_measured(self._environment, year, boosted=not last.get("boosted"))
+        if other is not None:
+            parts.append(describe(other))
+        self._timing_label.setText(f"Last start of Maya {year} here: " + " \u00b7 ".join(parts))
+        self._timing_label.setToolTip(f"From the click in Maya Gate until Maya was idle after starting up.\n"
+                                      f"Last start: {last.get('clicked', '')}")
+        self._timing_label.show()
 
     def _rebuild_rows(self, names: list[str], per_year: dict[str, list[str]]) -> None:
         if list(self._rows) == names:

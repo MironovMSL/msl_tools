@@ -500,6 +500,16 @@ What changed vs. the original (all deliberate, not oversights):
   version's list with that version's load times, so one can see what that
   Maya will and won't load; "All on" / "Heavy off" act on the rows shown.
   Per-version skip lists were considered and deliberately not built.
+- Startup time is measured, for every launch: `LaunchLog` (boost.py)
+  writes `boost/launches/<stamp>_<year>.json` at the click (year,
+  environment, boosted), and the boost loader — on PYTHONPATH in EVERY
+  launch now (`BoostStore.attach_loader`), boosting only when asked — adds
+  `ready_seconds` from a lowest-priority `evalDeferred`: the first idle
+  moment after Maya's startup work, plug-ins included. The Boost tab shows
+  "Last start of Maya 2025 here: 28.0 s with boost (plug-ins 3.6 s) ·
+  52.0 s without boost" (those are real numbers: windowed Maya 2025 on
+  this machine, 9 heavy plug-ins skipped); Print Launch Report shows the
+  session's own. No userSetup (MAYA_SKIP_USERSETUP_PY) = no measurement.
 - Every launch tells Maya what it is: `MSL_GATE_ENVIRONMENT` (the
   environment) and `MSL_GATE_VARIABLES` (names of the variables this launch
   set). The MSL menu's Dev > "Print Launch Report"

@@ -294,9 +294,13 @@ class MayaGatePage(qt.QtWidgets.QWidget):
         self._user_setup_tab.save()  # launch with what's on screen, not the last autosave
         environment_vars = self._user_setup_store.launch_environment(self._environment, environment_vars)
         arguments: list[str] = []
+        # The loader goes along in every launch: it also measures the startup time.
+        environment_vars = self._boost_store.attach_loader(environment_vars)
         if boosted:
             environment_vars, arguments = self._boost_store.prepare_launch(
                 self._environment, year, self._boost_tab.skipped(), environment_vars)
+        environment_vars = self._boost_store.launch_log().start(
+            year, self._environment, boosted, len(self._boost_tab.skipped()) if boosted else 0, environment_vars)
         self._logger.info(f'Launching Maya {year}, environment "{self._environment}"'
                           + (" (boost start)" if boosted else ""))
         if not ProcessLauncher.launch_maya(version=year, environment=environment_vars, arguments=arguments):
