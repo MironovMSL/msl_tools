@@ -574,11 +574,6 @@ working directory (`launch_command()`); the desktop shortcut "MSL Tools"
 (`create_shortcut()`, PowerShell + WScript.Shell, values passed as
 environment variables, icon `assets/icons/brand/hub.ico`) does exactly that.
 
-`core/installer/package_installer.py` (PackageInstaller, the old Maya-side
-copy + userSetup registration) is no longer wired to anything
-(`Resources().packageInstaller` is gone) — kept until the one-click update
-is in, then delete or reuse.
-
 ## One-click update
 
 "Update now" in What's new replaces the installed code with a published
@@ -622,7 +617,9 @@ under a running hub:
 - Verified in a sandbox with fake release archives (also with the runtime
   environment's Python): update + restart, rollback of a release that
   crashes on start, damaged archive, wrong version, missing release, a
-  real GitHub download. Not yet done against a real published release.
+  real GitHub download. Then for real (2026-10-01): the installed copy in
+  the user's stable folder updated 0.1.1 -> 0.1.2 from the published
+  release with "Update now". The rollback path has only run in the sandbox.
 
 ## Verified so far
 
@@ -635,8 +632,6 @@ disk. NOT yet tested: against a real Maya installation (actual launch via
 
 ## Not done yet / open threads
 
-- One-click update: publish a release that contains the updater, install
-  it into the stable folder, publish the next one and update to it for real.
 - Setup was verified in a sandbox (own runtime dir, offscreen): the .bat,
   environment creation, install / reinstall / uninstall, shortcut, hub
   start from the installed copy. Not yet run by hand on a clean machine.

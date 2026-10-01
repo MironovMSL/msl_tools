@@ -366,11 +366,6 @@ QLabel#installerMessage[state="success"]   { color: var(--success); }
 QLabel#installerMessage[state="warning"]   { color: var(--warning); }
 QLabel#installerMessage[state="error"]     { color: var(--error); }
 
-InstallPathWidget QLabel#installHint {
-    color: var(--text-secondary);
-    font-size: 11px;
-}
-
 EnvVarRow {
     qproperty-selectedColor: alpha(var(--accent), 14.9%);
     qproperty-hoverColor:    alpha(var(--text-primary), 4%);
