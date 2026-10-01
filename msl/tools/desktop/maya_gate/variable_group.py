@@ -7,7 +7,7 @@ from msl_tools.msl.core.theme import ThemeRegistry
 from msl_tools.msl.ui.theme import StylesheetBuilder
 from msl_tools.msl.ui.theme.qss import color_property, make_rounded_popup
 from msl_tools.msl.ui.ui_resources import UiResources
-from msl_tools.msl.ui.widgets.compositions import BrowseMode, BulkActionBar, DraggableList, EnvVarRow
+from msl_tools.msl.ui.widgets.compositions import BulkActionBar, DraggableList, EnvVarRow, ValueSpec
 from msl_tools.msl.ui.widgets.windows.confirm_dialog import ConfirmDialog
 
 # Maya Gate's own style rules (qproperty colors of its tool-specific widgets)
@@ -251,7 +251,8 @@ class CollapsibleVariableGroup(qt.QtWidgets.QWidget):
 
     def __init__(self, title: str, section: str, config, collapsed: bool = False,
                  copy_targets: Sequence[str] = (),
-                 browse_mode_for: Callable[[str], BrowseMode] | None = None, parent=None):
+                 value_spec_for: Callable[[str], ValueSpec] | None = None,
+                 default_value_for: Callable[[str], str] | None = None, parent=None):
         """
         Args:
             title: Display title prefix (e.g. "Maya Variables"); shown as
@@ -260,9 +261,13 @@ class CollapsibleVariableGroup(qt.QtWidgets.QWidget):
             config: The JsonConfig (or ConfigNode) whose sections this group
                 reads/writes — supplied by the owner, not looked up here.
             collapsed: Initial fold state.
-            browse_mode_for: Variable name -> its row's BrowseMode (what
-                browsing does: replace / append to a path list / nothing).
-                None = every row replaces.
+            value_spec_for: Variable name -> its row's ValueSpec (how the
+                value is edited: a path field and what browsing does, an
+                Off / On switch, a drop-down). None = every row is a
+                folder field.
+            default_value_for: Variable name -> the value a newly added
+                variable starts with (a flag starts switched on).
+                None = every variable starts empty.
             copy_targets: Sections "Copy to…" offers (the current one is
                 always left out). Empty = no copy action.
             parent: Optional parent widget.
@@ -272,7 +277,8 @@ class CollapsibleVariableGroup(qt.QtWidgets.QWidget):
         self._section = section
         self._config = config
         self._copy_targets = list(copy_targets)
-        self._browse_mode_for = browse_mode_for or (lambda _name: BrowseMode.REPLACE)
+        self._value_spec_for = value_spec_for or (lambda _name: ValueSpec())
+        self._default_value_for = default_value_for or (lambda _name: "")
         self._frame_color = qt.QtGui.QColor(ThemeRegistry.fallback().border)  # until QSS applies
         self._header_hover_color = qt.QtGui.QColor(0, 0, 0, 0)
         self._divider_color = qt.QtGui.QColor(ThemeRegistry.fallback().border)
@@ -351,13 +357,15 @@ class CollapsibleVariableGroup(qt.QtWidgets.QWidget):
         self._update_state()
 
     def add_variable(self, var_name: str) -> None:
-        """Adds a new, empty variable to this section. No-op if it
+        """Adds a new variable to this section, with its starting value
+        (empty, unless `default_value_for` says otherwise). No-op if it
         already exists (matches the original's duplicate check). Expands
         the group if it was collapsed, so the new row is actually seen."""
         if var_name in self._config[self._section]:
             return
-        self._config[self._section][var_name] = ""
-        self._append_row(var_name, "")
+        value = self._default_value_for(var_name)
+        self._config[self._section][var_name] = value
+        self._append_row(var_name, value)
         self._update_state()
         if self._collapsed:
             self.set_collapsed(False)
@@ -444,7 +452,7 @@ class CollapsibleVariableGroup(qt.QtWidgets.QWidget):
     def _append_row(self, var_name: str, value: str) -> None:
         row = EnvVarRow(var_name, value, draggable=True,
                         selection_gutter=self.SELECTION_GUTTER,
-                        browse_mode=self._browse_mode_for(var_name))
+                        spec=self._value_spec_for(var_name))
         row.value_changed.connect(self._on_value_changed)
         row.selection_changed.connect(self._on_row_selection_changed)
         self.list.append_widget(var_name, row)

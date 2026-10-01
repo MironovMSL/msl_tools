@@ -11,17 +11,28 @@ from msl_tools.msl.tools.desktop.maya_gate.variable_group import CollapsibleVari
 from msl_tools.msl.tools.desktop.maya_gate.variable_adder import EnvVariableAdder
 from msl_tools.msl.tools.desktop.maya_gate.user_setup import UserSetupStore
 from msl_tools.msl.tools.desktop.maya_gate.user_setup_tab import UserSetupTab
-from msl_tools.msl.tools.desktop.maya_gate.maya_variables import VariableKind, kind_of
-from msl_tools.msl.ui.widgets.compositions import BrowseMode
+from msl_tools.msl.tools.desktop.maya_gate.maya_variables import VariableKind, launch_values, spec_of
+from msl_tools.msl.ui.widgets.compositions import BrowseMode, ValueSpec
 
 # How a variable's browse button behaves, by what the variable holds (maya_variables).
 _BROWSE_MODE = {VariableKind.PATH_LIST: BrowseMode.APPEND,
                 VariableKind.PATH: BrowseMode.REPLACE,
-                VariableKind.VALUE: BrowseMode.NONE}
+                VariableKind.FILE: BrowseMode.FILE}
 
 
-def _browse_mode_for(name: str) -> BrowseMode:
-    return _BROWSE_MODE[kind_of(name)]
+def _value_spec_for(name: str) -> ValueSpec:
+    """How variable `name`'s row edits its value (EnvVarRow knows nothing
+    about Maya): a path field per kind, a switch for a flag, a drop-down
+    for a choice."""
+    spec = spec_of(name)
+    return ValueSpec(browse=_BROWSE_MODE.get(spec.kind, BrowseMode.NONE),
+                     choices=spec.choices if spec.kind is VariableKind.CHOICE else (),
+                     toggle_value=spec.on_value if spec.kind is VariableKind.FLAG else "",
+                     description=spec.description)
+
+
+def _default_value_for(name: str) -> str:
+    return spec_of(name).default_value
 
 
 class MayaGatePage(qt.QtWidgets.QWidget):
@@ -124,11 +135,11 @@ class MayaGatePage(qt.QtWidgets.QWidget):
         self._maya_group = CollapsibleVariableGroup(
             "Maya Variables", self._environment, self._config[self.MAYA_KEY],
             collapsed=bool(collapsed.get("maya", False)), copy_targets=self.ENVIRONMENTS,
-            browse_mode_for=_browse_mode_for)
+            value_spec_for=_value_spec_for, default_value_for=_default_value_for)
         self._custom_group = CollapsibleVariableGroup(
             "Custom Variables", self._environment, self._config[self.CUSTOM_KEY],
             collapsed=bool(collapsed.get("custom", False)), copy_targets=self.ENVIRONMENTS,
-            browse_mode_for=_browse_mode_for)
+            value_spec_for=_value_spec_for, default_value_for=_default_value_for)
 
         container = qt.QtWidgets.QWidget()
         container_layout = qt.QtWidgets.QVBoxLayout(container)
@@ -242,6 +253,8 @@ class MayaGatePage(qt.QtWidgets.QWidget):
         environment_vars: dict[str, str] = {}
         environment_vars.update(dict(self._config[self.MAYA_KEY][self._environment]))
         environment_vars.update(dict(self._config[self.CUSTOM_KEY][self._environment]))
+        # Empty = not passed: a flag switched off, a choice not made, a blank field.
+        environment_vars = launch_values(environment_vars)
 
         self._user_setup_tab.save()  # launch with what's on screen, not the last autosave
         environment_vars = self._user_setup_store.launch_environment(self._environment, environment_vars)

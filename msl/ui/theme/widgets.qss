@@ -392,6 +392,11 @@ EnvVarRow {
     qproperty-selectedColor: alpha(var(--accent), 14.9%);
     qproperty-hoverColor:    alpha(var(--text-primary), 4%);
 }
+/* Next to a flag's Off / On switch: what it stores ("= 1" / "not set"). */
+EnvVarRow QLabel#rowValueNote {
+    color: var(--text-secondary);
+    font-size: 11px;
+}
 /* A value whose folder doesn't exist on disk (the tooltip says which):
    warning border, also on hover — the accent returns while typing. */
 EnvVarRow QLineEdit[pathState="missing"],

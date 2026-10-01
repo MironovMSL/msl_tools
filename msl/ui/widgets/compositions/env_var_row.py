@@ -1,6 +1,7 @@
 # ui/widgets/compositions/env_var_row.py
 import os
 import threading
+from dataclasses import dataclass
 from enum import Enum, auto
 
 import msl_tools.msl.ui.qt_bindings as qt
@@ -9,15 +10,45 @@ from msl_tools.msl.ui.theme.qss import color_property, repolish
 from msl_tools.msl.ui.ui_resources import UiResources
 from msl_tools.msl.ui.widgets.atoms.buttons import GlyphButton, IconPushButton
 from msl_tools.msl.ui.widgets.atoms.checkboxes.base_checkbox import BaseCheckbox
+from msl_tools.msl.ui.widgets.atoms.comboboxes.base_combo_box import BaseComboBox
+from msl_tools.msl.ui.widgets.atoms.segmented.segmented_control import SegmentedControl
 from msl_tools.msl.ui.widgets.compositions.copyable_line_edit import CopyableLineEdit
 from msl_tools.msl.ui.widgets.compositions.row_hover_menu import RowHoverMenu
 
 
 class BrowseMode(Enum):
-    """What the row's browse button does with the picked folder."""
+    """What the row's browse button does with the picked folder / file."""
     REPLACE = auto()  # the value is one folder: the pick replaces it
     APPEND = auto()   # the value is a folder LIST: the pick is added (if new)
+    FILE = auto()     # the value is one file: a file dialog, the pick replaces it
     NONE = auto()     # the value isn't a path: no browse button
+
+
+@dataclass(frozen=True)
+class ValueSpec:
+    """How a row's value is edited. The owner decides (it knows what each
+    variable is); the row only builds the matching editor:
+
+    - `toggle_value` set -> an Off / On switch: On stores `toggle_value`,
+      Off stores "" (any other non-empty stored value shows as On);
+    - else `choices` given -> a drop-down of them, plus "not set" ("");
+      a stored value that isn't among them is kept as an extra entry;
+    - else a text field, with the browse button `browse` describes.
+
+    Attributes:
+        browse: The text field's browse button (ignored by the switch and
+            the drop-down, which have none).
+        choices: Values of the drop-down.
+        toggle_value: Value an Off / On switch stores for On.
+        description: What the variable does — added to the name's tooltip.
+        file_filter: BrowseMode.FILE: the file dialog's filter.
+    """
+
+    browse: BrowseMode = BrowseMode.REPLACE
+    choices: tuple[str, ...] = ()
+    toggle_value: str = ""
+    description: str = ""
+    file_filter: str = "All Files (*)"
 
 
 def _looks_like_path(text: str) -> bool:
@@ -49,14 +80,21 @@ class EnvVarRow(qt.QtWidgets.QWidget):
       frame, like Notion's page-margin handle, while the checkbox sits
       just inside it. 0 = no separate column.
     - Name + copy-name button (shown on hover).
-    - Value: CopyableLineEdit — its own copy button appears on hover.
-    - Browse is a regular bordered button — it's a primary action, so it
-      shouldn't look like a hover-only control. `browse_mode` decides what
-      it does (the owner knows which variables are what; this row doesn't):
-      REPLACE (folder icon) sets the value to the picked folder; APPEND
-      (folder-add icon) adds it to a `list_separator`-joined folder list,
-      skipping one that's already there; NONE hides the button but keeps
-      its space, so value fields stay aligned across rows.
+    - Value: what `spec` (ValueSpec) asks for — the owner knows which
+      variables are what; this row doesn't:
+        * a text field (CopyableLineEdit — its own copy button appears on
+          hover) with a browse button. Browse is a regular bordered button
+          — a primary action, so it shouldn't look like a hover-only
+          control. `spec.browse` decides what it does: REPLACE (folder
+          icon) sets the value to the picked folder; APPEND (folder-add
+          icon) adds it to a `list_separator`-joined folder list, skipping
+          one that's already there; FILE picks a file; NONE hides the
+          button but keeps its space, so value fields stay aligned.
+        * an Off / On switch (SegmentedControl) for a flag, with a dimmed
+          note of what that means ("= 1" / "not set");
+        * a drop-down (BaseComboBox) for one of a few values.
+      Whatever the editor, the value is a string and changes are reported
+      through value_changed.
 
     There is no per-row delete or move button: removal is a bulk action on
     the selection (see BulkActionBar), reordering is drag-and-drop.
@@ -71,7 +109,7 @@ class EnvVarRow(qt.QtWidgets.QWidget):
     pathState="missing" (a warning border, widgets.qss) and names the
     missing folder(s) in the field's tooltip — a mistyped path otherwise
     fails silently in the launched application. Values that aren't paths
-    ("1") and NONE-mode rows aren't checked. The check runs on a background
+    ("1"), NONE-mode rows, switches and drop-downs aren't checked. The check runs on a background
     thread (an unreachable network drive can block for seconds), first when
     the row is shown, then PATH_CHECK_DELAY_MS after each edit. For path
     lists the tooltip also lays the entries out one per line.
@@ -96,6 +134,10 @@ class EnvVarRow(qt.QtWidgets.QWidget):
     PATH_CHECK_DELAY_MS = 400
     EMPTY_PLACEHOLDER = "empty"
     COPIED_ICON = "check"
+    TOGGLE_OFF, TOGGLE_ON = "Off", "On"
+    TOGGLE_OFF_NOTE = "not set"
+    CHOICE_NOT_SET = "not set"         # the drop-down's entry for ""
+    CHOICE_MIN_WIDTH = 170
 
     selectedColor = color_property("_selected_color")
     hoverColor = color_property("_hover_color")
@@ -105,12 +147,19 @@ class EnvVarRow(qt.QtWidgets.QWidget):
     _paths_checked = qt.QtCore.Signal(int, list)  # (check id, missing entries), from the check thread
 
     def __init__(self, item_id: str, value: str, draggable: bool = False,
-                 selection_gutter: int = 0, browse_mode: BrowseMode = BrowseMode.REPLACE,
+                 selection_gutter: int = 0, spec: ValueSpec | None = None,
                  list_separator: str = os.pathsep, parent=None):
         super().__init__(parent)
         self.item_id = item_id
         self.value = value
-        self.browse_mode = browse_mode
+        self.spec = spec or ValueSpec()
+        self._is_toggle = bool(self.spec.toggle_value)
+        self._is_choice = bool(self.spec.choices) and not self._is_toggle
+        # The switch and the drop-down have no browse button.
+        self.browse_mode = BrowseMode.NONE if (self._is_toggle or self._is_choice) else self.spec.browse
+        self.toggle: SegmentedControl | None = None
+        self.toggle_note: qt.QtWidgets.QLabel | None = None
+        self.choice_combo: BaseComboBox | None = None
         self._list_separator = list_separator
         self._selected_color = qt.QtGui.QColor(ThemeRegistry.fallback().accent)  # until QSS applies
         self._hover_color = qt.QtGui.QColor(0, 0, 0, 0)  # until QSS applies
@@ -153,7 +202,9 @@ class EnvVarRow(qt.QtWidgets.QWidget):
         self.hover_menu.add_widget(self.select_checkbox)
 
         self.name_label = qt.QtWidgets.QLabel(self.item_id)
-        self.name_label.setToolTip(self.item_id)  # full name even when the column clips it
+        # Full name even when the column clips it, then what the variable does.
+        self.name_label.setToolTip(f"{self.item_id}\n{self.spec.description}" if self.spec.description
+                                   else self.item_id)
         self.name_label.setMinimumWidth(self.LABEL_MIN_WIDTH)
         self.name_label.setTextInteractionFlags(qt.QtCore.Qt.TextInteractionFlag.TextSelectableByMouse)
 
@@ -166,14 +217,31 @@ class EnvVarRow(qt.QtWidgets.QWidget):
 
         self.value_field = CopyableLineEdit(self.value)
         self.value_field.setPlaceholderText(self.EMPTY_PLACEHOLDER)
+        if self._is_toggle:
+            self.value_field.hide()
+            self.toggle = SegmentedControl([self.TOGGLE_OFF, self.TOGGLE_ON],
+                                           self.TOGGLE_ON if self.value.strip() else self.TOGGLE_OFF)
+            self.toggle.setFocusPolicy(qt.QtCore.Qt.FocusPolicy.NoFocus)
+            self.toggle_note = qt.QtWidgets.QLabel()
+            self.toggle_note.setObjectName("rowValueNote")  # widgets.qss: dimmed
+            self._update_toggle_note()
+        elif self._is_choice:
+            self.value_field.hide()
+            items = [self.CHOICE_NOT_SET, *self.spec.choices]
+            if self.value and self.value not in self.spec.choices:
+                items.append(self.value)  # a value typed before the choices existed: kept
+            self.choice_combo = BaseComboBox(items, self.value or self.CHOICE_NOT_SET, enable_wheel=False)
+            self.choice_combo.setMinimumWidth(self.CHOICE_MIN_WIDTH)
 
         # Framed button (base.qss), icon tinted by QSS iconColor; "..." if the asset is missing.
         # Its padding is zeroed in widgets.qss — the base 4px 10px leaves no room at this size.
         appending = self.browse_mode is BrowseMode.APPEND
+        browse_tooltip = {BrowseMode.APPEND: "Add a folder to the list",
+                          BrowseMode.FILE: "Browse for a file"}.get(self.browse_mode, "Browse for a folder")
         self.browse_button = IconPushButton(
             UiResources().iconManager.get_icon(self.BROWSE_APPEND_ICON if appending else self.BROWSE_ICON,
                                                sub_folder=self.ICON_SUB_FOLDER),
-            "Add a folder to the list" if appending else "Browse for a folder", fallback_text="...")
+            browse_tooltip, fallback_text="...")
         self.browse_button.setFixedSize(self.BROWSE_BUTTON_SIZE)
         self.browse_button.setCursor(qt.QtCore.Qt.CursorShape.PointingHandCursor)
         self.browse_button.setFocusPolicy(qt.QtCore.Qt.FocusPolicy.NoFocus)
@@ -192,10 +260,21 @@ class EnvVarRow(qt.QtWidgets.QWidget):
         layout.addWidget(self.name_label)
         layout.addWidget(self.copy_name_button)
         layout.addWidget(self.value_field, 1)
+        if self.toggle is not None:
+            layout.addWidget(self.toggle)
+            layout.addSpacing(6)
+            layout.addWidget(self.toggle_note, 1)
+        elif self.choice_combo is not None:
+            layout.addWidget(self.choice_combo)
+            layout.addStretch(1)
         layout.addWidget(self.browse_button)
 
     def _build_connections(self) -> None:
         self.value_field.textChanged.connect(self._on_value_changed)
+        if self.toggle is not None:
+            self.toggle.current_changed.connect(self._on_toggled)
+        if self.choice_combo is not None:
+            self.choice_combo.activated.connect(self._on_choice_picked)
         self.browse_button.clicked.connect(self._on_browse)
         self.copy_name_button.clicked.connect(self._on_copy_name)
         self.select_checkbox.toggled.connect(self._on_selection_toggled)
@@ -249,12 +328,28 @@ class EnvVarRow(qt.QtWidgets.QWidget):
         self.value_changed.emit(self.item_id, text)
         self._path_check_timer.start()  # re-check once the typing pauses
 
+    def _on_toggled(self, option: str) -> None:
+        self._on_value_changed(self.spec.toggle_value if option == self.TOGGLE_ON else "")
+        self._update_toggle_note()
+
+    def _update_toggle_note(self) -> None:
+        """Says in plain words what the switch stores: "= 1" / "not set"."""
+        self.toggle_note.setText(f"= {self.value}" if self.value.strip() else self.TOGGLE_OFF_NOTE)
+
+    def _on_choice_picked(self, _index: int) -> None:
+        text = self.choice_combo.currentText()
+        self._on_value_changed("" if text == self.CHOICE_NOT_SET else text)
+
     def _on_browse(self) -> None:
         entries = self._list_entries()
         start = entries[-1] if entries else ""
-        directory = qt.QtWidgets.QFileDialog.getExistingDirectory(self, "Select a Folder", start)
-        if directory:
-            self.value_field.setText(self.value_with_folder(directory))
+        if self.browse_mode is BrowseMode.FILE:
+            picked, _ = qt.QtWidgets.QFileDialog.getOpenFileName(self, "Select a File", start,
+                                                                 self.spec.file_filter)
+        else:
+            picked = qt.QtWidgets.QFileDialog.getExistingDirectory(self, "Select a Folder", start)
+        if picked:
+            self.value_field.setText(self.value_with_folder(picked))
 
     def value_with_folder(self, folder: str) -> str:
         """The value after picking `folder`: the folder itself (REPLACE), or
@@ -341,7 +436,8 @@ class EnvVarRow(qt.QtWidgets.QWidget):
                 lines.append(f"{len(missing)} folder(s) not found")
             self.value_field.setToolTip("\n".join(lines))
         elif missing:
-            self.value_field.setToolTip(f"Folder not found:\n{missing[0]}")
+            what = "File" if self.browse_mode is BrowseMode.FILE else "Folder"
+            self.value_field.setToolTip(f"{what} not found:\n{missing[0]}")
         else:
             self.value_field.setToolTip("")
 
@@ -373,10 +469,13 @@ if __name__ == "__main__":
         dialog = ThemedWidgetPlaygroundDialog()
 
         drag_list = DraggableList(draggable=True)
-        for name, value in [("MAYA_APP_DIR", "H:/ProjectsDev/Maya/MSL_Prefs"),
-                             ("PYTHONPATH", "H:/ProjectsDev/Maya/MSL_Scripts"),
-                             ("TEMP", "H:/ProjectsDev/Temp")]:
-            row = EnvVarRow(name, value, draggable=True, selection_gutter=22)
+        for name, value, spec in [
+                ("MAYA_APP_DIR", "H:/ProjectsDev/Maya/MSL_Prefs", ValueSpec()),
+                ("PYTHONPATH", "H:/ProjectsDev/Maya/MSL_Scripts", ValueSpec(browse=BrowseMode.APPEND)),
+                ("OCIO", "", ValueSpec(browse=BrowseMode.FILE, file_filter="OCIO config (*.ocio)")),
+                ("MAYA_DISABLE_CIP", "1", ValueSpec(toggle_value="1", description="No CIP popup.")),
+                ("MAYA_UI_LANGUAGE", "", ValueSpec(choices=("en_US", "ja_JP", "zh_CN")))]:
+            row = EnvVarRow(name, value, draggable=True, selection_gutter=22, spec=spec)
             row.value_changed.connect(lambda i, v: print("changed:", i, "=", v))
             row.selection_changed.connect(lambda i, s: print("selected:", i, s))
             drag_list.append_widget(name, row)

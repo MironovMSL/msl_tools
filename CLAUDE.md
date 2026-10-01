@@ -367,13 +367,28 @@ What changed vs. the original (all deliberate, not oversights):
   replace / skip / cancel; `copy_items_to()` is the non-interactive core).
   A shared "Common" layer was deliberately NOT added yet — add it only if
   the same variables keep getting copied everywhere.
-- Browse button per variable kind (`maya_variables.py` → `EnvVarRow`
-  `BrowseMode`, mapped in page.py): PATH_LIST vars (PYTHONPATH,
-  MAYA_MODULE_PATH, ...) APPEND the picked folder with os.pathsep, skipping
-  duplicates (folder_add icon) — replacing would silently drop the other
-  entries; PATH vars and unknown/custom ones REPLACE (folder icon); VALUE
-  flags (MAYA_DISABLE_CIP/CER/CLIC_IPM) have no browse button (space kept
-  so fields stay aligned). EnvVarRow itself knows nothing about Maya.
+- Value editor per variable kind (`maya_variables.py`: `VariableSpec` —
+  name, kind, description, choices, on_value; `spec_of()`, `kind_of()`).
+  page.py turns a spec into the row's `ValueSpec` (`_value_spec_for`);
+  EnvVarRow itself knows nothing about Maya and just builds the editor:
+  - PATH_LIST (PYTHONPATH, MAYA_MODULE_PATH, ...): text field; browse
+    APPENDS the picked folder with os.pathsep, skipping duplicates
+    (folder_add icon) — replacing would silently drop the other entries.
+  - PATH and unknown/custom variables: text field; browse REPLACES.
+  - FILE: text field; browse picks a file (`BrowseMode.FILE`).
+  - FLAG (MAYA_DISABLE_CIP/CER/CLIC_IPM): an Off / On SegmentedControl
+    with a dimmed note ("= 1" / "not set"). On stores `on_value`, Off
+    stores "" — and an EMPTY value of any kind is not passed to Maya
+    (`launch_values()` in `_launch`): many Maya flags only check that the
+    variable exists, so "=0" would still switch them on. An off flag keeps
+    its row. A flag is ADDED switched on (`VariableSpec.default_value`,
+    the group's `default_value_for`); any non-empty stored value shows On.
+  - CHOICE: a BaseComboBox of `choices` + "not set" (""); a stored value
+    outside the choices is kept as an extra entry.
+  - VALUE: text field without a browse button (space kept so fields align).
+  FILE / CHOICE / VALUE editors exist and are tested, but no catalog entry
+  uses them yet — step 2 (a verified, described, grouped catalog of ~30-40
+  variables) will. Values stay plain strings in the config.
 - Window-resize-on-content-change was intentionally NOT ported (the
   original chained `.update_size()` calls up to its own standalone
   top-level window). Maya Gate is now one page inside the hub's
