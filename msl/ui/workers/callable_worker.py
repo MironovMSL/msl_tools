@@ -14,7 +14,7 @@ class CallableWorker(qt.QtCore.QThread):
     duration of the call.
 
     Usage:
-        worker = CallableWorker(lambda: core.packageInstaller.install_package(src, dst), parent=self)
+        worker = CallableWorker(lambda: installer.install(install_dir), parent=self)
         worker.succeeded.connect(self._on_success)
         worker.failed.connect(self._on_failure)
         worker.finished_with_result.connect(self._on_finished)  # fires in both cases

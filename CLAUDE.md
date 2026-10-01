@@ -17,7 +17,8 @@ https://github.com/MironovMSL/msl_tools
 ```
 msl_tools/                 (repo root)
     CLAUDE.md                this file
-    setup_drag_drop_maya.py  drag-and-drop into Maya's viewport → runs the package installer
+    setup_express_launcher.bat  double-click setup: finds Python, prepares the runtime, opens the setup window
+    requirements.txt         what the hub's Python environment gets (PySide6-Essentials)
     configs/                runtime config output (JsonConfig files land here),
                             split into core/, maya/<tool_name>/ (Maya-side tools)
                             and desktop/<tool_name>/ (the hub: hub/, maya_gate/)
@@ -29,6 +30,7 @@ msl_tools/                 (repo root)
                             from a committed config file.
     msl/
         run_hub.py            standalone entry point for the desktop hub
+        run_installer.py      standalone entry point of the setup window (run by path, see "Install")
         assets/               icons/, themes/ — SVG assets, sparse right now
         core/                 Qt-FREE layer: config, fs, logger,
                               environment, theme, version, installer, network,
@@ -42,8 +44,9 @@ msl_tools/                 (repo root)
         tools/                DCC-specific instruments
             desktop/            NEW: tools that run as part of the desktop hub
                 maya_gate/        fully ported Maya Gate tool (see below)
+                installer/        InstallerView — the setup window (not a hub tool, not in the registry)
                 stub_a/, stub_b/  placeholder tools used to test hub navigation
-            maya/               existing Maya-side tools (installer, etc.)
+            maya/               existing Maya-side tools (the MSL menu, etc.)
 ```
 
 ## Hard conventions (violate these and it won't match the rest of the codebase)
@@ -530,6 +533,56 @@ not every commit. The notes are the release's description on GitHub:
   publish a GitHub release tagged `v<version>` with the notes. No `gh` CLI
   on this machine — the release is created in the browser.
 
+## Install (the hub is where everything starts)
+
+Setup no longer goes through Maya: `setup_drag_drop_maya.py` and
+`tools/maya/installer/` are gone, and nothing is written into Maya's
+folders (no userSetup spread over Maya installs) — Maya Gate injects its
+userSetup + the msl_tools path at launch. The flow, from a downloaded
+release archive or a checkout:
+
+1. `setup_express_launcher.bat` (CRLF, plain ASCII) finds Python 3.10+
+   (`py -3`, then `python`; none -> a message with the download link) and
+   runs `msl/core/installer/runtime_bootstrap.py --run msl/run_installer.py`.
+2. `runtime_bootstrap.py` — STDLIB ONLY and run by path (it runs before
+   anything is installed, so it must not import msl_tools or Qt): makes the
+   hub's own Python environment, a venv in `%LOCALAPPDATA%\MSL\runtime`
+   (`MSL_RUNTIME_DIR` overrides — use it in tests) and `pip install -r
+   requirements.txt`. The requirements' hash is kept in a marker file, so a
+   second run is instant and a changed requirements.txt reinstalls. Then it
+   starts the given script detached with the environment's `pythonw.exe`.
+   The runtime is separate from the install folder on purpose: reinstall /
+   update replace code, not ~220 MB of PySide6.
+3. `msl/run_installer.py` opens `InstallerView`. It's run BY PATH, and
+   aliases the package (`sys.modules["msl_tools"]` with `__path__` = the
+   root) when the folder isn't named `msl_tools` — GitHub archives unpack as
+   `msl_tools-<tag>`.
+4. `InstallerView` (tools/desktop/installer/, FramelessDialog): "Install
+   to" folder (default `%LOCALAPPDATA%\MSL`), installed-vs-package version,
+   "Create a desktop shortcut", Install / Reinstall, Uninstall (danger
+   ConfirmDialog: keep settings / remove everything), "Launch MSL Tools".
+   No logic of its own — `core/installer/hub_installer.py:HubInstaller`
+   (Qt-free) works on a CallableWorker thread.
+
+`HubInstaller`: an install is `<install_dir>/msl_tools/{msl/, requirements.txt,
+LICENSE, README.md}`; `configs/` and `logs/` next to them are per-user and
+never touched by install (uninstall removes them only when asked). It
+refuses the folder it is running from. The hub starts as
+`<runtime pythonw> -m msl_tools.msl.run_hub` with the install folder as the
+working directory (`launch_command()`); the desktop shortcut "MSL Tools"
+(`create_shortcut()`, PowerShell + WScript.Shell, values passed as
+environment variables, icon `assets/icons/brand/hub.ico`) does exactly that.
+
+`core/installer/package_installer.py` (PackageInstaller, the old Maya-side
+copy + userSetup registration) is no longer wired to anything
+(`Resources().packageInstaller` is gone) — kept until the one-click update
+is in, then delete or reuse.
+
+Next (not started): one-click update from the hub — download the release
+archive, swap `msl/` + root files with a backup to roll back to, restart;
+keep configs/logs and the runtime (re-run pip only when requirements.txt
+changed); disabled in a git checkout (`.git` present).
+
 ## Verified so far
 
 Everything above was smoke-tested in an offscreen Qt session (no display,
@@ -541,8 +594,11 @@ disk. NOT yet tested: against a real Maya installation (actual launch via
 
 ## Not done yet / open threads
 
-- The hub / Maya Gate work is in the working tree (mostly staged) but
-  not committed yet.
+- One-click update (see "Install"); until then the hub only points at the
+  release page.
+- Setup was verified in a sandbox (own runtime dir, offscreen): the .bat,
+  environment creation, install / reinstall / uninstall, shortcut, hub
+  start from the installed copy. Not yet run by hand on a clean machine.
 - Real icon assets for add/delete/copy/drag (currently Unicode placeholders).
 - The `cmds.commandPort`-based Maya connection (future work, unstarted).
 - Hub sidebar icons: only Maya Gate has one; the stub tools are text-only.

@@ -4,6 +4,9 @@ from enum import Enum, auto
 import msl_tools.msl.ui.qt_bindings as qt
 from pathlib import Path
 
+from msl_tools.msl.ui.ui_resources import UiResources
+from msl_tools.msl.ui.widgets.atoms.buttons.icon_push_button import IconPushButton
+
 class PathMode(Enum):
     """Determines which dialog type the browse button opens."""
     DIRECTORY = auto()
@@ -15,7 +18,9 @@ class BasePathWidget(qt.QtWidgets.QWidget):
     """Reusable path-selection widget: optional label + line edit + browse button.
 
     Styled by the window stylesheet: the label is QLabel#pathLabel
-    (ui/theme/widgets.qss), the field and button use the base.qss baseline.
+    (ui/theme/widgets.qss), the field uses the base.qss baseline, the browse
+    button is an IconPushButton (`actions/browse`, tinted by QSS; "..." if
+    the asset is missing) as high as the field.
 
     Signals:
         path_changed(str): emitted when the path changes (manual edit finished
@@ -23,6 +28,8 @@ class BasePathWidget(qt.QtWidgets.QWidget):
     """
 
     path_changed = qt.QtCore.Signal(str)
+
+    BROWSE_BUTTON_SIZE = qt.QtCore.QSize(26, 22)  # 22 = the field's height (base.qss)
 
     def __init__(self,
                  label:            str | None = None,
@@ -60,8 +67,12 @@ class BasePathWidget(qt.QtWidgets.QWidget):
         self.path_field.setPlaceholderText(placeholder_text)
         self.path_field.setReadOnly(read_only)
 
-        self.browse_button = qt.QtWidgets.QPushButton("...")
-        self.browse_button.setFixedWidth(30)
+        browsing_files = self._mode is not PathMode.DIRECTORY
+        self.browse_button = IconPushButton(
+            UiResources().iconManager.get_icon("browse", sub_folder="actions"),
+            "Browse for a file" if browsing_files else "Browse for a folder", fallback_text="...")
+        self.browse_button.setFixedSize(self.BROWSE_BUTTON_SIZE)
+        self.browse_button.setCursor(qt.QtCore.Qt.CursorShape.PointingHandCursor)
 
     def _create_layouts(self, label: str | None) -> None:
         self.main_layout = qt.QtWidgets.QVBoxLayout(self)
@@ -69,7 +80,7 @@ class BasePathWidget(qt.QtWidgets.QWidget):
         self.main_layout.setSpacing(0)
 
         self.path_layout = qt.QtWidgets.QHBoxLayout()
-        self.path_layout.setSpacing(0)
+        self.path_layout.setSpacing(4)
         self.path_layout.setContentsMargins(0, 0, 0, 0)
 
         self.path_layout.addWidget(self.path_field)

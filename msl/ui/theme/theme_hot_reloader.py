@@ -70,7 +70,6 @@ class ThemeHotReloader(qt.QtCore.QObject):
         """True in a source checkout (a .git folder next to the package),
         unless the MSL_THEME_HOT_RELOAD env var says otherwise ("0"/"1")."""
         override = os.environ.get("MSL_THEME_HOT_RELOAD")
-        print(override)
         if override is not None:
             return override.strip() not in ("", "0", "false", "False")
 

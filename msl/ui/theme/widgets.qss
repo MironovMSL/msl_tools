@@ -348,6 +348,12 @@ BulkActionBar QWidget#bulkDivider {
     background-color: alpha(var(--accent), 35%);
 }
 
+/* Setup window (tools/desktop/installer): what happened / what to do. */
+QLabel#installerMessage                    { color: var(--text-secondary); }
+QLabel#installerMessage[state="success"]   { color: var(--success); }
+QLabel#installerMessage[state="warning"]   { color: var(--warning); }
+QLabel#installerMessage[state="error"]     { color: var(--error); }
+
 InstallPathWidget QLabel#installHint {
     color: var(--text-secondary);
     font-size: 11px;

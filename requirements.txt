@@ -1,0 +1,4 @@
+# What the desktop hub needs (installed into the msl_tools Python environment by
+# msl/core/installer/runtime_bootstrap.py). Essentials = QtCore/QtGui/QtWidgets/QtSvg,
+# all the hub uses - several times smaller than the full PySide6.
+PySide6-Essentials>=6.8,<6.9

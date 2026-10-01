@@ -26,9 +26,6 @@ class MslMenuDefinition:
             menu_id=cls.MENU_ID,
             label=cls.MENU_LABEL,
             items=(
-                # Temporary entry: the installer stays reachable from the menu for now.
-                MenuAction("Installer", cls._tool("installer"), tooltip="Open the MSL installer.", icon=cls._icon("installer")),
-                MenuDivider(),
                 SubMenu("Dev", icon=cls._icon("dev"), items=(
                     MenuAction("Print Hello", cls._dev_action("print_hello"), tooltip="Prints a test message."),
                     MenuAction("Print Environment", cls._dev_action("print_environment"), tooltip="Prints Maya version, state and package location."),

@@ -4,7 +4,6 @@ from msl_tools.msl.core.config.manager import ConfigManager
 from msl_tools.msl.core.fs.manager import FileSystemManager
 from msl_tools.msl.core.version.manager import VersionManager
 from msl_tools.msl.core.network.network_client import NetworkClient
-from msl_tools.msl.core.installer import PackageInstaller, PackageInstallConfig
 from msl_tools.msl.core.theme import ThemeRegistry
 
 
@@ -39,18 +38,7 @@ class Resources(metaclass=SingletonMeta):
         self.networkClient    = NetworkClient(logger=self.logs.get("NetworkClient", to_file=False))
         self.versionManager   = VersionManager(releases_url, latest_release_url, self.networkClient, self.fsManager.msl,
                                                logger=self.logs.get("VersionManager", to_file=False))
-        self.packageInstaller = PackageInstaller(self.get_installer_config(), logger=self.logs.get("PackageInstaller", to_file=False))
         self.themeRegistry    = ThemeRegistry(self.fsManager.themes, logger=self.logs.get("ThemeRegistry", to_file=False))
-
-
-    def get_installer_config(self) -> PackageInstallConfig:
-        installConfig = PackageInstallConfig(package_name="msl_tools",
-                                             main_module="msl",
-                                             required_dirs=["core", "tools", "ui", "assets"],
-                                             entry_line='import msl; msl.bootstrap()')  # TODO need invent
-        return installConfig
-
-
 
 
 if __name__ == "__main__":
