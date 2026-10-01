@@ -62,6 +62,17 @@ _LEGACY_MENU_SNIPPET = re.compile(
     r"bootstrap\(\)\n?")
 
 
+# Folders an IDE puts on PYTHONPATH for the program it runs (PyCharm's plot / display
+# helpers, the pydev debugger). A hub started from the IDE inherits them - they are the
+# IDE's business, not Maya's. Matched on the path with forward slashes, lower case.
+_IDE_PATH_MARKERS = ("/helpers/pycharm_", "/helpers/pydev", "/plugins/python-ce/helpers", "/plugins/python/helpers")
+
+
+def _is_ide_path(entry: str) -> bool:
+    normalized = entry.replace("\\", "/").lower()
+    return any(marker in normalized for marker in _IDE_PATH_MARKERS)
+
+
 class UserSetupStore:
     """Reads/writes one userSetup script per Maya Gate environment and
     prepares the PYTHONPATH entries that make Maya run it at startup and
@@ -115,7 +126,9 @@ class UserSetupStore:
         2. the folder holding the msl_tools package — always, so Maya started
            from Maya Gate can `import msl_tools` with no path set anywhere;
         3. the value `variables` sets, else the current process's own, so
-           neither the user's nor the system's entries are lost.
+           neither the user's nor the system's entries are lost — minus the
+           folders an IDE added for itself (a hub run from PyCharm would
+           otherwise hand PyCharm's helpers to Maya).
 
         Entries already present (same folder, any spelling) aren't repeated.
         """
@@ -126,8 +139,11 @@ class UserSetupStore:
                 self.write(environment, script)  # the default, first launch: the wrapper needs a file
             entries.append(str(self._write_wrapper(environment)))
         entries.append(str(self.package_parent_dir()))
-        inherited = variables.get("PYTHONPATH") or os.environ.get("PYTHONPATH", "")
-        entries += [entry for entry in inherited.split(os.pathsep) if entry.strip()]
+        own = variables.get("PYTHONPATH")
+        inherited = own or os.environ.get("PYTHONPATH", "")
+        # What the environment sets itself is passed as it is; only the inherited value is cleaned.
+        entries += [entry for entry in inherited.split(os.pathsep)
+                    if entry.strip() and (own or not _is_ide_path(entry))]
 
         unique, seen = [], set()
         for entry in entries:

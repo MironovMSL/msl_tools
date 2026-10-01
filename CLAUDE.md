@@ -440,7 +440,10 @@ What changed vs. the original (all deliberate, not oversights):
   (`FileSystemManager.PARENT_DIR`) on PYTHONPATH — baked into
   `UserSetupStore.launch_environment()`, deliberately NOT a variable in the
   config (per-machine path; must not be editable away) — so scripts just
-  `from msl_tools...`. A never-saved script reads as
+  `from msl_tools...`. The PYTHONPATH inherited from the hub's own process
+  is passed on minus IDE helper folders (PyCharm's `helpers/pycharm_*`,
+  pydev): a hub run from PyCharm would otherwise hand them to Maya. A
+  PYTHONPATH the environment sets itself is passed untouched. A never-saved script reads as
   `UserSetupStore.DEFAULT_SCRIPT` = the 3-line `MENU_SNIPPET`
   (`from msl_tools.msl.startup import bootstrap; bootstrap()`), so a fresh
   install gets the msl menu in every environment; a script saved empty stays
