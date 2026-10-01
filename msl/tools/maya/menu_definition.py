@@ -29,6 +29,7 @@ class MslMenuDefinition:
                 SubMenu("Dev", icon=cls._icon("dev"), items=(
                     MenuAction("Print Hello", cls._dev_action("print_hello"), tooltip="Prints a test message."),
                     MenuAction("Print Environment", cls._dev_action("print_environment"), tooltip="Prints Maya version, state and package location."),
+                    MenuAction("Print Launch Report", f"{cls._TOOLS_PACKAGE}.launch_report.print_launch_report", tooltip="Prints how this Maya was started: Maya Gate environment, preferences folder, variables, userSetup files, boost start and plug-ins."),
                     MenuDivider(),
                     MenuAction("Reload Code", cls._dev_action("reload_package"), tooltip="Re-imports msl_tools from disk and rebuilds this menu. Already-open windows keep their old code until reopened."),
                     MenuAction("Rebuild Menu", f"{cls._ROOT_PACKAGE}.startup.rebuild_menu", tooltip="Re-creates this menu without reloading any code."),

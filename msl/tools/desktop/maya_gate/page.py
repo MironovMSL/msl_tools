@@ -1,4 +1,6 @@
 # tools/desktop/maya_gate/page.py
+import os
+
 import msl_tools.msl.ui.qt_bindings as qt
 from msl_tools.msl.core.resources import Resources
 from msl_tools.msl.core.fs.maya_paths import MayaPaths
@@ -11,6 +13,8 @@ from msl_tools.msl.tools.desktop.maya_gate.variable_group import CollapsibleVari
 from msl_tools.msl.tools.desktop.maya_gate.variable_adder import EnvVariableAdder
 from msl_tools.msl.tools.desktop.maya_gate.user_setup import UserSetupStore
 from msl_tools.msl.tools.desktop.maya_gate.user_setup_tab import UserSetupTab
+from msl_tools.msl.tools.desktop.maya_gate.boost import BoostStore
+from msl_tools.msl.tools.desktop.maya_gate.boost_tab import BoostTab
 from msl_tools.msl.tools.desktop.maya_gate.maya_variables import VariableKind, launch_values, spec_of
 from msl_tools.msl.ui.widgets.compositions import BrowseMode, ValueSpec
 
@@ -47,6 +51,8 @@ class MayaGatePage(qt.QtWidgets.QWidget):
       "Copy to…" on a selection copies variables to another environment.
     - "userSetup": a Python script Maya runs at startup next to the user's
       own userSetup.py (see UserSetupStore for how it's injected).
+    - "Boost start": which of Maya's auto-load plug-ins this environment
+      starts without, so Maya opens faster (see boost.py).
 
     Config-backed via Resources().configsDesktopHubMng.get_config("maya_gate")
     (configs/desktop/maya_gate/) — one JsonConfig replaces MSL_MayaGate's
@@ -73,9 +79,14 @@ class MayaGatePage(qt.QtWidgets.QWidget):
     MAYA_KEY = "maya"
     CUSTOM_KEY = "custom"
     UI_SECTION = "_ui"
-    TAB_KEYS = ("variables", "user_setup")  # tab order; stored by key, not index
+    BOOST_KEY = "boost"   # {"<env>": {"enabled": bool, "skip": [plug-in, ...]}} - see BoostTab
+    # Tells the launched Maya which environment it is (read by the MSL menu's "Print Launch Report").
+    ENVIRONMENT_VARIABLE = "MSL_GATE_ENVIRONMENT"
+    VARIABLES_VARIABLE = "MSL_GATE_VARIABLES"   # names of the variables this launch sets (os.pathsep-joined)
+    TAB_KEYS = ("variables", "user_setup", "boost")  # tab order; stored by key, not index
     DEFAULTS = {MAYA_KEY: {env: {} for env in ENVIRONMENTS},
                 CUSTOM_KEY: {env: {} for env in ENVIRONMENTS},
+                BOOST_KEY: {env: {"enabled": False, "skip": []} for env in ENVIRONMENTS},
                 UI_SECTION: {"year": "", "environment": DEFAULT_ENVIRONMENT, "tab": TAB_KEYS[0],
                              "collapsed": {"maya": False, "custom": False}}}
 
@@ -94,6 +105,7 @@ class MayaGatePage(qt.QtWidgets.QWidget):
         self._migrate_legacy_config()
         self._ui = self._config[self.UI_SECTION]
         self._user_setup_store = UserSetupStore(configs.base_dir / self.TOOL_NAME)
+        self._boost_store = BoostStore(configs.base_dir / self.TOOL_NAME)
         saved_environment = self._ui.get("environment")
         self._environment = (saved_environment if saved_environment in self.ENVIRONMENTS
                              else self.DEFAULT_ENVIRONMENT)
@@ -125,6 +137,10 @@ class MayaGatePage(qt.QtWidgets.QWidget):
         self._tabs.addTab(self._build_variables_tab(), "Variables")
         self._user_setup_tab = UserSetupTab(self._user_setup_store, self._environment)
         self._tabs.addTab(self._indented(self._user_setup_tab), "userSetup")
+        self._boost_tab = BoostTab(self._boost_store, self._config[self.BOOST_KEY], self._environment, years,
+                                   app_dir_for=lambda: self._launch_variables().get("MAYA_APP_DIR", ""),
+                                   blocked_reason_for=lambda: BoostStore.blocked_reason(self._launch_variables()))
+        self._tabs.addTab(self._indented(self._boost_tab), "Boost start")
         saved_tab = self._ui.get("tab")
         self._tabs.setCurrentIndex(self.TAB_KEYS.index(saved_tab) if saved_tab in self.TAB_KEYS else 0)
 
@@ -195,9 +211,13 @@ class MayaGatePage(qt.QtWidgets.QWidget):
         A name already present under the new key wins; nothing else is
         dropped. Top-level keys are then re-ordered maya, custom, _ui."""
         data = self._config.data
-        known = {self.MAYA_KEY, self.CUSTOM_KEY, self.UI_SECTION, self._LEGACY_CUSTOM_KEY}
+        # Only ENVIRONMENT sections are legacy Maya variables - never another top-level
+        # branch ("boost" was once swept into "maya" by a looser test, on every start).
         legacy_maya = {key: value for key, value in data.items()
-                       if key not in known and isinstance(value, dict)}
+                       if key in self.ENVIRONMENTS and isinstance(value, dict)}
+        stray = [key for key in data.get(self.MAYA_KEY, {}) if key not in self.ENVIRONMENTS]
+        for key in stray:  # what that looser test left behind
+            del self._config[self.MAYA_KEY][key]
         legacy_custom = data.get(self._LEGACY_CUSTOM_KEY)
         collapsed = data.get(self.UI_SECTION, {}).get("collapsed", {})
         legacy_collapsed = {old: collapsed[old] for old in self._LEGACY_COLLAPSED_KEYS if old in collapsed}
@@ -248,18 +268,38 @@ class MayaGatePage(qt.QtWidgets.QWidget):
         self._maya_group.set_section(environment)
         self._custom_group.set_section(environment)
         self._user_setup_tab.set_environment(environment)
+        self._boost_tab.set_environment(environment)
+
+    def _launch_variables(self) -> dict[str, str]:
+        """The current environment's variables as a launch passes them
+        (Maya + custom, empty ones left out)."""
+        variables: dict[str, str] = {}
+        variables.update(dict(self._config[self.MAYA_KEY][self._environment]))
+        variables.update(dict(self._config[self.CUSTOM_KEY][self._environment]))
+        # Empty = not passed: a flag switched off, a choice not made, a blank field.
+        return launch_values(variables)
 
     def _launch(self, year: str) -> None:
-        environment_vars: dict[str, str] = {}
-        environment_vars.update(dict(self._config[self.MAYA_KEY][self._environment]))
-        environment_vars.update(dict(self._config[self.CUSTOM_KEY][self._environment]))
-        # Empty = not passed: a flag switched off, a choice not made, a blank field.
-        environment_vars = launch_values(environment_vars)
+        environment_vars = self._launch_variables()
+        # Boost: only when its loader can run and has a list to work from - otherwise Maya,
+        # started without auto-load, would save an (almost) empty auto-load list of its own.
+        boosted = (self._boost_tab.is_enabled() and not BoostStore.blocked_reason(environment_vars)
+                   and bool(self._boost_store.autoload_plugins(year, environment_vars.get("MAYA_APP_DIR") or None)))
+        set_here = list(environment_vars)
+        if "PYTHONPATH" not in set_here:
+            set_here.append("PYTHONPATH")  # always extended by the launch (msl_tools, userSetup)
+        environment_vars[self.ENVIRONMENT_VARIABLE] = self._environment
+        environment_vars[self.VARIABLES_VARIABLE] = os.pathsep.join(set_here)
 
         self._user_setup_tab.save()  # launch with what's on screen, not the last autosave
         environment_vars = self._user_setup_store.launch_environment(self._environment, environment_vars)
-        self._logger.info(f'Launching Maya {year}, environment "{self._environment}"')
-        if not ProcessLauncher.launch_maya(version=year, environment=environment_vars):
+        arguments: list[str] = []
+        if boosted:
+            environment_vars, arguments = self._boost_store.prepare_launch(
+                self._environment, year, self._boost_tab.skipped(), environment_vars)
+        self._logger.info(f'Launching Maya {year}, environment "{self._environment}"'
+                          + (" (boost start)" if boosted else ""))
+        if not ProcessLauncher.launch_maya(version=year, environment=environment_vars, arguments=arguments):
             self._logger.warning(f'Maya {year} did not start (environment "{self._environment}")')
 
 

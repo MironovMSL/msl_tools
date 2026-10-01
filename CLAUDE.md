@@ -217,7 +217,11 @@ msl_tools/                 (repo root)
     `apps/` (third-party application logos: `maya`; later houdini, blender...
     — named after the app, not the tool that uses it, so several tools can
     share one), `tools/` (sidebar icons of our OWN hub tools, one-color like
-    action icons: `cube`, `layers` — the stub tools' placeholders), `brand/` (our own app icons: `hub` — an "M" monogram, full-color, NOT the
+    action icons: `cube`, `layers` — the stub tools' placeholders), `plugins/`
+    (Maya plug-in families on the Boost start tab, our own neutral glyphs —
+    NOT the vendors' logos: `plugin` (any), `bifrost`, `arnold`, `xgen`,
+    `mash`, `usd`, `bullet`, `redshift`, `flow`, `lookdevx`; the file name is
+    the family's name in lower case), `brand/` (our own app icons: `hub` — an "M" monogram, full-color, NOT the
     #000000 one-color convention: used as the window/taskbar icon, never
     tinted). Per-theme variants only when the SHAPE
     differs: `<name>_dark.svg` / `<name>_light.svg`.
@@ -452,6 +456,60 @@ What changed vs. the original (all deliberate, not oversights):
   differs from what's saved: QPlainTextEdit.textChanged also fires on a
   mere re-highlight (theme switch), which must not mark the script dirty.
 
+- Boost start tab (`boost.py` BoostStore, Qt-free + `boost_tab.py` BoostTab):
+  per environment, which of Maya's auto-load plug-ins Maya starts WITHOUT.
+  Config: `"boost": {"<env>": {"enabled": bool, "skip": [names]}}` — a SKIP
+  list, so a plug-in Maya gains later is loaded by default. A boosted
+  launch = `maya.exe -noAutoloadPlugins` (`ProcessLauncher.launch_maya(
+  arguments=)`) + a second generated userSetup.py on PYTHONPATH
+  (`boost/launch/`, constant content, parameters in MSL_GATE_BOOST_*
+  environment variables, Python-2.7-valid) that reads Maya's own list from
+  `prefs/pluginPrefs.mel` and loads everything except the skipped ones,
+  timing each into `boost/report_<year>.json` (shown per row on the tab).
+  THE TRAP, measured with Maya 2025: started with -noAutoloadPlugins, Maya
+  REWRITES pluginPrefs.mel on exit from the session's autoload flags —
+  44 entries became 1. So the loader first flags every plug-in of the
+  original list for autoload BY FILE PATH (`pluginInfo -e -autoload true
+  <path>` works unloaded; by name only for loaded ones; a Python `atexit`
+  hook never runs, Maya exits hard), and Maya writes the full list back
+  (44 -> 44 in 2025, 42 -> 42 in 2020, 45 -> 45 in 2026). A plug-in whose
+  file isn't found is loaded anyway rather than dropped. Therefore: never
+  pass the flag when the loader can't run — MAYA_SKIP_USERSETUP_PY blocks
+  boost (`BoostStore.blocked_reason`, a notice on the tab); every boosted
+  launch stores a copy of pluginPrefs.mel (`boost/backup/<year>/`, last 5,
+  never replaced by a list that lost entries), and the tab offers Restore /
+  "It's fine" when Maya's list has lost plug-ins since. Verified too: a
+  scene whose `requires` names a skipped plug-in loads it on open; a
+  skipped plug-in can still come up as a dependency (LookdevX -> USD).
+  Measured (windowed Maya 2025, incl. an 8 s wait before quitting):
+  normal start 45 s, with 34 of 44 plug-ins 30 s. `BoostStore.HEAVY` names
+  the costly families (Bifrost, Arnold, XGen, MASH, USD, Bullet, Redshift,
+  Flow, LookdevX — the last two from measurements) for "Heavy off".
+  Test any change to the loader on a COPY of the preferences first.
+  Also not boosted: a Maya with no pluginPrefs.mel yet in the environment's
+  preferences folder (a fresh MAYA_APP_DIR) — no list to load from, and
+  Maya would save a near-empty one instead of its defaults; its first start
+  is a normal one (`_launch` checks `autoload_plugins()`, the tab says so).
+  The list and the backups follow the environment's MAYA_APP_DIR.
+  The skip list is ONE per environment, shared by every Maya version (the
+  tab lists the union of all versions' auto-load lists). The tab's version
+  filter ("All versions" / "Maya 2025" ...) is a VIEW: it shows exactly one
+  version's list with that version's load times, so one can see what that
+  Maya will and won't load; "All on" / "Heavy off" act on the rows shown.
+  Per-version skip lists were considered and deliberately not built.
+- Every launch tells Maya what it is: `MSL_GATE_ENVIRONMENT` (the
+  environment) and `MSL_GATE_VARIABLES` (names of the variables this launch
+  set). The MSL menu's Dev > "Print Launch Report"
+  (`tools/maya/launch_report.py`, runs inside Maya, read-only) prints them
+  with the preferences folders, the variables Maya Gate set (folder lists
+  entry by entry with ok / MISSING), the other MAYA_* ones (lists summed
+  up — Maya extends them with dozens of module folders), the userSetup
+  files on sys.path, the boost report (loaded / skipped / failed, slowest,
+  notes) and the loaded plug-ins and modules.
+- `_migrate_legacy_config()` treats only ENVIRONMENT-named top-level keys
+  as legacy Maya variables. It used to take any unknown dict — and swept
+  the new "boost" branch into "maya" on every start, resetting it. A new
+  top-level config branch must never look like legacy data to it.
 - One scroll area for the whole Variables tab (no per-group scroll, no row
   cap); groups fold via their header instead. Fold state is persisted under
   the `_ui` key of the `maya_gate` config — never merged into a launch
@@ -496,6 +554,8 @@ maya_gate/
     toolbar.py             MayaGateToolbar (environment SegmentedControl on the left, "From <year>" filter combo on the right)
     user_setup.py          UserSetupStore (per-environment script files + launch PYTHONPATH wiring, Qt-free)
     user_setup_tab.py      UserSetupTab (CodeEditor for the script, debounced autosave)
+    boost.py               BoostStore (Maya's auto-load list, the boosted launch + its loader, reports, backups, Qt-free)
+    boost_tab.py           BoostTab (per-environment plug-in list: checked = loaded at startup)
     version_row.py         MayaVersionRow (animated row of installed versions)
     variable_group.py      CollapsibleVariableGroup (config-aware, owns persistence)
     variable_adder.py      EnvVariableAdder (known/custom variable input row)
@@ -507,6 +567,7 @@ New generic pieces added to `ui/widgets/` along the way:
 atoms/buttons/application_button.py          ApplicationButton (was ApplicationButtonWdg)
 atoms/buttons/icon_push_button.py         IconPushButton (framed button with a QSS-tinted one-color icon)
 atoms/buttons/icon_tile_button.py         IconTileButton (QToolButton tile: QSS-tinted icon over a short label; icon-less tiles keep the icon row empty so a column stays aligned)
+atoms/icons/tinted_icon.py                TintedIcon (passive one-color icon tinted from QSS: qproperty-iconColor; dimmed when disabled)
 atoms/buttons/glyph_button.py             GlyphButton (custom-painted small icon button; QPushButton's QSS padding leaves no room for a glyph at ~20px)
 atoms/comboboxes/base_combo_box.py        BaseComboBox (was QCustomComboBox)
 atoms/editors/code_editor.py              CodeEditor (line numbers + gutter divider, Python highlighting from --syntax-* tokens, Tab/auto-indent)
@@ -540,6 +601,12 @@ Bug fixes made to EXISTING framework files along the way (not new code):
   environment, "Maya variable…") are BaseComboBoxes. Never give QComboBox a
   VERTICAL padding: it also pads the popup window, where the native style
   paints a light 2px band above/below the list; height = `min-height`.
+
+Gotcha: never call `setVisible(True)` / `show()` on a widget that has no
+parent yet (typically in a `_build_widgets()` before the layout adopts it):
+Qt shows it as a tiny top-level window of its own for a moment. Write
+`if not wanted: widget.hide()` instead of `widget.setVisible(wanted)` there.
+(This flashed a window on every environment switch with the Boost tab open.)
 
 Gotcha worth knowing before subclassing `FramelessDialog`/
 `FramelessMainWindow` and overriding `_apply_theme()`: any state that
@@ -707,7 +774,6 @@ disk. NOT yet tested: against a real Maya installation (actual launch via
   start from the installed copy. Not yet run by hand on a clean machine.
 - Real icon assets for add/delete/copy/drag (currently Unicode placeholders).
 - The `cmds.commandPort`-based Maya connection (future work, unstarted).
-- Maya Gate "boost start" (planned, undesigned): a third tab next to
-  userSetup where, per environment, Maya plug-ins are switched on / off to
-  make Maya start faster. How the plug-in list is obtained and how the
-  choice is applied at launch are open — agree on the mechanism first.
+- Boost start: built and verified against real Maya 2020 / 2025 / 2026 on
+  COPIES of the preferences (MAYA_APP_DIR in %TEMP%); not yet used on the
+  user's real preferences, nor released.

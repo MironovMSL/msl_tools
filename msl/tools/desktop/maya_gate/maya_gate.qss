@@ -34,6 +34,63 @@ UserSetupTab IconPushButton {
     padding: 3px 10px 3px 8px;
 }
 
+/* Boost start tab: a titled list of Maya's auto-load plug-ins. */
+BoostTab QLabel#boostTitle {
+    color: var(--text-primary);
+    font-weight: 600;
+}
+BoostTab QLabel#boostSection,
+BoostTab QLabel#boostSummary,
+BoostTab QLabel#boostEmpty {
+    color: var(--text-secondary);
+}
+BoostTab QLabel#boostHint {
+    color: var(--text-secondary);
+    font-size: 11px;
+}
+BoostTab QPushButton {
+    padding: 3px 10px;
+}
+/* The list is a panel like the variable groups. */
+BoostTab StableScrollArea#boostScroll {
+    background-color: var(--surface-raised);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+}
+BoostTab QLabel#boostName:disabled {
+    color: alpha(var(--text-secondary), 70%);
+}
+/* A heavy family's icon reads stronger than the generic plug. */
+BoostTab TintedIcon[family="true"] {
+    qproperty-iconColor: var(--text-primary);
+}
+/* A plug-in's heavy family: a small neutral pill; its load time: dimmed numbers. */
+BoostTab QLabel#boostFamily {
+    color: var(--text-secondary);
+    background-color: alpha(var(--text-primary), 8%);
+    border-radius: 7px;
+    padding: 0px 6px;
+    min-height: 14px;
+    max-height: 14px;
+    font-size: 11px;
+}
+BoostTab QLabel#boostTime {
+    color: var(--text-secondary);
+    font-size: 11px;
+}
+BoostTab QLabel#boostTime[state="error"] {
+    color: var(--error);
+}
+/* Boost can't work here / Maya's own list shrank. */
+BoostTab QFrame#boostNoticeFrame {
+    background-color: alpha(var(--warning), 12%);
+    border: 1px solid alpha(var(--warning), 40%);
+    border-radius: 6px;
+}
+BoostTab QLabel#boostNotice {
+    color: var(--text-primary);
+}
+
 /* Groups are panels raised off the page card; their fields sit back in (--field).
    The header tints on hover (it folds the group) and is ruled off from the rows. */
 CollapsibleVariableGroup {

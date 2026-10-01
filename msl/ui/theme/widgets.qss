@@ -100,6 +100,12 @@ SlimScrollBar {
     qproperty-handlePressedColor: alpha(var(--accent), 75%);
 }
 
+/* --- TintedIcon: a passive one-color icon ---------------------------------------- */
+
+TintedIcon {
+    qproperty-iconColor: var(--text-secondary);
+}
+
 /* --- IconPushButton: framed button with a QSS-tinted one-color icon ------------ */
 
 IconPushButton {

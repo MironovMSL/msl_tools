@@ -257,7 +257,8 @@ class WhatsNewDialog(FramelessDialog):
         self._update_detail = qt.QtWidgets.QLabel(self._update_blocked_reason)
         self._update_detail.setObjectName("updateDetail")
         self._update_detail.setWordWrap(True)
-        self._update_detail.setVisible(bool(self._update_blocked_reason))
+        if not self._update_blocked_reason:
+            self._update_detail.hide()  # not setVisible(True): parentless here, it would flash as a window
         self._update_progress_bar = BaseProgressBar()
         self._update_progress_bar.hide()
 

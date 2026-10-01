@@ -55,13 +55,15 @@ class ProcessLauncher:
         return started
 
     @classmethod
-    def launch_maya(cls, *, version: str | None = None, environment: dict[str, str] | None = None) -> bool:
-        """Launches the given (or the latest detected) Maya version."""
+    def launch_maya(cls, *, version: str | None = None, environment: dict[str, str] | None = None,
+                    arguments: list[str] | None = None) -> bool:
+        """Launches the given (or the latest detected) Maya version, with
+        `arguments` on its command line (e.g. "-noAutoloadPlugins")."""
         executable = MayaPaths.get_latest_executable(version) if version else MayaPaths.get_latest_executable()
         if executable is None:
             logger.warning("Unable to launch Maya. No installation detected.")
             return False
-        return cls.launch_detached(executable, environment=environment)
+        return cls.launch_detached(executable, arguments=arguments, environment=environment)
 
     @classmethod
     def run_script_with_mayapy(cls, script_path: str | Path, *, version: str | None = None) -> bool:
