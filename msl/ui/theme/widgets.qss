@@ -296,6 +296,15 @@ WhatsNewDialog QPushButton#releaseVersion[state="current"] {
 WhatsNewDialog QPushButton#releaseVersion[state="current"]:hover {
     border: 1px solid alpha(var(--success), 55%);
 }
+/* "Install this version" (also an older one): a quiet link left of the pill. */
+WhatsNewDialog QPushButton#releaseInstall {
+    color: var(--accent);
+    padding: 1px 6px;
+    font-size: 11px;
+}
+WhatsNewDialog QPushButton#releaseInstall:disabled {
+    color: alpha(var(--text-secondary), 60%);
+}
 WhatsNewDialog QLabel#releaseBullet {
     color: var(--text-secondary);
 }

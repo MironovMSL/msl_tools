@@ -16,6 +16,7 @@ import msl_tools.msl.ui.qt_bindings as qt
 from msl_tools.msl import __version__
 from msl_tools.msl.core.installer.hub_updater import HubUpdater, UpdateResult
 from msl_tools.msl.core.resources import Resources
+from msl_tools.msl.core.version.version import Version
 from msl_tools.msl.ui.app.application_context import QtApplicationContext
 from msl_tools.msl.ui.theme import ThemeHotReloader
 from msl_tools.msl.ui.ui_resources import UiResources
@@ -99,7 +100,8 @@ def main() -> None:
             prepared = WhatsNewDialog.show_for(
                 window, Resources().versionManager.get_releases, __version__, Resources().releasesPageUrl,
                 update_handler=None if updater.blocked_reason() else prepare_update,
-                update_blocked_reason=updater.blocked_reason() or "", notice=notice)
+                update_blocked_reason=updater.blocked_reason() or "", notice=notice,
+                can_install=lambda note: updater.can_install(note.version))  # older ones too: a way back
             if prepared is None:
                 return
             if updater.start_apply(prepared.version, __version__):
@@ -111,7 +113,12 @@ def main() -> None:
 
         def report_update(result: UpdateResult) -> None:
             if result.succeeded:
-                show_whats_new(notice=f"Updated to {result.version}")
+                try:
+                    went_back = Version.compare(result.version, result.previous_version) == Version.SMALLER
+                except ValueError:
+                    went_back = False
+                show_whats_new(notice=f"Back on version {result.version}" if went_back
+                               else f"Updated to {result.version}")
                 return
             restored = result.status == "rolled_back"
             choice = ConfirmDialog.ask(

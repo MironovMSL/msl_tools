@@ -614,6 +614,18 @@ under a running hub:
   ConfirmDialog saying the previous version was restored ("Show the log").
 - A release must contain the updater to be updated FROM: 0.1.0 (installed
   before this existed) has to be reinstalled with the .bat once.
+- Going BACK is the same road: every release in What's new that
+  `HubUpdater.can_install()` accepts (`MINIMUM_VERSION` = 0.1.1, the first
+  with the updater — an older one would leave no way to update again) and
+  that isn't the installed one has an "Install this version" button
+  (`can_install=` on the dialog; `QPushButton#releaseInstall`). An older
+  version is asked first (ConfirmDialog, warning). `prepare()` stages the
+  version kept in `.update/backup` straight from there — going back to the
+  previous version works offline. After the restart the banner reads
+  "Back on version X. Version Y is the newest." + Update now. Settings
+  written by a newer version are read by the older one as they are — keep
+  config changes backward-tolerant (new keys with defaults, no renames
+  without a migration that survives going back).
 - Verified in a sandbox with fake release archives (also with the runtime
   environment's Python): update + restart, rollback of a release that
   crashes on start, damaged archive, wrong version, missing release, a

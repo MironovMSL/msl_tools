@@ -16,6 +16,11 @@ swap is a rename):
     result.json     what the helper did - read once by the hub on its next start
     update.log
 
+The same road leads BACK: prepare() takes any published version that has
+the updater (MINIMUM_VERSION and up), so a user can return to an older
+release while a fix is on its way. Going back to the version that is still
+in `backup/` needs no download.
+
 Qt-free. Updating is refused in a git checkout (a developer updates with git).
 """
 import json
@@ -72,6 +77,9 @@ class HubUpdater:
     DOWNLOAD_TIMEOUT = 30    # seconds without data
     CHUNK_SIZE = 64 * 1024
     MOVE_RETRY_SECONDS = 8
+    # The first release that contains update_helper.py. Older ones can't be installed from
+    # here - and a hub that went back to one would have no way to update again.
+    MINIMUM_VERSION = "0.1.1"
 
     def __init__(self, root: str | Path, archive_url: str, logger: logging.Logger | None = None):
         """
@@ -103,6 +111,13 @@ class HubUpdater:
             return "The install folder is read-only."
         return None
 
+    def can_install(self, version: str) -> bool:
+        """True if `version` can be installed from the hub (it has the updater)."""
+        try:
+            return Version.compare(version, self.MINIMUM_VERSION) != Version.SMALLER
+        except ValueError:
+            return False
+
     def take_result(self) -> UpdateResult | None:
         """The outcome of the last update, ONCE: the file is removed, so the
         next start doesn't report it again. None if there is nothing to report."""
@@ -127,7 +142,9 @@ class HubUpdater:
 
     def prepare(self, tag: str, version: str,
                 progress: Callable[[str, int, int], None] | None = None) -> None:
-        """Downloads release `tag` and stages it in `.update/staged`.
+        """Downloads release `tag` - newer OR older than the installed one -
+        and stages it in `.update/staged`. The version kept in `.update/backup`
+        is staged from there, without a download.
         Blocking - call it off the GUI thread.
 
         Args:
@@ -143,6 +160,8 @@ class HubUpdater:
         reason = self.blocked_reason()
         if reason:
             raise UpdateError(reason)
+        if not self.can_install(version):
+            raise UpdateError(f"Version {version} can’t be installed from here (it has no updater).")
         if not self._busy.acquire(blocking=False):
             raise UpdateError("An update is already being downloaded.")
         try:
@@ -163,6 +182,8 @@ class HubUpdater:
         except OSError as error:
             raise UpdateError(f"Can’t write to the install folder ({error}).") from error
 
+        if self._stage_from_backup(version, staged, progress):
+            return
         self._download(self._archive_url.format(tag=tag), archive, progress)
         progress("check", 0, 0)
         try:
@@ -186,6 +207,32 @@ class HubUpdater:
             except OSError:
                 pass
         self._logger.info(f'Update {version} staged in "{staged}".')
+
+    def _stage_from_backup(self, version: str, staged: Path, progress) -> bool:
+        """Stages `version` from `.update/backup` if that is the version kept
+        there (the one replaced by the last update): going back to it then
+        works offline. False = not there / not usable, download instead."""
+        backup = self.work_dir / "backup"
+        main = backup / HubInstaller.MAIN_MODULE
+        if not (main / "__init__.py").is_file():
+            return False
+        try:
+            if Version.compare(LocalVersionReader().get_version(main) or "", version) != Version.EQUAL:
+                return False
+            progress("check", 0, 0)
+            self._check(backup, version)
+            staged.mkdir()
+            shutil.copytree(main, staged / HubInstaller.MAIN_MODULE,
+                            ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+            for name in HubInstaller.ROOT_FILES:
+                if (backup / name).is_file():
+                    shutil.copy2(backup / name, staged / name)
+        except (OSError, ValueError, UpdateError) as error:
+            self._logger.info(f"The backup can't be used for {version}, downloading instead. Issue: {error}")
+            shutil.rmtree(staged, ignore_errors=True)
+            return False
+        self._logger.info(f"Version {version} staged from the backup.")
+        return True
 
     @classmethod
     def _move_folder(cls, source: Path, destination: Path) -> None:
