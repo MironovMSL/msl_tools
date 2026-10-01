@@ -528,7 +528,8 @@ not every commit. The notes are the release's description on GitHub:
   pressedColor) appears in the header left of the theme toggle, and the
   sidebar version turns accent (`QPushButton#hubFooter[notice="true"]`).
   Both open "What's new" (`update_clicked` / `footer_clicked`), whose
-  banner links to the release. The hub does NOT install updates itself.
+  banner offers "Update now" (see "One-click update") — or, where the copy
+  can't update itself (a git checkout), "Get it on GitHub" + the reason.
 - Releasing: bump `msl/__init__.py:__version_tuple__`, commit, push, then
   publish a GitHub release tagged `v<version>` with the notes. No `gh` CLI
   on this machine — the release is created in the browser.
@@ -578,10 +579,50 @@ copy + userSetup registration) is no longer wired to anything
 (`Resources().packageInstaller` is gone) — kept until the one-click update
 is in, then delete or reuse.
 
-Next (not started): one-click update from the hub — download the release
-archive, swap `msl/` + root files with a backup to roll back to, restart;
-keep configs/logs and the runtime (re-run pip only when requirements.txt
-changed); disabled in a git checkout (`.git` present).
+## One-click update
+
+"Update now" in What's new replaces the installed code with a published
+release and restarts the hub. Two halves, because files can't be swapped
+under a running hub:
+
+- `core/installer/hub_updater.py:HubUpdater` (Qt-free, inside the hub):
+  `blocked_reason()` (a `.git` folder = a developer's checkout -> no
+  self-update; read-only folder), `prepare(tag, version, progress)` —
+  downloads `Resources().releaseArchiveUrl` (GitHub's source zip of the
+  tag; `MSL_UPDATE_ARCHIVE_URL` overrides the template, e.g. a `file:///`
+  URL in tests), checks it (zip CRC, no paths outside the folder, complete
+  `msl/`, `__version__` == the release's version) and stages `msl/` + root
+  files in `<root>/.update/staged`; raises `UpdateError` with a message for
+  the user. `start_apply(version, previous)` starts the helper;
+  `take_result()` reads `.update/result.json` once on the next start.
+- `core/installer/update_helper.py` — STDLIB ONLY, copied to
+  `.update/apply_update.py` and run from there (the NEW version's helper,
+  so a release can fix it): waits for the hub's pid, moves the current
+  `msl/` + root files to `.update/backup`, the staged ones into place,
+  runs `runtime_bootstrap.ensure()` if requirements.txt changed (only when
+  running in the msl_tools environment), starts the hub and watches it for
+  12 s. Any failure — also the new hub exiting with an error in that time —
+  puts the backup back and starts the previous version. `configs/` and
+  `logs/` are never touched; `.update/update.log` tells what happened; the
+  backup stays until the next update. Uninstall removes `.update/`.
+- Freshly unpacked folders are often held by an antivirus scan for a
+  moment ("Access is denied" on rename): both halves retry a move for a
+  few seconds, then copy instead.
+- UI: `WhatsNewDialog(update_handler=, update_blocked_reason=, notice=)`
+  stays storage-/network-agnostic — the handler (run_hub: `updater.prepare`)
+  runs on a daemon thread, the banner shows progress (`QLabel#updateDetail`,
+  BaseProgressBar; GitHub rarely sends a size, so usually indeterminate +
+  MB), an error leaves "Try again". On success the dialog closes and
+  `show_for()` returns the release; run_hub then calls `start_apply()`,
+  closes the window (placement saved) and quits. After the restart
+  run_hub shows What's new with a green "Updated to X" banner, or a
+  ConfirmDialog saying the previous version was restored ("Show the log").
+- A release must contain the updater to be updated FROM: 0.1.0 (installed
+  before this existed) has to be reinstalled with the .bat once.
+- Verified in a sandbox with fake release archives (also with the runtime
+  environment's Python): update + restart, rollback of a release that
+  crashes on start, damaged archive, wrong version, missing release, a
+  real GitHub download. Not yet done against a real published release.
 
 ## Verified so far
 
@@ -594,8 +635,8 @@ disk. NOT yet tested: against a real Maya installation (actual launch via
 
 ## Not done yet / open threads
 
-- One-click update (see "Install"); until then the hub only points at the
-  release page.
+- One-click update: publish a release that contains the updater, install
+  it into the stable folder, publish the next one and update to it for real.
 - Setup was verified in a sandbox (own runtime dir, offscreen): the .bat,
   environment creation, install / reinstall / uninstall, shortcut, hub
   start from the installed copy. Not yet run by hand on a clean machine.

@@ -305,8 +305,20 @@ WhatsNewDialog QFrame#updateBanner {
     border: 1px solid alpha(var(--accent), 35%);
     border-radius: 6px;
 }
+WhatsNewDialog QFrame#updateBanner[state="success"] {   /* "Updated to X" */
+    background-color: alpha(var(--success), 12%);
+    border: 1px solid alpha(var(--success), 35%);
+}
 WhatsNewDialog QLabel#updateText {
     color: var(--text-primary);
+}
+/* Under it: why it can't update here / download progress / why it failed. */
+WhatsNewDialog QLabel#updateDetail {
+    color: var(--text-secondary);
+    font-size: 11px;
+}
+WhatsNewDialog QLabel#updateDetail[state="error"] {
+    color: var(--error);
 }
 WhatsNewDialog QLabel#releaseSection {
     color: var(--text-secondary);

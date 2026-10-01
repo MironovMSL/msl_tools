@@ -8,6 +8,8 @@ import msl_tools.msl.ui.qt_bindings as qt
 from msl_tools.msl.core.version.release_notes import ReleaseNote, split_blocks
 from msl_tools.msl.core.version.version import Version
 from msl_tools.msl.ui.process_launcher.process_launcher import ProcessLauncher
+from msl_tools.msl.ui.theme.qss import repolish
+from msl_tools.msl.ui.widgets.atoms.progress import BaseProgressBar, ProgressState
 from msl_tools.msl.ui.widgets.atoms.surfaces import StableScrollArea
 from msl_tools.msl.ui.widgets.windows.frameless_dialog import FramelessDialog
 
@@ -120,30 +122,43 @@ class WhatsNewDialog(FramelessDialog):
     headings ("### New", "### Fixed") shows as labelled sections. The
     installed version's block is marked "installed", newer ones "new" — and
     when there are newer ones, a banner on top says which version is
-    available, with a button to its page on GitHub.
+    available, with a button: "Update now" when the caller can install it
+    (`update_handler`), else "Get it on GitHub" (the release's page).
 
     Storage- and network-agnostic: the caller passes `fetch_releases`, a
     callable returning the releases (or None on failure). It runs on a
     background thread — it is a network request — while the dialog shows
     "Loading…"; a failure shows a message with Retry.
 
+    Updating is the caller's too: `update_handler(note, progress)` downloads
+    and prepares release `note` (blocking — it runs on a background thread
+    while the banner shows a progress bar; an exception's text is shown as
+    the reason it failed, with the button back as "Try again"). When it
+    returns, the dialog closes with `update_prepared` set to that release —
+    the caller then restarts the application into it.
+
     Colors / fonts: ui/theme/widgets.qss (QLabel#releaseDate, QPushButton
     #releaseVersion[state], #releaseSection, #releaseBody, #releaseBullet,
-    QFrame#updateBanner, #whatsNewStatus).
+    QFrame#updateBanner[state], #updateDetail[state], #whatsNewStatus).
 
     Usage:
-        WhatsNewDialog.show_for(window, fetch_releases=version_manager.get_releases,
-                                current_version="0.1.0", releases_url="https://github.com/.../releases")
+        prepared = WhatsNewDialog.show_for(window, fetch_releases=version_manager.get_releases,
+                                           current_version="0.1.0",
+                                           releases_url="https://github.com/.../releases",
+                                           update_handler=prepare)  # -> ReleaseNote | None
     """
 
     WIDTH = 520
     HEIGHT = 560
 
-    _loaded = qt.QtCore.Signal(object)  # list[ReleaseNote] | None, from the fetch thread
+    _loaded = qt.QtCore.Signal(object)               # list[ReleaseNote] | None, from the fetch thread
+    _update_progress = qt.QtCore.Signal(str, float, float)  # stage, done, total — from the update thread
+    _update_finished = qt.QtCore.Signal(str)         # "" = prepared, else why it failed
 
     def __init__(self, fetch_releases: Callable[[], Sequence[ReleaseNote] | None],
                  current_version: str = "", releases_url: str = "",
-                 title: str = "What’s new", parent=None):
+                 title: str = "What’s new", update_handler: Callable | None = None,
+                 update_blocked_reason: str = "", notice: str = "", parent=None):
         """
         Args:
             fetch_releases: Returns the releases, newest first, or None when
@@ -152,6 +167,14 @@ class WhatsNewDialog(FramelessDialog):
             releases_url: The releases page, for the "All releases on GitHub"
                 link ("" = no link).
             title: Window title.
+            update_handler: update_handler(note, progress) prepares release
+                `note` for installing; progress(stage, done, total) with
+                stage "download" (bytes, total 0 = unknown) or "check".
+                None = this application can't update itself.
+            update_blocked_reason: Why it can't, shown under the banner's
+                text ("" = say nothing). Ignored when a handler is given.
+            notice: A line for the banner when NO newer version exists
+                ("Updated to 0.2.0"), in the success tone.
             parent: Widget the dialog belongs to.
         """
         super().__init__(title=title, width=self.WIDTH, height=self.HEIGHT,
@@ -160,8 +183,16 @@ class WhatsNewDialog(FramelessDialog):
         self._fetch_releases = fetch_releases
         self._current_version = current_version
         self._releases_url = releases_url
+        self._update_handler = update_handler
+        self._update_blocked_reason = "" if update_handler else update_blocked_reason
+        self._notice = notice
+        self._latest: ReleaseNote | None = None
+        self._updating = False
+        self.update_prepared: ReleaseNote | None = None  # set when the handler finished: restart into it
         self._build()
         self._loaded.connect(self._on_loaded)
+        self._update_progress.connect(self._on_update_progress)
+        self._update_finished.connect(self._on_update_finished)
 
     def _build(self) -> None:
         self._status_label = qt.QtWidgets.QLabel()
@@ -190,17 +221,35 @@ class WhatsNewDialog(FramelessDialog):
         self._update_label = qt.QtWidgets.QLabel()
         self._update_label.setObjectName("updateText")
         self._update_label.setWordWrap(True)
-        self._update_button = qt.QtWidgets.QPushButton("Get it on GitHub")
+        self._update_button = qt.QtWidgets.QPushButton(self.UPDATE_TEXT if self._update_handler else self.OPEN_TEXT)
         self._update_button.setProperty("primary", True)
         self._update_button.setCursor(qt.QtCore.Qt.CursorShape.PointingHandCursor)
-        self._update_button.clicked.connect(self._open_update)
+        self._update_button.clicked.connect(self._on_update_clicked)
         self._update_url = ""
+        # Under the text: why updating isn't possible here / download progress / why it failed.
+        self._update_detail = qt.QtWidgets.QLabel(self._update_blocked_reason)
+        self._update_detail.setObjectName("updateDetail")
+        self._update_detail.setWordWrap(True)
+        self._update_detail.setVisible(bool(self._update_blocked_reason))
+        self._update_progress_bar = BaseProgressBar()
+        self._update_progress_bar.hide()
+
         self._update_banner = qt.QtWidgets.QFrame()
         self._update_banner.setObjectName("updateBanner")
-        banner_layout = qt.QtWidgets.QHBoxLayout(self._update_banner)
+        text_layout = qt.QtWidgets.QVBoxLayout()
+        text_layout.setContentsMargins(0, 0, 0, 0)
+        text_layout.setSpacing(2)
+        text_layout.addWidget(self._update_label)
+        text_layout.addWidget(self._update_detail)
+        top_layout = qt.QtWidgets.QHBoxLayout()
+        top_layout.setContentsMargins(0, 0, 0, 0)
+        top_layout.addLayout(text_layout, 1)
+        top_layout.addWidget(self._update_button)
+        banner_layout = qt.QtWidgets.QVBoxLayout(self._update_banner)
         banner_layout.setContentsMargins(12, 8, 8, 8)
-        banner_layout.addWidget(self._update_label, 1)
-        banner_layout.addWidget(self._update_button)
+        banner_layout.setSpacing(6)
+        banner_layout.addLayout(top_layout)
+        banner_layout.addWidget(self._update_progress_bar)
         self._update_banner.hide()
 
         list_page = qt.QtWidgets.QWidget()
@@ -291,17 +340,99 @@ class WhatsNewDialog(FramelessDialog):
 
         newer = [note for note in releases if self._state_of(note) == "new"]
         if newer:
-            latest = newer[0]  # releases come newest first
+            self._latest = latest = newer[0]  # releases come newest first
             have = f" \u2014 you have {self._current_version}" if self._current_version else ""
             self._update_label.setText(f"<b>Version {latest.version} is available</b>{have}.")
             self._update_url = latest.url or self._releases_url
-            self._update_button.setVisible(bool(self._update_url))
-        self._update_banner.setVisible(bool(newer))
+            self._update_button.setVisible(bool(self._update_handler or self._update_url))
+            self._set_banner_state("")
+        elif self._notice:
+            self._update_label.setText(f"<b>{html.escape(self._notice)}</b>")
+            self._update_button.hide()
+            self._update_detail.hide()
+            self._set_banner_state("success")
+        self._update_banner.setVisible(bool(newer or self._notice))
         self._pages.setCurrentWidget(self._list_page)
 
-    def _open_update(self) -> None:
-        if self._update_url:
-            ProcessLauncher.open_url_in_browser(self._update_url)
+    def _set_banner_state(self, state: str) -> None:
+        if self._update_banner.property("state") != state:
+            self._update_banner.setProperty("state", state)  # widgets.qss: QFrame#updateBanner[state]
+            repolish(self._update_banner)
+
+    # --- updating -----------------------------------------------------------------
+
+    UPDATE_TEXT = "Update now"
+    OPEN_TEXT = "Get it on GitHub"
+    RETRY_TEXT = "Try again"
+
+    def _on_update_clicked(self) -> None:
+        if self._update_handler is None or self._latest is None:
+            if self._update_url:
+                ProcessLauncher.open_url_in_browser(self._update_url)
+            return
+        if self._updating:
+            return
+        self._updating = True
+        self._update_button.setEnabled(False)
+        self._update_button.setText("Updating\u2026")
+        self._set_detail("Connecting\u2026")
+        self._update_progress_bar.set_state(ProgressState.NORMAL)
+        self._update_progress_bar.set_indeterminate(True)
+        self._update_progress_bar.show()
+        handler, note = self._update_handler, self._latest
+
+        def report(stage: str, done: int = 0, total: int = 0) -> None:
+            try:
+                self._update_progress.emit(stage, float(done), float(total))
+            except RuntimeError:
+                pass  # the dialog was closed and deleted meanwhile
+
+        def run() -> None:
+            try:
+                handler(note, report)
+                message = ""
+            except Exception as error:
+                message = str(error) or "The update could not be prepared."
+            try:
+                self._update_finished.emit(message)  # queued to the GUI thread
+            except RuntimeError:
+                pass
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def _on_update_progress(self, stage: str, done: float, total: float) -> None:
+        megabyte = 1024 * 1024
+        if stage == "download" and total > 0:
+            if self._update_progress_bar.maximum() == 0:
+                self._update_progress_bar.set_indeterminate(False)
+            self._update_progress_bar.set_progress(int(done / total * 100))
+            self._set_detail(f"Downloading\u2026 {done / megabyte:.1f} of {total / megabyte:.1f} MB")
+        elif stage == "download":
+            self._set_detail(f"Downloading\u2026 {done / megabyte:.1f} MB")
+        else:
+            self._set_detail("Checking the download\u2026")
+
+    def _on_update_finished(self, error_message: str) -> None:
+        self._updating = False
+        self._update_progress_bar.set_indeterminate(False)
+        if error_message:
+            self._update_progress_bar.hide()
+            self._update_button.setEnabled(True)
+            self._update_button.setText(self.RETRY_TEXT)
+            self._set_detail(error_message, "error")
+            return
+        self._update_progress_bar.set_progress(self._update_progress_bar.maximum())
+        self._set_detail("Restarting MSL Tools\u2026")
+        if self.isVisible():  # closed meanwhile = the user walked away: nothing restarts behind their back
+            self.update_prepared = self._latest
+            self.accept()
+
+    def _set_detail(self, text: str, state: str = "") -> None:
+        self._update_detail.setText(text)
+        self._update_detail.setVisible(bool(text))
+        if self._update_detail.property("state") != state:
+            self._update_detail.setProperty("state", state)  # widgets.qss: QLabel#updateDetail[state]
+            repolish(self._update_detail)
 
     def _state_of(self, note: ReleaseNote) -> str:
         """"current" for the installed version, "new" for newer ones, else ""."""
@@ -314,10 +445,17 @@ class WhatsNewDialog(FramelessDialog):
         return "new" if comparison == Version.BIGGER else ""
 
     @classmethod
-    def show_for(cls, parent, fetch_releases, current_version: str = "", releases_url: str = "") -> None:
+    def show_for(cls, parent, fetch_releases, current_version: str = "", releases_url: str = "",
+                 update_handler: Callable | None = None, update_blocked_reason: str = "",
+                 notice: str = "") -> ReleaseNote | None:
         """Opens the dialog modally over `parent`'s window, which is blurred
-        behind it if it's a frameless window (like ConfirmDialog.ask())."""
-        dialog = cls(fetch_releases, current_version, releases_url, parent=parent)
+        behind it if it's a frameless window (like ConfirmDialog.ask()).
+
+        Returns:
+            The release `update_handler` prepared (restart into it), else None.
+        """
+        dialog = cls(fetch_releases, current_version, releases_url, update_handler=update_handler,
+                     update_blocked_reason=update_blocked_reason, notice=notice, parent=parent)
         window = parent.window() if parent is not None else None
         blur = getattr(window, "set_blurred", None)
         if blur is not None:
@@ -327,6 +465,7 @@ class WhatsNewDialog(FramelessDialog):
         finally:
             if blur is not None:
                 blur(False)
+        return dialog.update_prepared
 
 
 if __name__ == "__main__":

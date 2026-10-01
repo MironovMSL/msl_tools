@@ -14,11 +14,14 @@ from pathlib import Path
 
 import msl_tools.msl.ui.qt_bindings as qt
 from msl_tools.msl import __version__
+from msl_tools.msl.core.installer.hub_updater import HubUpdater, UpdateResult
 from msl_tools.msl.core.resources import Resources
 from msl_tools.msl.ui.app.application_context import QtApplicationContext
 from msl_tools.msl.ui.theme import ThemeHotReloader
 from msl_tools.msl.ui.ui_resources import UiResources
 from msl_tools.msl.tools.desktop.registry import TOOLS
+from msl_tools.msl.ui.process_launcher.process_launcher import ProcessLauncher
+from msl_tools.msl.ui.widgets.windows.confirm_dialog import ConfirmDialog
 from msl_tools.msl.ui.widgets.windows.hub import HubWindow
 from msl_tools.msl.ui.widgets.windows.whats_new_dialog import WhatsNewDialog
 
@@ -72,12 +75,45 @@ def main() -> None:
         window = HubWindow(tools=TOOLS, current_tool_id=hub_config["current_tool"], icon=icon,
                            footer_text=f"v{__version__}", footer_tooltip="What\u2019s new")
 
-        def show_whats_new() -> None:
-            WhatsNewDialog.show_for(window, Resources().versionManager.get_releases, __version__,
-                                    Resources().releasesPageUrl)
+        # One-click update (core/installer/hub_updater.py): "What's new" downloads + checks the
+        # release, then a helper process swaps it in while the hub is closed and starts it again.
+        updater = HubUpdater(Resources().fsManager.ROOT_DIR, Resources().releaseArchiveUrl,
+                             logger=Resources().logsDesktopHub.get("updater"))
+        last_update = updater.take_result()  # what the helper did, if this start follows an update
 
-        window.footer_clicked.connect(show_whats_new)
-        window.update_clicked.connect(show_whats_new)  # its banner links to the new release
+        def prepare_update(note, progress) -> None:
+            updater.prepare(note.tag, note.version, progress)
+
+        def show_whats_new(notice: str = "") -> None:
+            prepared = WhatsNewDialog.show_for(
+                window, Resources().versionManager.get_releases, __version__, Resources().releasesPageUrl,
+                update_handler=None if updater.blocked_reason() else prepare_update,
+                update_blocked_reason=updater.blocked_reason() or "", notice=notice)
+            if prepared is None:
+                return
+            if updater.start_apply(prepared.version, __version__):
+                window.close()  # stores the window placement (finished)
+                qt.QtWidgets.QApplication.quit()
+            else:
+                ConfirmDialog.ask(window, "Update", "The update could not be started.",
+                                  details="See the log in logs/desktop/updater.", kind="warning")
+
+        def report_update(result: UpdateResult) -> None:
+            if result.succeeded:
+                show_whats_new(notice=f"Updated to {result.version}")
+                return
+            restored = result.status == "rolled_back"
+            choice = ConfirmDialog.ask(
+                window, "Update",
+                f"Version {result.version} could not be installed"
+                + (" \u2014 the previous version was restored." if restored else "."),
+                details=result.message.strip().splitlines()[0] if result.message.strip() else None,
+                choices=[("ok", "OK"), ("log", "Show the log")], kind="warning")
+            if choice == "log":
+                ProcessLauncher.open_file_explorer(updater.log_file)
+
+        window.footer_clicked.connect(lambda: show_whats_new())
+        window.update_clicked.connect(lambda: show_whats_new())  # its banner offers "Update now"
 
         def remember_tool(tool_id: str) -> None:
             hub_config["current_tool"] = tool_id
@@ -97,6 +133,8 @@ def main() -> None:
         window.finished.connect(remember_geometry)  # QDialog: emitted on every close
         window.show()
         _watch_for_update(window)
+        if last_update is not None:
+            qt.QtCore.QTimer.singleShot(300, lambda: report_update(last_update))
 
 
 if __name__ == "__main__":

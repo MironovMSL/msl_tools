@@ -20,6 +20,8 @@ class Resources(metaclass=SingletonMeta):
         releases_url       = "https://api.github.com/repos/MironovMSL/msl_tools/releases"
         latest_release_url = "https://api.github.com/repos/MironovMSL/msl_tools/releases/latest"
         self.releasesPageUrl = "https://github.com/MironovMSL/msl_tools/releases"  # for "open in browser" links
+        # A release's source archive ({tag} = "v1.2.3") - what the hub's one-click update downloads.
+        self.releaseArchiveUrl = "https://github.com/MironovMSL/msl_tools/archive/refs/tags/{tag}.zip"
 
 
         self.fsManager        = FileSystemManager()

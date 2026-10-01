@@ -11,6 +11,7 @@ An install looks like this (`install_dir` is what the user picks):
             msl/                code + assets            <- replaced by install / update
             requirements.txt, LICENSE, README.md         <- replaced too
             configs/, logs/     per-user, created on first run  <- never touched
+            .update/            the updater's work folder (hub_updater.py): download, backup, log
 
 The Python environment lives elsewhere (core/installer/runtime_bootstrap.py).
 Qt-free; every public method returns False on failure and logs why.
@@ -33,6 +34,7 @@ class HubInstaller:
     REQUIRED_DIRS = ("core", "tools", "ui", "assets")       # what a valid msl/ must contain
     ROOT_FILES = ("requirements.txt", "LICENSE", "README.md")
     USER_DATA_DIRS = ("configs", "logs")                    # kept across installs and updates
+    UPDATE_DIR = ".update"                                  # HubUpdater's work folder (backup of the previous version)
     HUB_MODULE = "msl_tools.msl.run_hub"
     SHORTCUT_NAME = "MSL Tools"
     ICON_RELATIVE = Path("msl") / "assets" / "icons" / "brand" / "hub.ico"
@@ -113,7 +115,7 @@ class HubInstaller:
             self._logger.warning(f'Refusing to uninstall "{target}": that is the folder the installer runs from.')
             return False
 
-        doomed = [target / self.MAIN_MODULE, *(target / name for name in self.ROOT_FILES)]
+        doomed = [target / self.MAIN_MODULE, target / self.UPDATE_DIR, *(target / name for name in self.ROOT_FILES)]
         if remove_user_data:
             doomed += [target / name for name in self.USER_DATA_DIRS]
         try:
