@@ -288,6 +288,15 @@ NEVER runs inside Maya; it's a pure standalone desktop app. Future
   is only applied from rules without pseudo-states, so not `:checked`).
   The first tool opens on start.
   `BaseNavButton` isn't used: it's built for the header's icon-only row.
+  Window size: the START size is `width=900, height=600` in
+  HubWindow.__init__ (then run_hub restores the saved placement). The
+  MINIMUM is not a number anywhere — FramelessWindowMixin's own floor is
+  `_MIN_WIDTH/_MIN_HEIGHT` (240x160), the real limit is the layout's
+  minimum, i.e. the widest thing on any tool page (~554px now: Maya Gate's
+  toolbar / variable adder row). One long non-wrapping QLabel sets it for
+  the whole window — make hint lines `setWordWrap(True)`. StableScrollArea
+  reports its content's minimum width (it never scrolls sideways), so
+  scrolled content can't be cut off by narrowing the window.
 - `msl/tools/desktop/registry.py` — `TOOLS: list[ToolDescriptor]`, one import
   + one line per tool. The hub iterates this and knows nothing about any
   individual tool.

@@ -15,7 +15,10 @@ class StableScrollArea(qt.QtWidgets.QScrollArea):
     scroll — an empty gutter instead of a disabled-looking bar.
 
     Also transparent by default (no frame, no viewport/content fill), so
-    it inherits whatever surface it sits on, and never scrolls sideways.
+    it inherits whatever surface it sits on, and never scrolls sideways —
+    which is why its minimum width is its content's (plus the scroll-bar
+    column): a window can't be made so narrow that the content is cut off
+    with no way to reach it.
     """
 
     def __init__(self, parent=None):
@@ -33,6 +36,21 @@ class StableScrollArea(qt.QtWidgets.QScrollArea):
     def setWidget(self, widget: qt.QtWidgets.QWidget) -> None:
         super().setWidget(widget)
         widget.setAutoFillBackground(False)  # QScrollArea.setWidget() forces it on
+        widget.installEventFilter(self)
+
+    def minimumSizeHint(self) -> qt.QtCore.QSize:
+        hint = super().minimumSizeHint()
+        content = self.widget()
+        if content is not None:
+            needed = (content.minimumSizeHint().width() + self.verticalScrollBar().sizeHint().width()
+                      + 2 * self.frameWidth())
+            hint.setWidth(max(hint.width(), needed))
+        return hint
+
+    def eventFilter(self, watched, event) -> bool:
+        if watched is self.widget() and event.type() == qt.QtCore.QEvent.Type.LayoutRequest:
+            self.updateGeometry()  # the content's minimum width may have changed
+        return super().eventFilter(watched, event)
 
     def _on_range_changed(self, _minimum: int, maximum: int) -> None:
         # Hides the bar only, never its container — the container is what

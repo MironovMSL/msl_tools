@@ -72,6 +72,7 @@ class UserSetupTab(qt.QtWidgets.QWidget):
         self._hint_label.setToolTip(
             f"Maya Gate adds this folder to PYTHONPATH on every launch:\n{self._store.package_parent_dir()}")
         self._hint_label.setObjectName("userSetupHint")
+        self._hint_label.setWordWrap(True)  # one long line would dictate the whole window's minimum width
 
         self._save_timer = qt.QtCore.QTimer(self)
         self._save_timer.setSingleShot(True)
