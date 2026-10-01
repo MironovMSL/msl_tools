@@ -28,6 +28,9 @@ msl_tools/                 (repo root)
                             every default must come from code (get_config
                             defaults, UserSetupStore.DEFAULT_SCRIPT), never
                             from a committed config file.
+    ref/                    the user's local collection of OTHER people's scripts, kept as
+                            references to learn from — NOT in git (.gitignore), not part of
+                            msl_tools, never installed. Read it for ideas; don't edit or import it.
     msl/
         run_hub.py            standalone entry point for the desktop hub
         run_installer.py      standalone entry point of the setup window (run by path, see "Install")

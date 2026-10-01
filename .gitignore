@@ -220,3 +220,6 @@ __marimo__/
 # msl_tools runtime output: per-user settings and logs, created on first run
 /configs/
 /logs/
+
+# Reference material: other people's scripts kept locally to learn from - never committed
+/ref/
