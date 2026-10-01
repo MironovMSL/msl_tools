@@ -21,6 +21,12 @@ class EnvVariableAdder(qt.QtWidgets.QWidget):
     separate signals here so that routing lives with the caller instead
     of being re-derived from a string tag.
 
+    The known-variables dropdown is the catalog of maya_variables.py:
+    listed by GROUP under small headers (not pickable), each variable with
+    its description as a tooltip. The list opens as wide as its longest
+    name, wider than the field; typing still filters across all groups
+    (the completer, with the same tooltips).
+
     Storage-agnostic — never touches config itself. Icon-file buttons
     (add1.svg etc.) replaced with a plain "+" — no matching assets in
     msl_tools yet (same reasoning as EnvVarRow's hover panels).
@@ -36,6 +42,8 @@ class EnvVariableAdder(qt.QtWidgets.QWidget):
 
     HEIGHT = 25
     COMBO_WIDTH = 170
+    POPUP_EXTRA_WIDTH = 28   # list padding + the scroll bar's column
+    HEADER_FONT_DELTA = -1   # group headers: a point smaller, semibold
     LINE_EDIT_WIDTH = 170
     ADD_BUTTON_SIZE = qt.QtCore.QSize(24, 22)  # field height, so "+" lines up with its field
 
@@ -53,13 +61,21 @@ class EnvVariableAdder(qt.QtWidgets.QWidget):
         self.add_known_button = self._add_button("Add this Maya variable")
 
         # BaseComboBox: styled rows, slim scroll bar, animated arrow.
-        self.known_combo = BaseComboBox(self.KNOWN_VARIABLES, "")
+        self.known_combo = BaseComboBox([], "")
+        self._fill_known_combo()
         self.known_combo.setFixedWidth(self.COMBO_WIDTH)
         self.known_combo.setCurrentIndex(-1)
         self.known_combo.setEditable(True)
         self.known_combo.lineEdit().setPlaceholderText("Maya variable…")
+        self.known_combo.setMaxVisibleItems(18)
 
-        completer = qt.QtWidgets.QCompleter(self.KNOWN_VARIABLES, self.known_combo)
+        # Names only (no group headers), each with its description as a tooltip.
+        completer_model = qt.QtGui.QStandardItemModel(self.known_combo)
+        for name in self.KNOWN_VARIABLES:
+            item = qt.QtGui.QStandardItem(name)
+            item.setToolTip(maya_variables.spec_of(name).description)
+            completer_model.appendRow(item)
+        completer = qt.QtWidgets.QCompleter(completer_model, self.known_combo)
         completer.setCaseSensitivity(qt.QtCore.Qt.CaseSensitivity.CaseInsensitive)
         completer.setFilterMode(qt.QtCore.Qt.MatchFlag.MatchContains)
         self.known_combo.setCompleter(completer)
@@ -71,11 +87,35 @@ class EnvVariableAdder(qt.QtWidgets.QWidget):
         popup.setItemDelegate(qt.QtWidgets.QStyledItemDelegate(popup))
         popup.setVerticalScrollBar(SlimScrollBar(qt.QtCore.Qt.Orientation.Vertical))
 
+        # Both lists open as wide as the longest name: the field is narrower than most of them.
+        metrics = self.known_combo.fontMetrics()
+        list_width = max(metrics.horizontalAdvance(name) for name in self.KNOWN_VARIABLES) + self.POPUP_EXTRA_WIDTH
+        self.known_combo.view().setMinimumWidth(max(list_width, self.COMBO_WIDTH))
+        popup.setMinimumWidth(max(list_width, self.COMBO_WIDTH))
+
         self.custom_line_edit = qt.QtWidgets.QLineEdit()
         self.custom_line_edit.setPlaceholderText("Custom variable…")
         self.custom_line_edit.setFixedWidth(self.LINE_EDIT_WIDTH)
 
         self.add_custom_button = self._add_button("Add this custom variable")
+
+    def _fill_known_combo(self) -> None:
+        """The catalog, group by group: a header row (disabled, so it can't
+        be picked and the keyboard skips it), then the group's variables."""
+        model = self.known_combo.model()
+        header_font = self.known_combo.font()
+        header_font.setPointSize(max(header_font.pointSize() + self.HEADER_FONT_DELTA, 6))
+        header_font.setWeight(qt.QtGui.QFont.Weight.DemiBold)
+        header_font.setLetterSpacing(qt.QtGui.QFont.SpacingType.AbsoluteSpacing, 0.5)
+        for title, specs in maya_variables.GROUPS:
+            self.known_combo.addItem(title.upper())
+            header = model.item(self.known_combo.count() - 1)
+            header.setFlags(qt.QtCore.Qt.ItemFlag.NoItemFlags)  # base.qss: ::item:disabled = dimmed
+            header.setFont(header_font)
+            for spec in specs:
+                self.known_combo.addItem(spec.name)
+                self.known_combo.setItemData(self.known_combo.count() - 1, spec.description,
+                                             qt.QtCore.Qt.ItemDataRole.ToolTipRole)
 
     def _add_button(self, tooltip: str) -> IconPushButton:
         """Framed "+" button (a regular button: a flat one didn't read as clickable)."""

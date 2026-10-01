@@ -90,7 +90,10 @@ class _ClipBody(qt.QtWidgets.QWidget):
         return self._child.sizeHint()
 
     def minimumSizeHint(self) -> qt.QtCore.QSize:
-        return qt.QtCore.QSize(0, 0)
+        # No minimum HEIGHT (the body folds to nothing), but the child's minimum
+        # WIDTH stands: handed less, a row squeezes its hover menu and name
+        # sideways. The window then can't be made narrower than its rows need.
+        return qt.QtCore.QSize(self._child.minimumSizeHint().width(), 0)
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)

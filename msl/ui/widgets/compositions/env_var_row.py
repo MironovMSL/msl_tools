@@ -137,7 +137,8 @@ class EnvVarRow(qt.QtWidgets.QWidget):
     TOGGLE_OFF, TOGGLE_ON = "Off", "On"
     TOGGLE_OFF_NOTE = "not set"
     CHOICE_NOT_SET = "not set"         # the drop-down's entry for ""
-    CHOICE_MIN_WIDTH = 170
+    CHOICE_WIDTH = 170                 # the drop-down's width while the row has room...
+    CHOICE_MIN_WIDTH = 70              # ...and how far it gives way in a narrow row
 
     selectedColor = color_property("_selected_color")
     hoverColor = color_property("_hover_color")
@@ -224,6 +225,9 @@ class EnvVarRow(qt.QtWidgets.QWidget):
             self.toggle.setFocusPolicy(qt.QtCore.Qt.FocusPolicy.NoFocus)
             self.toggle_note = qt.QtWidgets.QLabel()
             self.toggle_note.setObjectName("rowValueNote")  # widgets.qss: dimmed
+            # The note is the part that gives way in a narrow row (it gets clipped), not the name.
+            self.toggle_note.setSizePolicy(qt.QtWidgets.QSizePolicy.Policy.Ignored,
+                                           qt.QtWidgets.QSizePolicy.Policy.Preferred)
             self._update_toggle_note()
         elif self._is_choice:
             self.value_field.hide()
@@ -231,7 +235,16 @@ class EnvVarRow(qt.QtWidgets.QWidget):
             if self.value and self.value not in self.spec.choices:
                 items.append(self.value)  # a value typed before the choices existed: kept
             self.choice_combo = BaseComboBox(items, self.value or self.CHOICE_NOT_SET, enable_wheel=False)
+            # Like a text field, it must give way when the row gets narrow: a combo box
+            # otherwise insists on its longest entry's width, and the row's layout then
+            # squeezes the hover menu and the name instead (they'd jump sideways).
+            self.choice_combo.setSizeAdjustPolicy(
+                qt.QtWidgets.QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+            self.choice_combo.setMinimumContentsLength(1)
             self.choice_combo.setMinimumWidth(self.CHOICE_MIN_WIDTH)
+            self.choice_combo.setMaximumWidth(self.CHOICE_WIDTH)
+            self.choice_combo.setSizePolicy(qt.QtWidgets.QSizePolicy.Policy.Expanding,
+                                            qt.QtWidgets.QSizePolicy.Policy.Fixed)
 
         # Framed button (base.qss), icon tinted by QSS iconColor; "..." if the asset is missing.
         # Its padding is zeroed in widgets.qss — the base 4px 10px leaves no room at this size.
@@ -265,7 +278,7 @@ class EnvVarRow(qt.QtWidgets.QWidget):
             layout.addSpacing(6)
             layout.addWidget(self.toggle_note, 1)
         elif self.choice_combo is not None:
-            layout.addWidget(self.choice_combo)
+            layout.addWidget(self.choice_combo, 100)  # takes the room first, up to CHOICE_WIDTH
             layout.addStretch(1)
         layout.addWidget(self.browse_button)
 

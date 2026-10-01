@@ -386,9 +386,30 @@ What changed vs. the original (all deliberate, not oversights):
   - CHOICE: a BaseComboBox of `choices` + "not set" (""); a stored value
     outside the choices is kept as an extra entry.
   - VALUE: text field without a browse button (space kept so fields align).
-  FILE / CHOICE / VALUE editors exist and are tested, but no catalog entry
-  uses them yet — step 2 (a verified, described, grouped catalog of ~30-40
-  variables) will. Values stay plain strings in the config.
+  Values stay plain strings in the config.
+  Narrow rows: the value editor is what gives way (the drop-down shrinks
+  from 170 to 70px, the switch's note is clipped); RowHoverMenu has a fixed
+  width and the group's _ClipBody passes the rows' minimum WIDTH on, so the
+  window can't get narrower than its rows need — otherwise a row's layout
+  takes the missing pixels from the hover menu and the name, and those rows
+  jump out of the column.
+- The catalog (`maya_variables.py:GROUPS`): 49 variables in 7 groups
+  (Search paths, Folders, Startup & interface, Python & scripts, Viewport,
+  Color management, Scenes & rendering), each with a one-line description.
+  A CURATED part of Maya's variables, Windows only. Every name was checked
+  to exist in the local Maya 2025 install (`grep -rhoaw` over bin/*.dll,
+  *.exe, scripts/, Python/.../maya); kinds / allowed values follow
+  Autodesk's "Environment variables" help (General, File path, Rendering
+  variables). Do both checks before adding one — a wrong kind silently
+  writes a wrong value into every launch. `on_value` isn't always "1"
+  (MAYA_FORCE_PANEL_FOCUS: "0"). MAYA_SHADER_PATH / MAYA_ICON_PATH from the
+  old list weren't found in Maya: out of the dropdown, kept in `_LEGACY` so
+  a config that has them keeps the folder-list editor.
+  EnvVariableAdder lists the catalog by group — header rows are disabled
+  items (`QComboBox QAbstractItemView::item:disabled`, base.qss), each
+  variable's description is its tooltip (also on the row's name and in the
+  completer); the list opens as wide as the longest name, wider than the
+  field.
 - Window-resize-on-content-change was intentionally NOT ported (the
   original chained `.update_size()` calls up to its own standalone
   top-level window). Maya Gate is now one page inside the hub's
@@ -683,3 +704,7 @@ disk. NOT yet tested: against a real Maya installation (actual launch via
   start from the installed copy. Not yet run by hand on a clean machine.
 - Real icon assets for add/delete/copy/drag (currently Unicode placeholders).
 - The `cmds.commandPort`-based Maya connection (future work, unstarted).
+- Maya Gate "boost start" (planned, undesigned): a third tab next to
+  userSetup where, per environment, Maya plug-ins are switched on / off to
+  make Maya start faster. How the plug-in list is obtained and how the
+  choice is applied at launch are open — agree on the mechanism first.

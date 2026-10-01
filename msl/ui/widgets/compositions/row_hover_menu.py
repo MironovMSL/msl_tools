@@ -14,7 +14,9 @@ class RowHoverMenu(qt.QtWidgets.QWidget):
     like Notion keeps a selected row's checkbox on screen.
 
     Hidden widgets keep their space (retainSizeWhenHidden), so the rest of
-    the row never shifts when the menu shows or hides.
+    the row never shifts when the menu shows or hides. The menu's own width
+    is fixed for the same reason: a row that runs out of room must not take
+    it from here (the name next to it would jump sideways).
     """
 
     SPACING = 1
@@ -28,6 +30,7 @@ class RowHoverMenu(qt.QtWidgets.QWidget):
         self._layout = qt.QtWidgets.QHBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
         self._layout.setSpacing(self.SPACING)
+        self.setSizePolicy(qt.QtWidgets.QSizePolicy.Policy.Fixed, qt.QtWidgets.QSizePolicy.Policy.Preferred)
 
     def add_widget(self, widget: qt.QtWidgets.QWidget) -> qt.QtWidgets.QWidget:
         """Appends `widget` to the menu (left to right) and returns it.

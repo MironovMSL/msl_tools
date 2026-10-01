@@ -238,6 +238,11 @@ QComboBox QAbstractItemView::item:selected {
     background-color: alpha(var(--accent), 22%);
     color: var(--text-primary);
 }
+/* A row that can't be picked: a group header inside a long list. */
+QComboBox QAbstractItemView::item:disabled {
+    background-color: transparent;
+    color: var(--text-secondary);
+}
 
 /* --- labels ------------------------------------------------------------------------ */
 

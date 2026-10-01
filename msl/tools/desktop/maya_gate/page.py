@@ -28,7 +28,7 @@ def _value_spec_for(name: str) -> ValueSpec:
     return ValueSpec(browse=_BROWSE_MODE.get(spec.kind, BrowseMode.NONE),
                      choices=spec.choices if spec.kind is VariableKind.CHOICE else (),
                      toggle_value=spec.on_value if spec.kind is VariableKind.FLAG else "",
-                     description=spec.description)
+                     description=spec.description, file_filter=spec.file_filter)
 
 
 def _default_value_for(name: str) -> str:
