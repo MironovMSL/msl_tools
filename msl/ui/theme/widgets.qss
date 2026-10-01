@@ -147,22 +147,22 @@ BaseProgressBar::chunk                  { background-color: var(--accent); }
 BaseProgressBar[state="success"]::chunk { background-color: var(--success); }
 BaseProgressBar[state="error"]::chunk   { background-color: var(--error); }
 
-/* --- VersionStatusWidget: status color per `status` -------------------------- */
+/* --- VersionStatusWidget: "Installed 0.1.1 · up to date" ----------------------
+   Reference information, so quiet: "up to date" is not colored (the caller's
+   own message carries the success accent); only what needs a decision is. */
 
-VersionStatusWidget QLabel#versionPrefix {
-    color: var(--text-secondary);
-    font-size: 12px;
-}
-VersionStatusWidget QLabel#versionValue,
-VersionStatusWidget QLabel#versionStatus {
+VersionStatusWidget QLabel#versionValue {
     color: var(--text-primary);
-    font-size: 13px;
     font-weight: 600;
 }
-VersionStatusWidget QLabel#versionStatus[status="up_to_date"]       { color: var(--success); }
-VersionStatusWidget QLabel#versionStatus[status="update_available"] { color: var(--warning); }
-VersionStatusWidget QLabel#versionStatus[status="not_installed"]    { color: var(--text-secondary); }
-VersionStatusWidget QLabel#versionStatus[status="unknown"]          { color: var(--error); }
+VersionStatusWidget QLabel#versionValue[status="not_installed"],
+VersionStatusWidget QLabel#versionSeparator,
+VersionStatusWidget QLabel#versionStatus {
+    color: var(--text-secondary);
+}
+VersionStatusWidget QLabel#versionValue[status="unknown"]           { color: var(--error); }
+VersionStatusWidget QLabel#versionStatus[status="update_available"] { color: var(--accent); }
+VersionStatusWidget QLabel#versionStatus[status="newer"]            { color: var(--warning); }
 
 /* --- BasePathWidget ------------------------------------------------------------ */
 
@@ -374,6 +374,19 @@ QLabel#installerMessage                    { color: var(--text-secondary); }
 QLabel#installerMessage[state="success"]   { color: var(--success); }
 QLabel#installerMessage[state="warning"]   { color: var(--warning); }
 QLabel#installerMessage[state="error"]     { color: var(--error); }
+QWidget#installerDivider                   { background-color: alpha(var(--border), 55%); }
+/* Uninstall: a quiet text button - it must not compete with Install / Launch. */
+QPushButton#installerUninstall {
+    color: var(--text-secondary);
+    padding: 3px 8px;
+}
+QPushButton#installerUninstall:hover {
+    color: var(--danger);
+    background-color: alpha(var(--danger), 10%);
+}
+QPushButton#installerUninstall:disabled {
+    color: alpha(var(--text-secondary), 45%);
+}
 
 EnvVarRow {
     qproperty-selectedColor: alpha(var(--accent), 14.9%);

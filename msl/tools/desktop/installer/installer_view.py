@@ -33,10 +33,17 @@ class InstallerView(FramelessDialog):
     No business logic here: HubInstaller does the work on a CallableWorker
     thread; the view shows the state (VersionStatusWidget: what is installed
     in the chosen folder vs. this package's version).
+
+    Two groups, ruled off by a divider: WHAT to do (folder, shortcut) and
+    what IS there (installed version, then the outcome of the last action —
+    the one colored line of the window). The progress bar shows only while
+    something is running; Uninstall is a quiet text button, so it doesn't
+    compete with Install / Launch.
     """
 
     WIDTH = 460
-    HEIGHT = 190
+    HEIGHT = 196
+    SUCCESS_MARK = "\u2713"
 
     def __init__(self, parent=None):
         self._core = Resources()
@@ -48,7 +55,7 @@ class InstallerView(FramelessDialog):
 
         super().__init__(title="MSL Tools Setup", width=self.WIDTH, height=self.HEIGHT,
                          icon=self._ui.iconManager.get_icon("hub", sub_folder="brand"),
-                         show_minimize_button=False, show_maximize_button=False,
+                         show_minimize_button=False, show_maximize_button=False, show_theme_toggle=False,
                          fade_when_inactive=False, resources=self._ui, parent=parent)
         self._build_widgets()
         self._build_layout()
@@ -68,10 +75,22 @@ class InstallerView(FramelessDialog):
         self._message.setObjectName("installerMessage")
         self._message.setWordWrap(True)
         self._progress = BaseProgressBar()
+        policy = self._progress.sizePolicy()
+        policy.setRetainSizeWhenHidden(True)  # shown only while working, without the rows jumping
+        self._progress.setSizePolicy(policy)
+        self._progress.hide()
+
+        self._divider = qt.QtWidgets.QWidget()
+        self._divider.setObjectName("installerDivider")
+        self._divider.setAttribute(qt.QtCore.Qt.WidgetAttribute.WA_StyledBackground, True)
+        self._divider.setFixedHeight(1)
 
         self._install_button = qt.QtWidgets.QPushButton("Install")
         self._install_button.setProperty("primary", True)
         self._uninstall_button = qt.QtWidgets.QPushButton("Uninstall")
+        self._uninstall_button.setObjectName("installerUninstall")  # widgets.qss: quiet, red on hover
+        self._uninstall_button.setFlat(True)
+        self._uninstall_button.setCursor(qt.QtCore.Qt.CursorShape.PointingHandCursor)
         self._launch_button = qt.QtWidgets.QPushButton("Launch MSL Tools")
         self._launch_button.hide()
 
@@ -88,6 +107,9 @@ class InstallerView(FramelessDialog):
         layout.setSpacing(8)
         layout.addWidget(self._path)
         layout.addWidget(self._shortcut_checkbox)
+        layout.addSpacing(2)
+        layout.addWidget(self._divider)
+        layout.addSpacing(2)
         layout.addWidget(self._status)
         layout.addWidget(self._message)
         layout.addWidget(self._progress)
@@ -106,6 +128,7 @@ class InstallerView(FramelessDialog):
         self._install_dir = str(Path(path)) if path.strip() else ""
         self._launch_button.hide()
         self._set_primary(self._install_button)
+        self._set_message("")  # the last action's outcome was about the previous folder
         self._refresh()
 
     def _refresh(self) -> None:
@@ -113,7 +136,9 @@ class InstallerView(FramelessDialog):
         installed = self._installer.installed_version(self._install_dir) if self._install_dir else None
         is_source = bool(self._install_dir) and self._installer.is_source(self._install_dir)
         self._status.set_update_info(self._core.versionManager.check_install_status(self._install_dir or "."))
-        self._install_button.setText("Reinstall" if installed else "Install")
+        package = self._core.versionManager.core_raw_version
+        self._install_button.setText("Install" if not installed
+                                     else "Reinstall" if installed == package else f"Install {package}")
         self._install_button.setEnabled(bool(self._install_dir) and not is_source)
         self._uninstall_button.setEnabled(installed is not None and not is_source)
         if is_source:
@@ -124,7 +149,7 @@ class InstallerView(FramelessDialog):
             self._set_message("")
 
     def _set_message(self, text: str, state: str = "") -> None:
-        self._message.setText(text)
+        self._message.setText(f"{self.SUCCESS_MARK}  {text}" if state == "success" and text else text)
         if self._message.property("state") != state:
             self._message.setProperty("state", state)  # colored by widgets.qss: QLabel#installerMessage[state]
             repolish(self._message)
@@ -199,6 +224,7 @@ class InstallerView(FramelessDialog):
         self._set_message("Working…")
         self._progress.set_state(ProgressState.NORMAL)
         self._progress.set_indeterminate(True)
+        self._progress.show()
 
         self._pending = (done, failed, on_success)
         self._worker = CallableWorker(work, parent=self)
@@ -209,8 +235,7 @@ class InstallerView(FramelessDialog):
         done, failed, on_success = self._pending
         self._worker = None
         self._progress.set_indeterminate(False)
-        self._progress.set_progress(self._progress.maximum())
-        self._progress.set_state(ProgressState.SUCCESS if success else ProgressState.ERROR)
+        self._progress.hide()  # the message says how it went
         self._path.setEnabled(True)
         self._set_message(done if success else failed, "success" if success else "error")
         self._refresh()

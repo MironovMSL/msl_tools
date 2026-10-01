@@ -7,6 +7,6 @@ TOOL_DESCRIPTOR = ToolDescriptor(
     id="stub_a",
     title="Stub A",
     widget_factory=lambda: StubToolWidget("Stub tool A"),
-    icon="maya1",
-    icon_sub_folder="apps",
+    icon="cube",
+    icon_sub_folder="tools",
 )

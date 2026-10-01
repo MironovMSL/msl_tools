@@ -213,7 +213,8 @@ msl_tools/                 (repo root)
     `browse`, `folder_add`, `clear`, `arrow_right`, `chevron_down`, `add`, `check`, `select_all`; add new action icons here),
     `apps/` (third-party application logos: `maya`; later houdini, blender...
     — named after the app, not the tool that uses it, so several tools can
-    share one), `brand/` (our own app icons: `hub` — an "M" monogram, full-color, NOT the
+    share one), `tools/` (sidebar icons of our OWN hub tools, one-color like
+    action icons: `cube`, `layers` — the stub tools' placeholders), `brand/` (our own app icons: `hub` — an "M" monogram, full-color, NOT the
     #000000 one-color convention: used as the window/taskbar icon, never
     tinted). Per-theme variants only when the SHAPE
     differs: `<name>_dark.svg` / `<name>_light.svg`.
@@ -562,6 +563,13 @@ release archive or a checkout:
    to" folder (default `%LOCALAPPDATA%\MSL`), installed-vs-package version,
    "Create a desktop shortcut", Install / Reinstall, Uninstall (danger
    ConfirmDialog: keep settings / remove everything), "Launch MSL Tools".
+   Look: two groups ruled off by a divider — what to do (folder, shortcut)
+   / what is there (`VersionStatusWidget`: one quiet line, "Installed 0.1.1
+   · up to date", the setup's version only when it differs; then the last
+   action's outcome, the window's ONE colored line). The progress bar shows
+   only while working; Uninstall is a quiet text button
+   (`QPushButton#installerUninstall`); the main button reads Install /
+   Reinstall / "Install <version>" (another version is installed).
    No logic of its own — `core/installer/hub_installer.py:HubInstaller`
    (Qt-free) works on a CallableWorker thread.
 
@@ -631,7 +639,9 @@ under a running hub:
   crashes on start, damaged archive, wrong version, missing release, a
   real GitHub download. Then for real (2026-10-01): the installed copy in
   the user's stable folder updated 0.1.1 -> 0.1.2 from the published
-  release with "Update now". The rollback path has only run in the sandbox.
+  release with "Update now", then 0.1.2 -> 0.1.3 and back to 0.1.2 with
+  "Install this version". The AUTOMATIC rollback (a release that fails to
+  start) has only run in the sandbox.
 
 ## Verified so far
 
@@ -649,4 +659,3 @@ disk. NOT yet tested: against a real Maya installation (actual launch via
   start from the installed copy. Not yet run by hand on a clean machine.
 - Real icon assets for add/delete/copy/drag (currently Unicode placeholders).
 - The `cmds.commandPort`-based Maya connection (future work, unstarted).
-- Hub sidebar icons: only Maya Gate has one; the stub tools are text-only.

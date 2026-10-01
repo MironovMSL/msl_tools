@@ -6,25 +6,29 @@ from msl_tools.msl.ui.theme.qss import repolish
 
 
 class VersionStatusWidget(qt.QtWidgets.QWidget):
-    """Bottom status row: package version, installed version, and update status.
+    """One quiet line saying what is installed, and how that relates to the
+    package being set up:
 
-    Contains no comparison logic — only renders an UpdateInfo passed in via
-    set_update_info(). The caller (e.g. an installer controller) is responsible
-    for calling VersionManager.check_install_status() and forwarding the result.
+        Installed 0.1.1  ·  up to date
+        Installed 0.1.0  ·  this setup installs 0.1.3
+        Installed 0.1.3  ·  newer than this setup (0.1.1)
+        Not installed  ·  this setup installs 0.1.3
 
-    Styled entirely by the window stylesheet (ui/theme/widgets.qss): labels
-    carry object names ("versionPrefix", "versionValue", "versionStatus"),
-    and the status label a dynamic `status` property ("up_to_date",
-    "update_available", "not_installed", "unknown"; empty before the first
-    check) that the QSS picks the status color from.
+    The setup's own version is only mentioned when it differs from the
+    installed one. Contains no version comparison — it renders an UpdateInfo
+    passed in via set_update_info(); the caller calls
+    VersionManager.check_install_status() and forwards the result.
+
+    Styled entirely by the window stylesheet (ui/theme/widgets.qss): the
+    labels are QLabel#versionValue / #versionSeparator / #versionStatus, and
+    the status label carries a dynamic `status` property ("up_to_date",
+    "update_available", "newer", "not_installed", "unknown"; empty before
+    the first check) that the QSS picks its color from. It is reference
+    information, so "up to date" is NOT colored — the caller's own message
+    is the place for a success accent.
     """
 
-    _STATUS_TEXT = {
-        UpdateStatus.UP_TO_DATE:       "up to date",
-        UpdateStatus.UPDATE_AVAILABLE: "update available",
-        UpdateStatus.NOT_INSTALLED:    "not installed",
-        UpdateStatus.UNKNOWN:          "unknown",
-    }
+    SEPARATOR = "·"
 
     def __init__(self,
                  package_version: str,
@@ -32,9 +36,9 @@ class VersionStatusWidget(qt.QtWidgets.QWidget):
                  parent=None):
         """
         Args:
-            package_version: Version string of the package being installed
-                (shown in the "Setup version" field).
-            info: Initial UpdateInfo to render, or None to show placeholders.
+            package_version: Version of the package being installed (what
+                this setup would put in place).
+            info: Initial UpdateInfo to render, or None to show a placeholder.
             parent: Optional parent widget.
         """
         super().__init__(parent)
@@ -47,67 +51,50 @@ class VersionStatusWidget(qt.QtWidgets.QWidget):
 
         self.set_update_info(info)
 
-    @staticmethod
-    def _build_field(prefix_text: str) -> tuple[qt.QtWidgets.QWidget, qt.QtWidgets.QLabel, qt.QtWidgets.QLabel]:
-        """Builds a small (prefix, value) label pair inside a horizontal
-        container, so each part can be styled independently."""
-        container = qt.QtWidgets.QWidget()
-        layout = qt.QtWidgets.QHBoxLayout(container)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(4)
-
-        prefix_label = qt.QtWidgets.QLabel(prefix_text)
-        prefix_label.setObjectName("versionPrefix")
-
-        value_label = qt.QtWidgets.QLabel()
-        value_label.setObjectName("versionValue")
-
-        layout.addWidget(prefix_label)
-        layout.addWidget(value_label)
-
-        return container, prefix_label, value_label
-
     def _create_widgets(self) -> None:
-        self.version_container, _, self.version_value_label = self._build_field("Setup version:")
-        self.version_value_label.setText(self._package_version)
-
-        self.installed_container, _, self.installed_value_label = self._build_field("Installed version:")
-        self.status_container, self.status_prefix_label, self.status_value_label = self._build_field("Status:")
+        self.installed_value_label = qt.QtWidgets.QLabel()
+        self.installed_value_label.setObjectName("versionValue")
+        self.separator_label = qt.QtWidgets.QLabel(self.SEPARATOR)
+        self.separator_label.setObjectName("versionSeparator")
+        self.status_value_label = qt.QtWidgets.QLabel()
         self.status_value_label.setObjectName("versionStatus")
 
     def _create_layouts(self) -> None:
         self.main_layout = qt.QtWidgets.QHBoxLayout(self)
         self.main_layout.setContentsMargins(0, 0, 0, 0)
-        self.main_layout.setSpacing(0)
-
-        self.main_layout.addWidget(self.version_container)
+        self.main_layout.setSpacing(6)
+        self.main_layout.addWidget(self.installed_value_label)
+        self.main_layout.addWidget(self.separator_label)
+        self.main_layout.addWidget(self.status_value_label)
         self.main_layout.addStretch()
-        self.main_layout.addWidget(self.installed_container)
-        self.main_layout.addStretch()
-        self.main_layout.addWidget(self.status_container)
 
     def set_update_info(self, info: UpdateInfo | None) -> None:
         """Updates the display from an UpdateInfo. None means status was not checked yet."""
         self._last_info = info
+        package = self._package_version
 
         if info is None:
-            self.installed_value_label.setText("—")
-            self.status_value_label.setText("—")
-            self._set_status_property("")
-            return
-
-        if info.status is UpdateStatus.NOT_INSTALLED:
-            self.installed_value_label.setText("—")
+            self._show("—", "", "")
+        elif info.status is UpdateStatus.NOT_INSTALLED:
+            self._show("Not installed", f"this setup installs {package}", "not_installed")
+        elif info.status is UpdateStatus.UPDATE_AVAILABLE:
+            self._show(f"Installed {info.current_version}", f"this setup installs {package}", "update_available")
+        elif info.status is UpdateStatus.UP_TO_DATE:
+            if str(info.current_version) == str(package):
+                self._show(f"Installed {info.current_version}", "up to date", "up_to_date")
+            else:  # nothing newer to offer, yet not the same version: the installed one is ahead
+                self._show(f"Installed {info.current_version}", f"newer than this setup ({package})", "newer")
         else:
-            self.installed_value_label.setText(str(info.current_version))
+            self._show("Installed version unknown", "", "unknown")
 
-        self.status_value_label.setText(self._STATUS_TEXT.get(info.status, "unknown"))
-        self._set_status_property(info.status.name.lower())
-
-    def _set_status_property(self, status: str) -> None:
-        self.status_value_label.setProperty("status", status)
-        repolish(self.status_value_label)
-
+    def _show(self, value: str, status_text: str, status: str) -> None:
+        self.installed_value_label.setText(value)
+        self.status_value_label.setText(status_text)
+        self.separator_label.setVisible(bool(status_text))
+        self.status_value_label.setVisible(bool(status_text))
+        for label in (self.installed_value_label, self.status_value_label):
+            label.setProperty("status", status)
+            repolish(label)
 
 
 if __name__ == "__main__":
@@ -121,4 +108,6 @@ if __name__ == "__main__":
         for status in UpdateStatus:
             info = UpdateInfo(status=status, current_version="0.0.1", latest_version="0.0.2")
             dialog.add_case(status.name, VersionStatusWidget(package_version="0.0.2", info=info))
+        dialog.add_case("installed is newer than the setup", VersionStatusWidget(
+            package_version="0.0.2", info=UpdateInfo(status=UpdateStatus.UP_TO_DATE, current_version="0.0.5")))
         dialog.show()
