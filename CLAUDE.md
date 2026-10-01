@@ -509,7 +509,18 @@ not every commit. The notes are the release's description on GitHub:
   fetch them (blocking; None on failure). The dialog calls its
   `fetch_releases` on a daemon thread ("Loading…", then the list, or an
   error with Retry). The installed version's pill reads "installed", newer
-  ones "new" (`QLabel#releaseVersion[state]`, widgets.qss).
+  ones "new" (`QPushButton#releaseVersion[state]`, widgets.qss — the pill
+  opens that release's page); when a newer release exists a banner on top
+  says "Version X is available — you have Y" (`QFrame#updateBanner`).
+- The dialog lays the notes out itself (`split_blocks()` -> bullet rows /
+  paragraphs, `_inline_html()` for **bold**, `code`, links) instead of
+  Qt's Markdown lists, whose indent, bullets and code font can't be styled.
+  `ReleaseNote.display_title` drops a leading version from the release name
+  ("v0.1.0 — Desktop hub" -> "Desktop hub").
+- On start run_hub checks for a newer release on a daemon thread
+  (`_watch_for_update`) and, if there is one, calls
+  `HubWindow.set_footer_notice()` — the sidebar version turns accent
+  (`QPushButton#hubFooter[notice="true"]`) with a tooltip naming it.
 - Releasing: bump `msl/__init__.py:__version_tuple__`, commit, push, then
   publish a GitHub release tagged `v<version>` with the notes. No `gh` CLI
   on this machine — the release is created in the browser.

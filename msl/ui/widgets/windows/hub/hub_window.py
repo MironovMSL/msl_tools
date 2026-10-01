@@ -167,6 +167,7 @@ class HubWindow(FramelessDialog):
 
         self._pages: Dict[str, qt.QtWidgets.QWidget] = {}
         self._nav_buttons: Dict[str, qt.QtWidgets.QPushButton] = {}
+        self._footer: qt.QtWidgets.QPushButton | None = None
         self._current_tool_id: str | None = None
         self._nav_group = qt.QtWidgets.QButtonGroup(self)
         self._nav_group.setExclusive(True)
@@ -202,6 +203,7 @@ class HubWindow(FramelessDialog):
             footer.setFocusPolicy(qt.QtCore.Qt.FocusPolicy.NoFocus)
             footer.clicked.connect(self.footer_clicked)
             self._sidebar_layout.addWidget(footer)
+            self._footer = footer
 
         self._stack = qt.QtWidgets.QStackedWidget()
         self._card = BasePanel(corner_radius=self.CARD_RADIUS)
@@ -216,6 +218,17 @@ class HubWindow(FramelessDialog):
         body_layout.addWidget(sidebar)
         body_layout.addWidget(self._card, 1)
         self.add_widget(body)
+
+    def set_footer_notice(self, tooltip: str) -> None:
+        """Marks the footer as carrying news (accent color, widgets.qss
+        `QPushButton#hubFooter[notice="true"]`) with `tooltip` saying what;
+        "" clears the mark. run_hub calls it when an update is available."""
+        if self._footer is None:
+            return
+        self._footer.setProperty("notice", bool(tooltip))
+        if tooltip:
+            self._footer.setToolTip(tooltip)
+        repolish(self._footer)
 
     def _apply_theme(self, theme: Theme) -> None:
         super()._apply_theme(theme)

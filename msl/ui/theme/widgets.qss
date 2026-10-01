@@ -217,6 +217,11 @@ QPushButton#hubFooter:hover {
     border: 1px solid transparent;
     color: var(--text-primary);
 }
+/* An update is out (HubWindow.set_footer_notice()). */
+QPushButton#hubFooter[notice="true"] {
+    color: var(--accent);
+    font-weight: 600;
+}
 QPushButton#hubFooter:pressed {
     background-color: alpha(var(--text-primary), 12%);
     border: 1px solid transparent;
@@ -255,22 +260,44 @@ WhatsNewDialog QLabel#releaseDate {
 WhatsNewDialog QLabel#releaseTitle {
     color: var(--text-secondary);
 }
-/* Version pill: neutral; accent for versions newer than the installed one,
-   green for the installed one. */
-WhatsNewDialog QLabel#releaseVersion {
+/* Version pill (a button: opens the release's page): neutral; accent for
+   versions newer than the installed one, green for the installed one. */
+WhatsNewDialog QPushButton#releaseVersion {
     color: var(--text-secondary);
     background-color: alpha(var(--text-primary), 8%);
+    border: 1px solid transparent;
     border-radius: 4px;
     padding: 1px 7px;
     font-size: 11px;
 }
-WhatsNewDialog QLabel#releaseVersion[state="new"] {
+WhatsNewDialog QPushButton#releaseVersion:hover {
+    border: 1px solid alpha(var(--text-primary), 30%);
+}
+WhatsNewDialog QPushButton#releaseVersion[state="new"] {
     color: var(--accent);
     background-color: alpha(var(--accent), 15%);
 }
-WhatsNewDialog QLabel#releaseVersion[state="current"] {
+WhatsNewDialog QPushButton#releaseVersion[state="new"]:hover {
+    border: 1px solid alpha(var(--accent), 55%);
+}
+WhatsNewDialog QPushButton#releaseVersion[state="current"] {
     color: var(--success);
     background-color: alpha(var(--success), 15%);
+}
+WhatsNewDialog QPushButton#releaseVersion[state="current"]:hover {
+    border: 1px solid alpha(var(--success), 55%);
+}
+WhatsNewDialog QLabel#releaseBullet {
+    color: var(--text-secondary);
+}
+/* "A newer version is out" banner above the list. */
+WhatsNewDialog QFrame#updateBanner {
+    background-color: alpha(var(--accent), 12%);
+    border: 1px solid alpha(var(--accent), 35%);
+    border-radius: 6px;
+}
+WhatsNewDialog QLabel#updateText {
+    color: var(--text-primary);
 }
 WhatsNewDialog QLabel#releaseSection {
     color: var(--text-secondary);

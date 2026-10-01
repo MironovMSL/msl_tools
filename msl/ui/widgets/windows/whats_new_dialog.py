@@ -1,41 +1,74 @@
 # ui/widgets/windows/whats_new_dialog.py
+import html
+import re
 import threading
 from typing import Callable, Sequence
 
 import msl_tools.msl.ui.qt_bindings as qt
-from msl_tools.msl.core.version.release_notes import ReleaseNote
+from msl_tools.msl.core.version.release_notes import ReleaseNote, split_blocks
 from msl_tools.msl.core.version.version import Version
 from msl_tools.msl.ui.process_launcher.process_launcher import ProcessLauncher
 from msl_tools.msl.ui.widgets.atoms.surfaces import StableScrollArea
 from msl_tools.msl.ui.widgets.windows.frameless_dialog import FramelessDialog
 
 
+# Inline Markdown -> Qt rich text. Code spans get a real monospace face: Qt's own
+# Markdown rendering falls back to a cramped system fixed font.
+_CODE_FONT = "'Cascadia Mono', 'JetBrains Mono', 'Consolas', monospace"
+_INLINE_RULES = (
+    (re.compile(r"`([^`]+)`"), rf'<span style="font-family: {_CODE_FONT};">\1</span>'),
+    (re.compile(r"\[([^\]]+)\]\((https?://[^)\s]+)\)"), r'<a href="\2">\1</a>'),
+    (re.compile(r"\*\*(.+?)\*\*"), r"<b>\1</b>"),
+    (re.compile(r"(?<![\w*])\*(?!\s)(.+?)(?<!\s)\*(?![\w*])"), r"<i>\1</i>"),
+)
+
+
+def _inline_html(text: str) -> str:
+    """Escapes `text` and renders its inline Markdown (`code`, [links](url),
+    **bold**, *italic*) as Qt rich text."""
+    result = html.escape(text, quote=False)
+    for pattern, replacement in _INLINE_RULES:
+        result = pattern.sub(replacement, result)
+    return result
+
+
 class _ReleaseBlock(qt.QtWidgets.QWidget):
-    """Private: one release — date, version pill, then its notes cut into
-    sections (a small caps heading over a Markdown block each)."""
+    """Private: one release — date, a version pill (click: the release's page
+    on GitHub), its name, then the notes cut into sections: a small caps
+    heading over bullet rows / paragraphs laid out here (not by Qt's Markdown
+    lists, whose indent and bullets can't be styled)."""
+
+    BULLET_WIDTH = 14
+    BULLET = "\u2022"
 
     def __init__(self, note: ReleaseNote, state: str, parent=None):
         super().__init__(parent)
         date_label = qt.QtWidgets.QLabel(note.date_text or note.tag)
         date_label.setObjectName("releaseDate")
 
-        version_label = qt.QtWidgets.QLabel(note.version + {"current": "  ·  installed", "new": "  ·  new"}.get(state, ""))
-        version_label.setObjectName("releaseVersion")
-        version_label.setProperty("state", state)  # widgets.qss: pill color
+        suffix = {"current": "  \u00b7  installed", "new": "  \u00b7  new"}.get(state, "")
+        version_button = qt.QtWidgets.QPushButton(note.version + suffix)
+        version_button.setObjectName("releaseVersion")
+        version_button.setProperty("state", state)  # widgets.qss: pill color
+        version_button.setFocusPolicy(qt.QtCore.Qt.FocusPolicy.NoFocus)
+        if note.url:
+            version_button.setCursor(qt.QtCore.Qt.CursorShape.PointingHandCursor)
+            version_button.setToolTip("Open this release on GitHub")
+            version_button.clicked.connect(lambda: ProcessLauncher.open_url_in_browser(note.url))
 
         header = qt.QtWidgets.QHBoxLayout()
         header.setContentsMargins(0, 0, 0, 0)
         header.addWidget(date_label)
         header.addStretch()
-        header.addWidget(version_label)
+        header.addWidget(version_button)
 
         layout = qt.QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(4)
+        layout.setSpacing(3)
         layout.addLayout(header)
 
-        if note.title and note.title not in (note.tag, note.version):
-            title_label = qt.QtWidgets.QLabel(note.title)
+        if note.display_title:
+            title_label = qt.QtWidgets.QLabel(note.display_title)
             title_label.setObjectName("releaseTitle")
             title_label.setWordWrap(True)
             layout.addWidget(title_label)
@@ -52,16 +85,30 @@ class _ReleaseBlock(qt.QtWidgets.QWidget):
                 font = heading_label.font()
                 font.setLetterSpacing(qt.QtGui.QFont.SpacingType.AbsoluteSpacing, 0.6)
                 heading_label.setFont(font)
-                layout.addSpacing(6)
+                layout.addSpacing(7)
                 layout.addWidget(heading_label)
-            body_label = qt.QtWidgets.QLabel()
-            body_label.setObjectName("releaseBody")
-            body_label.setTextFormat(qt.QtCore.Qt.TextFormat.MarkdownText)
-            body_label.setText(text)
-            body_label.setWordWrap(True)
-            body_label.setOpenExternalLinks(True)
-            body_label.setTextInteractionFlags(qt.QtCore.Qt.TextInteractionFlag.TextBrowserInteraction)
-            layout.addWidget(body_label)
+                layout.addSpacing(1)
+            for kind, content in split_blocks(text):
+                layout.addLayout(self._block_row(kind, content))
+
+    def _block_row(self, kind: str, content: str) -> qt.QtWidgets.QLayout:
+        text_label = qt.QtWidgets.QLabel(_inline_html(content))
+        text_label.setObjectName("releaseBody")
+        text_label.setTextFormat(qt.QtCore.Qt.TextFormat.RichText)
+        text_label.setWordWrap(True)
+        text_label.setOpenExternalLinks(True)
+        text_label.setTextInteractionFlags(qt.QtCore.Qt.TextInteractionFlag.TextBrowserInteraction)
+
+        row = qt.QtWidgets.QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(0)
+        if kind == "bullet":
+            bullet_label = qt.QtWidgets.QLabel(self.BULLET)
+            bullet_label.setObjectName("releaseBullet")
+            bullet_label.setFixedWidth(self.BULLET_WIDTH)
+            row.addWidget(bullet_label, 0, qt.QtCore.Qt.AlignmentFlag.AlignTop)
+        row.addWidget(text_label, 1)
+        return row
 
 
 class WhatsNewDialog(FramelessDialog):
@@ -71,15 +118,18 @@ class WhatsNewDialog(FramelessDialog):
     The notes are whatever each release's description says on GitHub
     (core/version/release_notes.py); a description written with Markdown
     headings ("### New", "### Fixed") shows as labelled sections. The
-    installed version's block is marked "installed", newer ones "new".
+    installed version's block is marked "installed", newer ones "new" — and
+    when there are newer ones, a banner on top says which version is
+    available, with a button to its page on GitHub.
 
     Storage- and network-agnostic: the caller passes `fetch_releases`, a
     callable returning the releases (or None on failure). It runs on a
     background thread — it is a network request — while the dialog shows
     "Loading…"; a failure shows a message with Retry.
 
-    Colors / fonts: ui/theme/widgets.qss (QLabel#releaseDate, #releaseVersion
-    [state], #releaseSection, #releaseBody, #whatsNewStatus).
+    Colors / fonts: ui/theme/widgets.qss (QLabel#releaseDate, QPushButton
+    #releaseVersion[state], #releaseSection, #releaseBody, #releaseBullet,
+    QFrame#updateBanner, #whatsNewStatus).
 
     Usage:
         WhatsNewDialog.show_for(window, fetch_releases=version_manager.get_releases,
@@ -136,9 +186,34 @@ class WhatsNewDialog(FramelessDialog):
         self._scroll = StableScrollArea()
         self._scroll.setWidget(self._list)
 
+        # "A newer version is out": shown above the list when one is.
+        self._update_label = qt.QtWidgets.QLabel()
+        self._update_label.setObjectName("updateText")
+        self._update_label.setWordWrap(True)
+        self._update_button = qt.QtWidgets.QPushButton("Get it on GitHub")
+        self._update_button.setProperty("primary", True)
+        self._update_button.setCursor(qt.QtCore.Qt.CursorShape.PointingHandCursor)
+        self._update_button.clicked.connect(self._open_update)
+        self._update_url = ""
+        self._update_banner = qt.QtWidgets.QFrame()
+        self._update_banner.setObjectName("updateBanner")
+        banner_layout = qt.QtWidgets.QHBoxLayout(self._update_banner)
+        banner_layout.setContentsMargins(12, 8, 8, 8)
+        banner_layout.addWidget(self._update_label, 1)
+        banner_layout.addWidget(self._update_button)
+        self._update_banner.hide()
+
+        list_page = qt.QtWidgets.QWidget()
+        list_page_layout = qt.QtWidgets.QVBoxLayout(list_page)
+        list_page_layout.setContentsMargins(0, 0, 0, 0)
+        list_page_layout.setSpacing(8)
+        list_page_layout.addWidget(self._update_banner)
+        list_page_layout.addWidget(self._scroll, 1)
+        self._list_page = list_page
+
         self._pages = qt.QtWidgets.QStackedWidget()
         self._pages.addWidget(self._status_page)
-        self._pages.addWidget(self._scroll)
+        self._pages.addWidget(self._list_page)
         self.add_widget(self._pages)
 
         if self._releases_url:
@@ -213,7 +288,20 @@ class WhatsNewDialog(FramelessDialog):
                 self._list_layout.addWidget(divider)
             self._list_layout.addWidget(_ReleaseBlock(note, self._state_of(note)))
         self._list_layout.addStretch()
-        self._pages.setCurrentWidget(self._scroll)
+
+        newer = [note for note in releases if self._state_of(note) == "new"]
+        if newer:
+            latest = newer[0]  # releases come newest first
+            have = f" \u2014 you have {self._current_version}" if self._current_version else ""
+            self._update_label.setText(f"<b>Version {latest.version} is available</b>{have}.")
+            self._update_url = latest.url or self._releases_url
+            self._update_button.setVisible(bool(self._update_url))
+        self._update_banner.setVisible(bool(newer))
+        self._pages.setCurrentWidget(self._list_page)
+
+    def _open_update(self) -> None:
+        if self._update_url:
+            ProcessLauncher.open_url_in_browser(self._update_url)
 
     def _state_of(self, note: ReleaseNote) -> str:
         """"current" for the installed version, "new" for newer ones, else ""."""

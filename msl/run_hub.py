@@ -9,6 +9,7 @@ ui/theme/base.qss, save, the hub repaints). MSL_THEME_HOT_RELOAD=0/1
 forces it off/on.
 """
 import sys
+import threading
 from pathlib import Path
 
 import msl_tools.msl.ui.qt_bindings as qt
@@ -33,6 +34,31 @@ def _use_own_taskbar_icon() -> None:
     if sys.platform == "win32":
         import ctypes
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("msl_tools.hub")
+
+
+class _UpdateNotifier(qt.QtCore.QObject):
+    """Carries "an update is available" from the check thread to the GUI thread."""
+
+    update_available = qt.QtCore.Signal(str)  # tooltip text for the hub's footer
+
+
+def _watch_for_update(window: HubWindow) -> None:
+    """Checks GitHub for a newer release in the background (a network request
+    must not delay the window) and, if there is one, marks the version in the
+    hub's sidebar. Silent on failure: no network is not worth a message."""
+    notifier = _UpdateNotifier(window)
+    notifier.update_available.connect(window.set_footer_notice)  # queued: the window lives in the GUI thread
+
+    def check() -> None:
+        try:
+            info = Resources().versionManager.check_for_remote_update()
+            if info.has_update:
+                notifier.update_available.emit(
+                    f"Update available: v{info.latest_version} \u2014 click to see what\u2019s new")
+        except Exception:
+            pass  # includes RuntimeError: the window was closed meanwhile
+
+    threading.Thread(target=check, daemon=True).start()
 
 
 def main() -> None:
@@ -65,6 +91,7 @@ def main() -> None:
 
         window.finished.connect(remember_geometry)  # QDialog: emitted on every close
         window.show()
+        _watch_for_update(window)
 
 
 if __name__ == "__main__":

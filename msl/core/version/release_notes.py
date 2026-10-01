@@ -20,6 +20,9 @@ from datetime import datetime
 from msl_tools.msl.core.version.version import Version
 
 _HEADING = re.compile(r"^\s{0,3}#{1,6}\s+(.*?)\s*#*\s*$")
+_BULLET = re.compile(r"^\s*[-*+]\s+(.*)$")
+# A release name's leading version ("v0.1.0 — Desktop hub", "0.1.0: ...") and the separator after it.
+_TITLE_VERSION = re.compile(r"^\s*v?\d+(?:\.\d+){1,2}\S*\s*[\u2014\u2013:|-]*\s*", re.IGNORECASE)
 _MONTHS = ("January", "February", "March", "April", "May", "June", "July",
            "August", "September", "October", "November", "December")
 
@@ -54,6 +57,13 @@ class ReleaseNote:
         except ValueError:
             return ""
         return f"{_MONTHS[moment.month - 1]} {moment.day}, {moment.year}"
+
+    @property
+    def display_title(self) -> str:
+        """`title` without a leading version number — "v0.1.0 — Desktop hub"
+        reads "Desktop hub"; a name that is only the version reads ""
+        (the version is shown separately anyway)."""
+        return _TITLE_VERSION.sub("", self.title).strip()
 
     def sections(self) -> list[tuple[str, str]]:
         """The body cut at its headings: [(heading or "", markdown), ...]."""
@@ -109,3 +119,26 @@ def split_sections(body: str) -> list[tuple[str, str]]:
             sections[-1][1].append(line)
     result = [(heading, "\n".join(lines).strip()) for heading, lines in sections]
     return [(heading, text) for heading, text in result if text]
+
+
+def split_blocks(text: str) -> list[tuple[str, str]]:
+    """Cuts a section's Markdown into blocks for a UI to lay out:
+    [("bullet" | "paragraph", text), ...]. A list item or paragraph that
+    continues on the next line(s) is joined into one block; blank lines end
+    a block. Inline Markdown (**bold**, `code`, links) is left in the text."""
+    blocks: list[list[str]] = []   # [kind, text]
+    open_block = False
+    for line in text.split("\n"):
+        if not line.strip():
+            open_block = False
+            continue
+        bullet = _BULLET.match(line)
+        if bullet:
+            blocks.append(["bullet", bullet.group(1).strip()])
+            open_block = True
+        elif open_block:
+            blocks[-1][1] += " " + line.strip()
+        else:
+            blocks.append(["paragraph", line.strip()])
+            open_block = True
+    return [(kind, content) for kind, content in blocks]
