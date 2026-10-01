@@ -216,3 +216,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# msl_tools runtime output: per-user settings and logs, created on first run
+/configs/
+/logs/

@@ -22,6 +22,11 @@ msl_tools/                 (repo root)
                             split into core/, maya/<tool_name>/ (Maya-side tools)
                             and desktop/<tool_name>/ (the hub: hub/, maya_gate/)
     logs/                   same split: logs/maya/, logs/desktop/<tool_name>/
+                            configs/ and logs/ are per-user and NOT in git
+                            (.gitignore): both are created on first run, so
+                            every default must come from code (get_config
+                            defaults, UserSetupStore.DEFAULT_SCRIPT), never
+                            from a committed config file.
     msl/
         run_hub.py            standalone entry point for the desktop hub
         assets/               icons/, themes/ — SVG assets, sparse right now
