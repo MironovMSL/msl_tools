@@ -28,6 +28,15 @@ CloseNavButton {
     qproperty-pressedColor:   var(--danger-pressed);
 }
 
+/* --- UpdateButton (header): "an update is available" ------------------------ */
+
+UpdateButton {
+    qproperty-iconColor:    var(--accent);
+    qproperty-ringColor:    alpha(var(--accent), 50%);
+    qproperty-hoverColor:   alpha(var(--accent), 16%);
+    qproperty-pressedColor: alpha(var(--accent), 28%);
+}
+
 /* --- GlyphButton ------------------------------------------------------------ */
 
 GlyphButton {

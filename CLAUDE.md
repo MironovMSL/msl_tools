@@ -519,8 +519,13 @@ not every commit. The notes are the release's description on GitHub:
   ("v0.1.0 — Desktop hub" -> "Desktop hub").
 - On start run_hub checks for a newer release on a daemon thread
   (`_watch_for_update`) and, if there is one, calls
-  `HubWindow.set_footer_notice()` — the sidebar version turns accent
-  (`QPushButton#hubFooter[notice="true"]`) with a tooltip naming it.
+  `HubWindow.set_update_available(version)`: an `UpdateButton`
+  (atoms/header/ — download arrow dipping into a tray, pop-in + a ring
+  pulse every few seconds; qproperty iconColor / ringColor / hoverColor /
+  pressedColor) appears in the header left of the theme toggle, and the
+  sidebar version turns accent (`QPushButton#hubFooter[notice="true"]`).
+  Both open "What's new" (`update_clicked` / `footer_clicked`), whose
+  banner links to the release. The hub does NOT install updates itself.
 - Releasing: bump `msl/__init__.py:__version_tuple__`, commit, push, then
   publish a GitHub release tagged `v<version>` with the notes. No `gh` CLI
   on this machine — the release is created in the browser.

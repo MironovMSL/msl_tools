@@ -39,22 +39,22 @@ def _use_own_taskbar_icon() -> None:
 class _UpdateNotifier(qt.QtCore.QObject):
     """Carries "an update is available" from the check thread to the GUI thread."""
 
-    update_available = qt.QtCore.Signal(str)  # tooltip text for the hub's footer
+    update_available = qt.QtCore.Signal(str)  # the newer version, "1.2.3"
 
 
 def _watch_for_update(window: HubWindow) -> None:
     """Checks GitHub for a newer release in the background (a network request
-    must not delay the window) and, if there is one, marks the version in the
-    hub's sidebar. Silent on failure: no network is not worth a message."""
+    must not delay the window) and, if there is one, has the hub announce it
+    (header button + marked sidebar version). Silent on failure: no network
+    is not worth a message."""
     notifier = _UpdateNotifier(window)
-    notifier.update_available.connect(window.set_footer_notice)  # queued: the window lives in the GUI thread
+    notifier.update_available.connect(window.set_update_available)  # queued: the window lives in the GUI thread
 
     def check() -> None:
         try:
             info = Resources().versionManager.check_for_remote_update()
             if info.has_update:
-                notifier.update_available.emit(
-                    f"Update available: v{info.latest_version} \u2014 click to see what\u2019s new")
+                notifier.update_available.emit(str(info.latest_version))
         except Exception:
             pass  # includes RuntimeError: the window was closed meanwhile
 
@@ -71,8 +71,13 @@ def main() -> None:
         icon = UiResources().iconManager.get_icon("hub", sub_folder="brand")
         window = HubWindow(tools=TOOLS, current_tool_id=hub_config["current_tool"], icon=icon,
                            footer_text=f"v{__version__}", footer_tooltip="What\u2019s new")
-        window.footer_clicked.connect(lambda: WhatsNewDialog.show_for(
-            window, Resources().versionManager.get_releases, __version__, Resources().releasesPageUrl))
+
+        def show_whats_new() -> None:
+            WhatsNewDialog.show_for(window, Resources().versionManager.get_releases, __version__,
+                                    Resources().releasesPageUrl)
+
+        window.footer_clicked.connect(show_whats_new)
+        window.update_clicked.connect(show_whats_new)  # its banner links to the new release
 
         def remember_tool(tool_id: str) -> None:
             hub_config["current_tool"] = tool_id

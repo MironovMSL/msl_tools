@@ -9,6 +9,7 @@ import msl_tools.msl.ui.qt_bindings as qt
 from msl_tools.msl.core.theme import Theme, ThemeRegistry
 from msl_tools.msl.ui.ui_resources import UiResources
 from msl_tools.msl.ui.widgets.atoms.buttons.icon_tile_button import IconTileButton
+from msl_tools.msl.ui.widgets.atoms.header.update_button import UpdateButton
 from msl_tools.msl.ui.widgets.atoms.surfaces import BasePanel
 from msl_tools.msl.ui.theme.qss import color_property, repolish
 from msl_tools.msl.ui.widgets.windows.frameless_dialog import FramelessDialog
@@ -127,6 +128,7 @@ class HubWindow(FramelessDialog):
     Signals:
         tool_changed(str): id of the tool the user switched to.
         footer_clicked(): the sidebar's footer text (the version) was clicked.
+        update_clicked(): the header's "update available" button was clicked.
 
     Args:
         tools: Descriptors for every tool the hub should list, in order.
@@ -151,6 +153,7 @@ class HubWindow(FramelessDialog):
 
     tool_changed = qt.QtCore.Signal(str)
     footer_clicked = qt.QtCore.Signal()
+    update_clicked = qt.QtCore.Signal()
 
     def __init__(self,
                  tools: Sequence[ToolDescriptor],
@@ -168,6 +171,7 @@ class HubWindow(FramelessDialog):
         self._pages: Dict[str, qt.QtWidgets.QWidget] = {}
         self._nav_buttons: Dict[str, qt.QtWidgets.QPushButton] = {}
         self._footer: qt.QtWidgets.QPushButton | None = None
+        self._update_button: UpdateButton | None = None
         self._current_tool_id: str | None = None
         self._nav_group = qt.QtWidgets.QButtonGroup(self)
         self._nav_group.setExclusive(True)
@@ -219,10 +223,25 @@ class HubWindow(FramelessDialog):
         body_layout.addWidget(self._card, 1)
         self.add_widget(body)
 
+    def set_update_available(self, version: str) -> None:
+        """Announces that `version` is out: an animated UpdateButton appears
+        in the header (left of the theme toggle; click -> update_clicked)
+        and the sidebar's version is marked. "" withdraws both. The hub only
+        shows it — run_hub decides when (its background update check)."""
+        tooltip = f"Update available: v{version} \u2014 click to see what\u2019s new" if version else ""
+        if version and self._update_button is None:
+            self._update_button = UpdateButton()
+            self._update_button.clicked.connect(self.update_clicked)
+            self.header.trailing_layout.insertWidget(0, self._update_button)  # before the theme toggle
+        if self._update_button is not None:
+            self._update_button.setToolTip(tooltip)
+            self._update_button.setVisible(bool(version))
+        self.set_footer_notice(tooltip)
+
     def set_footer_notice(self, tooltip: str) -> None:
         """Marks the footer as carrying news (accent color, widgets.qss
         `QPushButton#hubFooter[notice="true"]`) with `tooltip` saying what;
-        "" clears the mark. run_hub calls it when an update is available."""
+        "" clears the mark. See set_update_available()."""
         if self._footer is None:
             return
         self._footer.setProperty("notice", bool(tooltip))
