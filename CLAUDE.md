@@ -647,6 +647,10 @@ What changed vs. the original (all deliberate, not oversights):
       title bar); an "ended unexpectedly" line says "· unsaved changes".
       Measured with real Maya 2025: new cube -> modified within 2 s, save ->
       clean + the new name, the next edit -> modified again.
+      `_on_quit` reports the scene once more before the goodbye: a save
+      right before quitting (Maya's "Save changes?" on exit) reaches neither
+      the scene events nor the poll — Maya is gone before its next idle
+      moment, and the history would keep a wrong "*" (it did, Maya 2024).
     - The scene's name is a link (`_SceneLabel`, sessions_tab.py): only the
       NAME, not the empty space after it (the label stretches over the
       row) — a click shows the file in the file manager (its folder if the

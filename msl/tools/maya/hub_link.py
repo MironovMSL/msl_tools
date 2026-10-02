@@ -105,6 +105,10 @@ class HubLink(QtCore.QObject):
             self._socket.waitForBytesWritten(300)
 
     def _on_quit(self) -> None:
+        # The last word on the scene: a save right before quitting (Maya's own "Save
+        # changes?" on exit) never reaches the scene events or the poll - Maya is gone
+        # before its next idle moment.
+        self._on_scene_changed()
         self._flush_log()
         self._say_bye(protocol.BYE_QUIT)
 
