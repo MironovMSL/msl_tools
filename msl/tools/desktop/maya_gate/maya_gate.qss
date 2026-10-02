@@ -34,6 +34,61 @@ UserSetupTab IconPushButton {
     padding: 3px 10px 3px 8px;
 }
 
+/* Sessions tab: the Mayas running right now. */
+SessionsTab QLabel#sessionsTitle {
+    color: var(--text-primary);
+    font-weight: 600;
+}
+SessionsTab QLabel#sessionsSummary,
+SessionsTab QLabel#sessionsStatus,
+SessionsTab QLabel#sessionsEmpty,
+SessionsTab QLabel#sessionTime {
+    color: var(--text-secondary);
+}
+SessionsTab QLabel#sessionsStatus,
+SessionsTab QLabel#sessionsHint,
+SessionsTab QLabel#sessionTime {
+    font-size: 11px;
+}
+SessionsTab QLabel#sessionsStatus[state="error"] {
+    color: var(--error);
+}
+SessionsTab QLabel#sessionsHint {
+    color: var(--text-secondary);
+}
+SessionsTab StableScrollArea#sessionsScroll {
+    background-color: var(--surface-raised);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+}
+/* A connected Maya: a green dot. */
+SessionsTab QLabel#sessionDot {
+    background-color: var(--success);
+    border-radius: 4px;
+}
+SessionsTab QLabel#sessionVersion {
+    color: var(--text-primary);
+    font-weight: 600;
+}
+SessionsTab QLabel#sessionScene {
+    color: var(--text-primary);
+}
+/* Environment / boost: small pills (boost in the accent). */
+SessionsTab QLabel#sessionEnvironment,
+SessionsTab QLabel#sessionBoost {
+    color: var(--text-secondary);
+    background-color: alpha(var(--text-primary), 8%);
+    border-radius: 7px;
+    padding: 0px 6px;
+    min-height: 14px;
+    max-height: 14px;
+    font-size: 11px;
+}
+SessionsTab QLabel#sessionBoost {
+    color: var(--accent);
+    background-color: alpha(var(--accent), 15%);
+}
+
 /* Boost start tab: a titled list of Maya's auto-load plug-ins. */
 BoostTab QLabel#boostTitle {
     color: var(--text-primary);

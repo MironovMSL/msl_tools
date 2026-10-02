@@ -40,7 +40,8 @@ msl_tools/                 (repo root)
                               resources.py (core.Resources singleton)
                               (known Qt leftovers: config/ini_config.py uses QSettings,
                               fs/qt_paths.py imports Qt lazily)
-        ui/                   Qt-DEPENDENT layer: qt_bindings shim, icon_manager,
+        ui/                   Qt-DEPENDENT layer: qt_bindings shim (QtCore/Gui/Widgets/Svg/Network), icon_manager,
+                              maya_link/ (MayaLinkServer: the hub's end of the hub <-> Maya link),
                               ui_resources.py (UiResources singleton), theme/,
                               process_launcher/ (ProcessLauncher — QProcess-based, so ui/, not core/),
                               widgets/ (atoms/, compositions/, windows/, app/)
@@ -510,6 +511,42 @@ What changed vs. the original (all deliberate, not oversights):
   52.0 s without boost" (those are real numbers: windowed Maya 2025 on
   this machine, 9 heavy plug-ins skipped); Print Launch Report shows the
   session's own. No userSetup (MAYA_SKIP_USERSETUP_PY) = no measurement.
+- Sessions tab + the hub <-> Maya link (step 1 of the Maya connection):
+  the HUB is the server, every Maya a client — the reverse of Maya's
+  commandPort. One port, any number of Mayas, both sides can speak over the
+  one connection, and a Maya that closes or crashes leaves the list at once.
+  - `core/link/protocol.py` (Qt-free, runs in Maya too): a message is a
+    JSON object framed as 10 ASCII digits (body size) + UTF-8 body; kinds
+    event / request / reply, replies matched to requests by `id`.
+    `FrameDecoder.feed()` cuts the stream; a bad header / body raises
+    ProtocolError and the connection is dropped.
+  - `core/link/session.py`: `MayaSession` (pid, version, environment,
+    scene, boosted, connected_at).
+  - `ui/maya_link/server.py`: `MayaLinkServer` (QTcpServer, signals only,
+    nothing blocks) — `instance()` is the hub's one server, run_hub calls
+    `ensure_listening()`. 127.0.0.1 only; port 47611 (next free of 10 if
+    taken — a second hub) and a random token, both kept in
+    `configs/desktop/maya_link`, so a Maya that outlives a hub restart
+    reconnects. A connection becomes a session only after a `hello` with
+    the token (5 s to say it); anything else is dropped. Nothing received
+    is executed.
+  - `tools/maya/hub_link.py` (inside Maya): QTcpSocket in Maya's main
+    thread, hello on connect, a `scene` event on SceneOpened /
+    NewSceneOpened / SceneSaved (sent once per real change), retry every
+    5 s while the hub is away. Owned by the QApplication so "Reload Code"
+    doesn't kill it. NOT through the Qt shim, and Python-3.9-valid: Maya
+    2023 / 2024 ship PySide2 (the shim is PySide6-only), 2023 is 3.9.
+    Started by the loader (third job) from `MSL_GATE_LINK_PORT` / `_TOKEN`.
+    Maya 2020 (Python 2) doesn't connect.
+  - `sessions_tab.py`: every connected Maya (not per environment): dot,
+    version, environment, boost, scene, time connected; the tab's title
+    carries the count ("Sessions · 2"). Read-only so far.
+  Verified with real windowed Maya 2023, 2024, 2025 (copies of the
+  preferences): connect, scene change, hub away and back (rejoined in
+  ~2 s), exit. Next steps agreed in outline: commands hub -> Maya (launch
+  report into the hub, reload code, load a skipped plug-in in a running
+  Maya), events Maya -> hub (log stream), a dev console. Long work in Maya
+  must answer later by `id`, never block the socket.
 - Every launch tells Maya what it is: `MSL_GATE_ENVIRONMENT` (the
   environment) and `MSL_GATE_VARIABLES` (names of the variables this launch
   set). The MSL menu's Dev > "Print Launch Report"
@@ -569,6 +606,7 @@ maya_gate/
     user_setup_tab.py      UserSetupTab (CodeEditor for the script, debounced autosave)
     boost.py               BoostStore (Maya's auto-load list, the boosted launch + its loader, reports, backups, Qt-free)
     boost_tab.py           BoostTab (per-environment plug-in list: checked = loaded at startup)
+    sessions_tab.py        SessionsTab (the Mayas connected to the hub right now)
     version_row.py         MayaVersionRow (animated row of installed versions)
     variable_group.py      CollapsibleVariableGroup (config-aware, owns persistence)
     variable_adder.py      EnvVariableAdder (known/custom variable input row)
@@ -786,7 +824,8 @@ disk. NOT yet tested: against a real Maya installation (actual launch via
   environment creation, install / reinstall / uninstall, shortcut, hub
   start from the installed copy. Not yet run by hand on a clean machine.
 - Real icon assets for add/delete/copy/drag (currently Unicode placeholders).
-- The `cmds.commandPort`-based Maya connection (future work, unstarted).
+- The Maya connection: step 1 (sessions list) is built on our own link, not
+  `cmds.commandPort`; commands, the log stream and a dev console are next.
 - Boost start: built and verified against real Maya 2020 / 2025 / 2026 on
   COPIES of the preferences (MAYA_APP_DIR in %TEMP%); not yet used on the
   user's real preferences, nor released.

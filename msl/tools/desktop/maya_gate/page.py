@@ -15,6 +15,8 @@ from msl_tools.msl.tools.desktop.maya_gate.user_setup import UserSetupStore
 from msl_tools.msl.tools.desktop.maya_gate.user_setup_tab import UserSetupTab
 from msl_tools.msl.tools.desktop.maya_gate.boost import BoostStore
 from msl_tools.msl.tools.desktop.maya_gate.boost_tab import BoostTab
+from msl_tools.msl.tools.desktop.maya_gate.sessions_tab import SessionsTab
+from msl_tools.msl.ui.maya_link import MayaLinkServer
 from msl_tools.msl.tools.desktop.maya_gate.maya_variables import VariableKind, launch_values, spec_of
 from msl_tools.msl.ui.widgets.compositions import BrowseMode, ValueSpec
 
@@ -53,6 +55,8 @@ class MayaGatePage(qt.QtWidgets.QWidget):
       own userSetup.py (see UserSetupStore for how it's injected).
     - "Boost start": which of Maya's auto-load plug-ins this environment
       starts without, so Maya opens faster (see boost.py).
+    - "Sessions": the Mayas running right now, whatever their environment
+      (live, through the hub <-> Maya link: ui/maya_link/).
 
     Config-backed via Resources().configsDesktopHubMng.get_config("maya_gate")
     (configs/desktop/maya_gate/) — one JsonConfig replaces MSL_MayaGate's
@@ -83,7 +87,8 @@ class MayaGatePage(qt.QtWidgets.QWidget):
     # Tells the launched Maya which environment it is (read by the MSL menu's "Print Launch Report").
     ENVIRONMENT_VARIABLE = "MSL_GATE_ENVIRONMENT"
     VARIABLES_VARIABLE = "MSL_GATE_VARIABLES"   # names of the variables this launch sets (os.pathsep-joined)
-    TAB_KEYS = ("variables", "user_setup", "boost")  # tab order; stored by key, not index
+    TAB_KEYS = ("variables", "user_setup", "boost", "sessions")  # tab order; stored by key, not index
+    SESSIONS_TAB_TITLE = "Sessions"
     DEFAULTS = {MAYA_KEY: {env: {} for env in ENVIRONMENTS},
                 CUSTOM_KEY: {env: {} for env in ENVIRONMENTS},
                 BOOST_KEY: {env: {"enabled": False, "skip": []} for env in ENVIRONMENTS},
@@ -141,6 +146,11 @@ class MayaGatePage(qt.QtWidgets.QWidget):
                                    app_dir_for=lambda: self._launch_variables().get("MAYA_APP_DIR", ""),
                                    blocked_reason_for=lambda: BoostStore.blocked_reason(self._launch_variables()))
         self._tabs.addTab(self._indented(self._boost_tab), "Boost start")
+        self._link = MayaLinkServer.instance()  # the hub's one server; run_hub starts it listening
+        self._sessions_tab = SessionsTab(self._link)
+        self._tabs.addTab(self._indented(self._sessions_tab), self.SESSIONS_TAB_TITLE)
+        self._link.sessions_changed.connect(self._update_sessions_tab_title)
+        self._update_sessions_tab_title()
         saved_tab = self._ui.get("tab")
         self._tabs.setCurrentIndex(self.TAB_KEYS.index(saved_tab) if saved_tab in self.TAB_KEYS else 0)
 
@@ -270,6 +280,12 @@ class MayaGatePage(qt.QtWidgets.QWidget):
         self._user_setup_tab.set_environment(environment)
         self._boost_tab.set_environment(environment)
 
+    def _update_sessions_tab_title(self) -> None:
+        """"Sessions" / "Sessions · 2": the count is seen from any tab."""
+        count = len(self._link.sessions())
+        index = self._tabs.indexOf(self._sessions_tab.parentWidget())
+        self._tabs.setTabText(index, self.SESSIONS_TAB_TITLE + (f" \u00b7 {count}" if count else ""))
+
     def _launch_variables(self) -> dict[str, str]:
         """The current environment's variables as a launch passes them
         (Maya + custom, empty ones left out)."""
@@ -299,6 +315,8 @@ class MayaGatePage(qt.QtWidgets.QWidget):
         if boosted:
             environment_vars, arguments = self._boost_store.prepare_launch(
                 self._environment, year, self._boost_tab.skipped(), environment_vars)
+        self._link.ensure_listening()  # normally already is (run_hub); a Maya can't join a hub that isn't
+        environment_vars.update(self._link.launch_variables())
         environment_vars = self._boost_store.launch_log().start(
             year, self._environment, boosted, len(self._boost_tab.skipped()) if boosted else 0, environment_vars)
         self._logger.info(f'Launching Maya {year}, environment "{self._environment}"'

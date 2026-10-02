@@ -22,6 +22,7 @@ from msl_tools.msl.ui.theme import ThemeHotReloader
 from msl_tools.msl.ui.ui_resources import UiResources
 from msl_tools.msl.tools.desktop.registry import TOOLS
 from msl_tools.msl.ui.process_launcher.process_launcher import ProcessLauncher
+from msl_tools.msl.ui.maya_link import MayaLinkServer
 from msl_tools.msl.ui.widgets.windows.confirm_dialog import ConfirmDialog
 from msl_tools.msl.ui.widgets.windows.hub import HubWindow
 from msl_tools.msl.ui.widgets.windows.whats_new_dialog import WhatsNewDialog
@@ -151,6 +152,9 @@ def main() -> None:
         window.finished.connect(remember_geometry)  # QDialog: emitted on every close
         window.show()
         _watch_for_update(window)
+        # The hub <-> Maya link: listen from the start, so a Maya that outlived the
+        # previous hub (it retries every few seconds) finds this one.
+        MayaLinkServer.instance().ensure_listening()
         if last_update is not None:
             qt.QtCore.QTimer.singleShot(300, lambda: report_update(last_update))
 

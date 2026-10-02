@@ -19,6 +19,7 @@ try:
         QtGui,
         QtWidgets,
         QtSvg,
+        QtNetwork,
     )
     import shiboken6 as shiboken
 except ImportError as e:
