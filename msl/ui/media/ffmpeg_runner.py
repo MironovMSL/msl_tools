@@ -2,7 +2,7 @@
 import msl_tools.msl.ui.qt_bindings as qt
 from msl_tools.msl.core.media.ffmpeg import FfmpegTools
 from msl_tools.msl.core.media.recipes import Job
-from msl_tools.msl.core.media.run import Progress, ProgressParser, clean_up, error_summary, fraction
+from msl_tools.msl.core.media.run import Progress, ProgressParser, clean_up, error_summary, fraction, prepare
 
 
 class FfmpegRunner(qt.QtCore.QObject):
@@ -56,7 +56,7 @@ class FfmpegRunner(qt.QtCore.QObject):
         self._tools, self._job = tools, job
         self._run_index, self._cancelled = 0, False
         try:
-            job.output.parent.mkdir(parents=True, exist_ok=True)  # ffmpeg doesn't create folders
+            prepare(job)  # ffmpeg doesn't create folders
         except OSError as error:
             self._end(False, f"Couldn’t create the folder for the result: {error}")
             return True

@@ -1008,10 +1008,20 @@ batch jobs and Maya playblasts are meant to reuse it.
   one's size and rate; sound only if all have it), `gif` (palettegen /
   paletteuse), `compare` (hstack / vstack, same height, the shorter one's
   length), `adjust` (rotate, crop to a shape, fps, speed — `atempo`
-  chained past 0.5..2), `default_output` (never clashes, also not with
+  chained past 0.5..2), `to_frames` (a video taken apart into
+  `<name>.<number>.<suffix>` pictures in a folder: PNG / JPG / TIFF,
+  `first_number`, `padding`, `every` = each Nth frame via `fps=`), `frame`
+  (ONE frame at a time, the format from the output's suffix),
+  `default_output` (never clashes, also not with
   `taken`; a sequence's video goes NEXT TO the frames' folder).
   Quality / speed / format are words (`QUALITY`, `SPEED`, `FORMATS`,
-  `SOUND_FORMATS`). `Job.command_text()` = "Show command".
+  `SOUND_FORMATS`, `IMAGE_FORMATS`, `JPG_QUALITY`). `Job.command_text()` =
+  "Show command".
+  A job that writes MANY files sets `Job.folder` (`output` is then that
+  folder): `prepare(job)` (run.py; both runners call it) creates it and
+  notes `folder_was_new`, and `clean_up` after a failure / cancel removes
+  the folder ONLY if this job created it — a folder that was there may
+  hold the user's other files. Such a job has no sample, so no estimate.
   `Overlays` = what is drawn on the picture: frame number (bottom right),
   time (bottom centre, `%{pts\:hms}`), a label (top left), the date (top
   right), a watermark image (bottom right; width in % of the frame,
@@ -1062,8 +1072,8 @@ tools folder): 101 MB in ~4 s, checksum matched, installed and usable in
 `msl/tools/desktop/media/` — a hub tool (sidebar "Media", icon
 `tools/media`): quick work with video and image sequences without knowing
 ffmpeg. Actions (`option_panels.PANELS`, in the picker's order): To video
-(sequences) · Make smaller · Trim · Stamp · Sound · GIF · For editing ·
-Adjust · Join (2+ videos) · Compare (exactly 2).
+(sequences) · Make smaller · Trim · Stamp · Sound · GIF · To frames · For
+editing · Adjust · Join (2+ videos) · Compare (exactly 2).
 
 - `page.py` `MediaPage` (registers `media.qss`), top to bottom:
   header (+ the "ffmpeg 8.0" link) · `FfmpegBar` · `SourceCard` · the
@@ -1124,7 +1134,15 @@ Adjust · Join (2+ videos) · Compare (exactly 2).
   the first and last frame of the piece shown, refreshed 350 ms after a
   change; all pictures made by `frames_at` on workers), `StampPanel`,
   `SoundPanel` (take out / remove / replace — its BUTTON and TAG follow
-  the mode), `GifPanel`, `EditingPanel`, `AdjustPanel`, `JoinPanel`,
+  the mode), `GifPanel`, `FramesPanel` (All frames / Every Nth / One
+  frame; format, JPG quality, first number + digits with a live example
+  of the file name; "One frame" takes a time and shows that frame before
+  it is saved. `INTO_FOLDER` — true except for one frame — tells the page
+  the result is a FOLDER: the field reads "Save into", browse picks a
+  folder, the default is `<video>_frames` next to the video, and an
+  existing folder is asked about — "Write into that folder?" — not
+  replaced. The queue row then shows "48 files · 2.3 MB"; open / show /
+  copy / drag act on the folder), `EditingPanel`, `AdjustPanel`, `JoinPanel`,
   `ComparePanel`. `_OverlayRows` is the mixin with the burn-in / label /
   watermark rows (sequence + stamp). Choices are words; the ffmpeg
   arguments stay in core/media/recipes.py. Settings are saved on every
@@ -1284,7 +1302,9 @@ disk. NOT yet tested: against a real Maya installation (actual launch via
 - Planned, nothing built yet (decisions taken 2026-10-02; details in the
   session memory files `ffmpeg-media-tool-idea` / `maya-batch-tool-idea`):
   - "Media" is built (see "Media tool"). Not built of what was offered:
-    video -> frames, a results history across restarts, a Windows notice
+    EXR frames (To frames writes PNG / JPG / TIFF: a video holds no more
+    than 8-10 bits, EXR would only be bigger), a results history across
+    restarts, a Windows notice
     when the queue is done, "playblast -> the hub" from Maya. A later
     "Batch" tool (headless Maya jobs: render, playblast, export) and Maya
     playblasts reuse the foundation.

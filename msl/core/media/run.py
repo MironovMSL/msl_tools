@@ -9,6 +9,7 @@ never blocks — both share the parser and the helpers below.
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -97,13 +98,33 @@ def error_summary(text: str) -> str:
     return lines[-1] if lines else "ffmpeg stopped without saying why."
 
 
+def prepare(job: Job) -> None:
+    """Makes the folders a job writes into (ffmpeg creates none). Raises OSError if it can't."""
+    job.output.parent.mkdir(parents=True, exist_ok=True)
+    if job.folder is not None:
+        job.folder_was_new = not job.folder.exists()
+        job.folder.mkdir(parents=True, exist_ok=True)
+
+
 def clean_up(job: Job, remove_output: bool) -> None:
-    """Removes the job's temporary files — and its output, when the job failed or was cancelled."""
-    for path in list(job.temporary) + ([job.output] if remove_output else []):
+    """Removes the job's temporary files — and its output, when the job
+    failed or was cancelled. A folder of frames is only taken away if this
+    job created it: one that was there before may hold other files."""
+    for path in list(job.temporary):
         try:
             Path(path).unlink()
         except OSError:
             pass
+    if not remove_output:
+        return
+    if job.folder is not None:
+        if job.folder_was_new:
+            shutil.rmtree(job.folder, ignore_errors=True)
+        return
+    try:
+        job.output.unlink()
+    except OSError:
+        pass
 
 
 @dataclass(frozen=True)
@@ -210,7 +231,7 @@ def run_job(tools: FfmpegTools, job: Job, on_progress=None, should_cancel=None) 
     it advances; `should_cancel()` returning True stops it. Raises
     MediaError when ffmpeg fails or the job is cancelled — the half-written
     output is removed then."""
-    job.output.parent.mkdir(parents=True, exist_ok=True)  # ffmpeg doesn't create folders
+    prepare(job)
     flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
     try:
         for index, command in enumerate(job.commands(tools)):

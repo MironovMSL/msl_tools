@@ -54,6 +54,9 @@ FORMATS = {
                     ["-c:a", "pcm_s16le"], ".mov"),
     "dnxhr_hq": (["-c:v", "dnxhd", "-profile:v", "dnxhr_hq", "-pix_fmt", "yuv422p"], ["-c:a", "pcm_s16le"], ".mov"),
 }
+# Still pictures a video can be taken apart into -> (arguments, file suffix).
+IMAGE_FORMATS = {"png": ([], ".png"), "jpg": (["-q:v", "2"], ".jpg"), "tiff": ([], ".tif")}
+JPG_QUALITY = {"best": 2, "good": 5, "small": 10}   # ffmpeg's -q:v for JPEG: 2 is the best, 31 the worst
 SOUND_FORMATS = {"wav": (["-c:a", "pcm_s16le"], ".wav"), "mp3": (["-c:a", "libmp3lame", "-q:a", "2"], ".mp3"),
                  "m4a": (["-c:a", "aac", "-b:a", "192k"], ".m4a")}
 AUDIO_KBPS = 96
@@ -82,6 +85,9 @@ class Job:
             estimate: the job is instant, or its size can't be sampled).
         expected_size: Bytes the result will have when that is known in
             advance ("fit into N MB"); 0 otherwise.
+        folder: Set when the job writes MANY files (frames) into a folder —
+            `output` is then that folder. The runners create it, and take it
+            away again after a failure only if they created it.
     """
 
     title: str
@@ -92,6 +98,8 @@ class Job:
     temporary: list[Path] = field(default_factory=list)
     sample: list[str] = field(default_factory=list)
     expected_size: int = 0
+    folder: Path | None = None
+    folder_was_new: bool = False   # set by the runner: the folder didn't exist before this job
 
     def commands(self, tools: FfmpegTools) -> list[list[str]]:
         """The full command line of every run."""
@@ -424,6 +432,39 @@ def adjust(info: MediaInfo, output: str | Path, rotate: int = 0, aspect: str = "
     return Job(title=f"{info.path.name} → {output.name}", output=output, passes=[body + [str(output)]],
                duration=duration, frames=int(round(duration * rate)) if rate else 0,
                sample=_sample(body, info.duration))
+
+
+def to_frames(info: MediaInfo, folder: str | Path, name: str = "", image_format: str = "png",
+              jpg_quality: str = "best", first_number: int = 1, padding: int = 4, every: int = 1) -> Job:
+    """A video taken apart into numbered pictures in `folder`:
+    `<name>.<number>.<suffix>` — an image sequence. `every`: 1 = each frame,
+    2 = every second one, ... `first_number` / `padding`: how the files are
+    numbered ("0001" = 1 and 4). The job's output IS the folder."""
+    folder = Path(folder)
+    _need_video(info)
+    arguments, suffix = IMAGE_FORMATS.get(image_format, IMAGE_FORMATS["png"])
+    arguments = list(arguments)
+    if image_format == "jpg":
+        arguments = ["-q:v", str(JPG_QUALITY.get(jpg_quality, JPG_QUALITY["best"]))]
+    every = max(int(every), 1)
+    rate = (info.fps or 24.0) / every
+    filters = ["-vf", f"fps={_number(rate)}"] if every > 1 else []
+    name = (name or info.path.stem).replace("%", "%%")
+    pattern = folder / f"{name}.%0{max(int(padding), 1)}d{suffix}"
+    body = ["-i", str(info.path), *filters, *arguments, "-start_number", str(int(first_number)), str(pattern)]
+    frames = int(round(info.duration * rate)) if info.duration else 0
+    return Job(title=f"{info.path.name} → {folder.name}/ ({frames} {suffix.lstrip('.').upper()} frames)",
+               output=folder, passes=[body], duration=info.duration, frames=frames, folder=folder)
+
+
+def frame(info: MediaInfo, output: str | Path, seconds: float, jpg_quality: str = "best") -> Job:
+    """One frame of a video, at `seconds`, as a picture (the format follows `output`'s suffix)."""
+    output = Path(output)
+    _need_video(info)
+    seconds = min(max(float(seconds), 0.0), max(info.duration - 0.04, 0.0))
+    quality = ["-q:v", str(JPG_QUALITY.get(jpg_quality, 2))] if output.suffix.lower() in (".jpg", ".jpeg") else []
+    return Job(title=f"{info.path.name} at {_number(round(seconds, 2))} s → {output.name}", output=output,
+               passes=[["-ss", _number(seconds), "-i", str(info.path), "-frames:v", "1", *quality, str(output)]])
 
 
 def default_output(source: str | Path | ImageSequence, tag: str = "", suffix: str = ".mp4",

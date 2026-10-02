@@ -27,7 +27,8 @@ class QueueItem:
         speed: Times faster than real time, while running.
         message: Why it failed.
         seconds: How long it ran.
-        size: Bytes of the result.
+        size: Bytes of the result (of everything in it, when the result is a folder).
+        files: How many files the result holds (a folder of frames; 0 for one file).
     """
 
     id: int
@@ -39,6 +40,7 @@ class QueueItem:
     message: str = ""
     seconds: float = 0.0
     size: int = 0
+    files: int = 0
 
 
 class JobQueue(qt.QtCore.QObject):
@@ -143,7 +145,11 @@ class JobQueue(qt.QtCore.QObject):
             if ok:
                 item.state, item.fraction = DONE, 1.0
                 try:
-                    item.size = item.job.output.stat().st_size
+                    if item.job.folder is not None:
+                        sizes = [entry.stat().st_size for entry in item.job.folder.iterdir() if entry.is_file()]
+                        item.size, item.files = sum(sizes), len(sizes)
+                    else:
+                        item.size = item.job.output.stat().st_size
                 except OSError:
                     item.size = 0
             elif message == "Cancelled.":
@@ -293,7 +299,7 @@ class _JobRow(qt.QtWidgets.QFrame):
         elif state == DONE:
             megabytes = item.size / 1024 ** 2
             size = f"{megabytes:.1f} MB" if megabytes >= 1 else f"{item.size / 1024:.0f} KB"
-            text = f"{size}  ·  {item.seconds:.0f} s"
+            text = (f"{item.files} files  ·  " if item.files else "") + f"{size}  ·  {item.seconds:.0f} s"
         elif state == CANCELLED:
             text = "cancelled"
         else:

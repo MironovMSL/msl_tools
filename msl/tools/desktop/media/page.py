@@ -460,10 +460,17 @@ class MediaPage(qt.QtWidgets.QWidget):
         if panel is None or self._output_edited or not self._one_result():
             return
         self._output.setText(str(panel.output_for(self._sources[0], self._folder() or None, self._queue.outputs())))
+        self._output_caption.setText("Save into" if panel.INTO_FOLDER else "Save as")
 
     def _on_browse_output(self) -> None:
-        path, _filter = qt.QtWidgets.QFileDialog.getSaveFileName(self, "Save the result as", self._output.text(),
-                                                                 "All files (*.*)")
+        panel = self._panel()
+        if panel is not None and panel.INTO_FOLDER:
+            start = Path(self._output.text().strip() or ".")
+            path = qt.QtWidgets.QFileDialog.getExistingDirectory(
+                self, "The folder for the frames", str(start if start.is_dir() else start.parent))
+        else:
+            path, _filter = qt.QtWidgets.QFileDialog.getSaveFileName(self, "Save the result as", self._output.text(),
+                                                                     "All files (*.*)")
         if path:
             self._output.setText(path)
             self._output_edited = True
@@ -482,7 +489,10 @@ class MediaPage(qt.QtWidgets.QWidget):
                 if not text:
                     raise MediaError("Say where to save the result.")
                 output = Path(text)
-                if not output.suffix:
+                if panel.INTO_FOLDER:
+                    if output.is_file():
+                        raise MediaError(f"{output.name} is a file — the frames need a folder.")
+                elif not output.suffix:
                     output = output.with_suffix(panel.suffix(self._sources[0]))
                 if any(not source.is_sequence and output.resolve() == source.path.resolve() for source in self._sources):
                     raise MediaError("The result can’t replace the file it is made from — pick another name.")
@@ -511,9 +521,13 @@ class MediaPage(qt.QtWidgets.QWidget):
                 return
         existing = [job.output for job in jobs if job.output.exists()]
         if existing:
-            choice = ConfirmDialog.ask(self, "Replace the file?", f"{existing[0].name} is already there.",
-                                       details=str(existing[0]), kind="warning",
-                                       choices=[("replace", "Replace it"), ("cancel", "Cancel")])
+            folder = existing[0].is_dir()
+            choice = ConfirmDialog.ask(
+                self, "Write into that folder?" if folder else "Replace the file?",
+                f"{existing[0].name} is already there." + (" Pictures with the same names in it are replaced; "
+                                                           "everything else stays." if folder else ""),
+                details=str(existing[0]), kind="warning",
+                choices=[("replace", "Write into it" if folder else "Replace it"), ("cancel", "Cancel")])
             if choice != "replace":
                 self._discard(jobs)
                 return
@@ -574,7 +588,7 @@ class MediaPage(qt.QtWidgets.QWidget):
             self._say(f"That file isn’t there any more: {item.job.output}", "error")
 
     def _on_open_result(self, item) -> None:
-        if not item.job.output.is_file() or not self._open_file(item.job.output):
+        if not item.job.output.exists() or not self._open_file(item.job.output):
             self._say(f"That file isn’t there any more: {item.job.output}", "error")
 
     @staticmethod
