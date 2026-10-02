@@ -70,6 +70,7 @@ class ApplicationButton(qt.QtWidgets.QWidget):
         self._busy = False
         self._hover_color = qt.QtGui.QColor(0, 0, 0, 0)          # until QSS applies
         self._hover_border_color = qt.QtGui.QColor(0, 0, 0, 0)
+        self._badge: qt.QtWidgets.QLabel | None = None
         self.setCursor(qt.QtCore.Qt.CursorShape.PointingHandCursor)
 
         self._build_widgets()
@@ -160,6 +161,34 @@ class ApplicationButton(qt.QtWidgets.QWidget):
         if event.button() == qt.QtCore.Qt.MouseButton.LeftButton and self.rect().contains(event.position().toPoint()):
             self._on_clicked()
         super().mouseReleaseEvent(event)
+
+    def set_badge(self, text: str) -> None:
+        """A small pill over the icon's top-right corner ("2": two of this
+        application are running); "" removes it. Styled by widgets.qss
+        (`ApplicationButton QLabel#appBadge`)."""
+        if not text:
+            if self._badge is not None:
+                self._badge.hide()
+            return
+        if self._badge is None:
+            self._badge = qt.QtWidgets.QLabel(self)  # a child from the start: it never shows as a window
+            self._badge.setObjectName("appBadge")
+            self._badge.setAlignment(qt.QtCore.Qt.AlignmentFlag.AlignCenter)
+            self._badge.setAttribute(qt.QtCore.Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self._badge.setText(text)
+        self._badge.adjustSize()
+        self._place_badge()
+        self._badge.show()
+        self._badge.raise_()
+
+    def _place_badge(self) -> None:
+        if self._badge is not None:
+            icon = self._button.geometry()
+            self._badge.move(icon.right() - self._badge.width() + 5, icon.top() - 1)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._place_badge()
 
     def paintEvent(self, event) -> None:
         if self._hovered:

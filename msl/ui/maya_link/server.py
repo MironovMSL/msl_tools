@@ -41,6 +41,8 @@ class _Peer:
         self.socket = socket
         self.decoder = protocol.FrameDecoder()
         self.session: MayaSession | None = None
+        self.said_bye = False   # it announced that it is leaving (a quit, a link restart)
+        self.pinging = False    # a ping is out and not answered yet
 
 
 class MayaLinkServer(qt.QtCore.QObject):
@@ -52,6 +54,19 @@ class MayaLinkServer(qt.QtCore.QObject):
             that Maya's Script Editor just printed (warnings and errors;
             plain messages too once asked for with SET_LOG_LEVEL).
         listening_changed() — the server started or stopped listening.
+        session_ended(MayaSession, bool) — a session is gone. `clean` is
+            True when it said goodbye first (Maya quit, or its link
+            restarted after "Reload code") or the hub dropped it itself;
+            False when the connection just broke — Maya crashed or was killed.
+        attention_changed() — unread_errors() changed.
+
+    Busy: every PING_INTERVAL_MS each Maya is pinged; one that doesn't
+    answer within PING_TIMEOUT_MS has `session.busy` set (its main thread
+    is working — a long script, a heavy scene) until it answers again.
+
+    Unread errors: a number any view of the log may set (set_unread_errors)
+    for errors that arrived while nobody was looking — so another part of
+    the hub (the header indicator) can show it without knowing that view.
     """
 
     DEFAULT_PORT = 47611
@@ -64,8 +79,13 @@ class MayaLinkServer(qt.QtCore.QObject):
     MAX_LOG_ENTRIES = 500       # per message; more than that is cut
     MAX_LOG_TEXT = 8000         # characters per entry
 
+    PING_INTERVAL_MS = 4000     # how often every Maya is asked "are you there?"
+    PING_TIMEOUT_MS = 3000      # no answer in this time = busy
+
     sessions_changed = qt.QtCore.Signal()
     log_received = qt.QtCore.Signal(int, list)
+    session_ended = qt.QtCore.Signal(object, bool)   # (MayaSession, clean): see the class docstring
+    attention_changed = qt.QtCore.Signal()
     listening_changed = qt.QtCore.Signal()
 
     _instance: "MayaLinkServer | None" = None
@@ -87,6 +107,10 @@ class MayaLinkServer(qt.QtCore.QObject):
         self._next_request_id = 1
         # request id -> (peer, on_reply, timeout timer): the questions still waiting for an answer
         self._pending: dict[int, tuple[_Peer, object, qt.QtCore.QTimer]] = {}
+        self._unread_errors = 0
+        self._ping_timer = qt.QtCore.QTimer(self)
+        self._ping_timer.setInterval(self.PING_INTERVAL_MS)
+        self._ping_timer.timeout.connect(self._ping_all)
 
     # --- listening ---------------------------------------------------------------
 
@@ -117,13 +141,16 @@ class MayaLinkServer(qt.QtCore.QObject):
         for candidate in range(port, port + self.PORT_ATTEMPTS):
             if self._server.listen(qt.QtNetwork.QHostAddress(qt.QtNetwork.QHostAddress.SpecialAddress.LocalHost),
                                    candidate):
+                self._ping_timer.start()
                 self.listening_changed.emit()
                 return True
         return False
 
     def close(self) -> None:
         """Stops listening and drops every session."""
+        self._ping_timer.stop()
         for peer in list(self._peers):
+            peer.said_bye = True  # we are the ones leaving: not a crash
             peer.socket.abort()
         self._server.close()
         self.listening_changed.emit()
@@ -149,6 +176,32 @@ class MayaLinkServer(qt.QtCore.QObject):
     def sessions(self) -> list[MayaSession]:
         """Connected Mayas, oldest connection first."""
         return [peer.session for peer in self._peers if peer.session is not None]
+
+    def unread_errors(self) -> int:
+        return self._unread_errors
+
+    def set_unread_errors(self, count: int) -> None:
+        count = max(int(count), 0)
+        if count != self._unread_errors:
+            self._unread_errors = count
+            self.attention_changed.emit()
+
+    def _ping_all(self) -> None:
+        for peer in self._peers:
+            if peer.session is None or peer.pinging:
+                continue
+            peer.pinging = True
+            self.request(peer.session.session_id, protocol.PING, timeout_ms=self.PING_TIMEOUT_MS,
+                         on_reply=lambda reply, peer=peer: self._on_ping(peer, reply))
+
+    def _on_ping(self, peer: _Peer, reply: dict) -> None:
+        peer.pinging = False
+        if peer not in self._peers or peer.session is None:
+            return
+        busy = not reply.get("success")
+        if busy != peer.session.busy:
+            peer.session.busy = busy
+            self.sessions_changed.emit()
 
     def session(self, session_id: int) -> MayaSession | None:
         return next((s for s in self.sessions() if s.session_id == session_id), None)
@@ -229,7 +282,9 @@ class MayaLinkServer(qt.QtCore.QObject):
             self._next_id += 1
             self.sessions_changed.emit()
             return
-        if kind == protocol.EVENT and name == protocol.SCENE:
+        if kind == protocol.EVENT and name == protocol.BYE:
+            peer.said_bye = True
+        elif kind == protocol.EVENT and name == protocol.SCENE:
             scene = str(data.get("scene") or "")
             if scene != peer.session.scene:
                 peer.session.scene = scene
@@ -264,5 +319,6 @@ class MayaLinkServer(qt.QtCore.QObject):
                 self._finish(request_id, {"success": False, "error": "Maya disconnected.", "data": {}})
             if peer.session is not None:
                 self.sessions_changed.emit()
+                self.session_ended.emit(peer.session, peer.said_bye)
         except RuntimeError:
             pass  # the application is shutting down: Qt already deleted this server / the socket

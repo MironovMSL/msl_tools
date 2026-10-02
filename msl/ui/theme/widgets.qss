@@ -37,6 +37,17 @@ UpdateButton {
     qproperty-pressedColor: alpha(var(--accent), 28%);
 }
 
+/* --- LinkStatusButton (header): a connection service's state ---------------- */
+
+LinkStatusButton {
+    qproperty-onColor:        var(--success);
+    qproperty-offColor:       var(--text-secondary);
+    qproperty-attentionColor: var(--error);
+    qproperty-textColor:      var(--text-secondary);
+    qproperty-hoverColor:     alpha(var(--text-primary), 9%);
+    qproperty-pressedColor:   alpha(var(--text-primary), 16%);
+}
+
 /* --- GlyphButton ------------------------------------------------------------ */
 
 GlyphButton {
@@ -150,6 +161,18 @@ ApplicationButton QToolButton {
     background: transparent;
     border: none;
     padding: 0px;
+}
+/* "N of this application are running": a small pill on the icon's corner. */
+ApplicationButton QLabel#appBadge {
+    color: var(--on-accent);
+    background-color: var(--success);
+    border-radius: 7px;
+    padding: 0px 5px;
+    min-height: 14px;
+    max-height: 14px;
+    min-width: 4px;
+    font-size: 10px;
+    font-weight: 700;
 }
 ApplicationButton QLabel#appName {
     color: var(--text-primary);

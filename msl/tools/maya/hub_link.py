@@ -90,9 +90,22 @@ class HubLink(QtCore.QObject):
         self._log_timer.start()
         self._connect()
 
+    def _say_bye(self, reason: str) -> None:
+        """Tells the hub this connection ends on purpose — without it the hub
+        takes a dropped connection for a crash."""
+        if self.is_connected():
+            self._send(protocol.event(protocol.BYE, reason=reason))
+            self._socket.flush()
+            self._socket.waitForBytesWritten(300)
+
+    def _on_quit(self) -> None:
+        self._flush_log()
+        self._say_bye("quit")
+
     def shut(self) -> None:
         """Stops for good (a newer HubLink replaces this one)."""
         import maya.cmds as cmds
+        self._say_bye("restart")
         self._retry.stop()
         for job in self._script_jobs:
             try:
@@ -370,6 +383,10 @@ class HubLink(QtCore.QObject):
                 self._script_jobs.append(cmds.scriptJob(event=[name, self._on_scene_changed], protected=True))
             except Exception:
                 pass
+        try:
+            self._script_jobs.append(cmds.scriptJob(event=["quitApplication", self._on_quit], protected=True))
+        except Exception:
+            pass
 
     def _on_scene_changed(self) -> None:
         scene = self._scene()

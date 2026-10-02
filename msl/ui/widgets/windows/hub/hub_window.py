@@ -232,11 +232,28 @@ class HubWindow(FramelessDialog):
         if version and self._update_button is None:
             self._update_button = UpdateButton()
             self._update_button.clicked.connect(self.update_clicked)
-            self.header.trailing_layout.insertWidget(0, self._update_button)  # before the theme toggle
+            # Right before the theme toggle - after anything add_header_widget() put there.
+            self.header.trailing_layout.insertWidget(max(self.header.trailing_layout.count() - 1, 0),
+                                                     self._update_button)
         if self._update_button is not None:
             self._update_button.setToolTip(tooltip)
             self._update_button.setVisible(bool(version))
         self.set_footer_notice(tooltip)
+
+    def add_header_widget(self, widget: qt.QtWidgets.QWidget) -> None:
+        """Puts `widget` in the header, left of the theme toggle (and of the
+        update button, which always sits next to the toggle) — for small
+        status indicators. The hub doesn't know what they show."""
+        self.header.trailing_layout.insertWidget(0, widget)
+
+    def open_tool(self, tool_id: str) -> qt.QtWidgets.QWidget | None:
+        """Opens tool `tool_id` (as a click on its sidebar tile would) and
+        returns its page, or None if there is no such tool."""
+        button = self._nav_buttons.get(tool_id)
+        if button is None:
+            return None
+        button.click()
+        return self._pages.get(tool_id)
 
     def set_footer_notice(self, tooltip: str) -> None:
         """Marks the footer as carrying news (accent color, widgets.qss

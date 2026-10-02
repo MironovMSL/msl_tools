@@ -102,6 +102,21 @@ SessionsTab QLabel#sessionDot {
     background-color: var(--success);
     border-radius: 4px;
 }
+SessionsTab QLabel#sessionDot[state="busy"]  { background-color: var(--warning); }
+SessionsTab QLabel#sessionDot[state="ended"] { background-color: var(--error); }
+/* "busy": a small pill in the warning tone. */
+SessionsTab QLabel#sessionBusy {
+    color: var(--warning);
+    background-color: alpha(var(--warning), 16%);
+    border-radius: 7px;
+    padding: 0px 6px;
+    min-height: 14px;
+    max-height: 14px;
+    font-size: 11px;
+}
+SessionsTab QLabel#sessionEnded {
+    color: var(--error);
+}
 SessionsTab QLabel#sessionVersion {
     color: var(--text-primary);
     font-weight: 600;

@@ -23,6 +23,7 @@ from msl_tools.msl.ui.ui_resources import UiResources
 from msl_tools.msl.tools.desktop.registry import TOOLS
 from msl_tools.msl.ui.process_launcher.process_launcher import ProcessLauncher
 from msl_tools.msl.ui.maya_link import MayaLinkServer
+from msl_tools.msl.ui.widgets.atoms.header.link_status_button import LinkStatusButton
 from msl_tools.msl.ui.widgets.windows.confirm_dialog import ConfirmDialog
 from msl_tools.msl.ui.widgets.windows.hub import HubWindow
 from msl_tools.msl.ui.widgets.windows.whats_new_dialog import WhatsNewDialog
@@ -75,6 +76,42 @@ def _watch_for_update(window: HubWindow) -> None:
     timer.setInterval(UPDATE_CHECK_INTERVAL_MS)
     timer.timeout.connect(start_check)
     timer.start()
+
+
+MAYA_GATE_TOOL_ID = "maya_gate"
+
+
+def _add_link_indicator(window: HubWindow, link: MayaLinkServer) -> None:
+    """The header's indicator of the hub <-> Maya link: off / listening, how
+    many Mayas are connected, and an alert when one of them reported an
+    error nobody looked at yet. A click opens Maya Gate's Sessions tab."""
+    indicator = LinkStatusButton()
+
+    def refresh() -> None:
+        sessions, errors = len(link.sessions()), link.unread_errors()
+        if not link.is_listening():
+            indicator.set_state(LinkStatusButton.OFF)
+            indicator.setToolTip("Maya link: not listening" + (f"\n{link.error_text()}" if link.error_text() else ""))
+            return
+        indicator.set_state(LinkStatusButton.ATTENTION if errors else LinkStatusButton.ON, sessions)
+        lines = [f"Maya link: listening on port {link.port()}",
+                 "No Maya connected" if not sessions else f"{sessions} Maya session(s) connected"]
+        if errors:
+            lines.append(f"{errors} new error(s) in Maya \u2014 click to see")
+        indicator.setToolTip("\n".join(lines))
+
+    def open_sessions() -> None:
+        page = window.open_tool(MAYA_GATE_TOOL_ID)
+        show = getattr(page, "show_sessions", None)
+        if show is not None:
+            show()
+
+    link.listening_changed.connect(refresh)
+    link.sessions_changed.connect(refresh)
+    link.attention_changed.connect(refresh)
+    indicator.clicked.connect(open_sessions)
+    window.add_header_widget(indicator)
+    refresh()
 
 
 def main() -> None:
@@ -154,7 +191,9 @@ def main() -> None:
         _watch_for_update(window)
         # The hub <-> Maya link: listen from the start, so a Maya that outlived the
         # previous hub (it retries every few seconds) finds this one.
-        MayaLinkServer.instance().ensure_listening()
+        link = MayaLinkServer.instance()
+        _add_link_indicator(window, link)
+        link.ensure_listening()
         if last_update is not None:
             qt.QtCore.QTimer.singleShot(300, lambda: report_update(last_update))
 

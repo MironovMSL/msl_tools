@@ -521,7 +521,7 @@ What changed vs. the original (all deliberate, not oversights):
     `FrameDecoder.feed()` cuts the stream; a bad header / body raises
     ProtocolError and the connection is dropped.
   - `core/link/session.py`: `MayaSession` (pid, version, environment,
-    scene, boosted, connected_at).
+    scene, boosted, busy, connected_at).
   - `ui/maya_link/server.py`: `MayaLinkServer` (QTcpServer, signals only,
     nothing blocks) — `instance()` is the hub's one server, run_hub calls
     `ensure_listening()`. 127.0.0.1 only; port 47611 (next free of 10 if
@@ -609,6 +609,39 @@ What changed vs. the original (all deliberate, not oversights):
     code (level "input", ">>>" in the accent), its output, result and
     traceback go into that Maya's log and don't count as its problems.
     Verified with real Maya 2023 + 2025.
+  - Around the sessions (seen without opening the tab):
+    - Header indicator: `LinkStatusButton` (atoms/header/) left of the
+      theme toggle, put there by run_hub (`_add_link_indicator`,
+      `HubWindow.add_header_widget()`): hollow ring = not listening, green
+      dot + the number of connected Mayas = listening, red pulsing dot =
+      unread errors. A click = `HubWindow.open_tool("maya_gate")` +
+      `MayaGatePage.show_sessions()`. The atom knows nothing about Maya.
+    - Unread errors: `MayaLinkServer.unread_errors()` /
+      `set_unread_errors()` + `attention_changed`. The Sessions tab counts
+      errors (and Mayas that ended unexpectedly) that arrive while it is
+      NOT on screen and clears the number in showEvent; the tab's title
+      gets " · !" and the indicator turns to attention. Warnings don't count.
+    - Version tiles: `ApplicationButton.set_badge("2")` — a green pill on
+      the icon's corner = how many of that Maya are connected
+      (`MayaVersionRow.set_running({year: n})`, fed by the page).
+    - Busy: the server pings every Maya each PING_INTERVAL_MS (4 s); no
+      answer within PING_TIMEOUT_MS (3 s) sets `MayaSession.busy` (Maya's
+      main thread is working) until a ping is answered — the row shows a
+      "busy" pill and a warning-tone dot. Measured with real Maya: a 9 s
+      `time.sleep` in the main thread = busy for that time, then free.
+    - Goodbye: Maya sends a `bye` event when it quits (scriptJob
+      `quitApplication`) and when its link restarts ("Reload code");
+      `MayaLinkServer.session_ended(session, clean)` is clean=True then,
+      and when the hub itself closes. A connection that just breaks is
+      clean=False — Maya crashed or was killed: the tab keeps an "ended
+      unexpectedly at HH:MM" line (`_EndedRow`; Log file / Dismiss; a click
+      shows its log, kept until dismissed) and writes that Maya's log to
+      `logs/desktop/maya_gate/sessions/maya<year>_<stamp>_pid<pid>.log`.
+      A Maya whose code predates `bye` (started before this was built)
+      reads as ended unexpectedly on a normal quit.
+    Verified with real Maya 2023 + 2025: quit -> clean, killed process ->
+    not clean, busy on and off. Tests that read raw requests from a fake
+    Maya stop the ping timer first (`server._ping_timer.stop()`).
   - Offscreen tests of the link must `listen()` on a private port / token,
     never `ensure_listening()`: with the real ones, a real Maya running on
     the machine joins the test hub (it happened).
@@ -687,7 +720,8 @@ maya_gate/
 
 New generic pieces added to `ui/widgets/` along the way:
 ```
-atoms/buttons/application_button.py          ApplicationButton (was ApplicationButtonWdg)
+atoms/buttons/application_button.py          ApplicationButton (was ApplicationButtonWdg; set_badge(text): a small pill on the icon's corner)
+atoms/header/link_status_button.py        LinkStatusButton (header status dot + count: off / on / attention with a pulse; shows what it is told — set_state())
 atoms/buttons/icon_push_button.py         IconPushButton (framed button with a QSS-tinted one-color icon)
 atoms/buttons/icon_tile_button.py         IconTileButton (QToolButton tile: QSS-tinted icon over a short label; icon-less tiles keep the icon row empty so a column stays aligned)
 atoms/icons/tinted_icon.py                TintedIcon (passive one-color icon tinted from QSS: qproperty-iconColor; dimmed when disabled)

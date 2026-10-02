@@ -59,6 +59,13 @@ class MayaVersionRow(qt.QtWidgets.QWidget):
             suffix = f" with the {environment} environment" if environment else ""
             widget.setToolTip(f"Launch Maya {year}{suffix}")
 
+    def set_running(self, counts: dict) -> None:
+        """Marks each version's tile with how many of that Maya are running
+        ({"2025": 2}; a version left out or at 0 loses its mark)."""
+        for _, year, widget in self.maya_list:
+            count = int(counts.get(str(year), 0) or 0)
+            widget.set_badge(str(count) if count else "")
+
     def _populate(self) -> None:
         installs = MayaPaths.get_available_installs()
         if not installs:

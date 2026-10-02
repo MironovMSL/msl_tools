@@ -34,6 +34,7 @@ class MayaSession:
     boosted: bool = False
     skipped: list[str] = field(default_factory=list)
     console: bool = False
+    busy: bool = False   # not answering pings right now (its main thread is working)
     msl_version: str = ""
     connected_at: float = field(default_factory=time.time)
 

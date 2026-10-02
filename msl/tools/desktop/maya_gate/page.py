@@ -154,6 +154,7 @@ class MayaGatePage(qt.QtWidgets.QWidget):
         self._sessions_tab = SessionsTab(self._link)
         self._tabs.addTab(self._indented(self._sessions_tab), self.SESSIONS_TAB_TITLE)
         self._link.sessions_changed.connect(self._update_sessions_tab_title)
+        self._link.attention_changed.connect(self._update_sessions_tab_title)
         self._update_sessions_tab_title()
         saved_tab = self._ui.get("tab")
         self._tabs.setCurrentIndex(self.TAB_KEYS.index(saved_tab) if saved_tab in self.TAB_KEYS else 0)
@@ -287,8 +288,20 @@ class MayaGatePage(qt.QtWidgets.QWidget):
     def _update_sessions_tab_title(self) -> None:
         """"Sessions" / "Sessions · 2": the count is seen from any tab."""
         count = len(self._link.sessions())
+        # Which versions are running: a mark on their tiles.
+        running: dict[str, int] = {}
+        for session in self._link.sessions():
+            running[session.version] = running.get(session.version, 0) + 1
+        self._version_row.set_running(running)
         index = self._tabs.indexOf(self._sessions_tab.parentWidget())
+        if self._link.unread_errors():  # errors nobody has looked at: seen from any tab
+            self._tabs.setTabText(index, self.SESSIONS_TAB_TITLE + (f" \u00b7 {count}" if count else "") + " \u00b7 !")
+            return
         self._tabs.setTabText(index, self.SESSIONS_TAB_TITLE + (f" \u00b7 {count}" if count else ""))
+
+    def show_sessions(self) -> None:
+        """Opens the Sessions tab (the header's link indicator leads here)."""
+        self._tabs.setCurrentIndex(self._tabs.indexOf(self._sessions_tab.parentWidget()))
 
     def _launch_variables(self) -> dict[str, str]:
         """The current environment's variables as a launch passes them

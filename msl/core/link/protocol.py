@@ -33,6 +33,7 @@ EVENT, REQUEST, REPLY = "event", "request", "reply"
 HELLO = "hello"      # event, Maya -> hub, first message: who am I (with the token)
 SCENE = "scene"      # event, Maya -> hub: the open scene changed
 LOG = "log"          # event, Maya -> hub: {"entries": [[level, text], ...], "dropped": n} - Script Editor output
+BYE = "bye"          # event, Maya -> hub: {"reason": "quit" | "restart"} - leaving on purpose
 PING = "ping"        # request, either way
 # Requests hub -> Maya (handled in tools/maya/hub_link.py; replies carry the result in "data"):
 LAUNCH_REPORT = "launch_report"   # -> {"text": the launch report}
