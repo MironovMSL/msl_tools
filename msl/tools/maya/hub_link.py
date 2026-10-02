@@ -3,7 +3,9 @@
 MSL Tools hub that launched it, and keeps the hub told about it.
 
 The hub listens (ui/maya_link/server.py); this client connects, says hello
-(which Maya, which environment, which scene) and then reports scene changes.
+(which Maya, which environment, which scene) and then reports scene changes
+and what the Script Editor prints — warnings and errors, and plain messages
+too once the hub asks for them.
 If the hub isn't there — closed, restarting — it quietly tries again every
 few seconds, so a restarted hub gets its running Mayas back.
 
@@ -45,6 +47,9 @@ class HubLink(QtCore.QObject):
 
     RECONNECT_MS = 5000
     SCENE_EVENTS = ("SceneOpened", "NewSceneOpened", "SceneSaved")
+    LOG_FLUSH_MS = 250       # Script Editor output goes out in batches, not line by line
+    LOG_BUFFER_MAX = 400     # lines kept between two flushes (and while the hub is away)
+    LOG_TEXT_MAX = 6000      # characters of one message
 
     def __init__(self, port: int, token: str, parent=None):
         super().__init__(parent)
@@ -54,6 +59,15 @@ class HubLink(QtCore.QObject):
         self._decoder = protocol.FrameDecoder()
         self._script_jobs: list[int] = []
         self._sent_scene: str | None = None  # the scene the hub was last told about
+        self._log_all = False                # False: warnings and errors only
+        self._log_buffer: list[list[str]] = []
+        self._log_dropped = 0
+        self._output_callback = None
+        self._log_levels: dict = {}
+
+        self._log_timer = QtCore.QTimer(self)
+        self._log_timer.setInterval(self.LOG_FLUSH_MS)
+        self._log_timer.timeout.connect(self._flush_log)
 
         self._socket = QtNetwork.QTcpSocket(self)
         self._socket.connected.connect(self._on_connected)
@@ -70,6 +84,8 @@ class HubLink(QtCore.QObject):
 
     def open(self) -> None:
         self._watch_scene()
+        self._watch_output()
+        self._log_timer.start()
         self._connect()
 
     def shut(self) -> None:
@@ -83,6 +99,14 @@ class HubLink(QtCore.QObject):
             except Exception:
                 pass
         self._script_jobs = []
+        self._log_timer.stop()
+        if self._output_callback is not None:
+            try:
+                import maya.api.OpenMaya as om
+                om.MMessage.removeCallback(self._output_callback)
+            except Exception:
+                pass
+            self._output_callback = None
         self._socket.abort()
 
     def is_connected(self) -> bool:
@@ -116,6 +140,9 @@ class HubLink(QtCore.QObject):
         except Exception:
             full_version = ""
         self._sent_scene = self._scene()
+        # A fresh connection starts on "warnings and errors only": the hub that
+        # wants more says so again (it may be a different, restarted hub).
+        self._log_all = False
         self._send(protocol.event(
             protocol.HELLO,
             token=self._token,
@@ -156,6 +183,51 @@ class HubLink(QtCore.QObject):
             return
         self._send(protocol.reply(message_id, **result))
         self._socket.flush()
+
+    # --- the Script Editor's output --------------------------------------------------------
+
+    def _watch_output(self) -> None:
+        """Has Maya call _on_output for everything it prints to the Script Editor."""
+        try:
+            import maya.api.OpenMaya as om
+            kinds = om.MCommandMessage
+            self._log_levels = {kinds.kError: protocol.LOG_ERROR, kinds.kWarning: protocol.LOG_WARNING,
+                                kinds.kStackTrace: protocol.LOG_TRACE, kinds.kInfo: protocol.LOG_INFO,
+                                kinds.kResult: protocol.LOG_INFO, kinds.kDisplay: protocol.LOG_INFO}
+            self._output_callback = kinds.addCommandOutputCallback(self._on_output)
+        except Exception:
+            self._output_callback = None
+
+    def _on_output(self, message, kind, _client_data=None) -> None:
+        """Maya printed `message`. Called for EVERY line of output, so: quick,
+        and never printing or raising itself (that would come straight back
+        here). Command echo (history) is never forwarded; plain messages only
+        when the hub asked for everything. Lines are only collected here —
+        _flush_log() sends them."""
+        try:
+            level = self._log_levels.get(kind)
+            if level is None or (level == protocol.LOG_INFO and not self._log_all):
+                return
+            text = str(message).rstrip()
+            if not text:
+                return
+            if len(self._log_buffer) >= self.LOG_BUFFER_MAX:
+                self._log_dropped += 1
+                return
+            self._log_buffer.append([level, text[:self.LOG_TEXT_MAX]])
+        except Exception:
+            pass
+
+    def _flush_log(self) -> None:
+        if not self._log_buffer or not self.is_connected():
+            return
+        entries, dropped = self._log_buffer, self._log_dropped
+        self._log_buffer, self._log_dropped = [], 0
+        self._send(protocol.event(protocol.LOG, entries=entries, dropped=dropped))
+
+    def _handle_set_log_level(self, data: dict) -> dict:
+        self._log_all = bool(data.get("all"))
+        return {"all": self._log_all}
 
     # --- what the hub may ask for --------------------------------------------------------
 
@@ -214,6 +286,7 @@ class HubLink(QtCore.QObject):
         protocol.RELOAD_CODE: _handle_reload_code,
         protocol.PLUGIN_STATE: _handle_plugin_state,
         protocol.LOAD_PLUGINS: _handle_load_plugins,
+        protocol.SET_LOG_LEVEL: _handle_set_log_level,
     }
 
     # --- the scene ---------------------------------------------------------------------

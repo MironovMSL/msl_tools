@@ -45,6 +45,9 @@ class MayaLinkServer(qt.QtCore.QObject):
 
     Signals:
         sessions_changed() — a session connected, changed (its scene) or left.
+        log_received(int, list) — (session id, [(level, text), ...]): what
+            that Maya's Script Editor just printed (warnings and errors;
+            plain messages too once asked for with SET_LOG_LEVEL).
         listening_changed() — the server started or stopped listening.
     """
 
@@ -55,7 +58,11 @@ class MayaLinkServer(qt.QtCore.QObject):
     PORT_VARIABLE = "MSL_GATE_LINK_PORT"    # handed to a launched Maya
     TOKEN_VARIABLE = "MSL_GATE_LINK_TOKEN"
 
+    MAX_LOG_ENTRIES = 500       # per message; more than that is cut
+    MAX_LOG_TEXT = 8000         # characters per entry
+
     sessions_changed = qt.QtCore.Signal()
+    log_received = qt.QtCore.Signal(int, list)
     listening_changed = qt.QtCore.Signal()
 
     _instance: "MayaLinkServer | None" = None
@@ -224,6 +231,17 @@ class MayaLinkServer(qt.QtCore.QObject):
             if scene != peer.session.scene:
                 peer.session.scene = scene
                 self.sessions_changed.emit()
+        elif kind == protocol.EVENT and name == protocol.LOG:
+            entries = []
+            for entry in (data.get("entries") or [])[:self.MAX_LOG_ENTRIES]:
+                if isinstance(entry, (list, tuple)) and len(entry) == 2:
+                    level = entry[0] if entry[0] in protocol.LOG_LEVELS else protocol.LOG_INFO
+                    entries.append((level, str(entry[1])[:self.MAX_LOG_TEXT]))
+            dropped = data.get("dropped")
+            if isinstance(dropped, int) and dropped > 0:
+                entries.append((protocol.LOG_TRACE, f"\u2026 {dropped} more lines were not sent (too many at once)"))
+            if entries:
+                self.log_received.emit(peer.session.session_id, entries)
         elif kind == protocol.REQUEST and name == protocol.PING:
             peer.socket.write(protocol.encode(protocol.reply(message.get("id", 0))))
         elif kind == protocol.REPLY:

@@ -559,12 +559,41 @@ What changed vs. the original (all deliberate, not oversights):
     "Load all N" or one; already loaded ones are greyed) — and the outcome
     of the last request is the line under the list. A row is busy (buttons
     off) while its Maya works.
+  - The log stream Maya -> hub (step 3): `HubLink._watch_output()` has
+    Maya call `_on_output` for everything the Script Editor prints
+    (`maya.api.OpenMaya.MCommandMessage.addCommandOutputCallback`). The
+    callback only FILTERS and COLLECTS (it runs for every output line and
+    must never print or raise — that would come straight back to it);
+    `_flush_log` sends the batch every 250 ms as a `log` event
+    `{"entries": [[level, text], ...], "dropped": n}`. Levels: error,
+    warning, trace, info; command echo (kHistory) is never sent, info
+    (print, displayInfo, results) only after the hub's `set_log_level
+    {"all": true}` — and every new connection starts on problems only (the
+    hub re-asks sessions that join while its switch is on "All"). Caps:
+    400 lines per flush in Maya, 500 entries / 8000 chars per entry
+    accepted by the hub. What arrives from a windowed Maya (measured, 2023
+    + 2025): cmds.warning, MEL warnings and errors, Python `logging`
+    warnings / errors, MGlobal.displayError, uncaught Python exceptions;
+    with "All" also Python print, MEL print, displayInfo. A `cmds.error`
+    caught by a try does not.
+    `MayaLinkServer.log_received(session_id, entries)` -> the Sessions tab:
+    the list (as tall as its rows, 4 at most) + a log panel under it for
+    the SELECTED Maya (click a row): `LogView` (atoms/editors/log_view.py:
+    fixed-width, time-stamped, colored by level from QSS, follows the tail
+    while scrolled to the bottom), a Problems / All switch, Copy, Clear;
+    each row counts its errors / warnings. Logs and selection are keyed by
+    Maya's PID, not the session id ("Reload code" changes the id), and a
+    Maya that left keeps its log on screen for GONE_GRACE_S (60 s) — a
+    crashed Maya is the one whose log is wanted.
+  - Offscreen tests of the link must `listen()` on a private port / token,
+    never `ensure_listening()`: with the real ones, a real Maya running on
+    the machine joins the test hub (it happened).
   Verified with real windowed Maya 2023, 2024, 2025 (copies of the
   preferences): connect, scene change, hub away and back (rejoined in
   ~2 s), exit; and in 2023 + 2025 every request above — report ~1 s,
   loading MASH into a boosted Maya 0.15 s, reload + rejoin 0.3 s, an unknown
   request refused, Maya's own auto-load list intact after loading a plug-in
-  this way. Still to come: events Maya -> hub (log stream), a dev console.
+  this way. Still to come: a dev console (send Python to a session).
   Long work in Maya must answer later by `id`, never block the socket.
 - Every launch tells Maya what it is: `MSL_GATE_ENVIRONMENT` (the
   environment) and `MSL_GATE_VARIABLES` (names of the variables this launch
@@ -640,6 +669,7 @@ atoms/buttons/icon_tile_button.py         IconTileButton (QToolButton tile: QSS-
 atoms/icons/tinted_icon.py                TintedIcon (passive one-color icon tinted from QSS: qproperty-iconColor; dimmed when disabled)
 atoms/buttons/glyph_button.py             GlyphButton (custom-painted small icon button; QPushButton's QSS padding leaves no room for a glyph at ~20px)
 atoms/comboboxes/base_combo_box.py        BaseComboBox (was QCustomComboBox)
+atoms/editors/log_view.py                 LogView (read-only log: time-stamped entries colored by level — error / warning / info / trace — from qproperty colors; follows the tail)
 atoms/editors/code_editor.py              CodeEditor (line numbers + gutter divider, Python highlighting from --syntax-* tokens, Tab/auto-indent)
 atoms/segmented/segmented_control.py     SegmentedControl (one-of-few picker: sunken track, raised pill that slides; Left/Right keys)
 atoms/tabs/base_tab_bar.py                BaseTabBar + BaseTabWidget (sliding accent indicator under the open tab)
@@ -844,9 +874,9 @@ disk. NOT yet tested: against a real Maya installation (actual launch via
   environment creation, install / reinstall / uninstall, shortcut, hub
   start from the installed copy. Not yet run by hand on a clean machine.
 - Real icon assets for add/delete/copy/drag (currently Unicode placeholders).
-- The Maya connection: steps 1-2 (sessions list, requests hub -> Maya) are
-  built on our own link, not `cmds.commandPort`; the log stream (Maya ->
-  hub) and a dev console are next.
+- The Maya connection: steps 1-3 (sessions list, requests hub -> Maya, the
+  log stream Maya -> hub) are built on our own link, not
+  `cmds.commandPort`; a dev console is the one step left.
 - Boost start: built and verified against real Maya 2020 / 2025 / 2026 on
   COPIES of the preferences (MAYA_APP_DIR in %TEMP%); not yet used on the
   user's real preferences, nor released.

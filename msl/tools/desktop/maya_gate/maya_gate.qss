@@ -74,6 +74,29 @@ SessionsTab QPushButton#sessionAction:disabled {
 SessionsTab QLabel#sessionsMessage                  { color: var(--text-secondary); }
 SessionsTab QLabel#sessionsMessage[state="success"] { color: var(--success); }
 SessionsTab QLabel#sessionsMessage[state="error"]   { color: var(--error); }
+/* The selected session (its log is shown below). */
+SessionsTab QWidget#sessionRow[selected="true"] {
+    background-color: alpha(var(--accent), 12%);
+    border-radius: 5px;
+}
+/* How many errors / warnings a Maya printed: small pills in the tone. */
+SessionsTab QLabel#sessionErrors,
+SessionsTab QLabel#sessionWarnings {
+    border-radius: 7px;
+    padding: 0px 6px;
+    min-height: 14px;
+    max-height: 14px;
+    font-size: 11px;
+    font-weight: 600;
+}
+SessionsTab QLabel#sessionErrors {
+    color: var(--error);
+    background-color: alpha(var(--error), 16%);
+}
+SessionsTab QLabel#sessionWarnings {
+    color: var(--warning);
+    background-color: alpha(var(--warning), 16%);
+}
 /* A connected Maya: a green dot. */
 SessionsTab QLabel#sessionDot {
     background-color: var(--success);

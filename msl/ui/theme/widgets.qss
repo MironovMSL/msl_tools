@@ -100,6 +100,20 @@ SlimScrollBar {
     qproperty-handlePressedColor: alpha(var(--accent), 75%);
 }
 
+/* --- LogView: log entries colored by level ------------------------------------------- */
+
+LogView {
+    background-color: var(--editor-background);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 4px;
+    selection-background-color: alpha(var(--accent), 35%);
+    qproperty-textColor:    var(--text-primary);
+    qproperty-errorColor:   var(--error);
+    qproperty-warningColor: var(--warning);
+    qproperty-mutedColor:   var(--text-secondary);
+}
+
 /* --- TextDialog: a report to read and copy ----------------------------------------- */
 
 TextDialog QPlainTextEdit#textDialogView {

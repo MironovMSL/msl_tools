@@ -1,9 +1,13 @@
 # tools/desktop/maya_gate/sessions_tab.py
+import time
+
 import msl_tools.msl.ui.qt_bindings as qt
 from msl_tools.msl.core.link import protocol
 from msl_tools.msl.core.link.session import MayaSession
 from msl_tools.msl.ui.maya_link.server import MayaLinkServer
 from msl_tools.msl.ui.theme.qss import make_rounded_popup, repolish
+from msl_tools.msl.ui.widgets.atoms.editors import LogView
+from msl_tools.msl.ui.widgets.atoms.segmented.segmented_control import SegmentedControl
 from msl_tools.msl.ui.widgets.atoms.surfaces import StableScrollArea
 from msl_tools.msl.ui.widgets.windows.text_dialog import TextDialog
 
@@ -11,8 +15,10 @@ from msl_tools.msl.ui.widgets.windows.text_dialog import TextDialog
 class _SessionRow(qt.QtWidgets.QWidget):
     """Private: one running Maya — a live dot, "Maya 2025", its environment,
     the open scene, a "boost" mark, what can be asked of it (quiet text
-    buttons), and how long it has been connected. The row only says what
-    was clicked; the tab talks to Maya."""
+    buttons), how many errors / warnings it has printed, and how long it
+    has been connected. A click on the row selects it (its log is shown
+    below the list). The row only says what was clicked; the tab talks to
+    Maya."""
 
     HEIGHT = 30
     DOT_SIZE = 8
@@ -20,9 +26,12 @@ class _SessionRow(qt.QtWidgets.QWidget):
     report_requested = qt.QtCore.Signal(int)    # session id
     reload_requested = qt.QtCore.Signal(int)
     plugins_requested = qt.QtCore.Signal(int)
+    selected = qt.QtCore.Signal(int)
 
     def __init__(self, session: MayaSession, parent=None):
         super().__init__(parent)
+        self.setObjectName("sessionRow")
+        self.setAttribute(qt.QtCore.Qt.WidgetAttribute.WA_StyledBackground, True)  # for the selected tint (QSS)
         self.setFixedHeight(self.HEIGHT)
         self.dot = qt.QtWidgets.QLabel()
         self.dot.setObjectName("sessionDot")
@@ -39,6 +48,10 @@ class _SessionRow(qt.QtWidgets.QWidget):
         self.scene_label.setSizePolicy(qt.QtWidgets.QSizePolicy.Policy.Ignored, qt.QtWidgets.QSizePolicy.Policy.Preferred)
         self.time_label = qt.QtWidgets.QLabel()
         self.time_label.setObjectName("sessionTime")
+        self.errors_label = qt.QtWidgets.QLabel()
+        self.errors_label.setObjectName("sessionErrors")
+        self.warnings_label = qt.QtWidgets.QLabel()
+        self.warnings_label.setObjectName("sessionWarnings")
         self.plugins_button = self._action("Plug-ins", "Load plug-ins that boost start left out \u2014 "
                                                        "in this running Maya, no restart")
         self.reload_button = self._action("Reload code", "Re-read msl_tools from disk in this Maya and rebuild "
@@ -57,11 +70,33 @@ class _SessionRow(qt.QtWidgets.QWidget):
         layout.addWidget(self.environment_label)
         layout.addWidget(self.boost_label)
         layout.addWidget(self.scene_label, 1)
+        layout.addWidget(self.errors_label)
+        layout.addWidget(self.warnings_label)
         layout.addWidget(self.plugins_button)
         layout.addWidget(self.reload_button)
         layout.addWidget(self.report_button)
         layout.addWidget(self.time_label)
         self.set_session(session)
+        self.set_problems(0, 0)
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == qt.QtCore.Qt.MouseButton.LeftButton:
+            self.selected.emit(self.session_id)
+        super().mousePressEvent(event)
+
+    def set_selected(self, selected: bool) -> None:
+        if bool(self.property("selected")) != selected:
+            self.setProperty("selected", selected)  # maya_gate.qss: QWidget#sessionRow[selected="true"]
+            repolish(self)
+
+    def set_problems(self, errors: int, warnings: int) -> None:
+        """Counters of what this Maya printed since it connected (or since "Clear")."""
+        self.errors_label.setText(str(errors))
+        self.errors_label.setToolTip(f"{errors} error(s) in this Maya\u2019s Script Editor")
+        self.errors_label.setVisible(errors > 0)
+        self.warnings_label.setText(str(warnings))
+        self.warnings_label.setToolTip(f"{warnings} warning(s) in this Maya\u2019s Script Editor")
+        self.warnings_label.setVisible(warnings > 0)
 
     @staticmethod
     def _action(text: str, tooltip: str) -> qt.QtWidgets.QPushButton:
@@ -114,6 +149,14 @@ class SessionsTab(qt.QtWidgets.QWidget):
       out — load one, or all, in that Maya without restarting it.
     The outcome of the last request is the line under the list.
 
+    The log (below the list): what the SELECTED Maya's Script Editor prints,
+    as it happens — warnings and errors, or everything except command echo
+    with the "All" switch (asked of Maya with SET_LOG_LEVEL, so plain
+    messages don't travel unless someone wants them). Each row counts its
+    errors / warnings. Logs are kept per Maya PROCESS (pid), so "Reload
+    code" — which gives the session a new id — doesn't lose them; a Maya
+    that closed (or crashed) keeps its log on screen for GONE_GRACE_S.
+
     Colors: maya_gate.qss (SessionsTab ...).
     """
 
@@ -122,11 +165,20 @@ class SessionsTab(qt.QtWidgets.QWidget):
     REPORT_TIMEOUT_MS = 15_000
     RELOAD_TIMEOUT_MS = 20_000
     PLUGINS_TIMEOUT_MS = 180_000  # loading heavy plug-ins takes Maya a while
+    LIST_ROWS_SHOWN = 4           # the list is this tall at most; the log gets the rest
+    LOG_PROBLEMS, LOG_ALL = "Problems", "All"
+    LOG_KEPT = 2000               # entries kept per Maya
+    GONE_GRACE_S = 60             # how long a Maya that left keeps its log (and the selection)
 
     def __init__(self, server: MayaLinkServer, parent=None):
         super().__init__(parent)
         self._server = server
         self._rows: dict[int, _SessionRow] = {}
+        self._logs: dict[int, list] = {}          # pid -> [(level, text, time), ...]
+        self._problems: dict[int, list] = {}      # pid -> [errors, warnings]
+        self._selected_pid = 0
+        self._gone: dict[int, float] = {}         # pid -> when that Maya left (its log is kept a while)
+        self._log_all = False
 
         self._title_label = qt.QtWidgets.QLabel("Sessions")
         self._title_label.setObjectName("sessionsTitle")
@@ -148,6 +200,17 @@ class SessionsTab(qt.QtWidgets.QWidget):
         self._scroll = StableScrollArea()
         self._scroll.setObjectName("sessionsScroll")
         self._scroll.setWidget(self._list)
+
+        self._log_title = qt.QtWidgets.QLabel("Log")
+        self._log_title.setObjectName("sessionsTitle")
+        self._log_section = qt.QtWidgets.QLabel()
+        self._log_section.setObjectName("sessionsSummary")
+        self._log_section.setSizePolicy(qt.QtWidgets.QSizePolicy.Policy.Ignored, qt.QtWidgets.QSizePolicy.Policy.Preferred)
+        self._level_switch = SegmentedControl([self.LOG_PROBLEMS, self.LOG_ALL], self.LOG_PROBLEMS)
+        self._level_switch.setToolTip("Problems: warnings and errors.\nAll: also what scripts print (not the command echo).")
+        self._copy_log_button = _SessionRow._action("Copy", "Copy the log")
+        self._clear_log_button = _SessionRow._action("Clear", "Empty this Maya\u2019s log here (nothing changes in Maya)")
+        self._log_view = LogView("Warnings and errors from the selected Maya\u2019s Script Editor appear here.")
 
         self._message_label = qt.QtWidgets.QLabel()
         self._message_label.setObjectName("sessionsMessage")
@@ -174,10 +237,27 @@ class SessionsTab(qt.QtWidgets.QWidget):
         layout = qt.QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 6, 0, 0)
         layout.setSpacing(6)
+        log_header = qt.QtWidgets.QHBoxLayout()
+        log_header.setContentsMargins(0, 2, 0, 0)
+        log_header.setSpacing(6)
+        log_header.addWidget(self._log_title)
+        log_header.addWidget(self._log_section, 1)
+        log_header.addWidget(self._copy_log_button)
+        log_header.addWidget(self._clear_log_button)
+        log_header.addWidget(self._level_switch)
+
         layout.addLayout(header)
-        layout.addWidget(self._scroll, 1)
+        layout.addWidget(self._scroll)
         layout.addWidget(self._message_label)
+        layout.addLayout(log_header)
+        layout.addWidget(self._log_view, 1)
         layout.addWidget(self._hint_label)
+
+        self._server.log_received.connect(self._on_log)
+        self._level_switch.current_changed.connect(self._on_level_changed)
+        self._copy_log_button.clicked.connect(
+            lambda: qt.QtGui.QGuiApplication.clipboard().setText(self._log_view.plain_text()))
+        self._clear_log_button.clicked.connect(self._on_clear_log)
 
         self._timer = qt.QtCore.QTimer(self)
         self._timer.setInterval(self.REFRESH_MS)
@@ -209,7 +289,10 @@ class SessionsTab(qt.QtWidgets.QWidget):
                 row.report_requested.connect(self._on_report)
                 row.reload_requested.connect(self._on_reload)
                 row.plugins_requested.connect(self._on_plugins)
+                row.selected.connect(self._select_session)
                 self._rows[session_id] = row
+                if self._log_all:  # a Maya that just joined (or reloaded) starts on "Problems"
+                    self._server.request(session_id, protocol.SET_LOG_LEVEL, **{"all": True})
                 self._list_layout.insertWidget(index, row)
             else:
                 row.set_session(session)
@@ -227,6 +310,97 @@ class SessionsTab(qt.QtWidgets.QWidget):
                                       + (self._server.error_text() or "It starts with the first launch."))
         repolish(self._status_label)
         self._empty_label.setVisible(not count)
+
+        # The list is as tall as its rows (up to LIST_ROWS_SHOWN); the log gets the rest.
+        shown = max(min(count, self.LIST_ROWS_SHOWN), 1)
+        self._scroll.setFixedHeight(shown * _SessionRow.HEIGHT + 10 + (26 if not count else 0))
+
+        # Selection follows the PROCESS. A Maya that leaves keeps its log (and the selection)
+        # for GONE_GRACE_S: "Reload code" makes it leave and rejoin under a new session id,
+        # and a Maya that just crashed is exactly the one whose log one wants to read.
+        pids = {session.pid: session for session in sessions.values()}
+        now = time.time()
+        for pid in list(self._logs) + [self._selected_pid]:
+            if pid and pid not in pids:
+                self._gone.setdefault(pid, now)
+        for pid in [pid for pid in self._gone if pid in pids]:
+            del self._gone[pid]
+        expired = {pid for pid, since in self._gone.items() if now - since > self.GONE_GRACE_S}
+        if self._selected_pid not in pids and (not self._selected_pid or self._selected_pid in expired) and pids:
+            self._selected_pid = next(iter(pids))
+            self._show_log()
+        for pid in expired:
+            if pid != self._selected_pid:
+                self._logs.pop(pid, None)
+                self._problems.pop(pid, None)
+                self._gone.pop(pid, None)
+        for session_id, row in self._rows.items():
+            session = sessions[session_id]
+            row.set_selected(session.pid == self._selected_pid)
+            row.set_problems(*self._problems.get(session.pid, [0, 0]))
+        self._update_log_title(pids.get(self._selected_pid))
+
+    # --- the log ---------------------------------------------------------------------
+
+    def _session_by_pid(self, pid: int) -> MayaSession | None:
+        return next((session for session in self._server.sessions() if session.pid == pid), None)
+
+    def _update_log_title(self, session: MayaSession | None) -> None:
+        if session is not None:
+            text = f"\u00b7 Maya {session.version}" + (f" \u00b7 {session.environment}" if session.environment else "")
+        elif self._selected_pid:
+            text = "\u00b7 that Maya has closed"
+        else:
+            text = ""
+        self._log_section.setText(text)
+
+    def _select_session(self, session_id: int) -> None:
+        session = self._server.session(session_id)
+        if session is None or session.pid == self._selected_pid:
+            return
+        if self._selected_pid in self._gone:  # leaving a closed Maya's log: it isn't kept any longer
+            self._logs.pop(self._selected_pid, None)
+            self._problems.pop(self._selected_pid, None)
+            self._gone.pop(self._selected_pid, None)
+        self._selected_pid = session.pid
+        self._show_log()
+        self.refresh()
+
+    def _show_log(self) -> None:
+        self._log_view.set_entries(self._logs.get(self._selected_pid, []))
+
+    def _on_log(self, session_id: int, entries: list) -> None:
+        """Script Editor output of one Maya: kept for that process, shown if it is the selected one."""
+        session = self._server.session(session_id)
+        if session is None:
+            return
+        now = time.time()
+        log = self._logs.setdefault(session.pid, [])
+        problems = self._problems.setdefault(session.pid, [0, 0])
+        for level, text in entries:
+            log.append((level, text, now))
+            if level == protocol.LOG_ERROR:
+                problems[0] += 1
+            elif level == protocol.LOG_WARNING:
+                problems[1] += 1
+            if session.pid == self._selected_pid:
+                self._log_view.append_entry(level, text, now)
+        del log[:-self.LOG_KEPT]
+        row = self._rows.get(session_id)
+        if row is not None:
+            row.set_problems(*problems)
+
+    def _on_level_changed(self, option: str) -> None:
+        """Problems / All — for every connected Maya (and those that join later)."""
+        self._log_all = option == self.LOG_ALL
+        for session in self._server.sessions():
+            self._server.request(session.session_id, protocol.SET_LOG_LEVEL, **{"all": self._log_all})
+
+    def _on_clear_log(self) -> None:
+        self._logs.pop(self._selected_pid, None)
+        self._problems.pop(self._selected_pid, None)
+        self._log_view.clear_entries()
+        self.refresh()
 
     # --- requests to a running Maya ------------------------------------------------
 
