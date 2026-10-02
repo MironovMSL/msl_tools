@@ -19,21 +19,23 @@ class LogView(qt.QtWidgets.QPlainTextEdit):
     the reader scrolls up, it stays where they are. Keeps the last
     MAX_ENTRIES entries.
 
-    Levels: "error", "warning", "info", "trace" (anything else reads as
-    "info"). Colors are Qt properties set by ui/theme/widgets.qss (textColor,
-    errorColor, warningColor, mutedColor) — a theme switch re-renders the
-    entries in the new colors.
+    Levels: "error", "warning", "info", "trace", and "input" (something the
+    reader typed — shown with a ">>>" in the accent); anything else reads
+    as "info". Colors are Qt properties set by ui/theme/widgets.qss
+    (textColor, errorColor, warningColor, mutedColor, inputColor) — a theme
+    switch re-renders the entries in the new colors.
     """
 
     MAX_ENTRIES = 2000
     FONT_FAMILIES = ("Cascadia Mono", "JetBrains Mono", "Consolas")
     FONT_POINT_SIZE = 9
-    LEVEL_LABELS = {"error": "error", "warning": "warn ", "info": "     ", "trace": "     "}
+    LEVEL_LABELS = {"error": "error", "warning": "warn ", "info": "     ", "trace": "     ", "input": ">>>  "}
 
     textColor = color_property("_text_color", "_rerender")
     errorColor = color_property("_error_color", "_rerender")
     warningColor = color_property("_warning_color", "_rerender")
     mutedColor = color_property("_muted_color", "_rerender")
+    inputColor = color_property("_input_color", "_rerender")
 
     def __init__(self, placeholder: str = "", parent=None):
         super().__init__(parent)
@@ -42,6 +44,7 @@ class LogView(qt.QtWidgets.QPlainTextEdit):
         self._error_color = qt.QtGui.QColor(fallback.text_primary)
         self._warning_color = qt.QtGui.QColor(fallback.text_primary)
         self._muted_color = qt.QtGui.QColor(fallback.text_secondary)
+        self._input_color = qt.QtGui.QColor(fallback.accent)
         self._entries: list[tuple[str, str, float]] = []
 
         self.setReadOnly(True)
@@ -114,8 +117,8 @@ class LogView(qt.QtWidgets.QPlainTextEdit):
         if not self.document().isEmpty():
             cursor.insertBlock()
         cursor.insertText(stamp + "  ", self._format(self._muted_color))
-        body = {"error": self._error_color, "warning": self._warning_color,
-                "trace": self._muted_color}.get(level, self._text_color)
+        body = {"error": self._error_color, "warning": self._warning_color, "trace": self._muted_color,
+                "input": self._input_color}.get(level, self._text_color)
         cursor.insertText(label + "  ", self._format(body))
         cursor.insertText(lines[0], self._format(body))
         for line in lines[1:]:

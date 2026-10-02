@@ -39,6 +39,7 @@ PORT_VARIABLE = "MSL_GATE_LINK_PORT"
 TOKEN_VARIABLE = "MSL_GATE_LINK_TOKEN"
 ENVIRONMENT_VARIABLE = "MSL_GATE_ENVIRONMENT"
 BOOST_VARIABLE = "MSL_GATE_BOOST_SKIP"
+CONSOLE_VARIABLE = "MSL_GATE_CONSOLE"   # "1": this Maya may be sent code (Maya Gate: the Dev environment)
 OBJECT_NAME = "mslHubLink"
 
 
@@ -60,6 +61,7 @@ class HubLink(QtCore.QObject):
         self._script_jobs: list[int] = []
         self._sent_scene: str | None = None  # the scene the hub was last told about
         self._log_all = False                # False: warnings and errors only
+        self._console_running = False        # console code is running: its output goes in the reply
         self._log_buffer: list[list[str]] = []
         self._log_dropped = 0
         self._output_callback = None
@@ -152,6 +154,7 @@ class HubLink(QtCore.QObject):
             environment=os.environ.get(ENVIRONMENT_VARIABLE, ""),
             boosted=BOOST_VARIABLE in os.environ,
             skipped=[name for name in os.environ.get(BOOST_VARIABLE, "").split(os.pathsep) if name],
+            console=console_allowed(),
             scene=self._sent_scene,
             msl_version=_msl_version))
 
@@ -167,7 +170,8 @@ class HubLink(QtCore.QObject):
 
     def _on_request(self, message: dict) -> None:
         """Requests from the hub: a FIXED list (_HANDLERS) — a name that isn't
-        on it is refused; nothing that arrives is executed as code. A handler
+        on it is refused; nothing that arrives is executed as code, with ONE
+        exception that says so by name (run_python, see its handler). A handler
         runs here, in Maya's main thread, and its result is the reply; an
         exception becomes a failure reply, never an error in Maya."""
         name, message_id = message.get("name"), message.get("id", 0)
@@ -206,7 +210,7 @@ class HubLink(QtCore.QObject):
         _flush_log() sends them."""
         try:
             level = self._log_levels.get(kind)
-            if level is None or (level == protocol.LOG_INFO and not self._log_all):
+            if level is None or (level == protocol.LOG_INFO and not self._log_all) or self._console_running:
                 return
             text = str(message).rstrip()
             if not text:
@@ -280,6 +284,65 @@ class HubLink(QtCore.QObject):
                 failed[name] = str(error).strip()
         return {"loaded": loaded, "failed": failed}
 
+    def _handle_run_python(self, data: dict) -> dict:
+        """The console: runs `code` like the Script Editor would — in
+        __main__, so names stay between runs and are the ones the Script
+        Editor sees; the value of a final expression is the result. What
+        the code prints, its result and its traceback come back in the reply
+        AND show in this Maya's Script Editor (with the code itself above
+        them), so whoever sits at Maya sees what was run. One undo step for
+        the whole run.
+
+        While it runs, the log stream is paused (_console_running): the hub
+        gets this output in the reply, and would otherwise get it twice.
+
+        Refused unless this Maya was launched with the console allowed: the
+        hub hides the console for such sessions, but the decision is made
+        HERE, by the process that would run the code."""
+        if not console_allowed():
+            raise PermissionError("the console is off for this Maya (it is on only in a Dev environment)")
+        import ast
+        import contextlib
+        import io
+        import traceback
+        import __main__
+        import maya.cmds as cmds
+
+        code = str(data.get("code") or "")
+        real_out, real_err = sys.stdout, sys.stderr
+        output, result, error = _Tee(real_out), "", ""
+        self._console_running = True
+        cmds.undoInfo(openChunk=True, chunkName="MSL console")
+        try:
+            _write(real_out, code.rstrip() + "\n")  # the code, as the Script Editor would echo it
+            with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+                try:
+                    tree = ast.parse(code, "<MSL console>", "exec")
+                    last = tree.body.pop() if tree.body and isinstance(tree.body[-1], ast.Expr) else None
+                    exec(compile(tree, "<MSL console>", "exec"), __main__.__dict__)
+                    if last is not None:
+                        value = eval(compile(ast.Expression(last.value), "<MSL console>", "eval"), __main__.__dict__)
+                        if value is not None:
+                            result = repr(value)
+                except BaseException as exception:  # also SystemExit / KeyboardInterrupt: Maya must stay up
+                    # The traceback from the user's code on: our own frames above it say nothing.
+                    frames = traceback.extract_tb(exception.__traceback__)
+                    first = next((i for i, frame in enumerate(frames) if frame.filename == "<MSL console>"), None)
+                    shown = []
+                    if first is not None:
+                        shown = ["Traceback (most recent call last):\n"] + traceback.format_list(frames[first:])
+                    error = "".join(shown + traceback.format_exception_only(type(exception), exception))
+            if error:
+                _write(real_err, error)
+            elif result:
+                _write(real_out, "# Result: " + result + "\n")
+        finally:
+            cmds.undoInfo(closeChunk=True)
+            self._console_running = False
+        limit = self.LOG_TEXT_MAX * 4
+        # "traceback", not "error": a reply's own "error" field means the REQUEST failed.
+        return {"output": output.getvalue()[:limit], "result": result[:limit], "traceback": error[:limit]}
+
     _HANDLERS = {
         protocol.PING: _handle_ping,
         protocol.LAUNCH_REPORT: _handle_launch_report,
@@ -287,6 +350,7 @@ class HubLink(QtCore.QObject):
         protocol.PLUGIN_STATE: _handle_plugin_state,
         protocol.LOAD_PLUGINS: _handle_load_plugins,
         protocol.SET_LOG_LEVEL: _handle_set_log_level,
+        protocol.RUN_PYTHON: _handle_run_python,
     }
 
     # --- the scene ---------------------------------------------------------------------
@@ -312,6 +376,43 @@ class HubLink(QtCore.QObject):
         if scene != self._sent_scene:  # new + rename + save fire several events for one change
             self._sent_scene = scene
             self._send(protocol.event(protocol.SCENE, scene=scene))
+
+
+class _Tee(object):
+    """A text stream that keeps what is written to it AND passes it on to
+    `target` (Maya's own stdout): console output is both sent to the hub and
+    shown in the Script Editor."""
+
+    def __init__(self, target):
+        self._target = target
+        self._parts = []
+
+    def write(self, text):
+        self._parts.append(text)
+        _write(self._target, text)
+        return len(text)
+
+    def flush(self):
+        try:
+            self._target.flush()
+        except Exception:
+            pass
+
+    def getvalue(self):
+        return "".join(self._parts)
+
+
+def _write(stream, text):
+    """Writes to one of Maya's output streams; never raises (output must not break a run)."""
+    try:
+        stream.write(text)
+    except Exception:
+        pass
+
+
+def console_allowed() -> bool:
+    """True if this Maya was launched with the hub's console allowed."""
+    return os.environ.get(CONSOLE_VARIABLE, "") == "1"
 
 
 def current() -> HubLink | None:

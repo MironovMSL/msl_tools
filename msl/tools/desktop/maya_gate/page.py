@@ -87,6 +87,10 @@ class MayaGatePage(qt.QtWidgets.QWidget):
     # Tells the launched Maya which environment it is (read by the MSL menu's "Print Launch Report").
     ENVIRONMENT_VARIABLE = "MSL_GATE_ENVIRONMENT"
     VARIABLES_VARIABLE = "MSL_GATE_VARIABLES"   # names of the variables this launch sets (os.pathsep-joined)
+    # Environments whose Mayas accept code from the Sessions tab's console. The launched Maya
+    # is told with MSL_GATE_CONSOLE=1 and enforces it itself (tools/maya/hub_link.py).
+    CONSOLE_ENVIRONMENTS = ("Dev",)
+    CONSOLE_VARIABLE = "MSL_GATE_CONSOLE"
     TAB_KEYS = ("variables", "user_setup", "boost", "sessions")  # tab order; stored by key, not index
     SESSIONS_TAB_TITLE = "Sessions"
     DEFAULTS = {MAYA_KEY: {env: {} for env in ENVIRONMENTS},
@@ -306,6 +310,8 @@ class MayaGatePage(qt.QtWidgets.QWidget):
             set_here.append("PYTHONPATH")  # always extended by the launch (msl_tools, userSetup)
         environment_vars[self.ENVIRONMENT_VARIABLE] = self._environment
         environment_vars[self.VARIABLES_VARIABLE] = os.pathsep.join(set_here)
+        if self._environment in self.CONSOLE_ENVIRONMENTS:
+            environment_vars[self.CONSOLE_VARIABLE] = "1"
 
         self._user_setup_tab.save()  # launch with what's on screen, not the last autosave
         environment_vars = self._user_setup_store.launch_environment(self._environment, environment_vars)

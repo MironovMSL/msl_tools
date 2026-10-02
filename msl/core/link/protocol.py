@@ -40,10 +40,14 @@ RELOAD_CODE = "reload_code"       # -> {"modules": how many msl_tools modules we
 PLUGIN_STATE = "plugin_state"     # {"names": [...]} -> {"loaded": [those of them that are loaded]}
 LOAD_PLUGINS = "load_plugins"     # {"names": [...]} -> {"loaded": [...], "failed": {name: why}}
 SET_LOG_LEVEL = "set_log_level"   # {"all": bool}: also send plain messages, not only warnings / errors
+# The one request that runs code. Maya refuses it unless it was started with the console
+# allowed (MSL_GATE_CONSOLE=1 - Maya Gate sets it for the Dev environment only).
+RUN_PYTHON = "run_python"         # {"code": str} -> {"output": str, "result": str, "traceback": str}
 
 # Levels of a log entry.
 LOG_ERROR, LOG_WARNING, LOG_INFO, LOG_TRACE = "error", "warning", "info", "trace"
 LOG_LEVELS = (LOG_ERROR, LOG_WARNING, LOG_INFO, LOG_TRACE)
+LOG_INPUT = "input"   # hub side only: code the user sent from the console
 
 
 class ProtocolError(Exception):

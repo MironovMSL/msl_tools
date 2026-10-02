@@ -20,7 +20,10 @@ Safety: it listens on 127.0.0.1 only (not reachable from the network), and
 a connection is a session only after a hello carrying the hub's token, which
 only a Maya launched by this hub was given (environment variable). Anything
 else is dropped. Messages are data (core/link/protocol.py) — nothing here
-executes code that arrives.
+executes code that arrives. The other way round there is exactly one
+request that carries code, `run_python` (the Sessions tab's console), and
+Maya's side refuses it unless that Maya was launched with the console
+allowed — see tools/maya/hub_link.py.
 """
 import secrets
 import time

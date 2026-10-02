@@ -6,10 +6,54 @@ from msl_tools.msl.core.link import protocol
 from msl_tools.msl.core.link.session import MayaSession
 from msl_tools.msl.ui.maya_link.server import MayaLinkServer
 from msl_tools.msl.ui.theme.qss import make_rounded_popup, repolish
-from msl_tools.msl.ui.widgets.atoms.editors import LogView
+from msl_tools.msl.ui.widgets.atoms.editors import CodeEditor, LogView
 from msl_tools.msl.ui.widgets.atoms.segmented.segmented_control import SegmentedControl
 from msl_tools.msl.ui.widgets.atoms.surfaces import StableScrollArea
 from msl_tools.msl.ui.widgets.windows.text_dialog import TextDialog
+
+
+class _ConsoleInput(CodeEditor):
+    """Private: the console's input — a small Python editor. Ctrl+Enter
+    sends it; Ctrl+Up / Ctrl+Down walk through what was sent before."""
+
+    HEIGHT = 74
+    HISTORY_KEPT = 50
+
+    run_requested = qt.QtCore.Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedHeight(self.HEIGHT)
+        self.setPlaceholderText("Python for the selected Maya \u2014 Ctrl+Enter runs it, Ctrl+Up / Down: earlier code")
+        self._history: list[str] = []
+        self._history_index = 0   # == len(history): the line being written, not an old one
+        self._draft = ""
+
+    def remember(self, code: str) -> None:
+        """Adds `code` to the history (called once it was sent)."""
+        if code and (not self._history or self._history[-1] != code):
+            self._history.append(code)
+            del self._history[:-self.HISTORY_KEPT]
+        self._history_index = len(self._history)
+        self._draft = ""
+
+    def keyPressEvent(self, event) -> None:
+        control = bool(event.modifiers() & qt.QtCore.Qt.KeyboardModifier.ControlModifier)
+        key = event.key()
+        if control and key in (qt.QtCore.Qt.Key.Key_Return, qt.QtCore.Qt.Key.Key_Enter):
+            self.run_requested.emit()
+        elif control and key in (qt.QtCore.Qt.Key.Key_Up, qt.QtCore.Qt.Key.Key_Down) and self._history:
+            self._walk_history(-1 if key == qt.QtCore.Qt.Key.Key_Up else 1)
+        else:
+            super().keyPressEvent(event)
+
+    def _walk_history(self, step: int) -> None:
+        if self._history_index == len(self._history):
+            self._draft = self.toPlainText()  # what was being written comes back at the end
+        self._history_index = max(0, min(len(self._history), self._history_index + step))
+        at_end = self._history_index == len(self._history)
+        self.setPlainText(self._draft if at_end else self._history[self._history_index])
+        self.moveCursor(qt.QtGui.QTextCursor.MoveOperation.End)
 
 
 class _SessionRow(qt.QtWidgets.QWidget):
@@ -157,10 +201,19 @@ class SessionsTab(qt.QtWidgets.QWidget):
     code" — which gives the session a new id — doesn't lose them; a Maya
     that closed (or crashed) keeps its log on screen for GONE_GRACE_S.
 
+    The console (under the log, only while the selected Maya allows it —
+    one started in a Dev environment): a small Python editor; Ctrl+Enter or
+    "Run" sends the code to that Maya (RUN_PYTHON), which runs it like its
+    Script Editor would. The code, what it printed, its result or its
+    traceback go into that Maya's log. Whether a Maya accepts code is
+    decided by Maya itself (it was launched with MSL_GATE_CONSOLE=1); the
+    tab only hides the console where it would be refused.
+
     Colors: maya_gate.qss (SessionsTab ...).
     """
 
     REFRESH_MS = 30_000  # "12 min" labels
+    CONSOLE_TIMEOUT_MS = 600_000  # code may run long; Maya is busy meanwhile anyway
     MESSAGE_MS = 8000    # how long the last request's outcome stays
     REPORT_TIMEOUT_MS = 15_000
     RELOAD_TIMEOUT_MS = 20_000
@@ -212,6 +265,20 @@ class SessionsTab(qt.QtWidgets.QWidget):
         self._clear_log_button = _SessionRow._action("Clear", "Empty this Maya\u2019s log here (nothing changes in Maya)")
         self._log_view = LogView("Warnings and errors from the selected Maya\u2019s Script Editor appear here.")
 
+        self._console_input = _ConsoleInput()
+        self._run_button = qt.QtWidgets.QPushButton("Run")
+        self._run_button.setProperty("primary", True)
+        self._run_button.setToolTip("Run this code in the selected Maya (Ctrl+Enter)")
+        self._console = qt.QtWidgets.QWidget()
+        console_layout = qt.QtWidgets.QHBoxLayout(self._console)
+        console_layout.setContentsMargins(0, 0, 0, 0)
+        console_layout.setSpacing(6)
+        console_layout.addWidget(self._console_input, 1)
+        console_layout.addWidget(self._run_button, 0, qt.QtCore.Qt.AlignmentFlag.AlignBottom)
+        self._console.hide()
+        self._console_input.run_requested.connect(self._on_run_code)
+        self._run_button.clicked.connect(self._on_run_code)
+
         self._message_label = qt.QtWidgets.QLabel()
         self._message_label.setObjectName("sessionsMessage")
         self._message_label.setWordWrap(True)
@@ -251,6 +318,7 @@ class SessionsTab(qt.QtWidgets.QWidget):
         layout.addWidget(self._message_label)
         layout.addLayout(log_header)
         layout.addWidget(self._log_view, 1)
+        layout.addWidget(self._console)
         layout.addWidget(self._hint_label)
 
         self._server.log_received.connect(self._on_log)
@@ -339,6 +407,9 @@ class SessionsTab(qt.QtWidgets.QWidget):
             row.set_selected(session.pid == self._selected_pid)
             row.set_problems(*self._problems.get(session.pid, [0, 0]))
         self._update_log_title(pids.get(self._selected_pid))
+        # The console: only for a selected Maya that is here and accepts code.
+        selected = pids.get(self._selected_pid)
+        self._console.setVisible(selected is not None and selected.console)
 
     # --- the log ---------------------------------------------------------------------
 
@@ -389,6 +460,50 @@ class SessionsTab(qt.QtWidgets.QWidget):
         row = self._rows.get(session_id)
         if row is not None:
             row.set_problems(*problems)
+
+    def _add_to_log(self, pid: int, level: str, text: str) -> None:
+        """A line of ours in Maya `pid`'s log (console input / output) — not counted as a problem."""
+        now = time.time()
+        self._logs.setdefault(pid, []).append((level, text, now))
+        if pid == self._selected_pid:
+            self._log_view.append_entry(level, text, now)
+
+    # --- the console -------------------------------------------------------------------
+
+    def _on_run_code(self) -> None:
+        """Sends the console's code to the selected Maya; code, output, result and
+        traceback all land in that Maya's log."""
+        session = self._session_by_pid(self._selected_pid)
+        code = self._console_input.toPlainText().strip("\n")
+        if session is None or not session.console or not code.strip() or not self._run_button.isEnabled():
+            return
+        pid = session.pid
+        self._add_to_log(pid, protocol.LOG_INPUT, code)
+        self._console_input.remember(code)
+        self._console_input.clear()
+        self._run_button.setEnabled(False)
+
+        def done(reply: dict) -> None:
+            self._run_button.setEnabled(True)
+            row = self._rows.get(session.session_id)
+            if row is not None:
+                row.set_busy(False)
+            data = reply.get("data") or {}
+            if not reply.get("success"):
+                self._add_to_log(pid, protocol.LOG_ERROR, reply.get("error") or "the request failed")
+                return
+            if data.get("output"):
+                self._add_to_log(pid, protocol.LOG_INFO, str(data["output"]).rstrip("\n"))
+            if data.get("traceback"):
+                self._add_to_log(pid, protocol.LOG_ERROR, str(data["traceback"]).rstrip("\n"))
+            elif data.get("result"):
+                self._add_to_log(pid, protocol.LOG_INFO, str(data["result"]))
+
+        row = self._rows.get(session.session_id)
+        if row is not None:
+            row.set_busy(True)
+        self._server.request(session.session_id, protocol.RUN_PYTHON, on_reply=done,
+                             timeout_ms=self.CONSOLE_TIMEOUT_MS, code=code)
 
     def _on_level_changed(self, option: str) -> None:
         """Problems / All — for every connected Maya (and those that join later)."""

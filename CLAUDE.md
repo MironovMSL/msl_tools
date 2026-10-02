@@ -528,8 +528,8 @@ What changed vs. the original (all deliberate, not oversights):
     taken — a second hub) and a random token, both kept in
     `configs/desktop/maya_link`, so a Maya that outlives a hub restart
     reconnects. A connection becomes a session only after a `hello` with
-    the token (5 s to say it); anything else is dropped. Nothing received
-    is executed.
+    the token (5 s to say it); anything else is dropped. Nothing the hub
+    RECEIVES is executed.
   - `tools/maya/hub_link.py` (inside Maya): QTcpSocket in Maya's main
     thread, hello on connect, a `scene` event on SceneOpened /
     NewSceneOpened / SceneSaved (sent once per real change), retry every
@@ -585,6 +585,30 @@ What changed vs. the original (all deliberate, not oversights):
     Maya's PID, not the session id ("Reload code" changes the id), and a
     Maya that left keeps its log on screen for GONE_GRACE_S (60 s) — a
     crashed Maya is the one whose log is wanted.
+  - The console (step 4): the ONE request that carries code,
+    `run_python` {"code"} -> {"output", "result", "traceback"} (not
+    "error": a reply's own `error` field means the request failed — the
+    name clash once swallowed every traceback). Maya's handler runs the
+    code like the Script Editor would: in `__main__` (names persist and are
+    the Script Editor's own), the value of a final expression is the
+    result, stdout / stderr are captured into the reply AND passed on to
+    Maya's own (`_Tee`), so the Script Editor shows the code, its output,
+    "# Result: ..." or the traceback — whoever sits at Maya sees what was
+    run. While it runs the log stream is paused (`_console_running`), or
+    the hub would get that output twice (checked with the switch on "All").
+    The traceback starts at the user's code, the whole run is one undo
+    step, and BaseException is caught (`sys.exit()` must not take Maya
+    down).
+    WHO MAY: only a Maya launched with `MSL_GATE_CONSOLE=1`, which Maya
+    Gate sets for `MayaGatePage.CONSOLE_ENVIRONMENTS` = ("Dev",). The
+    decision is made in Maya (`hub_link.console_allowed()`, checked on
+    every call) — the hub merely hides the console for sessions whose
+    hello says `console: false`. On the tab: `_ConsoleInput` (a small
+    CodeEditor; Ctrl+Enter runs, Ctrl+Up / Down walk the history) + Run,
+    under the log, shown only for a selected Maya that allows it; the
+    code (level "input", ">>>" in the accent), its output, result and
+    traceback go into that Maya's log and don't count as its problems.
+    Verified with real Maya 2023 + 2025.
   - Offscreen tests of the link must `listen()` on a private port / token,
     never `ensure_listening()`: with the real ones, a real Maya running on
     the machine joins the test hub (it happened).
@@ -593,7 +617,7 @@ What changed vs. the original (all deliberate, not oversights):
   ~2 s), exit; and in 2023 + 2025 every request above — report ~1 s,
   loading MASH into a boosted Maya 0.15 s, reload + rejoin 0.3 s, an unknown
   request refused, Maya's own auto-load list intact after loading a plug-in
-  this way. Still to come: a dev console (send Python to a session).
+  this way. All four planned steps of the link are built.
   Long work in Maya must answer later by `id`, never block the socket.
 - Every launch tells Maya what it is: `MSL_GATE_ENVIRONMENT` (the
   environment) and `MSL_GATE_VARIABLES` (names of the variables this launch
@@ -874,9 +898,10 @@ disk. NOT yet tested: against a real Maya installation (actual launch via
   environment creation, install / reinstall / uninstall, shortcut, hub
   start from the installed copy. Not yet run by hand on a clean machine.
 - Real icon assets for add/delete/copy/drag (currently Unicode placeholders).
-- The Maya connection: steps 1-3 (sessions list, requests hub -> Maya, the
-  log stream Maya -> hub) are built on our own link, not
-  `cmds.commandPort`; a dev console is the one step left.
+- The Maya connection (sessions, requests, log stream, console) is built
+  on our own link, not `cmds.commandPort`. Not built: "open a scene" from
+  the hub (it can discard unsaved work — needs a confirmation), Mayas not
+  started from the hub joining it, Maya 2020 (Python 2).
 - Boost start: built and verified against real Maya 2020 / 2025 / 2026 on
   COPIES of the preferences (MAYA_APP_DIR in %TEMP%); not yet used on the
   user's real preferences, nor released.

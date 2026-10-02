@@ -112,6 +112,7 @@ LogView {
     qproperty-errorColor:   var(--error);
     qproperty-warningColor: var(--warning);
     qproperty-mutedColor:   var(--text-secondary);
+    qproperty-inputColor:   var(--accent);
 }
 
 /* --- TextDialog: a report to read and copy ----------------------------------------- */

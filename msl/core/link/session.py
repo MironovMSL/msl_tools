@@ -20,6 +20,7 @@ class MayaSession:
         scene: Path of the open scene ("" = untitled).
         boosted: Started with boost start.
         skipped: Plug-ins boost start left out at startup (they may have been loaded since).
+        console: This Maya accepts code from the hub's console (a Dev environment).
         msl_version: Version of msl_tools loaded in that Maya.
         connected_at: time.time() when it connected.
     """
@@ -32,6 +33,7 @@ class MayaSession:
     scene: str = ""
     boosted: bool = False
     skipped: list[str] = field(default_factory=list)
+    console: bool = False
     msl_version: str = ""
     connected_at: float = field(default_factory=time.time)
 
@@ -61,4 +63,5 @@ class MayaSession:
                    scene=str(data.get("scene") or ""),
                    boosted=bool(data.get("boosted")),
                    skipped=[str(name) for name in data.get("skipped") or [] if name],
+                   console=bool(data.get("console")),
                    msl_version=str(data.get("msl_version") or ""))
