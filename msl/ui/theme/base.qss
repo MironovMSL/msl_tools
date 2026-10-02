@@ -377,6 +377,10 @@ QMenu::item {
     padding: 5px 24px 5px 12px;
     border-radius: 4px;
 }
+/* An item's icon: set in from the item's rounded edge, like its text is on the right. */
+QMenu::icon {
+    padding-left: 6px;
+}
 QMenu::item:selected {
     background-color: alpha(var(--accent), 18%);
     color: var(--text-primary);

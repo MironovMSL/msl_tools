@@ -111,6 +111,13 @@ SlimScrollBar {
     qproperty-handlePressedColor: alpha(var(--accent), 75%);
 }
 
+/* --- BarStrip: a handful of measurements as thin bars ------------------------------- */
+
+BarStrip {
+    qproperty-accentColor: var(--accent);
+    qproperty-mutedColor:  alpha(var(--text-secondary), 70%);
+}
+
 /* --- LogView: log entries colored by level ------------------------------------------- */
 
 LogView {

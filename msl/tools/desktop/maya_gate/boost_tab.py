@@ -4,6 +4,7 @@ from typing import Callable, Sequence
 import msl_tools.msl.ui.qt_bindings as qt
 from msl_tools.msl.ui.theme.qss import repolish
 from msl_tools.msl.ui.ui_resources import UiResources
+from msl_tools.msl.ui.widgets.atoms.charts import BarStrip
 from msl_tools.msl.ui.widgets.atoms.checkboxes.base_checkbox import BaseCheckbox
 from msl_tools.msl.ui.widgets.atoms.comboboxes.base_combo_box import BaseComboBox
 from msl_tools.msl.ui.widgets.atoms.icons import TintedIcon
@@ -124,6 +125,8 @@ class BoostTab(qt.QtWidgets.QWidget):
     ALL_VERSIONS = "All versions"
     YEAR_COMBO_WIDTH = 104
 
+    CHART_BARS = 24   # timed launches shown as bars next to the last start's time
+
     def __init__(self, store: BoostStore, config, environment: str, years: Sequence[str],
                  app_dir_for: Callable[[], str] | None = None,
                  blocked_reason_for: Callable[[], str] | None = None, parent=None):
@@ -228,6 +231,9 @@ class BoostTab(qt.QtWidgets.QWidget):
         self._timing_label.setWordWrap(True)
         self._timing_label.setTextFormat(qt.QtCore.Qt.TextFormat.RichText)
         self._timing_label.hide()
+        # ... and how the starts before it went: one bar per timed launch.
+        self._timing_chart = BarStrip()
+        self._timing_chart.hide()
 
     def _build_layout(self) -> None:
         header = qt.QtWidgets.QHBoxLayout()
@@ -249,7 +255,12 @@ class BoostTab(qt.QtWidgets.QWidget):
         layout.addLayout(header)
         layout.addWidget(self._notice)
         layout.addWidget(self._scroll, 1)
-        layout.addWidget(self._timing_label)
+        timing = qt.QtWidgets.QHBoxLayout()
+        timing.setContentsMargins(0, 0, 0, 0)
+        timing.setSpacing(12)
+        timing.addWidget(self._timing_label, 1)
+        timing.addWidget(self._timing_chart, 0, qt.QtCore.Qt.AlignmentFlag.AlignBottom)
+        layout.addLayout(timing)
         layout.addWidget(self._hint_label)
 
     def _build_connections(self) -> None:
@@ -346,6 +357,7 @@ class BoostTab(qt.QtWidgets.QWidget):
         last = log.last_measured(self._environment, self._year)
         if last is None:
             self._timing_label.hide()
+            self._timing_chart.hide()
             return
         year = str(last.get("year", ""))
 
@@ -363,6 +375,14 @@ class BoostTab(qt.QtWidgets.QWidget):
         self._timing_label.setToolTip(f"From the click in Maya Gate until Maya was idle after starting up.\n"
                                       f"Last start: {last.get('clicked', '')}")
         self._timing_label.show()
+        # The chart: this version's timed starts here, oldest to newest; a lone bar says nothing.
+        launches = log.measured(self._environment, year, self.CHART_BARS)
+        self._timing_chart.set_bars([
+            (float(entry["ready_seconds"]), bool(entry.get("boosted")),
+             f"{float(entry['ready_seconds']):.1f} s " + ("with boost" if entry.get("boosted") else "without boost")
+             + f"  ·  {entry.get('clicked', '')}")
+            for entry in launches])
+        self._timing_chart.setVisible(len(launches) >= 2)
 
     def _rebuild_rows(self, names: list[str], per_year: dict[str, list[str]]) -> None:
         if list(self._rows) == names:

@@ -214,7 +214,7 @@ msl_tools/                 (repo root)
     named by what the icon IS, not the gesture (`drag_handle`, not
     `dragAndDrop`). Categories: `window/` (chrome: close/maximize/...),
     `actions/` (row/toolbar actions: `drag_handle`, `copy`, `delete`,
-    `browse`, `folder_add`, `clear`, `arrow_right`, `chevron_down`, `add`, `check`, `select_all`; add new action icons here),
+    `browse`, `folder_add`, `clear`, `arrow_right`, `chevron_down`, `add`, `check`, `select_all`, `more`, `report`, `code`, `restart`, `power`; add new action icons here),
     `apps/` (third-party application logos: `maya`; later houdini, blender...
     — named after the app, not the tool that uses it, so several tools can
     share one), `tools/` (sidebar icons of our OWN hub tools, one-color like
@@ -512,6 +512,11 @@ What changed vs. the original (all deliberate, not oversights):
   52.0 s without boost" (those are real numbers: windowed Maya 2025 on
   this machine, 9 heavy plug-ins skipped); Print Launch Report shows the
   session's own. No userSetup (MAYA_SKIP_USERSETUP_PY) = no measurement.
+  Next to that line a `BarStrip` (atoms/charts/) draws the last
+  CHART_BARS (24) timed starts of that version in the environment
+  (`LaunchLog.measured()`), oldest on the left: accent = with boost, muted
+  = without; each bar's tooltip says its time and date. Shown from two
+  timed launches on.
 - Sessions tab + the hub <-> Maya link (step 1 of the Maya connection):
   the HUB is the server, every Maya a client — the reverse of Maya's
   commandPort. One port, any number of Mayas, both sides can speak over the
@@ -676,7 +681,18 @@ What changed vs. the original (all deliberate, not oversights):
       Maya again with the scene. A session still waiting as an "ended
       unexpectedly" line isn't listed twice. The history file is first read
       when the tab is shown.
-    - Close / Restart (a row's "Close" -> menu): the request `quit_maya`
+    - A live row has ONE "more" button (GlyphButton, `actions/more`; a
+      right click on the row opens the same menu — `_on_row_menu`): Launch
+      report, Reload code, Load plug-ins… (boosted sessions), Close Maya…,
+      Restart Maya…. Separate link buttons made a full row need ~776 px.
+      The items carry icons (`actions/report`, `code`, `restart`, `power`,
+      `plugins/plugin`). A menu's icons are QIcons, which QSS can't tint:
+      the tab takes the colors as properties (qproperty menuIconColor /
+      menuDangerColor - "Close Maya" is in the danger tone) and tints them
+      with `tint_icon()` when the menu opens (`_menu_icon`), so they follow
+      the theme. `QMenu::icon` (base.qss) sets every menu's icons in from
+      the item's edge.
+    - Close / Restart (the row's menu): the request `quit_maya`
       {"save", "discard"}. The hub asks first (ConfirmDialog: with unsaved
       changes "Save and close" / "Close without saving" / Cancel — no save
       offered for an untitled scene, and that dialog is "danger"); MAYA
@@ -702,8 +718,23 @@ What changed vs. the original (all deliberate, not oversights):
       environment. Measured with real Maya 2025, boost on: the scene opens,
       unmodified. (A hand-written minimal .ma shows as modified right after
       opening — that is Maya filling in what the file lacks, not the launch.)
+      A scene's name in ANY session row (live, ended, history) can also be
+      dragged onto a tile: `_SceneLabel` starts a QDrag carrying the file
+      as a URL (`drag_data()`), so the tile's file drop takes it like one
+      from the file manager — and so does anything else that takes files.
+      A drop goes through `_open_scene` (a scene that is gone = a message).
     - Log lines wrap by default ("Wrap" switch, `LogView.set_wrap()`,
       remembered in `_ui.log_wrap`).
+    - Console snippets: `snippets.py` (`SnippetStore`, Qt-free;
+      `configs/desktop/maya_gate/console/snippets.json`, in the order
+      added). Chips (`QPushButton#snippetChip`, in a `FlowLayout` that
+      wraps) above the console's input: a click runs the snippet in the
+      selected Maya (`_run_code`, the same road as Run — the input isn't
+      touched), a right click offers Run / Edit (the code goes into the
+      input; saving under the same name replaces it in place) / Delete
+      (asks). "+ Save as snippet" asks for the name in place (`_NameField`:
+      Enter takes it, Esc / a click elsewhere gives up) — no dialog. The
+      file is first read when the console first shows.
     - Selection: a Maya that left with an EMPTY log holds the selection only
       RELOAD_GRACE_S (5 s — a "Reload code" comes back sooner) and the log
       title stays blank; one with a log keeps it GONE_GRACE_S, titled
@@ -784,6 +815,7 @@ maya_gate/
     boost.py               BoostStore (Maya's auto-load list, the boosted launch + its loader, reports, backups, Qt-free)
     boost_tab.py           BoostTab (per-environment plug-in list: checked = loaded at startup)
     sessions_tab.py        SessionsTab (the Mayas connected to the hub right now; the finished ones while none is)
+    snippets.py            SnippetStore (named pieces of code for the console, Qt-free)
     session_history.py     SessionHistory / SessionRecord (the sessions that are over, kept across hub restarts, Qt-free)
     version_row.py         MayaVersionRow (animated row of installed versions)
     variable_group.py      CollapsibleVariableGroup (config-aware, owns persistence)
@@ -800,6 +832,8 @@ atoms/buttons/icon_tile_button.py         IconTileButton (QToolButton tile: QSS-
 atoms/icons/tinted_icon.py                TintedIcon (passive one-color icon tinted from QSS: qproperty-iconColor; dimmed when disabled)
 atoms/buttons/glyph_button.py             GlyphButton (custom-painted small icon button; QPushButton's QSS padding leaves no room for a glyph at ~20px)
 atoms/comboboxes/base_combo_box.py        BaseComboBox (was QCustomComboBox)
+atoms/charts/bar_strip.py                 BarStrip (a handful of measurements as thin bars in two tones, each with a tooltip; scaled from zero; qproperty accentColor / mutedColor)
+atoms/layouts/flow_layout.py              FlowLayout (items left to right, wrapping like words; height-for-width; hidden widgets take no room)
 atoms/editors/log_view.py                 LogView (read-only log: time-stamped entries colored by level — error / warning / info / trace — from qproperty colors; follows the tail; its QSS `color` exists only to color the placeholder — a QPlainTextEdit without one draws it near-black)
 atoms/editors/code_editor.py              CodeEditor (line numbers + gutter divider, Python highlighting from --syntax-* tokens, Tab/auto-indent)
 atoms/segmented/segmented_control.py     SegmentedControl (one-of-few picker: sunken track, raised pill that slides; Left/Right keys)

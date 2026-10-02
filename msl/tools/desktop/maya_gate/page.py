@@ -18,6 +18,7 @@ from msl_tools.msl.tools.desktop.maya_gate.user_setup_tab import UserSetupTab
 from msl_tools.msl.tools.desktop.maya_gate.boost import BoostStore
 from msl_tools.msl.tools.desktop.maya_gate.boost_tab import BoostTab
 from msl_tools.msl.tools.desktop.maya_gate.session_history import SessionHistory
+from msl_tools.msl.tools.desktop.maya_gate.snippets import SnippetStore
 from msl_tools.msl.tools.desktop.maya_gate.sessions_tab import SessionsTab
 from msl_tools.msl.ui.maya_link import MayaLinkServer
 from msl_tools.msl.tools.desktop.maya_gate.maya_variables import VariableKind, launch_values, spec_of
@@ -120,6 +121,7 @@ class MayaGatePage(qt.QtWidgets.QWidget):
         self._user_setup_store = UserSetupStore(configs.base_dir / self.TOOL_NAME)
         self._boost_store = BoostStore(configs.base_dir / self.TOOL_NAME)
         self._session_history = SessionHistory(configs.base_dir / self.TOOL_NAME)
+        self._snippet_store = SnippetStore(configs.base_dir / self.TOOL_NAME)
         saved_environment = self._ui.get("environment")
         self._environment = (saved_environment if saved_environment in self.ENVIRONMENTS
                              else self.DEFAULT_ENVIRONMENT)
@@ -157,7 +159,8 @@ class MayaGatePage(qt.QtWidgets.QWidget):
         self._tabs.addTab(self._indented(self._boost_tab), "Boost start")
         self._link = MayaLinkServer.instance()  # the hub's one server; run_hub starts it listening
         self._sessions_tab = SessionsTab(self._link, self._session_history,
-                                         launch=self._launch_scene, settings=self._ui)
+                                         launch=self._launch_scene, settings=self._ui,
+                                         snippets=self._snippet_store)
         self._tabs.addTab(self._indented(self._sessions_tab), self.SESSIONS_TAB_TITLE)
         self._link.sessions_changed.connect(self._update_sessions_tab_title)
         self._link.attention_changed.connect(self._update_sessions_tab_title)
@@ -215,7 +218,7 @@ class MayaGatePage(qt.QtWidgets.QWidget):
         self._toolbar.environment_changed.connect(self._on_environment_changed)
         self._tabs.currentChanged.connect(lambda index: self._save_ui("tab", self.TAB_KEYS[index]))
         self._version_row.clicked.connect(self._launch)
-        self._version_row.scene_dropped.connect(lambda year, path: self._launch(year, scene=path))
+        self._version_row.scene_dropped.connect(self._open_scene)  # from the file manager or a session row
         self._version_row.menu_requested.connect(self._on_version_menu)
 
         self._adder.known_variable_added.connect(self._maya_group.add_variable)

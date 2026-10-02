@@ -9,12 +9,18 @@ from msl_tools.msl.core.resources import Resources
 from msl_tools.msl.ui.process_launcher.process_launcher import ProcessLauncher
 from msl_tools.msl.core.link.session import MayaSession
 from msl_tools.msl.core.environment.processes import is_process_running
+from msl_tools.msl.tools.desktop.maya_gate.snippets import SnippetStore
 from msl_tools.msl.tools.desktop.maya_gate.session_history import (
     LOG_FOLDER_NAME, SessionHistory, SessionRecord, read_log, write_log)
 from msl_tools.msl.ui.widgets.windows.confirm_dialog import ConfirmDialog
 from msl_tools.msl.ui.maya_link.server import MayaLinkServer
-from msl_tools.msl.ui.theme.qss import make_rounded_popup, repolish
+from msl_tools.msl.core.theme import ThemeRegistry
+from msl_tools.msl.ui.icon_manager import tint_icon
+from msl_tools.msl.ui.theme.qss import color_property, make_rounded_popup, repolish
+from msl_tools.msl.ui.ui_resources import UiResources
+from msl_tools.msl.ui.widgets.atoms.buttons.glyph_button import GlyphButton
 from msl_tools.msl.ui.widgets.atoms.editors import CodeEditor, LogView
+from msl_tools.msl.ui.widgets.atoms.layouts import FlowLayout
 from msl_tools.msl.ui.widgets.atoms.segmented.segmented_control import SegmentedControl
 from msl_tools.msl.ui.widgets.atoms.surfaces import StableScrollArea
 from msl_tools.msl.ui.widgets.windows.text_dialog import TextDialog
@@ -64,11 +70,30 @@ class _ConsoleInput(CodeEditor):
         self.moveCursor(qt.QtGui.QTextCursor.MoveOperation.End)
 
 
+class _NameField(qt.QtWidgets.QLineEdit):
+    """Private: a one-line field that asks for a name in place — Enter takes
+    it (returnPressed), Esc or clicking elsewhere gives up (cancelled)."""
+
+    cancelled = qt.QtCore.Signal()
+
+    def keyPressEvent(self, event) -> None:
+        if event.key() == qt.QtCore.Qt.Key.Key_Escape:
+            self.cancelled.emit()
+            return
+        super().keyPressEvent(event)
+
+    def focusOutEvent(self, event) -> None:
+        super().focusOutEvent(event)
+        self.cancelled.emit()
+
+
 class _SceneLabel(qt.QtWidgets.QLabel):
     """Private: a scene's file name — "hero_rig_v07.ma", with a "*" while it
     has unsaved changes (as in Maya's title bar). When the scene is a file,
     the NAME (not the empty space after it) is a link: a click shows the file
-    in the system's file manager, a right click offers that and "Copy path".
+    in the system's file manager, a right click offers that and "Copy path",
+    and it can be DRAGGED — onto a Maya version tile (open it in that Maya),
+    or anywhere else that takes a file.
 
     Signals:
         reveal_failed(str) — neither the file nor its folder is there any more.
@@ -84,6 +109,7 @@ class _SceneLabel(qt.QtWidgets.QLabel):
         self.setMouseTracking(True)
         self._path = ""
         self._pressed = False
+        self._press_position = qt.QtCore.QPoint()
 
     def set_scene(self, path: str, modified: bool = False) -> None:
         self._path = path
@@ -92,7 +118,8 @@ class _SceneLabel(qt.QtWidgets.QLabel):
         if modified:
             lines.append("It has unsaved changes.")
         if path:
-            lines.append("Click: show in folder  ·  right click: copy the path")
+            lines.append("Click: show in folder  ·  drag onto a Maya version: open it there  ·  "
+                         "right click: copy the path")
         self.setToolTip(chr(10).join(lines))
 
     def reveal(self) -> None:
@@ -114,7 +141,26 @@ class _SceneLabel(qt.QtWidgets.QLabel):
             else:
                 self.unsetCursor()
 
+    def drag_data(self) -> qt.QtCore.QMimeData:
+        """What a drag of this scene carries: the file (as a URL) and its path (as text)."""
+        data = qt.QtCore.QMimeData()
+        data.setUrls([qt.QtCore.QUrl.fromLocalFile(self._path)])
+        data.setText(self._path)
+        return data
+
+    def _start_drag(self) -> None:
+        drag = qt.QtGui.QDrag(self)
+        drag.setMimeData(self.drag_data())
+        name_width = min(self.fontMetrics().horizontalAdvance(self.text()) + 4, self.width())
+        drag.setPixmap(self.grab(qt.QtCore.QRect(0, 0, name_width, self.height())))
+        drag.exec(qt.QtCore.Qt.DropAction.CopyAction)
+
     def mouseMoveEvent(self, event) -> None:
+        if self._pressed and (event.position().toPoint() - self._press_position).manhattanLength() \
+                >= qt.QtWidgets.QApplication.startDragDistance():
+            self._pressed = False  # it became a drag: the release that follows is not a click
+            self._start_drag()
+            return
         self._set_hover(self._over_name(event))
         super().mouseMoveEvent(event)
 
@@ -125,6 +171,7 @@ class _SceneLabel(qt.QtWidgets.QLabel):
     def mousePressEvent(self, event) -> None:
         if event.button() == qt.QtCore.Qt.MouseButton.LeftButton and self._over_name(event):
             self._pressed = True
+            self._press_position = event.position().toPoint()
             event.accept()  # a click on the name is for the file, not for selecting the row
             return
         super().mousePressEvent(event)
@@ -152,19 +199,17 @@ class _SceneLabel(qt.QtWidgets.QLabel):
 
 class _SessionRow(qt.QtWidgets.QWidget):
     """Private: one running Maya — a live dot, "Maya 2025", its environment,
-    the open scene, a "boost" mark, what can be asked of it (quiet text
-    buttons), how many errors / warnings it has printed, and how long it
-    has been connected. A click on the row selects it (its log is shown
-    below the list). The row only says what was clicked; the tab talks to
-    Maya."""
+    the open scene, a "boost" mark, how many errors / warnings it has
+    printed, how long it has been connected, and ONE "more" button for what
+    can be asked of it (a right click on the row opens the same menu). A
+    click on the row selects it (its log is shown below the list). The row
+    only says what was clicked; the tab builds the menu and talks to Maya."""
 
     HEIGHT = 30
     DOT_SIZE = 8
+    MENU_BUTTON_SIZE = qt.QtCore.QSize(24, 22)
 
-    report_requested = qt.QtCore.Signal(int)    # session id
-    reload_requested = qt.QtCore.Signal(int)
-    plugins_requested = qt.QtCore.Signal(int)
-    close_requested = qt.QtCore.Signal(int)
+    menu_requested = qt.QtCore.Signal(int)    # session id
     selected = qt.QtCore.Signal(int)
 
     def __init__(self, session: MayaSession, parent=None):
@@ -183,8 +228,8 @@ class _SessionRow(qt.QtWidgets.QWidget):
         self.boost_label.setObjectName("sessionBoost")
         self.busy_label = qt.QtWidgets.QLabel("busy")
         self.busy_label.setObjectName("sessionBusy")
-        self.busy_label.setToolTip("This Maya isn\u2019t answering right now: it is working "
-                                   "(a long script, a heavy scene).\nRequests wait until it is free.")
+        self.busy_label.setToolTip("This Maya isn’t answering right now: it is working "
+                                   "(a long script, a heavy scene)." + chr(10) + "Requests wait until it is free.")
         self.scene_label = _SceneLabel()
         self.time_label = qt.QtWidgets.QLabel()
         self.time_label.setObjectName("sessionTime")
@@ -192,20 +237,15 @@ class _SessionRow(qt.QtWidgets.QWidget):
         self.errors_label.setObjectName("sessionErrors")
         self.warnings_label = qt.QtWidgets.QLabel()
         self.warnings_label.setObjectName("sessionWarnings")
-        self.plugins_button = self._action("Plug-ins", "Load plug-ins that boost start left out \u2014 "
-                                                       "in this running Maya, no restart")
-        self.reload_button = self._action("Reload code", "Re-read msl_tools from disk in this Maya and rebuild "
-                                                         "the MSL menu\n(open windows keep their old code until reopened)")
-        self.report_button = self._action("Report", "How this Maya was started: environment, preferences, "
-                                                    "variables, userSetup files, plug-ins")
-        self.plugins_button.clicked.connect(lambda: self.plugins_requested.emit(self.session_id))
-        self.reload_button.clicked.connect(lambda: self.reload_requested.emit(self.session_id))
-        self.report_button.clicked.connect(lambda: self.report_requested.emit(self.session_id))
-        self.close_button = self._action("Close", "Close or restart this Maya (asks first)")
-        self.close_button.clicked.connect(lambda: self.close_requested.emit(self.session_id))
+        self.menu_button = GlyphButton("⋯", "Report, reload code, plug-ins, close, restart",
+                                       self.MENU_BUTTON_SIZE)
+        icon = UiResources().iconManager.get_icon("more", sub_folder="actions")
+        if icon is not None and not icon.isNull():
+            self.menu_button.set_icon(icon)
+        self.menu_button.clicked.connect(lambda: self.menu_requested.emit(self.session_id))
 
         layout = qt.QtWidgets.QHBoxLayout(self)
-        layout.setContentsMargins(12, 0, 12, 0)
+        layout.setContentsMargins(12, 0, 8, 0)
         layout.setSpacing(8)
         layout.addWidget(self.dot)
         layout.addWidget(self.version_label)
@@ -215,11 +255,8 @@ class _SessionRow(qt.QtWidgets.QWidget):
         layout.addWidget(self.scene_label, 1)
         layout.addWidget(self.errors_label)
         layout.addWidget(self.warnings_label)
-        layout.addWidget(self.plugins_button)
-        layout.addWidget(self.reload_button)
-        layout.addWidget(self.report_button)
-        layout.addWidget(self.close_button)
         layout.addWidget(self.time_label)
+        layout.addWidget(self.menu_button)
         self.set_session(session)
         self.set_problems(0, 0)
 
@@ -227,6 +264,10 @@ class _SessionRow(qt.QtWidgets.QWidget):
         if event.button() == qt.QtCore.Qt.MouseButton.LeftButton:
             self.selected.emit(self.session_id)
         super().mousePressEvent(event)
+
+    def contextMenuEvent(self, event) -> None:
+        if self.menu_button.isEnabled():
+            self.menu_requested.emit(self.session_id)
 
     def set_selected(self, selected: bool) -> None:
         if bool(self.property("selected")) != selected:
@@ -236,16 +277,17 @@ class _SessionRow(qt.QtWidgets.QWidget):
     def set_problems(self, errors: int, warnings: int) -> None:
         """Counters of what this Maya printed since it connected (or since "Clear")."""
         self.errors_label.setText(str(errors))
-        self.errors_label.setToolTip(f"{errors} error(s) in this Maya\u2019s Script Editor")
+        self.errors_label.setToolTip(f"{errors} error(s) in this Maya’s Script Editor")
         self.errors_label.setVisible(errors > 0)
         self.warnings_label.setText(str(warnings))
-        self.warnings_label.setToolTip(f"{warnings} warning(s) in this Maya\u2019s Script Editor")
+        self.warnings_label.setToolTip(f"{warnings} warning(s) in this Maya’s Script Editor")
         self.warnings_label.setVisible(warnings > 0)
 
     @staticmethod
     def _action(text: str, tooltip: str) -> qt.QtWidgets.QPushButton:
+        """A quiet accent link (maya_gate.qss: QPushButton#sessionAction)."""
         button = qt.QtWidgets.QPushButton(text)
-        button.setObjectName("sessionAction")  # maya_gate.qss: a quiet accent link
+        button.setObjectName("sessionAction")
         button.setFlat(True)
         button.setToolTip(tooltip)
         button.setCursor(qt.QtCore.Qt.CursorShape.PointingHandCursor)
@@ -254,8 +296,7 @@ class _SessionRow(qt.QtWidgets.QWidget):
 
     def set_busy(self, busy: bool) -> None:
         """While Maya works on a request, nothing else can be asked of it."""
-        for button in (self.plugins_button, self.reload_button, self.report_button, self.close_button):
-            button.setEnabled(not busy)
+        self.menu_button.setEnabled(not busy)
 
     def set_session(self, session: MayaSession) -> None:
         self.session_id = session.session_id
@@ -264,7 +305,6 @@ class _SessionRow(qt.QtWidgets.QWidget):
         # Safe here (unlike on a parentless widget): the labels already belong to this row.
         self.environment_label.setVisible(bool(session.environment))
         self.boost_label.setVisible(session.boosted)
-        self.plugins_button.setVisible(bool(session.skipped))
         self.busy_label.setVisible(session.busy)
         state = "busy" if session.busy else ""
         if self.dot.property("state") != state:
@@ -489,6 +529,10 @@ class SessionsTab(qt.QtWidgets.QWidget):
     traceback go into that Maya's log. Whether a Maya accepts code is
     decided by Maya itself (it was launched with MSL_GATE_CONSOLE=1); the
     tab only hides the console where it would be refused.
+    Snippets (SnippetStore): code saved under a name becomes a chip above
+    the input — a click runs it in the selected Maya, a right click offers
+    Edit (the code goes into the input) and Delete. "+ Save as snippet"
+    asks for the name in place (_NameField).
 
     Colors: maya_gate.qss (SessionsTab ...).
     """
@@ -507,11 +551,25 @@ class SessionsTab(qt.QtWidgets.QWidget):
     QUIT_TIMEOUT_MS = 120_000     # "save and close": saving a heavy scene takes Maya a while
     RESTART_WAIT_S = 90           # how long a restart waits for the old Maya's process to be gone
     LOG_PLACEHOLDER = "Warnings and errors from the selected Maya’s Script Editor appear here."
+    SNIPPET_TIP_LINES = 12        # lines of a snippet's code shown in its chip's tooltip
+    MENU_ICON_SIZE = 16
+
+    # Colors of the row menu's icons (maya_gate.qss): a menu's icons are QIcons, which QSS
+    # can't tint - the tab takes the colors as properties and tints them when the menu opens.
+    menuIconColor = color_property("_menu_icon_color", None)
+    menuDangerColor = color_property("_menu_danger_color", None)
     HISTORY_CAPTION_HEIGHT = 24
 
     def __init__(self, server: MayaLinkServer, history: SessionHistory | None = None, launch=None,
-                 settings=None, parent=None):
+                 settings=None, snippets: SnippetStore | None = None, parent=None):
         super().__init__(parent)
+        fallback = ThemeRegistry.fallback()  # until QSS applies
+        self._menu_icon_color = qt.QtGui.QColor(fallback.text_secondary)
+        self._menu_danger_color = qt.QtGui.QColor(fallback.error)
+        self._snippets = snippets                 # None: the console has no snippets
+        self._snippet_chips: list = []
+        self._snippets_shown = False              # the snippet file is first read when the console shows
+        self._editing_snippet = ""                # the snippet whose code was put into the editor to change
         self._server = server
         self._history = history                   # None: finished sessions aren't kept
         self._launch = launch                     # (year, environment, scene) -> "" or an error; None: can't launch
@@ -599,12 +657,35 @@ class SessionsTab(qt.QtWidgets.QWidget):
         self._run_button = qt.QtWidgets.QPushButton("Run")
         self._run_button.setProperty("primary", True)
         self._run_button.setToolTip("Run this code in the selected Maya (Ctrl+Enter)")
+        # Snippets: saved pieces of code as chips above the input - one click runs one.
+        self._save_snippet_button = _SessionRow._action(
+            "+ Save as snippet", "Keep the code in the console under a name — it becomes a chip here, "
+                                 "one click runs it in the selected Maya")
+        self._snippet_name = _NameField()
+        self._snippet_name.setPlaceholderText("Snippet name, then Enter")
+        self._snippet_name.setFixedWidth(190)
+        self._snippets_bar = qt.QtWidgets.QWidget()
+        self._snippets_layout = FlowLayout(self._snippets_bar, spacing=6)
+        self._snippets_layout.addWidget(self._save_snippet_button)
+        self._snippets_layout.addWidget(self._snippet_name)
+        self._snippet_name.hide()
+        self._save_snippet_button.clicked.connect(self._on_save_snippet)
+        self._snippet_name.returnPressed.connect(self._on_snippet_named)
+        self._snippet_name.cancelled.connect(self._snippet_name.hide)
+
         self._console = qt.QtWidgets.QWidget()
-        console_layout = qt.QtWidgets.QHBoxLayout(self._console)
+        input_row = qt.QtWidgets.QHBoxLayout()
+        input_row.setContentsMargins(0, 0, 0, 0)
+        input_row.setSpacing(6)
+        input_row.addWidget(self._console_input, 1)
+        input_row.addWidget(self._run_button, 0, qt.QtCore.Qt.AlignmentFlag.AlignBottom)
+        console_layout = qt.QtWidgets.QVBoxLayout(self._console)
         console_layout.setContentsMargins(0, 0, 0, 0)
-        console_layout.setSpacing(6)
-        console_layout.addWidget(self._console_input, 1)
-        console_layout.addWidget(self._run_button, 0, qt.QtCore.Qt.AlignmentFlag.AlignBottom)
+        console_layout.setSpacing(4)
+        console_layout.addWidget(self._snippets_bar)
+        console_layout.addLayout(input_row)
+        if self._snippets is None:
+            self._snippets_bar.hide()
         self._console.hide()
         self._console_input.run_requested.connect(self._on_run_code)
         self._run_button.clicked.connect(self._on_run_code)
@@ -688,10 +769,7 @@ class SessionsTab(qt.QtWidgets.QWidget):
             row = self._rows.get(session_id)
             if row is None:
                 row = _SessionRow(session)
-                row.report_requested.connect(self._on_report)
-                row.reload_requested.connect(self._on_reload)
-                row.plugins_requested.connect(self._on_plugins)
-                row.close_requested.connect(self._on_close_menu)
+                row.menu_requested.connect(self._on_row_menu)
                 row.selected.connect(self._select_session)
                 row.scene_label.reveal_failed.connect(self._on_reveal_failed)
                 self._rows[session_id] = row
@@ -802,6 +880,9 @@ class SessionsTab(qt.QtWidgets.QWidget):
         # The console: only for a selected Maya that is here and accepts code.
         selected = pids.get(self._selected_pid)
         self._console.setVisible(selected is not None and selected.console)
+        if self._console.isVisible() and not self._snippets_shown:
+            self._snippets_shown = True  # first time the console is on screen: read the snippets
+            self._rebuild_snippets()
 
     # --- the log ---------------------------------------------------------------------
 
@@ -1000,17 +1081,43 @@ class SessionsTab(qt.QtWidgets.QWidget):
             session = info["session"]
             self._start(session.version, session.environment, session.scene)
 
-    def _on_close_menu(self, session_id: int) -> None:
-        row = self._rows.get(session_id)
-        if row is None:
+    def _menu_icon(self, name: str, sub_folder: str, danger: bool = False) -> qt.QtGui.QIcon:
+        """A one-color icon for a menu item, in the theme's color (an empty icon if the file is missing)."""
+        icon = UiResources().iconManager.get_icon(name, sub_folder=sub_folder)
+        if icon is None or icon.isNull():
+            return qt.QtGui.QIcon()
+        color = self._menu_danger_color if danger else self._menu_icon_color
+        return qt.QtGui.QIcon(tint_icon(icon, self.MENU_ICON_SIZE, self.devicePixelRatioF(), color))
+
+    def _on_row_menu(self, session_id: int) -> None:
+        """Everything that can be asked of one running Maya, as a menu under the row's button."""
+        row, session = self._rows.get(session_id), self._server.session(session_id)
+        if row is None or session is None:
             return
         menu = make_rounded_popup(qt.QtWidgets.QMenu(self))
         menu.setAttribute(qt.QtCore.Qt.WidgetAttribute.WA_DeleteOnClose, True)
-        menu.addAction("Close Maya…").triggered.connect(lambda: self._close_maya(session_id, restart=False))
+        menu.setToolTipsVisible(True)
+
+        def add(text: str, icon: tuple, tooltip: str, handler, danger: bool = False) -> None:
+            action = menu.addAction(self._menu_icon(*icon, danger=danger), text)
+            action.setToolTip(tooltip)
+            action.triggered.connect(lambda _checked=False: handler())
+
+        add("Launch report", ("report", "actions"), "How this Maya was started: environment, preferences, "
+            "variables, userSetup files, plug-ins", lambda: self._on_report(session_id))
+        add("Reload code", ("code", "actions"), "Re-read msl_tools from disk in this Maya and rebuild the MSL menu"
+            + chr(10) + "(open windows keep their old code until reopened)", lambda: self._on_reload(session_id))
+        if session.skipped:
+            add("Load plug-ins…", ("plugin", "plugins"), "Load plug-ins that boost start left out — in this "
+                "running Maya, no restart", lambda: self._on_plugins(session_id))
+        menu.addSeparator()
         if self._launch is not None:
-            menu.addAction("Restart Maya…").triggered.connect(lambda: self._close_maya(session_id, restart=True))
-        self._close_menu = menu  # for tests; the menu deletes itself on close
-        menu.popup(row.close_button.mapToGlobal(qt.QtCore.QPoint(0, row.close_button.height())))
+            add("Restart Maya…", ("restart", "actions"), "Close this Maya and start it again: same version, "
+                "environment and scene (asks first)", lambda: self._close_maya(session_id, restart=True))
+        add("Close Maya…", ("power", "actions"), "Close this Maya (asks first)",
+            lambda: self._close_maya(session_id, restart=False), danger=True)
+        self._row_menu = menu  # for tests; the menu deletes itself on close
+        menu.popup(row.menu_button.mapToGlobal(qt.QtCore.QPoint(0, row.menu_button.height())))
 
     def _close_maya(self, session_id: int, restart: bool) -> None:
         """Closes (or restarts) a Maya after asking: unsaved changes are saved,
@@ -1092,16 +1199,21 @@ class SessionsTab(qt.QtWidgets.QWidget):
     # --- the console -------------------------------------------------------------------
 
     def _on_run_code(self) -> None:
-        """Sends the console's code to the selected Maya; code, output, result and
-        traceback all land in that Maya's log."""
+        """Runs what is in the console's input, then empties it (the history keeps it)."""
+        code = self._console_input.toPlainText().strip(chr(10))
+        if self._run_code(code):
+            self._console_input.remember(code)
+            self._console_input.clear()
+
+    def _run_code(self, code: str) -> bool:
+        """Sends `code` to the selected Maya; code, output, result and traceback
+        all land in that Maya's log. False if it wasn't sent (no such Maya, no
+        code, or the previous run isn't back yet)."""
         session = self._session_by_pid(self._selected_pid)
-        code = self._console_input.toPlainText().strip("\n")
         if session is None or not session.console or not code.strip() or not self._run_button.isEnabled():
-            return
+            return False
         pid = session.pid
         self._add_to_log(pid, protocol.LOG_INPUT, code)
-        self._console_input.remember(code)
-        self._console_input.clear()
         self._run_button.setEnabled(False)
 
         def done(reply: dict) -> None:
@@ -1125,6 +1237,91 @@ class SessionsTab(qt.QtWidgets.QWidget):
             row.set_busy(True)
         self._server.request(session.session_id, protocol.RUN_PYTHON, on_reply=done,
                              timeout_ms=self.CONSOLE_TIMEOUT_MS, code=code)
+        return True
+
+    # --- snippets ------------------------------------------------------------------------
+
+    def _rebuild_snippets(self) -> None:
+        """One chip per saved snippet, in front of "+ Save as snippet"."""
+        if self._snippets is None:
+            return
+        for chip in self._snippet_chips:
+            self._snippets_layout.removeWidget(chip)
+            chip.hide()
+            chip.deleteLater()
+        self._snippet_chips = []
+        for name in self._snippets.names():
+            chip = qt.QtWidgets.QPushButton(name, self._snippets_bar)
+            chip.setObjectName("snippetChip")  # maya_gate.qss
+            chip.setCursor(qt.QtCore.Qt.CursorShape.PointingHandCursor)
+            chip.setFocusPolicy(qt.QtCore.Qt.FocusPolicy.NoFocus)
+            lines = self._snippets.code(name).split(chr(10))
+            chip.setToolTip(chr(10).join(lines[:self.SNIPPET_TIP_LINES]
+                                         + (["…"] if len(lines) > self.SNIPPET_TIP_LINES else []))
+                            + chr(10) + chr(10) + "Click: run it in the selected Maya  ·  right click: edit, delete")
+            chip.clicked.connect(lambda _checked=False, name=name: self._run_snippet(name))
+            chip.setContextMenuPolicy(qt.QtCore.Qt.ContextMenuPolicy.CustomContextMenu)
+            chip.customContextMenuRequested.connect(
+                lambda position, name=name, chip=chip: self._on_snippet_menu(name, chip.mapToGlobal(position)))
+            self._snippet_chips.append(chip)
+        # FlowLayout keeps the order items were added in: take the two fixed ones out, add them last.
+        for widget in (self._save_snippet_button, self._snippet_name):
+            self._snippets_layout.removeWidget(widget)
+        for widget in self._snippet_chips + [self._save_snippet_button, self._snippet_name]:
+            self._snippets_layout.addWidget(widget)
+            if widget is not self._snippet_name:
+                widget.show()
+        self._snippets_layout.invalidate()
+
+    def _run_snippet(self, name: str) -> None:
+        if not self._run_code(self._snippets.code(name)) and not self._run_button.isEnabled():
+            self._say("Maya is still running the previous code.")
+
+    def _on_snippet_menu(self, name: str, position) -> None:
+        menu = make_rounded_popup(qt.QtWidgets.QMenu(self))
+        menu.setAttribute(qt.QtCore.Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        menu.addAction("Run").triggered.connect(lambda: self._run_snippet(name))
+        menu.addAction("Edit").triggered.connect(lambda: self._edit_snippet(name))
+        menu.addSeparator()
+        menu.addAction("Delete…").triggered.connect(lambda: self._delete_snippet(name))
+        self._snippet_menu = menu  # for tests; the menu deletes itself on close
+        menu.popup(position)
+
+    def _edit_snippet(self, name: str) -> None:
+        """Puts the snippet's code into the console; saving it under the same name replaces it."""
+        self._editing_snippet = name
+        self._console_input.setPlainText(self._snippets.code(name))
+        self._console_input.setFocus()
+        self._say(f"“{name}” is in the console — change it, then “+ Save as snippet” (same name replaces it).")
+
+    def _delete_snippet(self, name: str) -> None:
+        choice = ConfirmDialog.ask(self, "Delete snippet", f"Delete the snippet “{name}”?",
+                                   choices=[("delete", "Delete"), ("cancel", "Cancel")], kind="danger")
+        if choice == "delete":
+            self._snippets.delete(name)
+            self._rebuild_snippets()
+
+    def _on_save_snippet(self) -> None:
+        if not self._console_input.toPlainText().strip():
+            self._say("Write the code in the console first, then save it as a snippet.")
+            return
+        self._snippet_name.setText(self._editing_snippet)
+        self._snippet_name.show()
+        self._snippets_layout.invalidate()
+        self._snippet_name.setFocus()
+        self._snippet_name.selectAll()
+
+    def _on_snippet_named(self) -> None:
+        name = self._snippet_name.text().strip()
+        code = self._console_input.toPlainText().strip(chr(10))
+        self._snippet_name.hide()
+        if not name or not code.strip():
+            return
+        replaced = name in self._snippets.names()
+        self._snippets.save(name, code)
+        self._editing_snippet = ""
+        self._rebuild_snippets()
+        self._say(f"Snippet “{name}” " + ("updated." if replaced else "saved."), "success")
 
     def _on_level_changed(self, option: str) -> None:
         """Problems / All — for every connected Maya (and those that join later)."""
@@ -1215,7 +1412,7 @@ class SessionsTab(qt.QtWidgets.QWidget):
                 menu.addAction(name).triggered.connect(
                     lambda _checked=False, name=name: self._load_plugins(session.session_id, [name]))
         self._plugins_menu = menu  # for tests; the menu deletes itself on close
-        menu.popup(row.plugins_button.mapToGlobal(qt.QtCore.QPoint(0, row.plugins_button.height())))
+        menu.popup(row.menu_button.mapToGlobal(qt.QtCore.QPoint(0, row.menu_button.height())))
 
     def _load_plugins(self, session_id: int, names: list) -> None:
         def done(session: MayaSession, data: dict) -> None:

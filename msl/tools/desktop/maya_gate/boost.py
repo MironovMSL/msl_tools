@@ -451,6 +451,14 @@ class LaunchLog:
                 found.append(data)
         return found
 
+    def measured(self, environment: str, year: str, limit: int = 24) -> list[dict]:
+        """The last `limit` launches of Maya `year` in `environment` that
+        reported their startup time — oldest first (for a chart)."""
+        found = [entry for entry in self.entries()
+                 if entry.get("environment") == environment and str(entry.get("year")) == str(year)
+                 and "ready_seconds" in entry]
+        return list(reversed(found[:limit]))
+
     def last_measured(self, environment: str, year: str = "", boosted: bool | None = None) -> dict | None:
         """The newest launch of `environment` that reported its startup time
         (optionally of one Maya `year` / only boosted or only normal ones)."""

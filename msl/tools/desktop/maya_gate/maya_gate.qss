@@ -35,6 +35,10 @@ UserSetupTab IconPushButton {
 }
 
 /* Sessions tab: the Mayas running right now. */
+SessionsTab {
+    qproperty-menuIconColor:   var(--text-secondary);   /* icons of a row's menu */
+    qproperty-menuDangerColor: var(--danger);           /* ... of its "Close Maya" */
+}
 SessionsTab QLabel#sessionsTitle {
     color: var(--text-primary);
     font-weight: 600;
@@ -69,6 +73,24 @@ SessionsTab QPushButton#sessionAction {
 }
 SessionsTab QPushButton#sessionAction:disabled {
     color: alpha(var(--text-secondary), 55%);
+}
+/* A console snippet: a small pill - one click runs it. */
+SessionsTab QPushButton#snippetChip {
+    color: var(--text-primary);
+    background: alpha(var(--text-primary), 8%);
+    border: 1px solid transparent;
+    border-radius: 9px;
+    padding: 0px 9px;
+    min-height: 18px;
+    max-height: 18px;
+    font-size: 11px;
+}
+SessionsTab QPushButton#snippetChip:hover {
+    background: alpha(var(--accent), 18%);
+    border-color: alpha(var(--accent), 55%);
+}
+SessionsTab QPushButton#snippetChip:pressed {
+    background: alpha(var(--accent), 30%);
 }
 /* An on / off switch among the quiet links ("Wrap"): dimmed while off. */
 SessionsTab QPushButton#sessionToggle {
