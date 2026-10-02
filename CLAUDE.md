@@ -1021,7 +1021,9 @@ folders. Numbers on a 399-frame 1080p PNG sequence: mp4 in 3-6 s; 720p
 Tests ran against the real 8.0 build with the user's sequence as read-only
 input and everything written into `sandbox/` (blocking and Qt runner,
 cancel, failure, installer with a fake and a real-layout archive through
-`file:///`). NOT run: the real 101 MB download from GitHub.
+`file:///`). The real download ran once too (2026-10-02, into a throwaway
+tools folder): 101 MB in ~4 s, checksum matched, installed and usable in
+16 s in all (most of it the freshly written programs being scanned).
 
 ## Install (the hub is where everything starts)
 
