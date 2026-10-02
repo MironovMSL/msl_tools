@@ -288,13 +288,15 @@ class BoostStore:
         return ""
 
     def prepare_launch(self, environment: str, year: str, skip: list[str],
-                       variables: Mapping[str, str]) -> tuple[dict[str, str], list[str]]:
+                       variables: Mapping[str, str], backup: bool = True) -> tuple[dict[str, str], list[str]]:
         """What a boosted launch of Maya `year` needs: (`variables` with the
         loader on PYTHONPATH and its parameters, extra command-line
-        arguments). Stores a backup of pluginPrefs.mel first. Call it AFTER
+        arguments). Stores a backup of pluginPrefs.mel first (not with
+        backup=False — a preview of the launch). Call it AFTER
         UserSetupStore.launch_environment(), which builds PYTHONPATH."""
         result = self.attach_loader(variables)
-        self._backup_prefs(year, result.get("MAYA_APP_DIR") or None)
+        if backup:
+            self._backup_prefs(year, result.get("MAYA_APP_DIR") or None)
         result[self.SKIP_VARIABLE] = os.pathsep.join(skip)
         result[self.REPORT_VARIABLE] = str(self.report_file(year))
         result[self.ENVIRONMENT_VARIABLE] = environment

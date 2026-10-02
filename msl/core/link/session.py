@@ -19,6 +19,10 @@ class MayaSession:
         environment: The Maya Gate environment it was started in ("" = not from Maya Gate).
         scene: Path of the open scene ("" = untitled).
         modified: The open scene has unsaved changes.
+        autosave: Maya's own autosave is switched on.
+        autosave_folder: Where that Maya writes its autosave files ("" = unknown).
+        startup_seconds: From the click in Maya Gate until Maya was ready (0 = not measured).
+        busy_since: time.time() when it stopped answering (0 while it answers).
         boosted: Started with boost start.
         skipped: Plug-ins boost start left out at startup (they may have been loaded since).
         console: This Maya accepts code from the hub's console (a Dev environment).
@@ -33,6 +37,10 @@ class MayaSession:
     environment: str = ""
     scene: str = ""
     modified: bool = False
+    autosave: bool = False
+    autosave_folder: str = ""
+    startup_seconds: float = 0.0
+    busy_since: float = 0.0
     boosted: bool = False
     skipped: list[str] = field(default_factory=list)
     console: bool = False
@@ -65,7 +73,17 @@ class MayaSession:
                    environment=str(data.get("environment") or ""),
                    scene=str(data.get("scene") or ""),
                    modified=bool(data.get("modified")),
+                   autosave=bool(data.get("autosave")),
+                   autosave_folder=str(data.get("autosave_folder") or ""),
+                   startup_seconds=_number(data.get("startup_seconds")),
                    boosted=bool(data.get("boosted")),
                    skipped=[str(name) for name in data.get("skipped") or [] if name],
                    console=bool(data.get("console")),
                    msl_version=str(data.get("msl_version") or ""))
+
+
+def _number(value) -> float:
+    try:
+        return max(float(value or 0.0), 0.0)
+    except (TypeError, ValueError):
+        return 0.0

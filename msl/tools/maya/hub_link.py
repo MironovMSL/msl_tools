@@ -25,6 +25,7 @@ than Python 3.9 at runtime.
 from __future__ import annotations
 
 import os
+import time
 import sys
 
 try:
@@ -40,6 +41,8 @@ TOKEN_VARIABLE = "MSL_GATE_LINK_TOKEN"
 ENVIRONMENT_VARIABLE = "MSL_GATE_ENVIRONMENT"
 BOOST_VARIABLE = "MSL_GATE_BOOST_SKIP"
 CONSOLE_VARIABLE = "MSL_GATE_CONSOLE"   # "1": this Maya may be sent code (Maya Gate: the Dev environment)
+LAUNCH_TIME_VARIABLE = "MSL_GATE_LAUNCH_TIME"       # time.time() of the click in Maya Gate
+STARTUP_VARIABLE = "MSL_GATE_STARTUP_SECONDS"       # set here once: how long the start took
 OBJECT_NAME = "mslHubLink"
 
 
@@ -60,7 +63,7 @@ class HubLink(QtCore.QObject):
         self._token = token
         self._decoder = protocol.FrameDecoder()
         self._script_jobs: list[int] = []
-        self._sent_scene: tuple | None = None  # (scene, modified) the hub was last told about
+        self._sent_scene: tuple | None = None  # (scene, modified, autosave, its folder) the hub was last told
         self._log_all = False                # False: warnings and errors only
         self._console_running = False        # console code is running: its output goes in the reply
         self._log_buffer: list[list[str]] = []
@@ -165,7 +168,7 @@ class HubLink(QtCore.QObject):
             full_version = str(cmds.about(installedVersion=True)).split()[-1]
         except Exception:
             full_version = ""
-        self._sent_scene = (self._scene(), self._modified())
+        self._sent_scene = self._scene_state()
         # A fresh connection starts on "warnings and errors only": the hub that
         # wants more says so again (it may be a different, restarted hub).
         self._log_all = False
@@ -181,6 +184,9 @@ class HubLink(QtCore.QObject):
             console=console_allowed(),
             scene=self._sent_scene[0],
             modified=self._sent_scene[1],
+            autosave=self._sent_scene[2],
+            autosave_folder=self._sent_scene[3],
+            startup_seconds=_startup_seconds(),
             msl_version=_msl_version))
 
     def _on_ready_read(self) -> None:
@@ -414,6 +420,19 @@ class HubLink(QtCore.QObject):
         except Exception:
             return False
 
+    @staticmethod
+    def _autosave() -> tuple:
+        """(Maya's autosave is on, the folder its files go to)."""
+        import maya.cmds as cmds
+        try:
+            return (bool(cmds.autoSave(query=True, enable=True)),
+                    str(cmds.autoSave(query=True, destinationFolder=True) or ""))
+        except Exception:
+            return (False, "")
+
+    def _scene_state(self) -> tuple:
+        return (self._scene(), self._modified()) + self._autosave()
+
     def _watch_scene(self) -> None:
         import maya.cmds as cmds
         for name in self.SCENE_EVENTS:
@@ -431,10 +450,11 @@ class HubLink(QtCore.QObject):
         only when one of them changed. Reached from Maya's scene events (new +
         rename + save fire several for one change) and from the poll: Maya has
         no event for "the scene was modified"."""
-        state = (self._scene(), self._modified())
+        state = self._scene_state()
         if state != self._sent_scene:
             self._sent_scene = state
-            self._send(protocol.event(protocol.SCENE, scene=state[0], modified=state[1]))
+            self._send(protocol.event(protocol.SCENE, scene=state[0], modified=state[1],
+                                      autosave=state[2], autosave_folder=state[3]))
 
 
 class _Tee(object):
@@ -489,11 +509,29 @@ def start() -> bool:
     if not port.isdigit() or not token or application is None:
         return False
     stop()
+    _startup_seconds()  # measured now, at the first start: Maya has just become idle
     # Owned by the QApplication, so it outlives this module being reloaded
     # (the MSL menu's "Reload Code" drops msl_tools from sys.modules).
     link = HubLink(int(port), token, parent=application)
     link.open()
     return True
+
+
+def _startup_seconds() -> float:
+    """From the click in Maya Gate until this link first started - the moment
+    Maya was idle after starting up. Kept in the environment, so a link
+    restarted later ("Reload code") still reports the start, not itself."""
+    kept = os.environ.get(STARTUP_VARIABLE)
+    if kept is None:
+        try:
+            kept = "%.2f" % max(time.time() - float(os.environ[LAUNCH_TIME_VARIABLE]), 0.0)
+        except (KeyError, ValueError):
+            kept = "0"
+        os.environ[STARTUP_VARIABLE] = kept
+    try:
+        return float(kept)
+    except ValueError:
+        return 0.0
 
 
 def _quit_maya() -> None:

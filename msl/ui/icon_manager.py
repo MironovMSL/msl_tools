@@ -32,6 +32,17 @@ def tint_icon(icon: qt.QtGui.QIcon, side: int, ratio: float,
     return tinted
 
 
+def tinted_menu_icon(icon: "qt.QtGui.QIcon | None", color: qt.QtGui.QColor, ratio: float,
+                     side: int = 16) -> qt.QtGui.QIcon:
+    """`icon` as a one-color QIcon for a QMenu item (an empty icon if there is
+    none). A menu's icons are plain QIcons, which QSS can't tint: the widget
+    that builds the menu takes the color as a QSS-set property and calls
+    this each time the menu opens, so the icons follow the theme."""
+    if icon is None or icon.isNull():
+        return qt.QtGui.QIcon()
+    return qt.QtGui.QIcon(tint_icon(icon, side, ratio, color))
+
+
 class IconManager:
     """Resolves icon names to theme-aware QIcon/QPixmap instances.
 

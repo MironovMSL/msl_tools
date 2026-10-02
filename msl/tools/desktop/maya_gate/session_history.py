@@ -36,6 +36,8 @@ class SessionRecord:
         ended_at: time.time() when it left.
         clean: True = it quit; False = the connection just broke (a crash, a killed process).
         log_file: The log saved for an unclean end ("" = none).
+        forced: The unclean end was a "Force close" from the hub.
+        autosave: The newest autosave of the scene found after an unclean end ("" = none).
     """
 
     pid: int = 0
@@ -48,6 +50,8 @@ class SessionRecord:
     ended_at: float = 0.0
     clean: bool = True
     log_file: str = ""
+    forced: bool = False
+    autosave: str = ""
 
     @property
     def key(self) -> tuple:
@@ -90,7 +94,13 @@ class SessionRecord:
                    connected_at=float(data.get("connected_at") or 0.0),
                    ended_at=float(data.get("ended_at") or 0.0),
                    clean=bool(data.get("clean", True)),
-                   log_file=str(data.get("log_file") or ""))
+                   log_file=str(data.get("log_file") or ""),
+                   forced=bool(data.get("forced")),
+                   autosave=str(data.get("autosave") or ""))
+
+    def outcome_text(self) -> str:
+        """How it ended, in two words."""
+        return "closed" if self.clean else "force closed" if self.forced else "ended unexpectedly"
 
 
 class SessionHistory:
@@ -169,7 +179,7 @@ def write_log(folder: str | Path, record: SessionRecord, entries, full_version: 
                  f"Scene: {record.scene or 'untitled'}",
                  f"Unsaved changes in the scene: {'yes' if record.modified else 'no'}",
                  "Connected: " + time.strftime(clock, time.localtime(record.connected_at)),
-                 ("Closed: " if record.clean else "Ended unexpectedly: ")
+                 ("Closed: " if record.clean else "Force closed: " if record.forced else "Ended unexpectedly: ")
                  + time.strftime(clock, time.localtime(record.ended_at)),
                  "", _LOG_RULE + " (warnings and errors; everything if \"All\" was on) ---"]
         for level, text, at in entries:
@@ -212,3 +222,33 @@ def _remove_log(path: str) -> None:
             Path(path).unlink()
         except OSError:
             pass
+
+
+# --- Maya's autosave files -------------------------------------------------------------------------
+
+UNTITLED_AUTOSAVE = "__AUTO-SAVE__untitled"   # what Maya calls the autosaves of a scene with no file
+
+
+def find_autosave(folder: str, scene: str, since: float) -> str:
+    """The newest autosave Maya wrote for `scene` into `folder` at or after
+    `since` — "" if there is none, or if the scene file itself is newer.
+
+    Maya names them `<scene name>.<number>.ma|mb` (`__AUTO-SAVE__untitled.…`
+    for a scene with no file) — measured with Maya 2025."""
+    if not folder:
+        return ""
+    stem = os.path.splitext(os.path.basename(scene))[0] if scene else UNTITLED_AUTOSAVE
+    pattern = re.compile(re.escape(stem) + r"\.\d+\.m[ab]$", re.IGNORECASE)
+    newest, newest_time = "", since
+    try:
+        saved_at = os.path.getmtime(scene) if scene and os.path.isfile(scene) else 0.0
+        for name in os.listdir(folder):
+            if not pattern.match(name):
+                continue
+            path = os.path.join(folder, name)
+            written = os.path.getmtime(path)
+            if written >= newest_time and written > saved_at:
+                newest, newest_time = path, written
+    except OSError:
+        return ""
+    return newest.replace(os.sep, "/")

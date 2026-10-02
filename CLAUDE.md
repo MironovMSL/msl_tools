@@ -214,7 +214,7 @@ msl_tools/                 (repo root)
     named by what the icon IS, not the gesture (`drag_handle`, not
     `dragAndDrop`). Categories: `window/` (chrome: close/maximize/...),
     `actions/` (row/toolbar actions: `drag_handle`, `copy`, `delete`,
-    `browse`, `folder_add`, `clear`, `arrow_right`, `chevron_down`, `add`, `check`, `select_all`, `more`, `report`, `code`, `restart`, `power`; add new action icons here),
+    `browse`, `folder_add`, `clear`, `arrow_right`, `chevron_down`, `add`, `check`, `select_all`, `more`, `report`, `code`, `restart`, `power`, `play`, `edit`, `scene`, `stop`; add new action icons here),
     `apps/` (third-party application logos: `maya`; later houdini, blender...
     — named after the app, not the tool that uses it, so several tools can
     share one), `tools/` (sidebar icons of our OWN hub tools, one-color like
@@ -704,6 +704,35 @@ What changed vs. the original (all deliberate, not oversights):
       is_process_running` — never `os.kill(pid, 0)` on Windows, it
       terminates; Maya still writes its preferences for ~0.3 s after its
       goodbye), then starts the same version + environment + scene.
+    - Force close: a Maya that doesn't answer (`session.busy`, with
+      `busy_since`) gets "Force close…" in its menu — asks (danger; the
+      default is "Wait"), then `terminate_process(pid)`
+      (core/environment/processes.py). The end that follows is marked
+      `forced` (ended row "force closed at …", `SessionRecord.forced`), and
+      doesn't count as an unread error. A row never disables its menu
+      button: while a request is out (`row.pending`) or Maya is busy, the
+      menu's requests are greyed instead — otherwise a hung Maya's menu
+      couldn't be opened at all.
+    - Autosave after an unclean end: Maya reports its autosave state in the
+      hello and the `scene` event (`autosave`, `autosave_folder` =
+      `cmds.autoSave(q=True, destinationFolder=True)`, the folder in
+      effect). `find_autosave(folder, scene, since)` (session_history.py)
+      picks the newest `<scene name>.<number>.ma|mb` (`__AUTO-SAVE__
+      untitled.…` for a scene with no file — names measured with Maya 2025)
+      written since the session connected AND newer than the scene file.
+      Found: "Open autosave" on the ended row / "Autosave" on the history
+      row (`SessionRecord.autosave`) starts that Maya with the autosave as
+      its scene. Verified with real Maya 2025: killed 2 s after an autosave,
+      the hub found that file. Probing autosave needs a TEMP PROJECT
+      (`cmds.workspace(dir, newWorkspace=True)` + openWorkspace): with a
+      copied MAYA_APP_DIR the project is still the user's real one, and the
+      autosaves land in their Documents (it happened; cleaned up).
+    - A live row's tooltip: process memory (`process_memory(pid)`, read at
+      each refresh), how long the start took (`startup_seconds` — hub_link
+      measures it once at its first start from MSL_GATE_LAUNCH_TIME and
+      keeps it in MSL_GATE_STARTUP_SECONDS, so "Reload code" doesn't
+      re-measure), boost + plug-ins not loaded, "Not answering for …",
+      autosave on / off.
     - The tab launches nothing itself: the page hands it
       `launch(year, environment, scene) -> "" | error`
       (`MayaGatePage._launch_scene`: version still installed, scene still
@@ -711,6 +740,20 @@ What changed vs. the original (all deliberate, not oversights):
       `MayaGatePage._launch(year, environment=None, scene="")` takes the
       named environment's variables, userSetup and boost settings — not
       the toolbar's — and passes the scene as `-file <path>`.
+    - Launch preview: a tile's menu -> "What Maya will get…" ->
+      `MayaGatePage.launch_preview(year)` in a TextDialog: executable,
+      arguments, boost (or why it isn't applied), userSetup, then every
+      variable — the environment's own first, what MSL Tools adds or
+      extends second (folder lists one entry per line; the link token is
+      "(hidden)"). `_prepare_launch(..., preview=True)` is the launch
+      itself minus its traces: no pluginPrefs backup
+      (`BoostStore.prepare_launch(backup=False)`), no launch record, the
+      userSetup editor isn't saved. `_launch` = `_prepare_launch` + the
+      launch record + the process.
+    - Menu icons: `ui/icon_manager.py:tinted_menu_icon(icon, color, ratio)`
+      — the version tile's menu (MayaGatePage qproperty menuIconColor) and
+      the snippet chip's menu use it like the row menu does (`actions/play`,
+      `browse`, `report`, `scene`, `edit`, `delete`, `stop`).
     - Launch with a scene: drop a .ma / .mb on a version tile
       (`ApplicationButton.set_drop_suffixes()` -> `file_dropped`), or right
       click it (`menu_requested` -> the page's menu: Launch, "Open a

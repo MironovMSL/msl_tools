@@ -34,6 +34,10 @@ UserSetupTab IconPushButton {
     padding: 3px 10px 3px 8px;
 }
 
+/* Icons of a version's right-click menu. */
+MayaGatePage {
+    qproperty-menuIconColor: var(--text-secondary);
+}
 /* Sessions tab: the Mayas running right now. */
 SessionsTab {
     qproperty-menuIconColor:   var(--text-secondary);   /* icons of a row's menu */

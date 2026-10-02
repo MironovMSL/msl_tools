@@ -207,6 +207,7 @@ class MayaLinkServer(qt.QtCore.QObject):
         busy = not reply.get("success")
         if busy != peer.session.busy:
             peer.session.busy = busy
+            peer.session.busy_since = time.time() if busy else 0.0
             self.sessions_changed.emit()
 
     def session(self, session_id: int) -> MayaSession | None:
@@ -292,9 +293,12 @@ class MayaLinkServer(qt.QtCore.QObject):
             peer.said_bye = True
             peer.bye_reason = str(data.get("reason") or protocol.BYE_QUIT)
         elif kind == protocol.EVENT and name == protocol.SCENE:
-            scene, modified = str(data.get("scene") or ""), bool(data.get("modified"))
-            if (scene, modified) != (peer.session.scene, peer.session.modified):
-                peer.session.scene, peer.session.modified = scene, modified
+            session = peer.session
+            state = (str(data.get("scene") or ""), bool(data.get("modified")),
+                     bool(data.get("autosave", session.autosave)),  # absent from a Maya with older code
+                     str(data.get("autosave_folder", session.autosave_folder) or ""))
+            if state != (session.scene, session.modified, session.autosave, session.autosave_folder):
+                session.scene, session.modified, session.autosave, session.autosave_folder = state
                 self.sessions_changed.emit()
         elif kind == protocol.EVENT and name == protocol.LOG:
             entries = []

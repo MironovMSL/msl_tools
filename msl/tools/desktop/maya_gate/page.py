@@ -5,7 +5,11 @@ import msl_tools.msl.ui.qt_bindings as qt
 from msl_tools.msl.core.resources import Resources
 from msl_tools.msl.core.fs.maya_paths import MayaPaths
 from msl_tools.msl.ui.process_launcher.process_launcher import ProcessLauncher
-from msl_tools.msl.ui.theme.qss import make_rounded_popup
+from msl_tools.msl.core.theme import ThemeRegistry
+from msl_tools.msl.ui.icon_manager import tinted_menu_icon
+from msl_tools.msl.ui.theme.qss import color_property, make_rounded_popup
+from msl_tools.msl.ui.ui_resources import UiResources
+from msl_tools.msl.ui.widgets.windows.text_dialog import TextDialog
 from msl_tools.msl.ui.widgets.atoms.surfaces import StableScrollArea
 from msl_tools.msl.ui.widgets.windows.confirm_dialog import ConfirmDialog
 from msl_tools.msl.ui.widgets.atoms.tabs import BaseTabWidget
@@ -15,7 +19,7 @@ from msl_tools.msl.tools.desktop.maya_gate.variable_group import CollapsibleVari
 from msl_tools.msl.tools.desktop.maya_gate.variable_adder import EnvVariableAdder
 from msl_tools.msl.tools.desktop.maya_gate.user_setup import UserSetupStore
 from msl_tools.msl.tools.desktop.maya_gate.user_setup_tab import UserSetupTab
-from msl_tools.msl.tools.desktop.maya_gate.boost import BoostStore
+from msl_tools.msl.tools.desktop.maya_gate.boost import BoostStore, LaunchLog
 from msl_tools.msl.tools.desktop.maya_gate.boost_tab import BoostTab
 from msl_tools.msl.tools.desktop.maya_gate.session_history import SessionHistory
 from msl_tools.msl.tools.desktop.maya_gate.snippets import SnippetStore
@@ -95,6 +99,10 @@ class MayaGatePage(qt.QtWidgets.QWidget):
     # is told with MSL_GATE_CONSOLE=1 and enforces it itself (tools/maya/hub_link.py).
     CONSOLE_ENVIRONMENTS = ("Dev",)
     RECENT_SCENES_SHOWN = 8   # in a version's right-click menu
+    HIDDEN_VARIABLES = (MayaLinkServer.TOKEN_VARIABLE,)   # never shown in a launch preview
+
+    # Color of the icons in a version's right-click menu (maya_gate.qss) - see tinted_menu_icon().
+    menuIconColor = color_property("_menu_icon_color", None)
     CONSOLE_VARIABLE = "MSL_GATE_CONSOLE"
     TAB_KEYS = ("variables", "user_setup", "boost", "sessions")  # tab order; stored by key, not index
     SESSIONS_TAB_TITLE = "Sessions"
@@ -112,6 +120,7 @@ class MayaGatePage(qt.QtWidgets.QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._menu_icon_color = qt.QtGui.QColor(ThemeRegistry.fallback().text_secondary)  # until QSS applies
         resources = Resources()
         configs = resources.configsDesktopHubMng
         self._logger = resources.logsDesktopHub.get(self.TOOL_NAME)
@@ -332,16 +341,29 @@ class MayaGatePage(qt.QtWidgets.QWidget):
             node = {}
         return {"enabled": bool(node.get("enabled", False)), "skip": [str(name) for name in node.get("skip", [])]}
 
-    def _launch(self, year: str, environment: str | None = None, scene: str = "") -> bool:
-        """Starts Maya `year` in `environment` (the current one unless named —
-        a restart or a reopened session names its own), opening `scene` if given."""
+    def _prepare_launch(self, year: str, environment: str | None = None, scene: str = "",
+                        preview: bool = False) -> dict:
+        """Everything a launch of Maya `year` hands to Maya, as a dict:
+        environment, variables (what is added to the system's own), arguments,
+        boosted, skip, own (the names the environment's settings set), and
+        boost_note (why boost, though switched on, isn't applied).
+
+        With preview=True nothing is changed on disk beyond what is rewritten
+        identically anyway: no backup of Maya's plug-in list, no launch
+        record, the editor's script isn't saved."""
         environment = environment if environment in self.ENVIRONMENTS else self._environment
         environment_vars = self._launch_variables(environment)
+        own = list(environment_vars)
         boost = self._boost_settings(environment)
         # Boost: only when its loader can run and has a list to work from - otherwise Maya,
         # started without auto-load, would save an (almost) empty auto-load list of its own.
-        boosted = (boost["enabled"] and not BoostStore.blocked_reason(environment_vars)
-                   and bool(self._boost_store.autoload_plugins(year, environment_vars.get("MAYA_APP_DIR") or None)))
+        blocked = BoostStore.blocked_reason(environment_vars)
+        has_list = bool(self._boost_store.autoload_plugins(year, environment_vars.get("MAYA_APP_DIR") or None))
+        boosted = boost["enabled"] and not blocked and has_list
+        boost_note = ""
+        if boost["enabled"] and not boosted:
+            boost_note = blocked or (f"Maya {year} has no plug-in list in this environment's preferences yet: "
+                                     f"this start is a normal one.")
         set_here = list(environment_vars)
         if "PYTHONPATH" not in set_here:
             set_here.append("PYTHONPATH")  # always extended by the launch (msl_tools, userSetup)
@@ -350,7 +372,7 @@ class MayaGatePage(qt.QtWidgets.QWidget):
         if environment in self.CONSOLE_ENVIRONMENTS:
             environment_vars[self.CONSOLE_VARIABLE] = "1"
 
-        if environment == self._environment:
+        if environment == self._environment and not preview:
             self._user_setup_tab.save()  # launch with what's on screen, not the last autosave
         environment_vars = self._user_setup_store.launch_environment(environment, environment_vars)
         arguments: list[str] = []
@@ -358,19 +380,75 @@ class MayaGatePage(qt.QtWidgets.QWidget):
         environment_vars = self._boost_store.attach_loader(environment_vars)
         if boosted:
             environment_vars, arguments = self._boost_store.prepare_launch(
-                environment, year, boost["skip"], environment_vars)
+                environment, year, boost["skip"], environment_vars, backup=not preview)
         if scene:
             arguments = arguments + ["-file", scene]
-        self._link.ensure_listening()  # normally already is (run_hub); a Maya can't join a hub that isn't
+        if not preview:
+            self._link.ensure_listening()  # normally already is (run_hub); a Maya can't join a hub that isn't
         environment_vars.update(self._link.launch_variables())
+        return {"environment": environment, "variables": environment_vars, "arguments": arguments,
+                "boosted": boosted, "skip": boost["skip"] if boosted else [], "own": own, "boost_note": boost_note}
+
+    def _launch(self, year: str, environment: str | None = None, scene: str = "") -> bool:
+        """Starts Maya `year` in `environment` (the current one unless named —
+        a restart or a reopened session names its own), opening `scene` if given."""
+        launch = self._prepare_launch(year, environment, scene)
+        environment, boosted = launch["environment"], launch["boosted"]
         environment_vars = self._boost_store.launch_log().start(
-            year, environment, boosted, len(boost["skip"]) if boosted else 0, environment_vars)
+            year, environment, boosted, len(launch["skip"]), launch["variables"])
         self._logger.info(f'Launching Maya {year}, environment "{environment}"'
                           + (" (boost start)" if boosted else "") + (f", scene {scene}" if scene else ""))
-        started = ProcessLauncher.launch_maya(version=year, environment=environment_vars, arguments=arguments)
+        started = ProcessLauncher.launch_maya(version=year, environment=environment_vars,
+                                              arguments=launch["arguments"])
         if not started:
             self._logger.warning(f'Maya {year} did not start (environment "{environment}")')
         return started
+
+    def launch_preview(self, year: str) -> str:
+        """What a launch of Maya `year` in the current environment would hand to
+        Maya, as text: the executable, its arguments, boost, and every variable
+        — the environment's own first, then what MSL Tools adds."""
+        launch = self._prepare_launch(year, preview=True)
+        variables, own = launch["variables"], launch["own"]
+        lines = [f'Maya {year}  ·  environment "{launch["environment"]}"', "",
+                 f"Executable    {MayaPaths.get_executable_path(str(year)) or 'not found'}",
+                 "Arguments     " + (" ".join(launch["arguments"]) or "none")]
+        if launch["boosted"]:
+            lines.append(f"Boost start   on — {len(launch['skip'])} plug-in(s) not loaded at startup")
+        else:
+            lines.append("Boost start   " + ("on, but not applied" if launch["boost_note"] else "off"))
+            if launch["boost_note"]:
+                lines.append("              " + launch["boost_note"])
+        script = self._user_setup_store.read(launch["environment"])
+        lines.append("userSetup     " + (f"this environment's script ({len(script.splitlines())} lines)"
+                                         if script.strip() else "none (the script is blank)"))
+
+        def show(names: list) -> list:
+            width = max((len(name) for name in names), default=0)
+            shown = []
+            for name in names:
+                value = "(hidden)" if name in self.HIDDEN_VARIABLES else variables[name]
+                entries = [entry for entry in value.split(os.pathsep) if entry]
+                if os.pathsep in value and len(entries) > 1:  # a list of folders: one per line
+                    shown.append(f"  {name}")
+                    shown += [f"      {entry}" for entry in entries]
+                else:
+                    shown.append(f"  {name.ljust(width)}  =  {value}")
+            return shown
+
+        from_environment = [name for name in own if name in variables and name != "PYTHONPATH"]
+        added = [name for name in variables if name not in from_environment]
+        lines += ["", f"From this environment's variables ({len(from_environment)})"]
+        lines += show(from_environment) or ["  none"]
+        lines += ["", f"Added or extended by MSL Tools ({len(added)})"]
+        lines += show(added)
+        lines += ["", f"Also set at the click: {LaunchLog.TIME_VARIABLE}, {LaunchLog.FILE_VARIABLE} "
+                      "(they time the start).",
+                  "Everything else Maya sees comes from Windows' own environment."]
+        return chr(10).join(lines)
+
+    def _show_launch_preview(self, year: str) -> None:
+        TextDialog.show_for(self, f"What Maya {year} will get  ·  {self._environment}", self.launch_preview(year))
 
     # --- launching with a scene -------------------------------------------------------
 
@@ -400,15 +478,24 @@ class MayaGatePage(qt.QtWidgets.QWidget):
         menu = make_rounded_popup(qt.QtWidgets.QMenu(self))
         menu.setAttribute(qt.QtCore.Qt.WidgetAttribute.WA_DeleteOnClose, True)
         menu.setToolTipsVisible(True)
-        menu.addAction(f"Launch Maya {year}").triggered.connect(lambda: self._launch(year))
-        menu.addAction("Open a scene…").triggered.connect(lambda: self._browse_scene(year))
+
+        def icon(name: str, sub_folder: str = "actions") -> qt.QtGui.QIcon:
+            return tinted_menu_icon(UiResources().iconManager.get_icon(name, sub_folder=sub_folder),
+                                    self._menu_icon_color, self.devicePixelRatioF())
+
+        menu.addAction(icon("play"), f"Launch Maya {year}").triggered.connect(lambda: self._launch(year))
+        menu.addAction(icon("browse"), "Open a scene…").triggered.connect(lambda: self._browse_scene(year))
+        preview = menu.addAction(icon("report"), "What Maya will get…")
+        preview.setToolTip("Everything this launch hands to Maya: arguments, boost, every variable")
+        preview.triggered.connect(lambda: self._show_launch_preview(year))
         recent = self._recent_scenes()
         if recent:
             menu.addSeparator()
             header = menu.addAction(f"Recent scenes — open in Maya {year}, {self._environment}")
             header.setEnabled(False)
+            scene_icon = icon("scene")
             for scene in recent:
-                action = menu.addAction(os.path.basename(scene))
+                action = menu.addAction(scene_icon, os.path.basename(scene))
                 action.setToolTip(scene)
                 action.triggered.connect(lambda _checked=False, scene=scene: self._open_scene(year, scene))
         self._version_menu = menu  # for tests; the menu deletes itself on close
