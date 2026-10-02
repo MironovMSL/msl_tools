@@ -154,6 +154,8 @@ class SourceCard(qt.QtWidgets.QFrame):
         self._facts_layout.setContentsMargins(0, 1, 0, 1)
         self._facts_layout.setSpacing(5)
         self._facts_text = ""
+        self._base_facts: list = []
+        self._extra_facts: list = []
         self._warning_label = qt.QtWidgets.QLabel()
         self._warning_label.setObjectName("mediaSourceWarning")
         self._warning_label.setSizePolicy(qt.QtWidgets.QSizePolicy.Policy.Ignored, qt.QtWidgets.QSizePolicy.Policy.Preferred)
@@ -207,6 +209,7 @@ class SourceCard(qt.QtWidgets.QFrame):
         names = [source.title() for source in sources]
         self._title_label.setText(title)
         self._title_label.setToolTip(chr(10).join(names))
+        self._base_facts, self._extra_facts = list(pairs), []
         self._set_facts(pairs)
         problems = [f"{source.title()}: {source.warning()}" for source in sources if source.warning()]
         self._warning_label.setText(", ".join(names) if not problems else "; ".join(problems))
@@ -225,7 +228,8 @@ class SourceCard(qt.QtWidgets.QFrame):
             return
         self._title_label.setText(source.title())
         self._title_label.setToolTip(str(source.path))
-        self._set_facts(source.fact_pairs())
+        self._base_facts, self._extra_facts = source.fact_pairs(), []
+        self._set_facts(self._base_facts)
         self._add_button.setVisible(not source.is_sequence)
         self._warning_label.setText(source.warning())
         self._warning_label.setToolTip("")
@@ -282,6 +286,13 @@ class SourceCard(qt.QtWidgets.QFrame):
         self._facts_row.resize(self._facts_layout.sizeHint())
         self._facts.setFixedHeight(self._facts_row.height())
         self._facts_text = "  ·  ".join(f"{value} {caption}" for value, caption in pairs)
+
+    def set_extra_facts(self, pairs: list) -> None:
+        """Tiles the picked action adds after the source's own (e.g. how long a
+        sequence will be at the picked frame rate). [] takes them away."""
+        if list(pairs) != self._extra_facts:
+            self._extra_facts = list(pairs)
+            self._set_facts(self._base_facts + self._extra_facts)
 
     def facts_text(self) -> str:
         """The tiles as one line of text."""

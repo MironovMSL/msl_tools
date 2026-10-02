@@ -21,11 +21,77 @@ from msl_tools.msl.ui.ui_resources import UiResources
 from msl_tools.msl.ui.widgets.atoms.buttons.icon_push_button import IconPushButton
 from msl_tools.msl.ui.widgets.atoms.checkboxes.base_checkbox import BaseCheckbox
 from msl_tools.msl.ui.widgets.atoms.comboboxes.base_combo_box import BaseComboBox
+from msl_tools.msl.ui.widgets.atoms.icons.tinted_icon import TintedIcon
+from msl_tools.msl.ui.widgets.compositions.chip_bar import ChipBar
 from msl_tools.msl.ui.widgets.atoms.segmented.segmented_control import SegmentedControl
 from msl_tools.msl.ui.widgets.compositions.range_strip import RangeStrip
 from msl_tools.msl.ui.workers.result_worker import ResultWorker
 
 NL = chr(10)
+
+
+class SectionHeader(qt.QtWidgets.QWidget):
+    """A small heading across an action's form — "PICTURE", "SOUND" — ruled
+    off by a hairline, so a long form reads as a few short ones. A FOLDABLE
+    one hides what is under it on a click (the panel does the hiding) and,
+    while folded, says in a few words what is set there.
+
+    Signals:
+        toggled(bool) — a foldable header was clicked; True = open now.
+    """
+
+    toggled = qt.QtCore.Signal(bool)
+
+    def __init__(self, title: str, foldable: bool = False, parent=None):
+        super().__init__(parent)
+        self._foldable = foldable
+        self._open = True
+        icons = UiResources().iconManager
+        self._icons = {True: icons.get_icon("chevron_down", sub_folder="actions"),
+                       False: icons.get_icon("chevron_right", sub_folder="actions")}
+        self._chevron = TintedIcon(self._icons[True], 10)
+        self._title = qt.QtWidgets.QLabel(title.upper())
+        self._title.setObjectName("mediaSection")
+        self._summary = qt.QtWidgets.QLabel()
+        self._summary.setObjectName("mediaHint")
+        rule = qt.QtWidgets.QFrame()
+        rule.setObjectName("mediaDivider")
+        rule.setFixedHeight(1)
+        line = qt.QtWidgets.QHBoxLayout(self)
+        line.setContentsMargins(0, 6, 0, 0)
+        line.setSpacing(6)
+        line.addWidget(self._chevron)
+        line.addWidget(self._title)
+        line.addWidget(self._summary)
+        line.addWidget(rule, 1)
+        if not foldable:
+            self._chevron.hide()
+        else:
+            self.setCursor(qt.QtCore.Qt.CursorShape.PointingHandCursor)
+            self.setToolTip("Click to show or hide these settings")
+        self._summary.hide()
+
+    def is_open(self) -> bool:
+        return self._open
+
+    def set_open(self, is_open: bool) -> None:
+        """Opens / folds without emitting toggled."""
+        self._open = bool(is_open)
+        self._chevron.set_icon(self._icons[self._open])
+        self._summary.setVisible(not self._open and bool(self._summary.text()))
+
+    def set_summary(self, text: str) -> None:
+        """What is set under this header — shown only while it is folded."""
+        self._summary.setText(text)
+        self._summary.setVisible(not self._open and bool(text))
+
+    def mouseReleaseEvent(self, event) -> None:
+        if self._foldable and event.button() == qt.QtCore.Qt.MouseButton.LeftButton:
+            self.set_open(not self._open)
+            self.toggled.emit(self._open)
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
 
 
 class OptionPanel(qt.QtWidgets.QFrame):
@@ -102,7 +168,7 @@ class OptionPanel(qt.QtWidgets.QFrame):
         line.setSpacing(8)
         stretches = False
         for widget in widgets:
-            grows = (isinstance(widget, (qt.QtWidgets.QLineEdit, RangeStrip)) and widget.maximumWidth() > 1000)                 or (isinstance(widget, qt.QtWidgets.QLabel) and widget.wordWrap())
+            grows = (isinstance(widget, (qt.QtWidgets.QLineEdit, RangeStrip, ChipBar)) and widget.maximumWidth() > 1000)                 or (isinstance(widget, qt.QtWidgets.QLabel) and widget.wordWrap())
             stretches = stretches or grows
             line.addWidget(widget, 1 if grows else 0)
         if hint:
@@ -116,6 +182,24 @@ class OptionPanel(qt.QtWidgets.QFrame):
         self._form.addWidget(holder, row, 1)
         self._rows.append((label, holder))
         return len(self._rows) - 1
+
+    def _add_section(self, title: str, foldable: bool = False) -> SectionHeader:
+        """Adds a heading across the form; the rows added after it belong to it."""
+        header = SectionHeader(title, foldable)
+        self._form.addWidget(header, self._form.rowCount(), 0, 1, 2)
+        return header
+
+    @staticmethod
+    def _note(text: str) -> qt.QtWidgets.QLabel:
+        """A small dimmed word beside a control, saying what it is."""
+        label = qt.QtWidgets.QLabel(text)
+        label.setObjectName("mediaHint")
+        return label
+
+    def source_facts(self, sources: list) -> list:
+        """(value, what it is) pairs this action adds to the source's tiles —
+        something about the source that depends on the settings here."""
+        return []
 
     def _set_row_visible(self, index: int, visible: bool) -> None:
         for widget in self._rows[index]:
@@ -204,17 +288,21 @@ SOUND_PATTERNS = "Sound (" + " ".join(f"*{suffix}" for suffix in AUDIO_SUFFIXES)
 
 
 class _OverlayRows:
-    """Mixin for a panel that can draw on the picture: the rows "Burn in"
-    (frame number, time, date), "Label" and "Watermark" (image, size,
-    opacity), and their settings. Call _add_overlay_rows() where they go."""
+    """Mixin for a panel that can draw on the picture: the rows "Show"
+    (frame number, time, date — pills switched on and off), "Label" and
+    "Watermark" (image, size, opacity), and their settings. Call
+    _add_overlay_rows() where they go."""
 
     MARK_SIZES = ("10%", "15%", "25%", "40%")
     MARK_OPACITIES = ("100%", "70%", "40%")
+    BURNS = {"frame": ("Frame number", "The number of each frame, bottom right"),
+             "time": ("Time", "The time since the start, bottom centre"),
+             "date": ("Date", "Today’s date, top right")}
 
     def _add_overlay_rows(self) -> list[int]:
-        self._burn_frame = self._check("Frame number", tooltip="The number of each frame, bottom right")
-        self._burn_time = self._check("Time", tooltip="The time since the start, bottom centre")
-        self._burn_date = self._check("Date", tooltip="Today’s date, top right")
+        self._burn = ChipBar(multiple=True)
+        self._burn.set_chips([(key, title, tip) for key, (title, tip) in self.BURNS.items()])
+        self._burn.clicked.connect(lambda _key: self.changed.emit())
         self._label = qt.QtWidgets.QLineEdit()
         self._label.setPlaceholderText("text for the top-left corner — a shot name, a version")
         self._label.textChanged.connect(lambda _text: self.changed.emit())
@@ -228,27 +316,36 @@ class _OverlayRows:
         self._mark_opacity.setToolTip("How solid the watermark is")
         for combo in (self._mark_size, self._mark_opacity):
             combo.currentIndexChanged.connect(lambda _index: self.changed.emit())
-        return [self._add_row("Burn in", self._burn_frame, self._burn_time, self._burn_date),
+        return [self._add_row("Show", self._burn),
                 self._add_row("Label", self._label),
-                self._add_row("Watermark", self._mark, self._mark_button, self._mark_size, self._mark_opacity)]
+                self._add_row("Watermark", self._mark, self._mark_button, self._mark_size, self._note("wide"),
+                              self._mark_opacity, self._note("solid"))]
+
+    def _overlay_summary(self) -> str:
+        """What is drawn, in a few words ("frame number · date · a label"), or "nothing"."""
+        shown = self._burn.checked()
+        parts = [self.BURNS[key][0].lower() for key in self.BURNS if key in shown]
+        parts += ["a label"] if self._label.text().strip() else []
+        parts += ["a watermark"] if self._mark.text().strip() else []
+        return "  ·  ".join(parts) or "nothing"
 
     def _overlays(self) -> Overlays:
-        return Overlays(frame_number=self._burn_frame.isChecked(), time=self._burn_time.isChecked(),
-                        date=self._burn_date.isChecked(), label=self._label.text().strip(),
+        shown = self._burn.checked()
+        return Overlays(frame_number="frame" in shown, time="time" in shown,
+                        date="date" in shown, label=self._label.text().strip(),
                         watermark=self._mark.text().strip(),
                         watermark_size=int(self._mark_size.currentText().rstrip("%")),
                         watermark_opacity=int(self._mark_opacity.currentText().rstrip("%")))
 
     def _overlay_settings(self) -> dict:
-        return {"burn_frame": self._burn_frame.isChecked(), "burn_time": self._burn_time.isChecked(),
-                "burn_date": self._burn_date.isChecked(), "label": self._label.text(),
+        shown = self._burn.checked()
+        return {"burn_frame": "frame" in shown, "burn_time": "time" in shown,
+                "burn_date": "date" in shown, "label": self._label.text(),
                 "watermark": self._mark.text(), "watermark_size": self._mark_size.currentText(),
                 "watermark_opacity": self._mark_opacity.currentText()}
 
     def _apply_overlay_settings(self, settings: dict) -> None:
-        self._burn_frame.set_checked_immediate(bool(settings.get("burn_frame", False)))
-        self._burn_time.set_checked_immediate(bool(settings.get("burn_time", False)))
-        self._burn_date.set_checked_immediate(bool(settings.get("burn_date", False)))
+        self._burn.set_checked([key for key in self.BURNS if settings.get(f"burn_{key}", False)])
         self._label.setText(str(settings.get("label", "")))
         self._mark.setText(str(settings.get("watermark", "")))
         if str(settings.get("watermark_size", "")) in self.MARK_SIZES:
@@ -268,7 +365,7 @@ class SequencePanel(_OverlayRows, OptionPanel):
     PRESETS = {
         "Preview · fast": {"quality": "Good", "speed": "Fast", "format": "MP4"},
         "Review · frame numbers": {"quality": "Good", "speed": "Balanced", "format": "MP4",
-                                   "burn_frame": True, "burn_date": True, "overlays_open": True},
+                                   "burn_frame": True, "burn_date": True, "draw_open": True},
         "For editing · ProRes": {"format": "ProRes"},
     }
 
@@ -280,30 +377,43 @@ class SequencePanel(_OverlayRows, OptionPanel):
         self._format = self._switch(VIDEO_FORMATS, "MP4", FORMAT_TIP)
         self._quality = self._switch(QUALITY_HIGH, "Good", "How good the picture looks — better is also bigger")
         self._speed = self._switch(SPEEDS, "Balanced", SPEED_TIP)
-        self._sound, self._sound_button = self._file_field("none — choose a sound file, or drop one here",
+        self._sound, self._sound_button = self._file_field("none — drop a sound file here, or choose one",
                                                            "The sound to put under the video", SOUND_PATTERNS)
-        self._more = self._check("Draw on the picture", tooltip="Frame numbers, the date, a label, a watermark")
+        sound_icon = TintedIcon(UiResources().iconManager.get_icon("volume", sub_folder="actions"), 16)
+        sound_icon.setToolTip("A sound file dropped anywhere on the page goes here")
         self._hold = self._check("Show the frame before a gap until the next one")
 
+        # Three short forms instead of one long one.
+        self._add_section("Picture")
         self._add_row("Frame rate", self._fps, hint="frames per second")
         self._add_row("Format", self._format)
         self._quality_row = self._add_row("Quality", self._quality)
         self._speed_row = self._add_row("Encoding", self._speed)
-        self._add_row("Sound", self._sound, self._sound_button)
-        self._add_row("Burn-ins", self._more)
-        self._overlay_rows = self._add_overlay_rows()
         self._gap_row = self._add_row("Gaps", self._hold)
         self._set_row_visible(self._gap_row, False)
+        self._add_section("Sound")
+        self._add_row("Sound", sound_icon, self._sound, self._sound_button)
+        # Folded until wanted; folded, its header says what is drawn. Folding hides the
+        # settings - it doesn't switch them off.
+        self._draw = self._add_section("Draw on the picture", foldable=True)
+        self._draw.set_open(False)
+        self._overlay_rows = self._add_overlay_rows()
         self._format.current_changed.connect(lambda _option: self._sync())
-        self._more.toggled.connect(lambda _checked: self._sync())
+        self._draw.toggled.connect(self._on_draw_toggled)
+        self.changed.connect(lambda: self._draw.set_summary(self._overlay_summary()))
         self._sync()
+
+    def _on_draw_toggled(self, _is_open: bool) -> None:
+        self._sync()
+        self.changed.emit()  # the fold is remembered
 
     def _sync(self) -> None:
         mp4 = self._format.current() == "MP4"
         self._set_row_visible(self._quality_row, mp4)   # the editing formats have no quality / speed choice
         self._set_row_visible(self._speed_row, mp4)
         for row in self._overlay_rows:
-            self._set_row_visible(row, self._more.isChecked())
+            self._set_row_visible(row, self._draw.is_open())
+        self._draw.set_summary(self._overlay_summary())
 
     @staticmethod
     def accepts(sources: list) -> bool:
@@ -320,6 +430,15 @@ class SequencePanel(_OverlayRows, OptionPanel):
     def set_sound(self, path: str) -> None:
         self._sound.setText(path)
 
+    def source_facts(self, sources: list) -> list:
+        """How long the video will be at the picked frame rate."""
+        try:
+            fps = float(self._fps.currentText())
+        except ValueError:
+            return []
+        frames = sum(source.sequence.last - source.sequence.first + 1 for source in sources)
+        return [(format_time(round(frames / fps, 1)), f"at {self._fps.currentText()} fps")] if fps else []
+
     def suffix(self, source: MediaSource) -> str:
         return FORMATS[VIDEO_FORMATS[self._format.current()]][2]
 
@@ -331,18 +450,19 @@ class SequencePanel(_OverlayRows, OptionPanel):
             fps = float(self._fps.currentText())
         except ValueError as error:
             raise MediaError("The frame rate must be a number.") from error
-        overlays = self._overlays() if self._more.isChecked() else None
+        overlays = self._overlays()
         return sequence_to_video(source.sequence, output, fps=fps, quality=QUALITY_HIGH[self._quality.current()],
                                  speed=SPEEDS[self._speed.current()], audio=sound or None,
                                  gaps=GAPS_HOLD if self._hold.isChecked() else GAPS_ERROR,
-                                 overlays=overlays if overlays is not None and overlays.any() else None,
+                                 overlays=overlays if overlays.any() else None,
                                  frame_size=(source.info.width, source.info.height),
                                  video_format=VIDEO_FORMATS[self._format.current()])
 
     def settings(self) -> dict:
+        # "overlays_open" is what versions up to 0.1.6 read: there it SWITCHED the burn-ins on.
         return {"fps": self._fps.currentText(), "quality": self._quality.current(), "speed": self._speed.current(),
-                "format": self._format.current(), "overlays_open": self._more.isChecked(),
-                **self._overlay_settings()}
+                "format": self._format.current(), "draw_open": self._draw.is_open(),
+                "overlays_open": self._overlays().any(), **self._overlay_settings()}
 
     def apply_settings(self, settings: dict) -> None:
         if str(settings.get("fps", "")) in self.FRAME_RATES:
@@ -351,8 +471,11 @@ class SequencePanel(_OverlayRows, OptionPanel):
         self._speed.set_current(str(settings.get("speed", "")), animate=False)
         chosen = str(settings.get("format", ""))
         self._format.set_current(RENAMED.get(chosen, chosen), animate=False)
-        self._more.set_checked_immediate(bool(settings.get("overlays_open", False)))
-        self._apply_overlay_settings(settings)
+        # Settings saved by 0.1.6 or older: "overlays_open" off meant "draw nothing", whatever
+        # was ticked under it - so nothing is taken over from there.
+        switched_off = "draw_open" not in settings and not settings.get("overlays_open", False)
+        self._apply_overlay_settings({} if switched_off else settings)
+        self._draw.set_open(bool(settings.get("draw_open", settings.get("overlays_open", False))))
         self._sync()
 
 
@@ -696,7 +819,7 @@ class StampPanel(_OverlayRows, OptionPanel):
         self._add_overlay_rows()
         self._quality = self._switch(QUALITY_HIGH, "High", "How good the picture looks — better is also bigger")
         self._add_row("Quality", self._quality)
-        self._burn_frame.set_checked_immediate(True)
+        self._burn.set_checked(["frame"])
 
     accepts = staticmethod(_videos)
 

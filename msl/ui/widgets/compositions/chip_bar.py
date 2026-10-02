@@ -1,6 +1,6 @@
 # ui/widgets/compositions/chip_bar.py
 import msl_tools.msl.ui.qt_bindings as qt
-from msl_tools.msl.ui.theme.qss import make_rounded_popup
+from msl_tools.msl.ui.theme.qss import make_rounded_popup, repolish
 from msl_tools.msl.ui.widgets.atoms.buttons.glyph_button import GlyphButton
 from msl_tools.msl.ui.widgets.atoms.layouts import FlowLayout
 
@@ -28,6 +28,8 @@ class ChipBar(qt.QtWidgets.QWidget):
 
     - a picker (checkable=True): one chip is the current one — for a
       handful to a dozen options that don't fit a SegmentedControl;
+    - toggles (multiple=True): every chip is switched on and off on its
+      own — a few yes / no choices in one row (checked() / set_checked());
     - a shelf of saved things (presets, snippets): a click uses one; with
       `add_text` an "+ …" link at the end asks for a name IN PLACE (Enter
       takes it, Esc gives up — no dialog) and add_requested follows; a
@@ -54,9 +56,11 @@ class ChipBar(qt.QtWidgets.QWidget):
     ADD_ICON_SIZE = qt.QtCore.QSize(24, 20)
 
     def __init__(self, add_text: str = "", name_placeholder: str = "", checkable: bool = False,
-                 add_icon: "qt.QtGui.QIcon | None" = None, parent=None):
+                 add_icon: "qt.QtGui.QIcon | None" = None, multiple: bool = False, parent=None):
         super().__init__(parent)
         self._checkable = checkable
+        self._multiple = multiple
+        self._marked: set[str] = set()
         self._chips: dict[str, qt.QtWidgets.QPushButton] = {}
         self._removable: set[str] = set()
         self._current = ""
@@ -99,7 +103,9 @@ class ChipBar(qt.QtWidgets.QWidget):
             chip = qt.QtWidgets.QPushButton(text, self)
             chip.setObjectName("chip")
             chip.setToolTip(tooltip)
-            chip.setCheckable(self._checkable)
+            chip.setCheckable(self._checkable or self._multiple)
+            if key in self._marked:
+                chip.setProperty("marked", True)
             chip.setCursor(qt.QtCore.Qt.CursorShape.PointingHandCursor)
             chip.setFocusPolicy(qt.QtCore.Qt.FocusPolicy.NoFocus)
             chip.clicked.connect(lambda _checked=False, key=key: self._on_chip(key))
@@ -130,6 +136,24 @@ class ChipBar(qt.QtWidgets.QWidget):
         if key in self._chips:
             self._current = key
             self._sync_checked()
+
+    def checked(self) -> list[str]:
+        """The keys of the chips that are switched on (multiple=True)."""
+        return [key for key, chip in self._chips.items() if chip.isChecked()]
+
+    def set_checked(self, keys) -> None:
+        """Switches exactly these chips on (multiple=True), without emitting clicked."""
+        keys = set(keys)
+        for key, chip in self._chips.items():
+            chip.setChecked(key in keys)
+
+    def set_marked(self, keys) -> None:
+        """Outlines these chips (widgets.qss: #chip[marked="true"]) — "this is the one in use"."""
+        self._marked = set(keys)
+        for key, chip in self._chips.items():
+            if bool(chip.property("marked")) != (key in self._marked):
+                chip.setProperty("marked", key in self._marked)
+                repolish(chip)
 
     def _sync_checked(self) -> None:
         for key, chip in self._chips.items():

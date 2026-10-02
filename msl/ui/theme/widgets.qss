@@ -134,6 +134,10 @@ ChipBar QPushButton#chip:checked {
     background: alpha(var(--accent), 26%);
     border-color: var(--accent);
 }
+/* The chip whose settings are the ones in use. */
+ChipBar QPushButton#chip[marked="true"] {
+    border-color: alpha(var(--accent), 85%);
+}
 /* ... or, as an icon: the accent, like the link it replaces. */
 ChipBar GlyphButton#chipAdd {
     qproperty-glyphColor:       var(--accent);

@@ -445,7 +445,8 @@ class MediaPage(qt.QtWidgets.QWidget):
         for other in self._panels.values():
             other.setVisible(other is panel)
         self._stack.setVisible(panel is not None)
-        self._actions.setVisible(panel is not None)
+        # one action to pick from is no choice: the card's header names it
+        self._actions.setVisible(panel is not None and len(self._actions.keys()) > 1)
         self._action_card.setVisible(panel is not None)
         if panel is not None:
             self._action_icon.set_icon(UiResources().iconManager.get_icon(panel.ICON, sub_folder="actions"))
@@ -454,6 +455,7 @@ class MediaPage(qt.QtWidgets.QWidget):
         self._forget_error()
         self._refresh_buttons()
         self._refresh_presets()
+        self._refresh_source_facts()
         self._suggest_output()
         self._refresh_controls()
         self._schedule_estimate()
@@ -463,9 +465,25 @@ class MediaPage(qt.QtWidgets.QWidget):
             return
         self._forget_error()  # what it complained about has just been changed
         self._refresh_buttons()
+        self._refresh_source_facts()
+        self._mark_preset()
         self._suggest_output()
         self._save_settings()
         self._schedule_estimate()
+
+    def _refresh_source_facts(self) -> None:
+        """The tiles the picked action adds to the source card."""
+        panel = self._panel()
+        self._card.set_extra_facts(panel.source_facts(self._sources) if panel is not None else [])
+
+    def _mark_preset(self) -> None:
+        """Outlines the preset whose settings are exactly the ones on screen."""
+        panel = self._panel()
+        if panel is None:
+            return
+        current = panel.settings()
+        self._presets.set_marked(name for name, settings in self._presets_of(panel).items()
+                                 if settings and all(current.get(key) == value for key, value in settings.items()))
 
     def _on_output_edited(self, _text: str) -> None:
         self._output_edited = True
@@ -524,6 +542,7 @@ class MediaPage(qt.QtWidgets.QWidget):
         chips = [(name, name, ",  ".join(f"{key}: {value}" for key, value in settings.items())
                   + chr(10) + "Click: use these settings  ·  right click: remove") for name, settings in presets.items()]
         self._presets.set_chips(chips, removable=set(presets))
+        self._mark_preset()
 
     def _on_preset_clicked(self, name: str) -> None:
         panel = self._panel()

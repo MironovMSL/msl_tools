@@ -148,6 +148,12 @@ MediaPage QFrame#mediaDivider {
     background-color: alpha(var(--border), 70%);
     border: none;
 }
+/* A heading across an action's form ("PICTURE", "SOUND"). */
+MediaPage QLabel#mediaSection {
+    color: var(--text-secondary);
+    font-size: 10px;
+    font-weight: 700;
+}
 /* An action's settings sit in the action's card: no frame of their own. */
 MediaPage QFrame#mediaOptions {
     background-color: transparent;

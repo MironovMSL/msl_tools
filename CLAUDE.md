@@ -1203,7 +1203,24 @@ frames · For editing · Adjust · Join (2+ videos) · Compare (exactly 2).
   FOLDS the list away (`settings.jobs_folded`; a hidden filler widget
   takes the room then). The empty list shows an icon over its hint.
   Actions are grouped by `OptionPanel.GROUP` (make / change / convert /
-  combine) — PANELS is in that order.
+  combine) — PANELS is in that order. With ONE action to pick from (a
+  sequence: To video) the strip is hidden.
+- A long form is cut into sections: `OptionPanel._add_section(title,
+  foldable=)` -> `SectionHeader` (capitals + a hairline; a foldable one
+  has a chevron and, folded, a summary of what is set under it). To video
+  = PICTURE · SOUND · DRAW ON THE PICTURE (folded until wanted). Folding
+  only HIDES: burn-ins apply whenever something is switched on. Up to
+  0.1.6 a check box "Draw on the picture" (`overlays_open`) switched them
+  on and off — settings without `draw_open` whose `overlays_open` is off
+  are read as "draw nothing", and `overlays_open` is still written (= is
+  anything drawn) for a hub that goes back to an older version.
+  Frame number / Time / Date are toggle pills (`ChipBar(multiple=True)`,
+  `checked()` / `set_checked()`); the watermark's two lists say "wide" /
+  "solid". `OptionPanel.source_facts(sources)` adds tiles to the source
+  card (`SourceCard.set_extra_facts`): To video's "0:06.7 / at 30 fps",
+  live with the frame rate; a sequence's own tiles include its range.
+  The preset whose settings are exactly the ones on screen is outlined
+  (`ChipBar.set_marked`, `MediaPage._mark_preset`).
 - "Show in folder" (`ProcessLauncher.open_file_explorer`, used by Maya
   Gate too): a FILE is selected through the shell —
   `core/environment/shell.py:select_in_file_manager()`

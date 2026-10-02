@@ -60,8 +60,10 @@ class MediaSource:
         """The same facts as (value, what it is) pairs, for a row of small tiles."""
         info = self.info
         if self.sequence is not None:
-            return [(str(self.sequence.count), "frames"), (info.resolution_text(), "frame size"),
-                    (self.sequence.suffix.lstrip(".").upper(), "format")]
+            digits = self.sequence.padding or 1
+            return [(str(self.sequence.count), "frames"),
+                    (f"{self.sequence.first:0{digits}d}–{self.sequence.last:0{digits}d}", "range"),
+                    (info.resolution_text(), "frame size"), (self.sequence.suffix.lstrip(".").upper(), "format")]
         pairs = [(info.resolution_text(), "frame size"), (info.fps_text().replace(" fps", ""), "fps"),
                  (info.duration_text(), "length"), (info.size_text(), "size"), (info.video_codec, "codec"),
                  ("yes" if info.has_audio else "none", "sound")]
