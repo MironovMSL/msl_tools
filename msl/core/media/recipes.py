@@ -169,10 +169,12 @@ def trim(info: MediaInfo, output: str | Path, start: float, end: float, exact: b
 
 
 def default_output(source: str | Path | ImageSequence, tag: str = "", suffix: str = ".mp4",
-                   folder: str | Path | None = None) -> Path:
+                   folder: str | Path | None = None, taken=()) -> Path:
     """A name for the result that clashes with nothing: next to the source
     (a sequence's video goes NEXT TO its frames' folder, not among the
-    frames), named after it + `tag`; "_2", "_3", ... if that name is taken."""
+    frames), named after it + `tag`; "_2", "_3", ... if that name is taken —
+    by a file, or by one of `taken` (results of jobs that haven't run yet)."""
+    taken = {Path(path) for path in taken}
     if isinstance(source, ImageSequence):
         stem = source.prefix.rstrip("._- ") or source.folder.name
         home = source.folder.parent
@@ -182,7 +184,7 @@ def default_output(source: str | Path | ImageSequence, tag: str = "", suffix: st
     home = Path(folder) if folder else home
     candidate = home / f"{stem}{tag}{suffix}"
     counter = 2
-    while candidate.exists():
+    while candidate.exists() or candidate in taken:
         candidate = home / f"{stem}{tag}_{counter}{suffix}"
         counter += 1
     return candidate

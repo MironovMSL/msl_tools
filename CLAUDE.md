@@ -53,6 +53,7 @@ msl_tools/                 (repo root)
         tools/                DCC-specific instruments
             desktop/            NEW: tools that run as part of the desktop hub
                 maya_gate/        fully ported Maya Gate tool (see below)
+                media/            Media: video and image sequences through ffmpeg (see "Media tool")
                 installer/        InstallerView — the setup window (not a hub tool, not in the registry)
                 stub_a/, stub_b/  placeholder tools used to test hub navigation
             maya/               existing Maya-side tools (the MSL menu, etc.)
@@ -966,8 +967,8 @@ not every commit. The notes are the release's description on GitHub:
 
 ## Media foundation (ffmpeg)
 
-Built (2026-10-02) as the base of the planned "Media" tool; later batch
-jobs and Maya playblasts are meant to reuse it. No tool / UI yet.
+Built (2026-10-02) as the base of the Media tool (next section); later
+batch jobs and Maya playblasts are meant to reuse it.
 
 `msl/core/media/` — Qt-free:
 - `ffmpeg.py`: `FfmpegLocator(configured=).find() -> FfmpegTools | None`
@@ -1000,6 +1001,8 @@ jobs and Maya playblasts are meant to reuse it. No tool / UI yet.
   keyframe-bound), `default_output` (never clashes; a sequence's video goes
   NEXT TO the frames' folder). Quality / speed are words (`QUALITY`,
   `SPEED`) mapped to crf / preset. `Job.command_text()` = "Show command".
+- `thumbnail.py`: `thumbnail(tools, info, target, width)` — a JPEG of a
+  video's middle or of a picture (None for sound).
 - `run.py`: `ProgressParser` (ffmpeg's `-progress pipe:1` blocks ->
   `Progress`), `fraction()`, `error_summary()`, `clean_up()`, and
   `run_job()` — blocking, for scripts / tests / headless work.
@@ -1024,6 +1027,62 @@ cancel, failure, installer with a fake and a real-layout archive through
 `file:///`). The real download ran once too (2026-10-02, into a throwaway
 tools folder): 101 MB in ~4 s, checksum matched, installed and usable in
 16 s in all (most of it the freshly written programs being scanned).
+
+## Media tool
+
+`msl/tools/desktop/media/` — a hub tool (sidebar "Media", icon
+`tools/media`): quick work with video and image sequences without knowing
+ffmpeg. Three actions so far — the ones the user does most.
+
+- `page.py` `MediaPage` (registers `media.qss`), top to bottom:
+  header (+ the "ffmpeg 8.0" link) · `FfmpegBar` · `SourceCard` · the
+  action (a label for a sequence's one action, a SegmentedControl for a
+  video's two) · that action's panel · "Save as" + "Command" + the start
+  button · a message line · the jobs.
+  Drops are taken by the PAGE, anywhere on it (the card only shows it is
+  the target); sound dropped while a sequence is open goes under that
+  sequence. Reading what was dropped runs on a `ResultWorker` — a token
+  makes only the newest load count.
+- `ffmpeg_bar.py` `FfmpegBar`: looking / ready / missing / working. Ready =
+  the bar is hidden and its `status_button()` (in the page's header) shows
+  "ffmpeg 8.0" with a menu; missing = a notice with "Download ffmpeg
+  (101 MB)" (FfmpegInstaller on a worker, progress through a signal,
+  Cancel) and "I already have it…" (a folder -> `settings["ffmpeg_path"]`).
+  ffmpeg is first looked for in the page's showEvent, not when it is built.
+- `source.py` (Qt-free): `MediaSource` (a video, or an ImageSequence + one
+  of its frames for the size; `facts()`, `warning()`), `load_source(tools,
+  path, chosen=)` — a video file, a folder of frames, or one frame; says
+  in plain words why something else can't be used. Thumbnails are cached
+  in `%TEMP%/msl_tools/media/thumbs` (name = hash of path + mtime).
+  `parse_time` / `format_time` ("0:12.5").
+- `source_card.py` `SourceCard`: empty (dashed drop area + "Choose a
+  file… / folder…"), loading, loaded (thumbnail, name, facts, a warning for
+  missing frames, a chooser when the folder holds several sequences, "×").
+- `option_panels.py`: `OptionPanel` (a caption / control form;
+  `job(source, output)`, `output_for(source, taken)`, `settings()` /
+  `apply_settings()`) -> `SequencePanel` (frame rate, quality, encoding,
+  sound, "Gaps" — only when frames are missing; not ticked = the job is
+  refused with the missing numbers), `ShrinkPanel` (frame size; by quality
+  or "Fit into a size" in MB; keep the sound), `TrimPanel` (from / to as
+  typed times, Exact / Fast). Choices are words; the ffmpeg arguments stay
+  in core/media/recipes.py. Settings are saved on every change.
+- `job_queue.py`: `JobQueue` (one FfmpegRunner; jobs run one after
+  another; `outputs()` = names still to be written, so a new job is
+  offered another name), `JobList` / `_JobRow` (state dot, progress bar
+  while running, then size + time; Show / Command / Cancel / Remove).
+- Config `configs/desktop/media/config.json`: `settings.ffmpeg_path`,
+  `panels.<key>` (each panel's remembered choices).
+- The result never replaces its own source; an existing file is asked
+  about (ConfirmDialog); "Save as" suggests a free name next to the source
+  (`default_output`) unless the user typed one.
+
+Verified offscreen in the hub against the real ffmpeg 8.0 (inputs read
+only, outputs in `sandbox/`): no ffmpeg -> notice; a folder without it ->
+said so; sequence by folder and by one frame; sound dropped on it; a
+folder with two sequences and gaps; smaller by quality and into 1 MB; an
+exact trim; cancel of a running and a waiting job; things that aren't
+media. NOT tried in the real GUI: the look at other window sizes, a drop
+from the real file manager, the native file dialogs.
 
 ## Install (the hub is where everything starts)
 
@@ -1155,10 +1214,9 @@ disk. NOT yet tested: against a real Maya installation (actual launch via
   started from the hub joining it, Maya 2020 (Python 2).
 - Planned, nothing built yet (decisions taken 2026-10-02; details in the
   session memory files `ffmpeg-media-tool-idea` / `maya-batch-tool-idea`):
-  - "Media": a hub tool on ffmpeg for quick work with video and image
-    sequences. Its foundation IS built (see "Media foundation"); the tool
-    itself is next, with three operations first: sequence -> video, make
-    smaller for sending, trim. A later "Batch" tool (headless Maya jobs:
+  - "Media" is built with its first three actions (see "Media tool"). Next
+    for it, as planned: sound / join / burn-ins and a watermark, video ->
+    frames, presets as chips. A later "Batch" tool (headless Maya jobs:
     render, playblast, export) and Maya playblasts reuse the foundation.
   - ffmpeg is never committed or shipped in a release. A managed copy lives
     next to the runtime (`%LOCALAPPDATA%\MSL	oolsfmpeg\<version>`),

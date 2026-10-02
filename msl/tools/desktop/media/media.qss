@@ -1,0 +1,128 @@
+/*
+ * Media tool styles (template) — registered with
+ * StylesheetBuilder.register_template() by page.py and appended after
+ * ui/theme/base.qss + widgets.qss. Same var()/alpha() syntax.
+ */
+
+MediaPage QLabel#mediaTitle {
+    color: var(--text-primary);
+    font-weight: 600;
+}
+MediaPage QLabel#mediaSubtitle,
+MediaPage QLabel#mediaCaption,
+MediaPage QLabel#mediaHint,
+MediaPage QLabel#mediaJobsEmpty {
+    color: var(--text-secondary);
+}
+MediaPage QLabel#mediaHint {
+    font-size: 11px;
+}
+/* The one action a source has (an image sequence: "To video"). */
+MediaPage QLabel#mediaAction {
+    color: var(--text-primary);
+    font-weight: 600;
+}
+/* Quiet accent text buttons. */
+MediaPage QPushButton#mediaLink {
+    color: var(--accent);
+    padding: 2px 6px;
+    font-size: 11px;
+}
+MediaPage QPushButton#mediaLink:disabled {
+    color: alpha(var(--text-secondary), 55%);
+}
+
+/* The line about ffmpeg: nothing to see while it is there, a notice while it isn't. */
+MediaPage QFrame#mediaFfmpeg {
+    background-color: transparent;
+    border: 1px solid transparent;
+    border-radius: 6px;
+}
+MediaPage QFrame#mediaFfmpeg[state="missing"] {
+    background-color: alpha(var(--warning), 12%);
+    border: 1px solid alpha(var(--warning), 40%);
+}
+MediaPage QFrame#mediaFfmpeg[state="working"] {
+    background-color: alpha(var(--accent), 8%);
+    border: 1px solid alpha(var(--accent), 35%);
+}
+MediaPage QLabel#mediaFfmpegText {
+    color: var(--text-primary);
+}
+MediaPage QFrame#mediaFfmpeg[state="looking"] QLabel#mediaFfmpegText {
+    color: var(--text-secondary);
+}
+
+/* What is being worked on: a dashed drop area while empty, a raised card once loaded. */
+MediaPage QFrame#mediaSource {
+    background-color: alpha(var(--text-primary), 2%);
+    border: 1px dashed alpha(var(--text-secondary), 55%);
+    border-radius: 8px;
+}
+MediaPage QFrame#mediaSource[look="loaded"] {
+    background-color: var(--surface-raised);
+    border: 1px solid var(--border);
+}
+MediaPage QFrame#mediaSource[dragging="true"] {
+    background-color: alpha(var(--accent), 9%);
+    border: 1px dashed var(--accent);
+}
+MediaPage QLabel#mediaDropHint {
+    color: var(--text-secondary);
+}
+MediaPage QLabel#mediaThumbnail {
+    background-color: alpha(var(--text-primary), 8%);
+    color: var(--text-secondary);
+    border-radius: 4px;
+    font-size: 11px;
+}
+MediaPage QLabel#mediaSourceTitle {
+    color: var(--text-primary);
+    font-weight: 600;
+}
+MediaPage QLabel#mediaSourceFacts {
+    color: var(--text-secondary);
+}
+MediaPage QLabel#mediaSourceWarning {
+    color: var(--warning);
+}
+
+/* An action's settings: a panel raised off the page, like Maya Gate's groups. */
+MediaPage QFrame#mediaOptions {
+    background-color: var(--surface-raised);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+}
+
+MediaPage QLabel#mediaMessage                { color: var(--text-secondary); }
+MediaPage QLabel#mediaMessage[state="error"] { color: var(--error); }
+
+/* The jobs. */
+MediaPage StableScrollArea#mediaJobs {
+    background-color: var(--surface-raised);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+}
+MediaPage QFrame#mediaJob {
+    border: none;
+    border-bottom: 1px solid alpha(var(--border), 45%);
+}
+MediaPage QLabel#mediaJobTitle {
+    color: var(--text-primary);
+}
+MediaPage QLabel#mediaJobStatus {
+    color: var(--text-secondary);
+    font-size: 11px;
+}
+MediaPage QLabel#mediaJobStatus[state="failed"] { color: var(--error); }
+MediaPage QLabel#mediaJobDot {
+    background-color: alpha(var(--text-secondary), 60%);
+    border-radius: 4px;
+}
+MediaPage QLabel#mediaJobDot[state="running"]   { background-color: var(--accent); }
+MediaPage QLabel#mediaJobDot[state="done"]      { background-color: var(--success); }
+MediaPage QLabel#mediaJobDot[state="failed"]    { background-color: var(--error); }
+MediaPage QLabel#mediaJobDot[state="cancelled"] {
+    background-color: transparent;
+    border: 1px solid var(--text-secondary);
+}

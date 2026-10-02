@@ -8,6 +8,7 @@ foundation under the Media tool (and, later, batch jobs and Maya playblasts).
     sequence.py  image sequences in a folder: find_sequences() -> ImageSequence
     recipes.py   tasks as ffmpeg arguments: sequence_to_video / shrink / trim -> Job
     run.py       following a run: ProgressParser, run_job() (blocking)
+    thumbnail.py a small picture of a file: thumbnail()
 
 A window runs jobs with ui/media/ffmpeg_runner.py (never blocks).
 """
