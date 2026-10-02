@@ -521,7 +521,7 @@ What changed vs. the original (all deliberate, not oversights):
     `FrameDecoder.feed()` cuts the stream; a bad header / body raises
     ProtocolError and the connection is dropped.
   - `core/link/session.py`: `MayaSession` (pid, version, environment,
-    scene, boosted, busy, connected_at).
+    scene, modified, boosted, busy, connected_at).
   - `ui/maya_link/server.py`: `MayaLinkServer` (QTcpServer, signals only,
     nothing blocks) — `instance()` is the hub's one server, run_hub calls
     `ensure_listening()`. 127.0.0.1 only; port 47611 (next free of 10 if
@@ -631,14 +631,41 @@ What changed vs. the original (all deliberate, not oversights):
       `time.sleep` in the main thread = busy for that time, then free.
     - Goodbye: Maya sends a `bye` event when it quits (scriptJob
       `quitApplication`) and when its link restarts ("Reload code");
-      `MayaLinkServer.session_ended(session, clean)` is clean=True then,
-      and when the hub itself closes. A connection that just breaks is
+      `MayaLinkServer.session_ended(session, clean, reason)` is clean=True
+      then, and when the hub itself closes; `reason` = protocol.BYE_QUIT /
+      BYE_RESTART / `ENDED_BY_HUB` / "" (broke). A connection that just breaks is
       clean=False — Maya crashed or was killed: the tab keeps an "ended
       unexpectedly at HH:MM" line (`_EndedRow`; Log file / Dismiss; a click
       shows its log, kept until dismissed) and writes that Maya's log to
       `logs/desktop/maya_gate/sessions/maya<year>_<stamp>_pid<pid>.log`.
       A Maya whose code predates `bye` (started before this was built)
       reads as ended unexpectedly on a normal quit.
+    - Unsaved changes: Maya has no event for "the scene was modified", so
+      HubLink polls `cmds.file(q=True, modified=True)` every SCENE_POLL_MS
+      (2 s) and sends a `scene` event {"scene", "modified"} only on a change
+      (the hello carries both). A row's scene name gets a "*" (as in Maya's
+      title bar); an "ended unexpectedly" line says "· unsaved changes".
+      Measured with real Maya 2025: new cube -> modified within 2 s, save ->
+      clean + the new name, the next edit -> modified again.
+    - The scene's name is a link (`_SceneLabel`, sessions_tab.py): only the
+      NAME, not the empty space after it (the label stretches over the
+      row) — a click shows the file in the file manager (its folder if the
+      file is gone), a right click offers that and "Copy path"; the click
+      doesn't select the row. An untitled scene is no link.
+    - History: `session_history.py` (`SessionHistory` / `SessionRecord`,
+      Qt-free) keeps the last 30 finished sessions in
+      `configs/desktop/maya_gate/sessions/history.json` — version,
+      environment, scene, unsaved flag, start / end, clean or not, the saved
+      log's path. Recorded on session_ended for reasons quit and "" only: a
+      link restart and the hub's own shutdown are NOT ends. While nothing
+      is running (and no "ended unexpectedly" line waits) the list shows
+      "Recent sessions" (`_HistoryRow`: hollow dot = closed, red = ended
+      unexpectedly + "Log file"; "Clear" forgets them, log files stay)
+      instead of an empty box. The file is first read when the tab is shown.
+    - Selection: a Maya that left with an EMPTY log holds the selection only
+      RELOAD_GRACE_S (5 s — a "Reload code" comes back sooner) and the log
+      title stays blank; one with a log keeps it GONE_GRACE_S, titled
+      "· Maya 2025 · Dev · closed".
     Verified with real Maya 2023 + 2025: quit -> clean, killed process ->
     not clean, busy on and off. Tests that read raw requests from a fake
     Maya stop the ping timer first (`server._ping_timer.stop()`).
@@ -711,7 +738,8 @@ maya_gate/
     user_setup_tab.py      UserSetupTab (CodeEditor for the script, debounced autosave)
     boost.py               BoostStore (Maya's auto-load list, the boosted launch + its loader, reports, backups, Qt-free)
     boost_tab.py           BoostTab (per-environment plug-in list: checked = loaded at startup)
-    sessions_tab.py        SessionsTab (the Mayas connected to the hub right now)
+    sessions_tab.py        SessionsTab (the Mayas connected to the hub right now; the finished ones while none is)
+    session_history.py     SessionHistory / SessionRecord (the sessions that are over, kept across hub restarts, Qt-free)
     version_row.py         MayaVersionRow (animated row of installed versions)
     variable_group.py      CollapsibleVariableGroup (config-aware, owns persistence)
     variable_adder.py      EnvVariableAdder (known/custom variable input row)
@@ -727,7 +755,7 @@ atoms/buttons/icon_tile_button.py         IconTileButton (QToolButton tile: QSS-
 atoms/icons/tinted_icon.py                TintedIcon (passive one-color icon tinted from QSS: qproperty-iconColor; dimmed when disabled)
 atoms/buttons/glyph_button.py             GlyphButton (custom-painted small icon button; QPushButton's QSS padding leaves no room for a glyph at ~20px)
 atoms/comboboxes/base_combo_box.py        BaseComboBox (was QCustomComboBox)
-atoms/editors/log_view.py                 LogView (read-only log: time-stamped entries colored by level — error / warning / info / trace — from qproperty colors; follows the tail)
+atoms/editors/log_view.py                 LogView (read-only log: time-stamped entries colored by level — error / warning / info / trace — from qproperty colors; follows the tail; its QSS `color` exists only to color the placeholder — a QPlainTextEdit without one draws it near-black)
 atoms/editors/code_editor.py              CodeEditor (line numbers + gutter divider, Python highlighting from --syntax-* tokens, Tab/auto-indent)
 atoms/segmented/segmented_control.py     SegmentedControl (one-of-few picker: sunken track, raised pill that slides; Left/Right keys)
 atoms/tabs/base_tab_bar.py                BaseTabBar + BaseTabWidget (sliding accent indicator under the open tab)

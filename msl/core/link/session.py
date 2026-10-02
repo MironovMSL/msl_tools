@@ -18,6 +18,7 @@ class MayaSession:
         full_version: Maya's full version as it reports it ("2025.3.1"; may be "").
         environment: The Maya Gate environment it was started in ("" = not from Maya Gate).
         scene: Path of the open scene ("" = untitled).
+        modified: The open scene has unsaved changes.
         boosted: Started with boost start.
         skipped: Plug-ins boost start left out at startup (they may have been loaded since).
         console: This Maya accepts code from the hub's console (a Dev environment).
@@ -31,6 +32,7 @@ class MayaSession:
     full_version: str = ""
     environment: str = ""
     scene: str = ""
+    modified: bool = False
     boosted: bool = False
     skipped: list[str] = field(default_factory=list)
     console: bool = False
@@ -62,6 +64,7 @@ class MayaSession:
                    full_version=str(data.get("full_version") or ""),
                    environment=str(data.get("environment") or ""),
                    scene=str(data.get("scene") or ""),
+                   modified=bool(data.get("modified")),
                    boosted=bool(data.get("boosted")),
                    skipped=[str(name) for name in data.get("skipped") or [] if name],
                    console=bool(data.get("console")),

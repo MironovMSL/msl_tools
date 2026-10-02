@@ -104,6 +104,11 @@ SessionsTab QLabel#sessionDot {
 }
 SessionsTab QLabel#sessionDot[state="busy"]  { background-color: var(--warning); }
 SessionsTab QLabel#sessionDot[state="ended"] { background-color: var(--error); }
+/* A session that is over and closed normally: a hollow dot. */
+SessionsTab QLabel#sessionDot[state="closed"] {
+    background-color: transparent;
+    border: 1px solid var(--text-secondary);
+}
 /* "busy": a small pill in the warning tone. */
 SessionsTab QLabel#sessionBusy {
     color: var(--warning);
@@ -123,6 +128,28 @@ SessionsTab QLabel#sessionVersion {
 }
 SessionsTab QLabel#sessionScene {
     color: var(--text-primary);
+}
+/* The scene's name is a link to the file. */
+SessionsTab QLabel#sessionScene[hover="true"] {
+    color: var(--accent);
+}
+/* Sessions that are over read quieter than the running ones. */
+SessionsTab QLabel#sessionVersion[past="true"],
+SessionsTab QLabel#sessionScene[past="true"],
+SessionsTab QLabel#sessionOutcome {
+    color: var(--text-secondary);
+}
+SessionsTab QLabel#sessionVersion[past="true"] {
+    font-weight: 400;
+}
+SessionsTab QLabel#sessionScene[past="true"][hover="true"] {
+    color: var(--accent);
+}
+SessionsTab QLabel#sessionOutcome {
+    font-size: 11px;
+}
+SessionsTab QLabel#sessionOutcome[state="error"] {
+    color: var(--error);
 }
 /* Environment / boost: small pills (boost in the accent). */
 SessionsTab QLabel#sessionEnvironment,

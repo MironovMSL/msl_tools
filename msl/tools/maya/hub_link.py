@@ -49,6 +49,7 @@ class HubLink(QtCore.QObject):
     RECONNECT_MS = 5000
     SCENE_EVENTS = ("SceneOpened", "NewSceneOpened", "SceneSaved")
     LOG_FLUSH_MS = 250       # Script Editor output goes out in batches, not line by line
+    SCENE_POLL_MS = 2000     # how often "has unsaved changes" is looked at (Maya has no event for it)
     LOG_BUFFER_MAX = 400     # lines kept between two flushes (and while the hub is away)
     LOG_TEXT_MAX = 6000      # characters of one message
 
@@ -59,7 +60,7 @@ class HubLink(QtCore.QObject):
         self._token = token
         self._decoder = protocol.FrameDecoder()
         self._script_jobs: list[int] = []
-        self._sent_scene: str | None = None  # the scene the hub was last told about
+        self._sent_scene: tuple | None = None  # (scene, modified) the hub was last told about
         self._log_all = False                # False: warnings and errors only
         self._console_running = False        # console code is running: its output goes in the reply
         self._log_buffer: list[list[str]] = []
@@ -70,6 +71,10 @@ class HubLink(QtCore.QObject):
         self._log_timer = QtCore.QTimer(self)
         self._log_timer.setInterval(self.LOG_FLUSH_MS)
         self._log_timer.timeout.connect(self._flush_log)
+
+        self._scene_timer = QtCore.QTimer(self)
+        self._scene_timer.setInterval(self.SCENE_POLL_MS)
+        self._scene_timer.timeout.connect(self._on_scene_changed)
 
         self._socket = QtNetwork.QTcpSocket(self)
         self._socket.connected.connect(self._on_connected)
@@ -88,6 +93,7 @@ class HubLink(QtCore.QObject):
         self._watch_scene()
         self._watch_output()
         self._log_timer.start()
+        self._scene_timer.start()
         self._connect()
 
     def _say_bye(self, reason: str) -> None:
@@ -100,12 +106,12 @@ class HubLink(QtCore.QObject):
 
     def _on_quit(self) -> None:
         self._flush_log()
-        self._say_bye("quit")
+        self._say_bye(protocol.BYE_QUIT)
 
     def shut(self) -> None:
         """Stops for good (a newer HubLink replaces this one)."""
         import maya.cmds as cmds
-        self._say_bye("restart")
+        self._say_bye(protocol.BYE_RESTART)
         self._retry.stop()
         for job in self._script_jobs:
             try:
@@ -115,6 +121,7 @@ class HubLink(QtCore.QObject):
                 pass
         self._script_jobs = []
         self._log_timer.stop()
+        self._scene_timer.stop()
         if self._output_callback is not None:
             try:
                 import maya.api.OpenMaya as om
@@ -154,7 +161,7 @@ class HubLink(QtCore.QObject):
             full_version = str(cmds.about(installedVersion=True)).split()[-1]
         except Exception:
             full_version = ""
-        self._sent_scene = self._scene()
+        self._sent_scene = (self._scene(), self._modified())
         # A fresh connection starts on "warnings and errors only": the hub that
         # wants more says so again (it may be a different, restarted hub).
         self._log_all = False
@@ -168,7 +175,8 @@ class HubLink(QtCore.QObject):
             boosted=BOOST_VARIABLE in os.environ,
             skipped=[name for name in os.environ.get(BOOST_VARIABLE, "").split(os.pathsep) if name],
             console=console_allowed(),
-            scene=self._sent_scene,
+            scene=self._sent_scene[0],
+            modified=self._sent_scene[1],
             msl_version=_msl_version))
 
     def _on_ready_read(self) -> None:
@@ -376,6 +384,15 @@ class HubLink(QtCore.QObject):
         except Exception:
             return ""
 
+    @staticmethod
+    def _modified() -> bool:
+        """The open scene has unsaved changes."""
+        import maya.cmds as cmds
+        try:
+            return bool(cmds.file(query=True, modified=True))
+        except Exception:
+            return False
+
     def _watch_scene(self) -> None:
         import maya.cmds as cmds
         for name in self.SCENE_EVENTS:
@@ -389,10 +406,14 @@ class HubLink(QtCore.QObject):
             pass
 
     def _on_scene_changed(self) -> None:
-        scene = self._scene()
-        if scene != self._sent_scene:  # new + rename + save fire several events for one change
-            self._sent_scene = scene
-            self._send(protocol.event(protocol.SCENE, scene=scene))
+        """Tells the hub the open scene and whether it has unsaved changes —
+        only when one of them changed. Reached from Maya's scene events (new +
+        rename + save fire several for one change) and from the poll: Maya has
+        no event for "the scene was modified"."""
+        state = (self._scene(), self._modified())
+        if state != self._sent_scene:
+            self._sent_scene = state
+            self._send(protocol.event(protocol.SCENE, scene=state[0], modified=state[1]))
 
 
 class _Tee(object):

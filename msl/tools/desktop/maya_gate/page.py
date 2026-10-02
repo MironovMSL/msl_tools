@@ -15,6 +15,7 @@ from msl_tools.msl.tools.desktop.maya_gate.user_setup import UserSetupStore
 from msl_tools.msl.tools.desktop.maya_gate.user_setup_tab import UserSetupTab
 from msl_tools.msl.tools.desktop.maya_gate.boost import BoostStore
 from msl_tools.msl.tools.desktop.maya_gate.boost_tab import BoostTab
+from msl_tools.msl.tools.desktop.maya_gate.session_history import SessionHistory
 from msl_tools.msl.tools.desktop.maya_gate.sessions_tab import SessionsTab
 from msl_tools.msl.ui.maya_link import MayaLinkServer
 from msl_tools.msl.tools.desktop.maya_gate.maya_variables import VariableKind, launch_values, spec_of
@@ -115,6 +116,7 @@ class MayaGatePage(qt.QtWidgets.QWidget):
         self._ui = self._config[self.UI_SECTION]
         self._user_setup_store = UserSetupStore(configs.base_dir / self.TOOL_NAME)
         self._boost_store = BoostStore(configs.base_dir / self.TOOL_NAME)
+        self._session_history = SessionHistory(configs.base_dir / self.TOOL_NAME)
         saved_environment = self._ui.get("environment")
         self._environment = (saved_environment if saved_environment in self.ENVIRONMENTS
                              else self.DEFAULT_ENVIRONMENT)
@@ -151,7 +153,7 @@ class MayaGatePage(qt.QtWidgets.QWidget):
                                    blocked_reason_for=lambda: BoostStore.blocked_reason(self._launch_variables()))
         self._tabs.addTab(self._indented(self._boost_tab), "Boost start")
         self._link = MayaLinkServer.instance()  # the hub's one server; run_hub starts it listening
-        self._sessions_tab = SessionsTab(self._link)
+        self._sessions_tab = SessionsTab(self._link, self._session_history)
         self._tabs.addTab(self._indented(self._sessions_tab), self.SESSIONS_TAB_TITLE)
         self._link.sessions_changed.connect(self._update_sessions_tab_title)
         self._link.attention_changed.connect(self._update_sessions_tab_title)

@@ -1,4 +1,5 @@
 # tools/desktop/maya_gate/sessions_tab.py
+import os
 import time
 from pathlib import Path
 
@@ -7,6 +8,7 @@ from msl_tools.msl.core.link import protocol
 from msl_tools.msl.core.resources import Resources
 from msl_tools.msl.ui.process_launcher.process_launcher import ProcessLauncher
 from msl_tools.msl.core.link.session import MayaSession
+from msl_tools.msl.tools.desktop.maya_gate.session_history import SessionHistory, SessionRecord
 from msl_tools.msl.ui.maya_link.server import MayaLinkServer
 from msl_tools.msl.ui.theme.qss import make_rounded_popup, repolish
 from msl_tools.msl.ui.widgets.atoms.editors import CodeEditor, LogView
@@ -59,6 +61,92 @@ class _ConsoleInput(CodeEditor):
         self.moveCursor(qt.QtGui.QTextCursor.MoveOperation.End)
 
 
+class _SceneLabel(qt.QtWidgets.QLabel):
+    """Private: a scene's file name — "hero_rig_v07.ma", with a "*" while it
+    has unsaved changes (as in Maya's title bar). When the scene is a file,
+    the NAME (not the empty space after it) is a link: a click shows the file
+    in the system's file manager, a right click offers that and "Copy path".
+
+    Signals:
+        reveal_failed(str) — neither the file nor its folder is there any more.
+    """
+
+    reveal_failed = qt.QtCore.Signal(str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("sessionScene")
+        # The scene's name is what gives way in a narrow window (clipped), not the rest.
+        self.setSizePolicy(qt.QtWidgets.QSizePolicy.Policy.Ignored, qt.QtWidgets.QSizePolicy.Policy.Preferred)
+        self.setMouseTracking(True)
+        self._path = ""
+        self._pressed = False
+
+    def set_scene(self, path: str, modified: bool = False) -> None:
+        self._path = path
+        self.setText((os.path.basename(path) if path else "untitled") + ("*" if modified else ""))
+        lines = [path or "This scene hasn’t been saved to a file yet."]
+        if modified:
+            lines.append("It has unsaved changes.")
+        if path:
+            lines.append("Click: show in folder  ·  right click: copy the path")
+        self.setToolTip(chr(10).join(lines))
+
+    def reveal(self) -> None:
+        """Shows the scene file in the file manager (its folder, if the file is gone)."""
+        path = Path(self._path)
+        target = path if path.exists() else path.parent
+        if not (self._path and target.exists() and ProcessLauncher.open_file_explorer(target)):
+            self.reveal_failed.emit(self._path)
+
+    def _over_name(self, event) -> bool:
+        return bool(self._path) and event.position().x() <= self.fontMetrics().horizontalAdvance(self.text())
+
+    def _set_hover(self, hover: bool) -> None:
+        if bool(self.property("hover")) != hover:
+            self.setProperty("hover", hover)  # maya_gate.qss: QLabel#sessionScene[hover="true"]
+            repolish(self)
+            if hover:
+                self.setCursor(qt.QtCore.Qt.CursorShape.PointingHandCursor)
+            else:
+                self.unsetCursor()
+
+    def mouseMoveEvent(self, event) -> None:
+        self._set_hover(self._over_name(event))
+        super().mouseMoveEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        self._set_hover(False)
+        super().leaveEvent(event)
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == qt.QtCore.Qt.MouseButton.LeftButton and self._over_name(event):
+            self._pressed = True
+            event.accept()  # a click on the name is for the file, not for selecting the row
+            return
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        if self._pressed:
+            self._pressed = False
+            if self._over_name(event):
+                self.reveal()
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+    def contextMenuEvent(self, event) -> None:
+        if not self._path:
+            return
+        menu = make_rounded_popup(qt.QtWidgets.QMenu(self))
+        menu.setAttribute(qt.QtCore.Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        menu.addAction("Show in folder").triggered.connect(self.reveal)
+        menu.addAction("Copy path").triggered.connect(
+            lambda: qt.QtGui.QGuiApplication.clipboard().setText(self._path))
+        self._menu = menu  # for tests; the menu deletes itself on close
+        menu.popup(event.globalPos())
+
+
 class _SessionRow(qt.QtWidgets.QWidget):
     """Private: one running Maya — a live dot, "Maya 2025", its environment,
     the open scene, a "boost" mark, what can be asked of it (quiet text
@@ -93,10 +181,7 @@ class _SessionRow(qt.QtWidgets.QWidget):
         self.busy_label.setObjectName("sessionBusy")
         self.busy_label.setToolTip("This Maya isn\u2019t answering right now: it is working "
                                    "(a long script, a heavy scene).\nRequests wait until it is free.")
-        self.scene_label = qt.QtWidgets.QLabel()
-        self.scene_label.setObjectName("sessionScene")
-        # The scene's name is what gives way in a narrow window (clipped), not the rest.
-        self.scene_label.setSizePolicy(qt.QtWidgets.QSizePolicy.Policy.Ignored, qt.QtWidgets.QSizePolicy.Policy.Preferred)
+        self.scene_label = _SceneLabel()
         self.time_label = qt.QtWidgets.QLabel()
         self.time_label.setObjectName("sessionTime")
         self.errors_label = qt.QtWidgets.QLabel()
@@ -178,11 +263,12 @@ class _SessionRow(qt.QtWidgets.QWidget):
         if self.dot.property("state") != state:
             self.dot.setProperty("state", state)  # maya_gate.qss: QLabel#sessionDot[state]
             repolish(self.dot)
-        self.scene_label.setText(session.scene_name)
+        self.scene_label.set_scene(session.scene, session.modified)
         self.time_label.setText(session.connected_for())
-        self.setToolTip(f"Maya {session.full_version or session.version}  ·  process {session.pid}\n"
-                        f"Scene: {session.scene or 'untitled'}\n"
-                        f"msl_tools {session.msl_version} in that Maya")
+        self.setToolTip(chr(10).join([
+            f"Maya {session.full_version or session.version}  ·  process {session.pid}",
+            f"Scene: {session.scene or 'untitled'}" + (" (unsaved changes)" if session.modified else ""),
+            f"msl_tools {session.msl_version} in that Maya"]))
 
 
 class _EndedRow(qt.QtWidgets.QWidget):
@@ -208,7 +294,8 @@ class _EndedRow(qt.QtWidgets.QWidget):
         version_label.setObjectName("sessionVersion")
         environment_label = qt.QtWidgets.QLabel(session.environment)
         environment_label.setObjectName("sessionEnvironment")
-        ended_label = qt.QtWidgets.QLabel("ended unexpectedly at " + time.strftime("%H:%M", time.localtime(when)))
+        ended_label = qt.QtWidgets.QLabel("ended unexpectedly at " + time.strftime("%H:%M", time.localtime(when))
+                                          + (" · unsaved changes" if session.modified else ""))
         ended_label.setObjectName("sessionEnded")
         ended_label.setSizePolicy(qt.QtWidgets.QSizePolicy.Policy.Ignored, qt.QtWidgets.QSizePolicy.Policy.Preferred)
         file_button = _SessionRow._action("Log file", "Show the log saved when this Maya went away")
@@ -227,9 +314,10 @@ class _EndedRow(qt.QtWidgets.QWidget):
         layout.addWidget(dismiss_button)
         environment_label.setVisible(bool(session.environment))  # safe: it already belongs to this row
         file_button.setVisible(has_file)
-        self.setToolTip(f"Maya {session.full_version or session.version}  ·  process {session.pid}\n"
-                        f"Its connection dropped without a goodbye: Maya crashed or was closed by force.\n"
-                        f"Scene at the time: {session.scene or 'untitled'}")
+        self.setToolTip(chr(10).join([
+            f"Maya {session.full_version or session.version}  ·  process {session.pid}",
+            "Its connection dropped without a goodbye: Maya crashed or was closed by force.",
+            f"Scene at the time: {session.scene or 'untitled'}" + (" (with unsaved changes)" if session.modified else "")]))
 
     def mousePressEvent(self, event) -> None:
         if event.button() == qt.QtCore.Qt.MouseButton.LeftButton:
@@ -240,6 +328,64 @@ class _EndedRow(qt.QtWidgets.QWidget):
         if bool(self.property("selected")) != selected:
             self.setProperty("selected", selected)
             repolish(self)
+
+
+class _HistoryRow(qt.QtWidgets.QWidget):
+    """Private: a Maya session that is over (a SessionRecord) — shown while
+    nothing is running. A hollow dot = it quit, a red one = it ended
+    unexpectedly (then with a link to the log saved at that moment); the
+    scene's name is the same link as in a live row."""
+
+    file_requested = qt.QtCore.Signal(str)   # path of the saved log
+
+    def __init__(self, record: SessionRecord, parent=None):
+        super().__init__(parent)
+        self.record = record
+        self.setObjectName("sessionRow")
+        self.setFixedHeight(_SessionRow.HEIGHT)
+
+        dot = qt.QtWidgets.QLabel()
+        dot.setObjectName("sessionDot")
+        dot.setProperty("state", "closed" if record.clean else "ended")
+        dot.setFixedSize(_SessionRow.DOT_SIZE, _SessionRow.DOT_SIZE)
+        version_label = qt.QtWidgets.QLabel(f"Maya {record.version}")
+        version_label.setObjectName("sessionVersion")
+        version_label.setProperty("past", True)
+        environment_label = qt.QtWidgets.QLabel(record.environment)
+        environment_label.setObjectName("sessionEnvironment")
+        self.scene_label = _SceneLabel()
+        self.scene_label.set_scene(record.scene, record.modified)
+        self.scene_label.setProperty("past", True)
+        self.outcome_label = qt.QtWidgets.QLabel("closed" if record.clean else "ended unexpectedly")
+        self.outcome_label.setObjectName("sessionOutcome")
+        self.outcome_label.setProperty("state", "" if record.clean else "error")
+        self.time_label = qt.QtWidgets.QLabel(f"{record.ended_text()}  ·  {record.duration_text()}")
+        self.time_label.setObjectName("sessionTime")
+
+        layout = qt.QtWidgets.QHBoxLayout(self)
+        layout.setContentsMargins(12, 0, 12, 0)
+        layout.setSpacing(8)
+        layout.addWidget(dot)
+        layout.addWidget(version_label)
+        layout.addWidget(environment_label)
+        layout.addWidget(self.scene_label, 1)
+        layout.addWidget(self.outcome_label)
+        if record.log_file:
+            file_button = _SessionRow._action("Log file", "Show the log saved when this Maya went away")
+            file_button.clicked.connect(lambda: self.file_requested.emit(self.record.log_file))
+            layout.addWidget(file_button)
+        layout.addWidget(self.time_label)
+        if not record.environment:
+            environment_label.hide()
+        lines = [f"Maya {record.version}  ·  process {record.pid}",
+                 "Started " + time.strftime("%d %b %H:%M", time.localtime(record.connected_at))
+                 + ", " + ("closed " if record.clean else "ended unexpectedly ")
+                 + time.strftime("%d %b %H:%M", time.localtime(record.ended_at)) + f" ({record.duration_text()})",
+                 f"Scene at the end: {record.scene or 'untitled'}"
+                 + (" (with unsaved changes)" if record.modified else "")]
+        if not record.clean:
+            lines.append("Its connection dropped without a goodbye: Maya crashed or was closed by force.")
+        self.setToolTip(chr(10).join(lines))
 
 
 class SessionsTab(qt.QtWidgets.QWidget):
@@ -280,6 +426,14 @@ class SessionsTab(qt.QtWidgets.QWidget):
     unread_errors (the tab's title and the header's indicator show a mark),
     and cleared when the tab is shown.
 
+    Scenes: a row's scene name carries a "*" while that scene has unsaved
+    changes, and is a link to the file (_SceneLabel).
+
+    History: every session that is over is kept (SessionHistory — it
+    survives a hub restart). While nothing is running the list shows those
+    "Recent sessions" instead of an empty box. A link restart ("Reload
+    code") and the hub's own shutdown are not ends of a session.
+
     The console (under the log, only while the selected Maya allows it —
     one started in a Dev environment): a small Python editor; Ctrl+Enter or
     "Run" sends the code to that Maya (RUN_PYTHON), which runs it like its
@@ -301,10 +455,17 @@ class SessionsTab(qt.QtWidgets.QWidget):
     LOG_PROBLEMS, LOG_ALL = "Problems", "All"
     LOG_KEPT = 2000               # entries kept per Maya
     GONE_GRACE_S = 60             # how long a Maya that left keeps its log (and the selection)
+    RELOAD_GRACE_S = 5            # ... and how long one that left with an empty log does
+    HISTORY_CAPTION_HEIGHT = 24
 
-    def __init__(self, server: MayaLinkServer, parent=None):
+    def __init__(self, server: MayaLinkServer, history: SessionHistory | None = None, parent=None):
         super().__init__(parent)
         self._server = server
+        self._history = history                   # None: finished sessions aren't kept
+        self._history_rows: list[_HistoryRow] = []
+        self._history_key: list = []              # what the history rows on screen were built from
+        self._seen = False                        # the history file is first read when the tab is shown
+        self._names: dict[int, str] = {}          # pid -> "Maya 2025 · Dev" (for a closed Maya's log title)
         self._rows: dict[int, _SessionRow] = {}
         self._logs: dict[int, list] = {}          # pid -> [(level, text, time), ...]
         self._problems: dict[int, list] = {}      # pid -> [errors, warnings]
@@ -330,6 +491,18 @@ class SessionsTab(qt.QtWidgets.QWidget):
         self._empty_label.setAlignment(qt.QtCore.Qt.AlignmentFlag.AlignCenter)
         self._empty_label.setWordWrap(True)
         self._list_layout.addWidget(self._empty_label)
+        self._history_caption = qt.QtWidgets.QWidget()
+        self._history_caption.setFixedHeight(self.HISTORY_CAPTION_HEIGHT)
+        caption_label = qt.QtWidgets.QLabel("Recent sessions")
+        caption_label.setObjectName("sessionsSummary")
+        self._clear_history_button = _SessionRow._action("Clear", "Forget these sessions (saved log files stay)")
+        caption_layout = qt.QtWidgets.QHBoxLayout(self._history_caption)
+        caption_layout.setContentsMargins(12, 0, 6, 0)
+        caption_layout.addWidget(caption_label, 1)
+        caption_layout.addWidget(self._clear_history_button)
+        self._list_layout.addWidget(self._history_caption)
+        self._history_caption.hide()
+        self._clear_history_button.clicked.connect(self._on_clear_history)
         self._list_layout.addStretch(1)
         self._scroll = StableScrollArea()
         self._scroll.setObjectName("sessionsScroll")
@@ -419,6 +592,7 @@ class SessionsTab(qt.QtWidgets.QWidget):
     def showEvent(self, event) -> None:
         super().showEvent(event)
         self._server.set_unread_errors(0)  # whatever came in meanwhile is being looked at now
+        self._seen = True
         self.refresh()
         self._timer.start()
 
@@ -441,6 +615,7 @@ class SessionsTab(qt.QtWidgets.QWidget):
                 row.reload_requested.connect(self._on_reload)
                 row.plugins_requested.connect(self._on_plugins)
                 row.selected.connect(self._select_session)
+                row.scene_label.reveal_failed.connect(self._on_reveal_failed)
                 self._rows[session_id] = row
                 if self._log_all:  # a Maya that just joined (or reloaded) starts on "Problems"
                     self._server.request(session_id, protocol.SET_LOG_LEVEL, **{"all": True})
@@ -451,7 +626,9 @@ class SessionsTab(qt.QtWidgets.QWidget):
         # Mayas that ended unexpectedly: listed under the live ones until dismissed.
         live_pids = {session.pid for session in sessions.values()}
         for pid in [pid for pid in self._ended if pid in live_pids]:
-            self._ended.pop(pid)  # it is back (an older Maya restarting its link): not ended after all
+            info = self._ended.pop(pid)  # it is back (an older Maya restarting its link): not ended after all
+            if self._history is not None:
+                self._history.discard(pid, info["when"])
         for pid in [pid for pid in self._ended_rows if pid not in self._ended]:
             row = self._ended_rows.pop(pid)
             row.hide()
@@ -477,12 +654,21 @@ class SessionsTab(qt.QtWidgets.QWidget):
             self._empty_label.setText("MSL Tools isn’t listening for Maya sessions.\n"
                                       + (self._server.error_text() or "It starts with the first launch."))
         repolish(self._status_label)
-        self._empty_label.setVisible(not count and not self._ended)
+        # Nothing running: the list shows the sessions that are over instead of an empty box.
+        records = self._history_records() if not count and not self._ended else []
+        self._show_history(records)
+        self._empty_label.setVisible(not count and not self._ended and not records)
+        if records:
+            self._summary_label.setText("· none running")
 
         # The list is as tall as its rows (up to LIST_ROWS_SHOWN); the log gets the rest.
         listed = count + len(self._ended)
-        shown = max(min(listed, self.LIST_ROWS_SHOWN), 1)
-        self._scroll.setFixedHeight(shown * _SessionRow.HEIGHT + 10 + (26 if not listed else 0))
+        if records:
+            shown = min(len(records), self.LIST_ROWS_SHOWN)
+            self._scroll.setFixedHeight(self.HISTORY_CAPTION_HEIGHT + shown * _SessionRow.HEIGHT + 10)
+        else:
+            shown = max(min(listed, self.LIST_ROWS_SHOWN), 1)
+            self._scroll.setFixedHeight(shown * _SessionRow.HEIGHT + 10 + (26 if not listed else 0))
 
         # Selection follows the PROCESS. A Maya that leaves keeps its log (and the selection)
         # for GONE_GRACE_S: "Reload code" makes it leave and rejoin under a new session id,
@@ -495,15 +681,25 @@ class SessionsTab(qt.QtWidgets.QWidget):
         for pid in [pid for pid in self._gone if pid in pids]:
             del self._gone[pid]
         expired = {pid for pid, since in self._gone.items() if now - since > self.GONE_GRACE_S}
-        if self._selected_pid not in pids and self._selected_pid not in self._ended \
-                and (not self._selected_pid or self._selected_pid in expired) and pids:
-            self._selected_pid = next(iter(pids))
-            self._show_log()
+        for pid, session in pids.items():
+            self._names[pid] = f"Maya {session.version}" + (f" · {session.environment}" if session.environment else "")
+        selected_here = self._selected_pid in pids or self._selected_pid in self._ended
+        # A Maya that left with nothing in its log holds the selection only long enough to
+        # come back from a "Reload code"; one with a log holds it for the whole grace time.
+        left_empty = (not self._logs.get(self._selected_pid)
+                      and now - self._gone.get(self._selected_pid, now) > self.RELOAD_GRACE_S)
+        if not selected_here and (not self._selected_pid or self._selected_pid in expired or left_empty):
+            if pids:
+                self._selected_pid = next(iter(pids))
+                self._show_log()
+            elif self._selected_pid and not self._logs.get(self._selected_pid):
+                self._selected_pid = 0  # that Maya is gone and left nothing to read
         for pid in expired:
             if pid != self._selected_pid:
                 self._logs.pop(pid, None)
                 self._problems.pop(pid, None)
                 self._gone.pop(pid, None)
+                self._names.pop(pid, None)
         for session_id, row in self._rows.items():
             session = sessions[session_id]
             row.set_selected(session.pid == self._selected_pid)
@@ -522,13 +718,14 @@ class SessionsTab(qt.QtWidgets.QWidget):
 
     def _update_log_title(self, session: MayaSession | None) -> None:
         if session is not None:
-            text = f"\u00b7 Maya {session.version}" + (f" \u00b7 {session.environment}" if session.environment else "")
+            text = "· " + self._names.get(session.pid, f"Maya {session.version}")
         elif self._selected_pid in self._ended:
             ended = self._ended[self._selected_pid]["session"]
             text = (f"· Maya {ended.version}" + (f" · {ended.environment}" if ended.environment else "")
                     + " · ended unexpectedly")
-        elif self._selected_pid:
-            text = "\u00b7 that Maya has closed"
+        elif self._selected_pid and self._logs.get(self._selected_pid):
+            # A Maya that closed: its log stays readable for a while. Without a log there is nothing to title.
+            text = "· " + self._names.get(self._selected_pid, "that Maya") + " · closed"
         else:
             text = ""
         self._log_section.setText(text)
@@ -576,18 +773,67 @@ class SessionsTab(qt.QtWidgets.QWidget):
 
     # --- a Maya that ended unexpectedly ---------------------------------------------------
 
-    def _on_session_ended(self, session: MayaSession, clean: bool) -> None:
-        """A session is gone. Without a goodbye it crashed or was killed: its
-        log is written to a file and it stays in the list until dismissed."""
-        if clean:
-            return
+    def _on_session_ended(self, session: MayaSession, clean: bool, reason: str) -> None:
+        """A session is gone. Every real end goes into the history; one without
+        a goodbye (a crash, a killed process) also has its log written to a
+        file and stays in the list until dismissed."""
+        if reason in (protocol.BYE_RESTART, MayaLinkServer.ENDED_BY_HUB):
+            return  # its link restarts ("Reload code") / the hub is the one leaving: that Maya is still running
         now = time.time()
-        self._ended[session.pid] = {"session": session, "when": now, "file": self._save_log(session, now)}
-        self._gone.pop(session.pid, None)
-        self._say(f"Maya {session.version} ended unexpectedly \u2014 its log was saved.", "error")
-        if not self.isVisible():
-            self._server.set_unread_errors(self._server.unread_errors() + 1)
+        file = None
+        if not clean:
+            file = self._save_log(session, now)
+            self._ended[session.pid] = {"session": session, "when": now, "file": file}
+            self._gone.pop(session.pid, None)
+            self._say(f"Maya {session.version} ended unexpectedly — its log was saved.", "error")
+            if not self.isVisible():
+                self._server.set_unread_errors(self._server.unread_errors() + 1)
+        if self._history is not None:
+            self._history.add(SessionRecord(
+                pid=session.pid, version=session.version, environment=session.environment, scene=session.scene,
+                modified=session.modified, boosted=session.boosted, connected_at=session.connected_at,
+                ended_at=now, clean=clean, log_file=str(file) if file is not None else ""))
         self.refresh()
+
+    # --- the sessions that are over ---------------------------------------------------------
+
+    def _history_records(self) -> list:
+        """What the "Recent sessions" list shows. Nothing before the tab was first
+        shown: the history file isn't read while the page is being built."""
+        if self._history is None or not self._seen:
+            return []
+        return self._history.records()
+
+    def _show_history(self, records: list) -> None:
+        """Brings the history rows in line with `records` ([] = none shown)."""
+        key = [(record.pid, record.ended_at) for record in records]
+        if key == self._history_key:
+            return
+        self._history_key = key
+        for row in self._history_rows:
+            row.hide()
+            row.deleteLater()
+        self._history_rows = []
+        self._history_caption.setVisible(bool(records))
+        first = self._list_layout.indexOf(self._history_caption) + 1
+        for offset, record in enumerate(records):
+            row = _HistoryRow(record)
+            row.file_requested.connect(self._on_show_history_file)
+            row.scene_label.reveal_failed.connect(self._on_reveal_failed)
+            self._history_rows.append(row)
+            self._list_layout.insertWidget(first + offset, row)
+
+    def _on_clear_history(self) -> None:
+        if self._history is not None:
+            self._history.clear()
+        self.refresh()
+
+    def _on_show_history_file(self, path: str) -> None:
+        if not ProcessLauncher.open_file_explorer(path):
+            self._say("That log file isn’t there any more.", "error")
+
+    def _on_reveal_failed(self, path: str) -> None:
+        self._say(f"That scene isn’t there any more: {path}", "error")
 
     def _save_log(self, session: MayaSession, when: float) -> Path | None:
         """Writes what that Maya reported to logs/desktop/maya_gate/sessions/. None if it couldn't."""
@@ -599,6 +845,7 @@ class SessionsTab(qt.QtWidgets.QWidget):
             lines = [f"Maya {session.full_version or session.version}, process {session.pid}",
                      f"Environment: {session.environment or '-'}   boost: {'on' if session.boosted else 'off'}",
                      f"Scene: {session.scene or 'untitled'}",
+                     f"Unsaved changes in the scene: {'yes' if session.modified else 'no'}",
                      "Connected: " + time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(session.connected_at)),
                      "Ended unexpectedly: " + time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(when)),
                      "", "--- what its Script Editor reported (warnings and errors; everything if \"All\" was on) ---"]

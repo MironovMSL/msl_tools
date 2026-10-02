@@ -115,6 +115,7 @@ SlimScrollBar {
 
 LogView {
     background-color: var(--editor-background);
+    color: var(--text-primary);  /* the entries carry their own colors; this one gives the placeholder its (dimmed) color */
     border: 1px solid var(--border);
     border-radius: 6px;
     padding: 4px;

@@ -42,6 +42,7 @@ class _Peer:
         self.decoder = protocol.FrameDecoder()
         self.session: MayaSession | None = None
         self.said_bye = False   # it announced that it is leaving (a quit, a link restart)
+        self.bye_reason = ""    # why it left: protocol.BYE_* / ENDED_BY_HUB; "" = the connection just broke
         self.pinging = False    # a ping is out and not answered yet
 
 
@@ -49,15 +50,18 @@ class MayaLinkServer(qt.QtCore.QObject):
     """Accepts Maya sessions and keeps the list of them.
 
     Signals:
-        sessions_changed() — a session connected, changed (its scene) or left.
+        sessions_changed() — a session connected, changed (its scene, unsaved state, busy) or left.
         log_received(int, list) — (session id, [(level, text), ...]): what
             that Maya's Script Editor just printed (warnings and errors;
             plain messages too once asked for with SET_LOG_LEVEL).
         listening_changed() — the server started or stopped listening.
-        session_ended(MayaSession, bool) — a session is gone. `clean` is
-            True when it said goodbye first (Maya quit, or its link
-            restarted after "Reload code") or the hub dropped it itself;
-            False when the connection just broke — Maya crashed or was killed.
+        session_ended(MayaSession, bool, str) — a session is gone. `clean` is
+            True when it said goodbye first or the hub dropped it itself;
+            False when the connection just broke — Maya crashed or was
+            killed. The third value says why: protocol.BYE_QUIT (Maya is
+            closing), protocol.BYE_RESTART (only its link restarts — "Reload
+            code"; it will be back), ENDED_BY_HUB (the hub stopped
+            listening; Maya is still running), "" (the connection broke).
         attention_changed() — unread_errors() changed.
 
     Busy: every PING_INTERVAL_MS each Maya is pinged; one that doesn't
@@ -81,10 +85,11 @@ class MayaLinkServer(qt.QtCore.QObject):
 
     PING_INTERVAL_MS = 4000     # how often every Maya is asked "are you there?"
     PING_TIMEOUT_MS = 3000      # no answer in this time = busy
+    ENDED_BY_HUB = "hub"        # session_ended's reason when the hub itself dropped the session
 
     sessions_changed = qt.QtCore.Signal()
     log_received = qt.QtCore.Signal(int, list)
-    session_ended = qt.QtCore.Signal(object, bool)   # (MayaSession, clean): see the class docstring
+    session_ended = qt.QtCore.Signal(object, bool, str)   # (MayaSession, clean, reason): see the class docstring
     attention_changed = qt.QtCore.Signal()
     listening_changed = qt.QtCore.Signal()
 
@@ -151,6 +156,7 @@ class MayaLinkServer(qt.QtCore.QObject):
         self._ping_timer.stop()
         for peer in list(self._peers):
             peer.said_bye = True  # we are the ones leaving: not a crash
+            peer.bye_reason = self.ENDED_BY_HUB
             peer.socket.abort()
         self._server.close()
         self.listening_changed.emit()
@@ -284,10 +290,11 @@ class MayaLinkServer(qt.QtCore.QObject):
             return
         if kind == protocol.EVENT and name == protocol.BYE:
             peer.said_bye = True
+            peer.bye_reason = str(data.get("reason") or protocol.BYE_QUIT)
         elif kind == protocol.EVENT and name == protocol.SCENE:
-            scene = str(data.get("scene") or "")
-            if scene != peer.session.scene:
-                peer.session.scene = scene
+            scene, modified = str(data.get("scene") or ""), bool(data.get("modified"))
+            if (scene, modified) != (peer.session.scene, peer.session.modified):
+                peer.session.scene, peer.session.modified = scene, modified
                 self.sessions_changed.emit()
         elif kind == protocol.EVENT and name == protocol.LOG:
             entries = []
@@ -319,6 +326,6 @@ class MayaLinkServer(qt.QtCore.QObject):
                 self._finish(request_id, {"success": False, "error": "Maya disconnected.", "data": {}})
             if peer.session is not None:
                 self.sessions_changed.emit()
-                self.session_ended.emit(peer.session, peer.said_bye)
+                self.session_ended.emit(peer.session, peer.said_bye, peer.bye_reason)
         except RuntimeError:
             pass  # the application is shutting down: Qt already deleted this server / the socket
