@@ -53,22 +53,21 @@ MediaPage QFrame#mediaFfmpeg[state="looking"] QLabel#mediaFfmpegText {
     color: var(--text-secondary);
 }
 
-/* What is being worked on: a dashed drop area while empty, a raised card once loaded. */
+/* What is being worked on: while empty a DropArea (it paints its own dashed frame -
+   ui/theme/widgets.qss), a raised card once loaded. */
 MediaPage QFrame#mediaSource {
-    background-color: alpha(var(--text-primary), 2%);
-    border: 1px dashed alpha(var(--text-secondary), 55%);
+    background-color: transparent;
+    border: 1px solid transparent;
     border-radius: 8px;
 }
 MediaPage QFrame#mediaSource[look="loaded"] {
     background-color: var(--surface-raised);
     border: 1px solid var(--border);
 }
-MediaPage QFrame#mediaSource[dragging="true"] {
+/* Something is dragged over the page while a source is loaded: it would replace it. */
+MediaPage QFrame#mediaSource[look="loaded"][dragging="true"] {
     background-color: alpha(var(--accent), 9%);
     border: 1px dashed var(--accent);
-}
-MediaPage QLabel#mediaDropHint {
-    color: var(--text-secondary);
 }
 MediaPage QLabel#mediaThumbnail {
     background-color: alpha(var(--text-primary), 8%);
@@ -92,11 +91,67 @@ MediaPage QLabel#mediaSourceWarning[plain="true"] {
     font-size: 11px;
 }
 
-/* An action's settings: a panel raised off the page, like Maya Gate's groups. */
-MediaPage QFrame#mediaOptions {
+/* The small icon buttons beside the start button (preview, command) and in a job's row. */
+MediaPage GlyphButton#mediaAction {
+    qproperty-glyphColor:       var(--accent);
+    qproperty-activeGlyphColor: var(--accent);
+    qproperty-highlightColor:   alpha(var(--accent), 16%);
+}
+
+/* About how big / how long: a quiet pill at the start of the row with the start button. */
+MediaPage QLabel#mediaEstimate {
+    color: var(--text-primary);
+    background-color: alpha(var(--text-primary), 7%);
+    border-radius: 10px;
+    padding: 2px 10px;
+    font-size: 11px;
+}
+
+/* The source's facts: a small tile each - the value over what it is. */
+MediaPage QFrame#mediaFact {
+    background-color: alpha(var(--text-primary), 5%);
+    border: 1px solid alpha(var(--border), 60%);
+    border-radius: 6px;
+}
+MediaPage QLabel#mediaFactValue {
+    color: var(--text-primary);
+    font-size: 12px;
+    font-weight: 600;
+}
+MediaPage QLabel#mediaFactCaption {
+    color: var(--text-secondary);
+    font-size: 10px;
+}
+/* The source's picture under the pointer: dimmed, with a play mark. */
+MediaPage SourceThumbnail {
+    qproperty-overlayColor: alpha(var(--surface), 45%);
+    qproperty-markColor:    var(--accent);
+    qproperty-symbolColor:  var(--on-accent);
+}
+
+/* A card: a block of the page raised off it, with a header line (an accent icon and a
+   title in capitals) - the picked action with everything that belongs to it, the jobs. */
+MediaPage QFrame#mediaCard {
     background-color: var(--surface-raised);
     border: 1px solid var(--border);
-    border-radius: 8px;
+    border-radius: 9px;
+}
+MediaPage QLabel#mediaCardTitle {
+    color: var(--text-primary);
+    font-size: 11px;
+    font-weight: 700;
+}
+MediaPage TintedIcon#mediaCardIcon {
+    qproperty-iconColor: var(--accent);
+}
+MediaPage QFrame#mediaDivider {
+    background-color: alpha(var(--border), 70%);
+    border: none;
+}
+/* An action's settings sit in the action's card: no frame of their own. */
+MediaPage QFrame#mediaOptions {
+    background-color: transparent;
+    border: none;
 }
 
 MediaPage QLabel#mediaMessage                { color: var(--text-secondary); }
@@ -104,9 +159,8 @@ MediaPage QLabel#mediaMessage[state="error"] { color: var(--error); }
 
 /* The jobs. */
 MediaPage StableScrollArea#mediaJobs {
-    background-color: var(--surface-raised);
-    border: 1px solid var(--border);
-    border-radius: 6px;
+    background-color: transparent;
+    border: none;
 }
 MediaPage QFrame#mediaJob {
     border: none;

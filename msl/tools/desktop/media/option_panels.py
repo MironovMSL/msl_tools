@@ -11,10 +11,11 @@ from pathlib import Path
 
 import msl_tools.msl.ui.qt_bindings as qt
 from msl_tools.msl.core.media import (Job, MediaError, Overlays, adjust, compare, convert, default_output,
-                                      extract_audio, frame, gif, join, remove_audio, replace_audio,
+                                      extract_audio, frame, gif, join, loop, remove_audio, replace_audio,
                                       sequence_to_video, shrink, stamp, to_frames, trim)
 from msl_tools.msl.core.media.recipes import FORMATS, GAPS_ERROR, GAPS_HOLD, IMAGE_FORMATS, SOUND_FORMATS
 from msl_tools.msl.core.media.thumbnail import frames_at
+from msl_tools.msl.tools.desktop.media.ffmpeg_bar import link_button
 from msl_tools.msl.tools.desktop.media.source import AUDIO_SUFFIXES, MediaSource, format_time, parse_time
 from msl_tools.msl.ui.ui_resources import UiResources
 from msl_tools.msl.ui.widgets.atoms.buttons.icon_push_button import IconPushButton
@@ -29,13 +30,24 @@ NL = chr(10)
 
 class OptionPanel(qt.QtWidgets.QFrame):
     """Base of an action's settings: a two-column form (dimmed caption, control).
+    The page puts it into the action's card, under the card's header.
 
     A subclass sets:
         KEY / TITLE / BUTTON — its id, its name in the action picker, the start button's text
-        TIP — one line saying what the action does (the picker's tooltip)
+        TIP — one line saying what the action does (the picker's tooltip, the card's header)
+        ICON — its icon in the picker and the header (assets/icons/actions/<ICON>.svg)
+        GROUP — what kind of action it is ("change" the video, "convert" it into
+                something else, "combine" several): the picker rules the groups off
         COMBINES — True: ONE job is made from all the sources (join, compare);
                    False: one job per source
         PRESETS — built-in presets {name: settings}
+        PREVIEW — the action can show a few seconds of its result before the
+                  start; PREVIEW_TIP — what its "Preview" button says it plays;
+                  PREVIEW_SECONDS — how much; PREVIEW_FROM_START — the START of
+                  the result, not a piece from its middle (where the beginning
+                  is the point)
+        COMPARES_SIZE — the finished job says how much smaller than its
+                  source the result is (pointless where it is a piece of it)
     and implements:
         accepts(sources) — is this action offered for these sources
         set_sources(sources) — new sources were loaded
@@ -50,9 +62,14 @@ class OptionPanel(qt.QtWidgets.QFrame):
         changed() — a choice changed (the page refreshes what depends on it).
     """
 
-    KEY = TITLE = BUTTON = TIP = ""
+    KEY = TITLE = BUTTON = TIP = ICON = GROUP = ""
     COMBINES = False
     PRESETS: dict = {}
+    PREVIEW = True
+    PREVIEW_TIP = "Make three seconds from the middle with these settings and play them"
+    PREVIEW_SECONDS = 3.0
+    PREVIEW_FROM_START = False
+    COMPARES_SIZE = True
     CAPTION_WIDTH = 84
 
     changed = qt.QtCore.Signal()
@@ -177,9 +194,11 @@ QUALITY_HIGH = {"Best": "best", "High": "high", "Good": "good", "Small": "small"
 SPEEDS = {"Fast": "fast", "Balanced": "balanced", "Compact": "compact"}
 SPEED_TIP = ("Fast: done soonest, a bigger file." + NL + "Balanced: the usual choice." + NL
              + "Compact: takes longer, the smallest file at the same quality.")
-VIDEO_FORMATS = {"MP4": "mp4", "ProRes": "prores", "ProRes HQ": "prores_hq", "DNxHR": "dnxhr_hq"}
+VIDEO_FORMATS = {"MP4": "mp4", "ProRes": "prores", "HQ": "prores_hq", "DNxHR": "dnxhr_hq"}
 FORMAT_TIP = ("MP4: small, plays everywhere — for watching and sending." + NL
-              + "ProRes / ProRes HQ / DNxHR: big files that keep far more of the picture — for editing and grading.")
+              + "ProRes / HQ (ProRes HQ) / DNxHR: big files that keep far more of the picture — for editing "
+                "and grading.")
+RENAMED = {"ProRes HQ": "HQ"}  # labels of earlier versions, as saved settings and presets still spell them
 IMAGE_PATTERNS = "Pictures (*.png *.jpg *.jpeg *.tif *.tiff *.tga *.bmp *.webp)"
 SOUND_PATTERNS = "Sound (" + " ".join(f"*{suffix}" for suffix in AUDIO_SUFFIXES) + ")"
 
@@ -243,6 +262,7 @@ class SequencePanel(_OverlayRows, OptionPanel):
     sound, burn-ins / watermark, and what to do about missing frames."""
 
     KEY, TITLE, BUTTON = "sequence", "To video", "Create video"
+    ICON, GROUP = "film", "make"
     TIP = "Turn the frames into a video"
     FRAME_RATES = ("12", "15", "23.976", "24", "25", "29.97", "30", "48", "50", "60")
     PRESETS = {
@@ -329,7 +349,8 @@ class SequencePanel(_OverlayRows, OptionPanel):
             self._fps.setCurrentText(str(settings["fps"]))
         self._quality.set_current(str(settings.get("quality", "")), animate=False)
         self._speed.set_current(str(settings.get("speed", "")), animate=False)
-        self._format.set_current(str(settings.get("format", "")), animate=False)
+        chosen = str(settings.get("format", ""))
+        self._format.set_current(RENAMED.get(chosen, chosen), animate=False)
         self._more.set_checked_immediate(bool(settings.get("overlays_open", False)))
         self._apply_overlay_settings(settings)
         self._sync()
@@ -340,6 +361,7 @@ class ShrinkPanel(OptionPanel):
     or a file size to fit into."""
 
     KEY, TITLE, BUTTON, TAG = "shrink", "Make smaller", "Make smaller", "_small"
+    ICON, GROUP = "compress", "change"
     TIP = "A lighter copy for sending"
     HEIGHTS = {"Keep": 0, "1080p": 1080, "720p": 720, "480p": 480}
     BY_QUALITY, BY_SIZE = "By quality", "Fit into a size"
@@ -411,13 +433,38 @@ class ShrinkPanel(OptionPanel):
         self._sync()
 
 
+class _TimeEdit(qt.QtWidgets.QLineEdit):
+    """Private: a time field whose Up / Down keys ask for a step (one frame)."""
+
+    stepped = qt.QtCore.Signal(int)  # +1 / -1
+
+    def keyPressEvent(self, event) -> None:
+        if event.key() in (qt.QtCore.Qt.Key.Key_Up, qt.QtCore.Qt.Key.Key_Down):
+            self.stepped.emit(1 if event.key() == qt.QtCore.Qt.Key.Key_Up else -1)
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+
 class TrimPanel(OptionPanel):
     """Video -> one piece of it. The piece is picked by eye on a strip of
     the video's frames (two handles) or typed as times; the frames at both
-    ends are shown, so one sees where the cut falls."""
+    ends are shown, so one sees where the cut falls.
+
+    The cut is set TO THE FRAME: the ‹ › buttons beside each time (and
+    Up / Down in the field, Left / Right on the strip) move that end by one
+    frame, Shift by ten; times snap to the video's frames, and the line
+    under them counts the frames of the piece. The page's "Preview" plays
+    the piece as it will be cut."""
 
     KEY, TITLE, BUTTON, TAG = "trim", "Trim", "Cut this piece", "_cut"
+    ICON, GROUP = "scissors", "change"
     TIP = "Keep one piece of the video"
+    PREVIEW_TEXT = "Play the piece"
+    PREVIEW_TIP = "Play the piece as it will be cut (its first minute)"
+    PREVIEW_SECONDS = 60.0
+    PREVIEW_FROM_START = True
+    COMPARES_SIZE = False
     EXACT, FAST = "Exact", "Fast"
     STRIP_FRAMES = 12
     PREVIEW_SIZE = qt.QtCore.QSize(128, 72)
@@ -427,19 +474,25 @@ class TrimPanel(OptionPanel):
         super().__init__(tools, parent)
         self._source: MediaSource | None = None
         self._duration = 0.0
+        self._fps = 24.0
         self._syncing = False
         self._workers: list = []
         self._token = 0
         self._strip = RangeStrip()
-        self._strip.setToolTip("Drag the handles to pick the piece; drag between them to move it")
-        self._start = qt.QtWidgets.QLineEdit("0:00")
-        self._end = qt.QtWidgets.QLineEdit()
+        self._strip.setToolTip("Drag the handles to pick the piece; drag between them to move it." + NL
+                               + "Left / Right move the handle you touched last by one frame (Shift: ten).")
+        self._start = _TimeEdit("0:00")
+        self._end = _TimeEdit()
         for field in (self._start, self._end):
             field.setFixedWidth(84)
-            field.setToolTip("Seconds, or minutes:seconds — 12.5, 0:12.5, 1:02:03")
+            field.setToolTip("Seconds, or minutes:seconds — 12.5, 0:12.5, 1:02:03" + NL
+                             + "Up / Down: one frame (Shift: ten)")
             field.textChanged.connect(self._on_times_typed)
+        self._start.stepped.connect(lambda frames: self._step(self._start, frames))
+        self._end.stepped.connect(lambda frames: self._step(self._end, frames))
         self._length_label = qt.QtWidgets.QLabel()
         self._length_label.setObjectName("mediaHint")
+        self._length_label.setWordWrap(True)  # so the row gives it the room that is left
         self._first_preview, self._last_preview = self._preview(), self._preview()
         self._mode = self._switch([self.EXACT, self.FAST], self.EXACT,
                                   "Exact: the cut is where you asked, to the frame (the piece is re-encoded)."
@@ -453,7 +506,8 @@ class TrimPanel(OptionPanel):
         to_caption = qt.QtWidgets.QLabel("to")
         to_caption.setObjectName("mediaCaption")
         self._strip_row = self._add_row("Piece", self._strip)
-        self._add_row("From", self._start, to_caption, self._end, self._length_label)
+        self._add_row("From", self._stepper(self._start), to_caption, self._stepper(self._end))
+        self._add_row("", self._length_label)
         self._add_row("Frames", self._first_preview, self._last_preview, hint="the first and the last frame of the piece")
         self._add_row("Cut", self._mode)
         self._strip.range_changed.connect(self._on_strip_moved)
@@ -465,12 +519,44 @@ class TrimPanel(OptionPanel):
         label.setAlignment(qt.QtCore.Qt.AlignmentFlag.AlignCenter)
         return label
 
+    def _stepper(self, field: qt.QtWidgets.QLineEdit) -> qt.QtWidgets.QWidget:
+        """`field` between a "one frame back" and a "one frame on" button."""
+        holder = qt.QtWidgets.QWidget()
+        line = qt.QtWidgets.QHBoxLayout(holder)
+        line.setContentsMargins(0, 0, 0, 0)
+        line.setSpacing(0)
+        back = link_button("‹", "One frame back (Shift: ten)")
+        forward = link_button("›", "One frame on (Shift: ten)")
+        back.clicked.connect(lambda: self._step(field, -1))
+        forward.clicked.connect(lambda: self._step(field, 1))
+        for widget in (back, field, forward):
+            line.addWidget(widget)
+        return holder
+
+    def _step(self, field: qt.QtWidgets.QLineEdit, frames: int) -> None:
+        """Moves the start or the end by `frames` frames (ten times that with Shift)."""
+        value = parse_time(field.text())
+        start, end = self._times()
+        if value is None or not self._duration:
+            return
+        if qt.QtWidgets.QApplication.keyboardModifiers() & qt.QtCore.Qt.KeyboardModifier.ShiftModifier:
+            frames *= 10
+        last = int(round(self._duration * self._fps))
+        frame = int(round(value * self._fps)) + frames
+        if field is self._start:
+            frame = min(max(frame, 0), (int(round(end * self._fps)) if end is not None else last) - 1)
+        else:
+            frame = min(max(frame, (int(round(start * self._fps)) if start is not None else 0) + 1), last)
+        field.setText(format_time(round(min(frame / self._fps, self._duration), 3)))
+
     accepts = staticmethod(_videos)
 
     def set_sources(self, sources: list) -> None:
         source = sources[0]
         # With several videos the same times are cut out of each; the strip shows the first.
         self._source, self._duration = source, min(other.info.duration for other in sources)
+        self._fps = source.info.fps or 24.0
+        self._strip.set_step(1.0 / max(self._duration * self._fps, 1.0))
         self._syncing = True
         self._start.setText("0:00")
         self._end.setText(format_time(self._duration))
@@ -491,10 +577,14 @@ class TrimPanel(OptionPanel):
 
     def _on_strip_moved(self, start: float, end: float) -> None:
         self._syncing = True
-        self._start.setText(format_time(round(start * self._duration, 2)))
-        self._end.setText(format_time(round(end * self._duration, 2)))
+        self._start.setText(format_time(self._on_frame(start * self._duration)))
+        self._end.setText(format_time(self._on_frame(end * self._duration)))
         self._syncing = False
         self._after_change()
+
+    def _on_frame(self, seconds: float) -> float:
+        """`seconds` moved onto the nearest frame of the video."""
+        return round(min(round(seconds * self._fps) / self._fps, self._duration), 3)
 
     def _on_times_typed(self) -> None:
         if self._syncing:
@@ -516,7 +606,12 @@ class TrimPanel(OptionPanel):
         elif end <= start:
             text = "the end must be after the start"
         else:
-            text = f"a piece of {format_time(round(min(end, self._duration or end) - start, 2))}"
+            end = min(end, self._duration or end)
+            first = int(round(start * self._fps))
+            last = max(int(round(end * self._fps)) - 1, first)
+            count = last - first + 1
+            text = (f"a piece of {format_time(round(end - start, 2))}  ·  {count} frame{'s' if count != 1 else ''}"
+                    f"  ·  frame {first + 1} to {last + 1} of {int(round(self._duration * self._fps))}")
         self._length_label.setText(text)
 
     # --- pictures (made by ffmpeg on worker threads) -------------------------------------------
@@ -591,6 +686,7 @@ class StampPanel(_OverlayRows, OptionPanel):
     """Video -> a copy with burn-ins and / or a watermark drawn over it."""
 
     KEY, TITLE, BUTTON, TAG = "stamp", "Stamp", "Stamp the video", "_stamped"
+    ICON, GROUP = "text_frame", "change"
     TIP = "Draw frame numbers, the date, a label or a watermark on the picture"
     PRESETS = {"Review · frame numbers": {"burn_frame": True, "burn_date": True, "burn_time": False},
                "Time code": {"burn_frame": False, "burn_date": False, "burn_time": True}}
@@ -615,10 +711,82 @@ class StampPanel(_OverlayRows, OptionPanel):
         self._apply_overlay_settings(settings)
 
 
+class LoopPanel(OptionPanel):
+    """Video -> the same video several times in a row: a cycle (a walk, a
+    gallop) that keeps going, forward every time or there and back."""
+
+    KEY, TITLE, BUTTON, TAG = "loop", "Loop", "Loop the video", "_loop"
+    ICON, GROUP = "repeat", "change"
+    TIP = "Repeat a cycle several times in a row"
+    REPEAT, BACK = "Repeat", "There and back"
+    TIMES = ("2", "3", "4", "5", "6", "8", "10", "20")
+    PRESETS = {"Cycle ×4": {"way": REPEAT, "times": "4"}, "There and back ×3": {"way": BACK, "times": "3"}}
+    PREVIEW_TEXT = "Play the start"
+    PREVIEW_TIP = "Play the first seconds of the loop — enough to see how it goes round"
+    PREVIEW_FROM_START = True
+    COMPARES_SIZE = False
+
+    def __init__(self, tools=None, parent=None):
+        super().__init__(tools, parent)
+        self._source: MediaSource | None = None
+        self._way = self._switch([self.REPEAT, self.BACK], self.REPEAT,
+                                 "Repeat: the video again and again, as it is." + NL
+                                 + "There and back: forward, then backward, and that again — for motion that "
+                                   "doesn’t end where it began. Without sound; for short videos.")
+        self._times = BaseComboBox(list(self.TIMES), "4")
+        self._times.setFixedWidth(64)
+        self._times.currentIndexChanged.connect(lambda _index: self.changed.emit())
+        self._length = qt.QtWidgets.QLabel()
+        self._length.setObjectName("mediaHint")
+        self._length.setWordWrap(True)  # so the row gives it the room that is left
+        self._quality = self._switch(QUALITY_HIGH, "High", "How good the picture looks — better is also bigger")
+        self._add_row("Way", self._way)
+        self._add_row("Times", self._times, self._length)
+        self._add_row("Quality", self._quality)
+        self.changed.connect(self._update_length)
+
+    accepts = staticmethod(_videos)
+
+    # a loop is watched at its seam: the preview is as long as one round and a bit, 12 s at most
+    PREVIEW_SECONDS = property(lambda self: min(self._round() * 1.5, 12.0) if self._source else 3.0)
+
+    def _round(self) -> float:
+        """Seconds of one round of the loop."""
+        length = self._source.info.duration if self._source is not None else 0.0
+        return length * (2 if self._way.current() == self.BACK else 1)
+
+    def set_sources(self, sources: list) -> None:
+        self._source = sources[0]
+        self._update_length()
+
+    def _update_length(self) -> None:
+        if self._source is None:
+            return
+        times = int(self._times.currentText())
+        self._length.setText(f"times  ·  {format_time(round(self._source.info.duration, 1))} becomes "
+                             f"{format_time(round(self._round() * times, 1))}")
+
+    def job(self, source: MediaSource, output: Path) -> Job:
+        return loop(source.info, output, times=int(self._times.currentText()),
+                    there_and_back=self._way.current() == self.BACK, quality=QUALITY_HIGH[self._quality.current()])
+
+    def settings(self) -> dict:
+        return {"way": self._way.current(), "times": self._times.currentText(), "quality": self._quality.current()}
+
+    def apply_settings(self, settings: dict) -> None:
+        self._way.set_current(str(settings.get("way", "")), animate=False)
+        self._quality.set_current(str(settings.get("quality", "")), animate=False)
+        if str(settings.get("times", "")) in self.TIMES:
+            self._times.setCurrentText(str(settings["times"]))
+        self._update_length()
+
+
 class SoundPanel(OptionPanel):
     """Video -> its sound taken out as a file, the sound removed, or another sound put under it."""
 
     KEY, TITLE = "sound", "Sound"
+    ICON, GROUP = "volume", "change"
+    COMPARES_SIZE = False
     TIP = "Take the sound out, remove it, or replace it"
     EXTRACT, REMOVE, REPLACE = "Take it out", "Remove", "Replace"
     SOUND_KINDS = {"WAV": "wav", "MP3": "mp3", "M4A": "m4a"}
@@ -687,6 +855,7 @@ class GifPanel(OptionPanel):
     """Video -> an animated GIF for a chat or a document."""
 
     KEY, TITLE, BUTTON = "gif", "GIF", "Create GIF"
+    ICON, GROUP = "gif", "convert"
     TIP = "An animated picture for a chat or a document"
     WIDTHS = {"320": 320, "480": 480, "640": 640, "800": 800, "Keep": 0}
     RATES = ("8", "10", "12", "15", "24")
@@ -720,13 +889,14 @@ class EditingPanel(OptionPanel):
     """Video -> an editing format (ProRes / DNxHR)."""
 
     KEY, TITLE, BUTTON = "editing", "For editing", "Convert"
+    ICON, GROUP = "clapper", "convert"
     TIP = "A big file that keeps the picture — for editing and grading"
-    KINDS = {"ProRes": "prores", "ProRes HQ": "prores_hq", "4444": "prores_4444", "DNxHR": "dnxhr_hq"}
+    KINDS = {"ProRes": "prores", "HQ": "prores_hq", "4444": "prores_4444", "DNxHR": "dnxhr_hq"}
 
     def __init__(self, tools=None, parent=None):
         super().__init__(tools, parent)
         self._kind = self._switch(self.KINDS, "ProRes",
-                                  "ProRes: the usual choice. ProRes HQ: more of the picture, bigger." + NL
+                                  "ProRes: the usual choice. HQ: ProRes HQ — more of the picture, bigger." + NL
                                   + "4444: ProRes 4444 — the most, with transparency. DNxHR: Avid’s counterpart (HQ).")
         self._add_row("Format", self._kind)
         self._add_row("", hint="These files are large — about 50–100 MB for ten seconds of 720p — and are meant "
@@ -745,15 +915,18 @@ class EditingPanel(OptionPanel):
         return {"kind": self._kind.current()}
 
     def apply_settings(self, settings: dict) -> None:
-        self._kind.set_current(str(settings.get("kind", "")), animate=False)
+        chosen = str(settings.get("kind", ""))
+        self._kind.set_current(RENAMED.get(chosen, chosen), animate=False)
 
 
 class AdjustPanel(OptionPanel):
     """Video -> a corrected copy: turned, cropped to a shape, at another frame rate, faster or slower."""
 
     KEY, TITLE, BUTTON, TAG = "adjust", "Adjust", "Adjust the video", "_adjusted"
+    ICON, GROUP = "crop", "change"
     TIP = "Turn, crop, change the frame rate or the speed"
-    TURNS = {"No": 0, "90° right": 90, "90° left": -90, "180°": 180}
+    TURNS = {"No": 0, "Right": 90, "Left": -90, "180°": 180}
+    TURNS_RENAMED = {"90° right": "Right", "90° left": "Left"}  # as earlier versions saved them
     SHAPES = {"Keep": "", "16:9": "16:9", "4:3": "4:3", "1:1": "1:1", "9:16": "9:16"}
     RATES = {"Keep": None, "24": 24.0, "25": 25.0, "30": 30.0, "60": 60.0}
     FACTORS = {"0.25×": 0.25, "0.5×": 0.5, "1×": 1.0, "1.5×": 1.5, "2×": 2.0, "4×": 4.0}
@@ -763,31 +936,38 @@ class AdjustPanel(OptionPanel):
 
     def __init__(self, tools=None, parent=None):
         super().__init__(tools, parent)
-        self._turn = self._switch(self.TURNS, "No", "Turn the picture")
+        self._turn = self._switch(self.TURNS, "No", "Turn the picture: a quarter to the right or to the left, "
+                                                    "or upside down")
         self._shape = self._switch(self.SHAPES, "Keep", "Crop the picture around its centre to this shape")
         self._rate = self._switch(self.RATES, "Keep", "Frames per second of the result")
-        self._factor = self._switch(self.FACTORS, "1×", "Play faster or slower — the sound follows at its own pitch")
+        # six options: a list, not a switch (a switch is as wide as options x its widest label)
+        self._factor = BaseComboBox(list(self.FACTORS), "1×")
+        self._factor.setFixedWidth(84)
+        self._factor.setToolTip("Play faster or slower — the sound follows at its own pitch")
+        self._factor.currentIndexChanged.connect(lambda _index: self.changed.emit())
         self._add_row("Turn", self._turn)
         self._add_row("Crop to", self._shape)
         self._add_row("Frame rate", self._rate)
-        self._add_row("Speed", self._factor)
+        self._add_row("Speed", self._factor, hint="1× = as it is")
 
     accepts = staticmethod(_videos)
 
     def job(self, source: MediaSource, output: Path) -> Job:
         return adjust(source.info, output, rotate=self.TURNS[self._turn.current()],
                       aspect=self.SHAPES[self._shape.current()], fps=self.RATES[self._rate.current()],
-                      speed_factor=self.FACTORS[self._factor.current()])
+                      speed_factor=self.FACTORS[self._factor.currentText()])
 
     def settings(self) -> dict:
         return {"turn": self._turn.current(), "shape": self._shape.current(), "rate": self._rate.current(),
-                "factor": self._factor.current()}
+                "factor": self._factor.currentText()}
 
     def apply_settings(self, settings: dict) -> None:
-        self._turn.set_current(str(settings.get("turn", "")), animate=False)
+        turn = str(settings.get("turn", ""))
+        self._turn.set_current(self.TURNS_RENAMED.get(turn, turn), animate=False)
         self._shape.set_current(str(settings.get("shape", "")), animate=False)
         self._rate.set_current(str(settings.get("rate", "")), animate=False)
-        self._factor.set_current(str(settings.get("factor", "")), animate=False)
+        if str(settings.get("factor", "")) in self.FACTORS:
+            self._factor.setCurrentText(str(settings["factor"]))
 
 
 class FramesPanel(OptionPanel):
@@ -796,6 +976,7 @@ class FramesPanel(OptionPanel):
     is saved."""
 
     KEY, TITLE = "frames", "To frames"
+    ICON, GROUP = "image_stack", "convert"
     TIP = "Take the video apart into pictures — an image sequence, or one frame"
     ALL, SOME, ONE = "All frames", "Every Nth", "One frame"
     KINDS = {"PNG": "png", "JPG": "jpg", "TIFF": "tiff"}
@@ -870,6 +1051,8 @@ class FramesPanel(OptionPanel):
         if take == self.ONE:
             self._preview_timer.start()
 
+    PREVIEW = False          # frames are pictures: "One frame" shows its own
+    COMPARES_SIZE = False
     BUTTON = property(lambda self: "Save this frame" if self._take.current() == self.ONE else "Save the frames")
     TAG = property(lambda self: "_frame" if self._take.current() == self.ONE else "_frames")
     INTO_FOLDER = property(lambda self: self._take.current() != self.ONE)
@@ -967,6 +1150,7 @@ class JoinPanel(OptionPanel):
     """Several videos -> one, in the order they were dropped."""
 
     KEY, TITLE, BUTTON, TAG, COMBINES = "join", "Join", "Join the videos", "_joined", True
+    ICON, GROUP = "merge", "combine"
     TIP = "Put the videos one after another into one"
 
     def __init__(self, tools=None, parent=None):
@@ -1006,6 +1190,7 @@ class ComparePanel(OptionPanel):
     """Two videos -> one picture with both, to compare them frame for frame."""
 
     KEY, TITLE, BUTTON, TAG, COMBINES = "compare", "Compare", "Create the comparison", "_compare", True
+    ICON, GROUP = "split_view", "combine"
     TIP = "Two videos in one picture — before / after"
     SIDE, STACKED = "Side by side", "One above the other"
 
@@ -1041,5 +1226,5 @@ class ComparePanel(OptionPanel):
         self._labels.set_checked_immediate(bool(settings.get("labels", True)))
 
 
-PANELS = (SequencePanel, ShrinkPanel, TrimPanel, StampPanel, SoundPanel, GifPanel, FramesPanel, EditingPanel,
-          AdjustPanel, JoinPanel, ComparePanel)
+PANELS = (SequencePanel, ShrinkPanel, TrimPanel, LoopPanel, StampPanel, SoundPanel, AdjustPanel, GifPanel,
+          FramesPanel, EditingPanel, JoinPanel, ComparePanel)

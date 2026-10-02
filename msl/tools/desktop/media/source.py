@@ -56,6 +56,17 @@ class MediaSource:
                      info.video_codec, "sound" if info.has_audio else "no sound"]
         return "  ·  ".join(part for part in parts if part)
 
+    def fact_pairs(self) -> list:
+        """The same facts as (value, what it is) pairs, for a row of small tiles."""
+        info = self.info
+        if self.sequence is not None:
+            return [(str(self.sequence.count), "frames"), (info.resolution_text(), "frame size"),
+                    (self.sequence.suffix.lstrip(".").upper(), "format")]
+        pairs = [(info.resolution_text(), "frame size"), (info.fps_text().replace(" fps", ""), "fps"),
+                 (info.duration_text(), "length"), (info.size_text(), "size"), (info.video_codec, "codec"),
+                 ("yes" if info.has_audio else "none", "sound")]
+        return [(value, caption) for value, caption in pairs if value]
+
     def warning(self) -> str:
         """What is wrong with it ("" = nothing)."""
         if self.sequence is not None and self.sequence.missing:
@@ -131,14 +142,32 @@ def same(first: MediaSource, second: MediaSource) -> bool:
 
 
 def summary(sources: list) -> tuple:
-    """(title, facts) for several sources shown as one: "4 videos", "1:23 in all  ·  45.0 MB"."""
+    """(title, fact pairs) for several sources shown as one: "4 videos",
+    [("1:23", "in all"), ("45.0 MB", "in all")]."""
     count = len(sources)
     if sources[0].is_sequence:
         frames = sum(source.sequence.count for source in sources)
-        return f"{count} image sequences", f"{frames} frames in all"
+        return f"{count} image sequences", [(str(frames), "frames in all")]
     seconds = sum(source.info.duration for source in sources)
     megabytes = sum(source.info.size for source in sources) / 1024 ** 2
-    return f"{count} videos", f"{format_time(round(seconds, 1))} in all  ·  {megabytes:.1f} MB"
+    return f"{count} videos", [(format_time(round(seconds, 1)), "length in all"), (f"{megabytes:.1f} MB", "size in all")]
+
+
+def result_thumbnail(tools: FfmpegTools, path: str | Path) -> Path | None:
+    """A cached thumbnail of a finished result: of the file, or — for a
+    folder of frames — of its first picture. None for sound, or when it
+    can't be made. Blocks (ffprobe + ffmpeg): call it from a worker thread."""
+    path = Path(path)
+    try:
+        if path.is_dir():
+            pictures = sorted(entry for entry in path.iterdir() if entry.suffix.lower() in IMAGE_SUFFIXES)
+            if not pictures:
+                return None
+            path = pictures[0]
+        info = probe(tools, path)
+    except (MediaError, OSError):
+        return None
+    return None if info.kind == AUDIO else _thumbnail(tools, info)
 
 
 def _thumbnail(tools: FfmpegTools, info: MediaInfo) -> Path | None:

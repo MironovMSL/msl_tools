@@ -220,7 +220,7 @@ msl_tools/                 (repo root)
     named by what the icon IS, not the gesture (`drag_handle`, not
     `dragAndDrop`). Categories: `window/` (chrome: close/maximize/...),
     `actions/` (row/toolbar actions: `drag_handle`, `copy`, `delete`,
-    `browse`, `folder_add`, `clear`, `arrow_right`, `chevron_down`, `add`, `check`, `select_all`, `more`, `report`, `code`, `restart`, `power`, `play`, `edit`, `scene`, `stop`; add new action icons here),
+    `browse`, `folder_add`, `file_video`, `bookmark`, `bookmark_add`, `save`, `file_add`, `chevron_right`, `eye`, `folder_into`, `compress`, `scissors`, `repeat`, `text_frame`, `volume`, `gif`, `image_stack`, `clapper`, `crop`, `merge`, `split_view`, `film` (the Media actions), `clear`, `arrow_right`, `chevron_down`, `add`, `check`, `select_all`, `more`, `report`, `code`, `restart`, `power`, `play`, `edit`, `scene`, `stop`; add new action icons here),
     `apps/` (third-party application logos: `maya`; later houdini, blender...
     — named after the app, not the tool that uses it, so several tools can
     share one), `tools/` (sidebar icons of our OWN hub tools, one-color like
@@ -313,7 +313,13 @@ NEVER runs inside Maya; it's a pure standalone desktop app. Future
   scrolled content can't be cut off by narrowing the window.
 - `msl/tools/desktop/registry.py` — `TOOLS: list[ToolDescriptor]`, one import
   + one line per tool. The hub iterates this and knows nothing about any
-  individual tool. The stub tools are listed only in a git checkout (a
+  individual tool. A tool whose page is built on first open (Media)
+  registers its QSS template only then — AFTER the window's stylesheet
+  was made: `HubWindow._show_tool` notices a template was added by the
+  factory and applies the theme again. (Without it Media was unstyled
+  whenever the hub started on another tool — it shipped like that in
+  0.1.6. Offscreen tests that start the hub ON the tool don't see this:
+  start it on another one.) The stub tools are listed only in a git checkout (a
   `.git` folder at the root): an installed copy shows real tools only.
 - `msl/run_hub.py` — the only place a `QApplication` gets created
   for the hub, via `QtApplicationContext`. It passes the `brand/hub` icon to HubWindow
@@ -894,8 +900,10 @@ compositions/env_var_row.py               EnvVarRow (Notion-style: hover menu at
 compositions/row_hover_menu.py            RowHoverMenu (extensible hover gutter: add_widget(), set_revealed(), set_pinned())
 compositions/bulk_action_bar.py           BulkActionBar (accent pill "N of M selected | select-all, actions | ×"; add_action(danger=) per bulk operation; select_all_requested / clear_requested)
 compositions/copyable_line_edit.py        CopyableLineEdit (copy button appears inside the field on hover)
+compositions/action_strip.py              ActionStrip (a strip of icon-only buttons of which one is picked — what a tool can DO, as opposed to settings; set_items([(key, title, description, icon, group)]), current() / set_current(key, animate=), clicked(str); wraps. The strip PAINTS: the accent pill under the picked button — it slides to a new one —, a hairline where the group changes, and the hovered button's name + description in the free room after the buttons, at once, so the icons get learned)
+compositions/drop_area.py                 DropArea (where files are dropped: a painted dashed frame, an icon + a line saying what to drop, a quiet second line, a pill of round icon buttons — add_button(); set_dragging() lights it up, set_busy() shows "Reading…"; it only shows the target, the owner takes the drop)
 compositions/chip_bar.py                  ChipBar (pills that wrap: a checkable picker, or a shelf of saved things with an in-place "+ …" name field and "Remove")
-compositions/range_strip.py               RangeStrip (pictures side by side with a range picked by two handles; range_changed / range_released)
+compositions/range_strip.py               RangeStrip (pictures side by side with a range picked by two handles; range_changed / range_released; Left / Right move the handle touched last by set_step())
 themed_widget_playground_dialog.py        ThemedWidgetPlaygroundDialog
 windows/confirm_dialog.py                 ConfirmDialog (themed rounded question window; ask() -> choice key or None)
 windows/text_dialog.py                    TextDialog (a block of fixed-width text to read and copy: reports, logs; show_for(parent, title, text))
@@ -1011,7 +1019,13 @@ batch jobs and Maya playblasts are meant to reuse it.
   chained past 0.5..2), `to_frames` (a video taken apart into
   `<name>.<number>.<suffix>` pictures in a folder: PNG / JPG / TIFF,
   `first_number`, `padding`, `every` = each Nth frame via `fps=`), `frame`
-  (ONE frame at a time, the format from the output's suffix),
+  (ONE frame at a time, the format from the output's suffix), `loop`
+  (the video `times` in a row: `-stream_loop`, sound kept; or
+  `there_and_back` — forward, then `reverse`d without the two turning
+  frames, that cycle repeated by the `loop` filter; no sound, and the
+  whole video sits in memory about three times, so more than LOOP_MEMORY
+  of raw frames is refused. Frame counts measured exact: 48 frames x4 =
+  192, there and back x3 = 282),
   `default_output` (never clashes, also not with
   `taken`; a sequence's video goes NEXT TO the frames' folder).
   Quality / speed / format are words (`QUALITY`, `SPEED`, `FORMATS`,
@@ -1045,6 +1059,11 @@ batch jobs and Maya playblasts are meant to reuse it.
   always starts with one; a real video has one in ~250). Measured: size
   within about x0.7..1.5, time x1..1.5 (exact for ProRes / "fit into N
   MB") — hence the "≈".
+  `preview(tools, job, target, seconds)` writes a few seconds of what the
+  job would make, with the job's own settings (`preview_arguments`: the
+  sample stretched to `seconds`; a job without one — or with its sample
+  taken away by the caller — gives the START of the job itself, `-t`
+  added). A job that writes a folder has none.
 
 `msl/ui/media/ffmpeg_runner.py`: `FfmpegRunner` (QProcess per run; signals
 `progressed(float, Progress)`, `finished(bool, str)`; `cancel()`). One job
@@ -1072,17 +1091,50 @@ tools folder): 101 MB in ~4 s, checksum matched, installed and usable in
 `msl/tools/desktop/media/` — a hub tool (sidebar "Media", icon
 `tools/media`): quick work with video and image sequences without knowing
 ffmpeg. Actions (`option_panels.PANELS`, in the picker's order): To video
-(sequences) · Make smaller · Trim · Stamp · Sound · GIF · To frames · For
-editing · Adjust · Join (2+ videos) · Compare (exactly 2).
+(sequences) · Make smaller · Trim · Loop · Stamp · Sound · GIF · To
+frames · For editing · Adjust · Join (2+ videos) · Compare (exactly 2).
 
+- The look (2026-10-02, after the user's reference — Batch Render
+  Creator): ACTIONS are icons, SETTINGS are in a card. The actions were
+  text chips right above the preset chips and read as one more row of
+  settings; now they are an `ActionStrip` of icon-only buttons (each
+  panel's `ICON`, the name in the tooltip), and everything that belongs to
+  the picked action sits in ONE card (`QFrame#mediaCard`): a header — the
+  action's icon in the accent, its name in capitals, its one-line TIP —,
+  the presets, a hairline, the panel (frameless inside the card), a
+  hairline, where the result goes + estimate / Preview / Command / start.
+  The jobs are a second card with the same kind of header.
+  Small things are icons too (`GlyphButton#mediaAction`, accent): save a
+  preset (`ChipBar(add_icon=)` — `bookmark_add`), Preview (`eye`; dimmed
+  + "Making the preview…" on the message line while it works), Command
+  (`code`), the captions of the presets row and of "Save as" (`bookmark`,
+  `save` — TintedIcons, the words are their tooltips), where results go (`folder_into` — its menu; the folder is in
+  the tooltip and in "Save as"), and a job row's copy / show in folder / cancel / remove
+  (`copy` — flashes a check —, `browse`, `stop`, `clear`). A job's row
+  shows the RESULT's name only; "source → result" is in its tooltip. A
+  finished result's row starts with a small PICTURE of it in the slot of
+  the state dot (`QueueItem.thumbnail`: `source.result_thumbnail()` on a
+  worker, one at a time, cached like the source's; restored rows get
+  theirs once ffmpeg is found — `refresh_thumbnails()`; a `changed` for a
+  picture must not touch the taskbar: `JobQueue.busy()`). The
+  finished file has a play button in front of its name (the same as a
+  click on the name: opens it in its program); a folder of frames has the `image_stack` icon
+  there (opens the folder). The slot keeps its room while it is hidden
+  (waiting / running / failed rows), so every name starts at the same x.
 - `page.py` `MediaPage` (registers `media.qss`), top to bottom:
   header (+ the "ffmpeg 8.0" link) · `FfmpegBar` · `SourceCard` · the
-  actions (a checkable `ChipBar` of the panels whose `accepts(sources)` is
-  true) · presets (a `ChipBar` shelf) · that action's panel · "Save as"
-  (one result) or a note (several) · "Results: … ▾" (the folder) + the
-  estimate + "Command" + the start button · a message line · the jobs.
+  actions (an `ActionStrip` of the panels whose `accepts(sources)` is
+  true) · the action's card: header · presets (a `ChipBar` shelf) · that
+  action's panel · "Save as"
+  (one result) or a note (several) · the estimate + where results go +
+  preview + command (icon buttons) + the start button · a message line ·
+  the jobs. An ERROR on the message line goes away as soon as a setting
+  or the output name changes (`_forget_error`); plain messages stay.
   Drops are taken by the PAGE, anywhere on it (the card only shows it is
-  the target). One sound file dropped on one open source is its sound
+  the target) — except a result dragged out of the page's OWN jobs list
+  (`_is_own_drag`: the drag's source is a child of the page): that one is
+  taken only on the source card, to work on it further; anywhere else on
+  the page letting go cancels the drag, and nothing lights up. One sound file dropped on one open source is its sound
   (under a sequence; "Replace" for a video), not a new source. Reading
   what was dropped runs on a `ResultWorker` — a token makes only the
   newest load count.
@@ -1104,6 +1156,61 @@ editing · Adjust · Join (2+ videos) · Compare (exactly 2).
   the old value is wiped at once (`_schedule_estimate`). Jobs built only
   to be looked at (estimate, "Command", a refused start) are cleaned up
   (`clean_up` / `_discard`) — burn-in texts and pass logs are files.
+- "Preview" (`_on_preview`): `core preview()` on a worker, the file in
+  `%TEMP%/msl_tools/media/preview` (the previous one of this process is
+  deleted first), then opened with the system's player. What it plays is
+  the panel's choice: PREVIEW_SECONDS (3) from the middle; Trim = the
+  piece as it will be cut, up to a minute; Loop = the start, one and a
+  half rounds (`PREVIEW_FROM_START`: the page empties `job.sample`).
+  FramesPanel has none (`PREVIEW = False`). The button always reads
+  "Preview" — a longer text per action widened the whole window; only the
+  tooltip differs. A preview whose settings changed meanwhile is dropped.
+- Results across restarts: `history.py` (`ResultHistory` / `ResultRecord`,
+  Qt-free; `configs/desktop/media/history.json`, the last 50, oldest
+  first). `JobQueue.restore(records)` shows them as finished rows in the
+  page's first showEvent; `results()` is written back on every finished
+  job and every removal — "Clear finished" therefore clears the history
+  too, failed / cancelled jobs are never kept. A restored row has no
+  "Command"; one whose file is gone reads "the file is gone" (no link,
+  Remove); one from another day carries its date. Never saved before the
+  old list was read (`_history_loaded`).
+- "How much smaller": `JobQueue.add(job, source_size)` -> the finished row
+  reads "9.5 MB → 1.2 MB (−87 %)". Given by the page for panels with
+  `COMPARES_SIZE` (not Trim / Loop / Sound / To frames, nor the combining
+  ones); a sequence's size is the sum of its frames (skipped past 3000).
+- While jobs run: `JobQueue.overall()` (the BATCH = everything added since
+  the queue was last idle) goes onto the window's taskbar button —
+  `core/environment/taskbar.py:TaskbarProgress` (ITaskbarList3 through
+  ctypes; Qt 6 has no wrapper; never raises, a no-op off Windows / in an
+  offscreen session). When the batch is over (`idle`, `last_batch()`) and
+  the page isn't in front (window not active, or another tool open):
+  `ui/desktop_notice.py:DesktopNotice` (a toast through a tray icon that
+  is in the tray only while the notice is up) + `QApplication.alert`.
+  A click on the notice opens Media (`window.open_tool`, if the window has
+  one) and raises the window. `settings.notify` (default on) is the last
+  item of the "where results go" menu. Both were run for real once
+  (2026-10-02): the COM calls answered S_OK, the toast showed.
+- More of the look: the source card shows the facts as small TILES (value
+  over what it is: `MediaSource.fact_pairs()`, `summary()` for several;
+  the row is clipped in a narrow window, never widens it), its picture
+  is a button (`SourceThumbnail`: dims + a play mark under the pointer,
+  a click opens the source — `play_requested`), and beside "×" a
+  `file_add` button adds more videos to what is loaded (`add_requested`
+  -> the page opens the loaded paths + the new ones). The estimate is a
+  pill at the START of the start row (`QLabel#mediaEstimate`, hidden
+  while empty). The jobs card's header counts ("JOBS · 4", while running
+  "JOBS · 1 of 3 done" — `JobQueue.batch_counts()`), and a click on it
+  FOLDS the list away (`settings.jobs_folded`; a hidden filler widget
+  takes the room then). The empty list shows an icon over its hint.
+  Actions are grouped by `OptionPanel.GROUP` (make / change / convert /
+  combine) — PANELS is in that order.
+- "Show in folder" (`ProcessLauncher.open_file_explorer`, used by Maya
+  Gate too): a FILE is selected through the shell —
+  `core/environment/shell.py:select_in_file_manager()`
+  (SHOpenFolderAndSelectItems via ctypes) — in the window its folder is
+  already open in; `explorer /select,` stays as the fallback (it opens one
+  more window every time). Checked on real Explorer through its COM
+  windows list: one window, the right file selected.
 - A finished job's title is the result file (`_ResultLabel`): click =
   open it with its program, drag = a file drag (a chat, a folder);
   "Copy" puts the FILE on the clipboard (urls + the path as text) —
@@ -1120,8 +1227,10 @@ editing · Adjust · Join (2+ videos) · Compare (exactly 2).
   in plain words why something else can't be used. Thumbnails are cached
   in `%TEMP%/msl_tools/media/thumbs` (name = hash of path + mtime).
   `parse_time` / `format_time` ("0:12.5").
-- `source_card.py` `SourceCard`: empty (dashed drop area + "Choose a
-  file… / folder…"), loading, loaded (thumbnail, name, facts, a warning for
+- `source_card.py` `SourceCard`: empty (a `DropArea`, 148 px high: "Drop
+  a video or an image sequence here" + a pill of two round buttons —
+  choose a file (`actions/file_video`) / a folder (`actions/browse`)),
+  loading (the same frame says "Reading <name>…"), loaded (104 px) (thumbnail, name, facts, a warning for
   missing frames, a chooser when the folder holds several sequences, "×").
 - `option_panels.py`: `OptionPanel` (a caption / control form;
   `job(source, output)`, `output_for(source, taken)`, `settings()` /
@@ -1132,7 +1241,13 @@ editing · Adjust · Join (2+ videos) · Compare (exactly 2).
   the job is refused with the missing numbers), `ShrinkPanel`, `TrimPanel`
   (a `RangeStrip` of 12 frames with two handles <-> the From / to fields;
   the first and last frame of the piece shown, refreshed 350 ms after a
-  change; all pictures made by `frames_at` on workers), `StampPanel`,
+  change; all pictures made by `frames_at` on workers. TO THE FRAME: times
+  snap to the video's frames; ‹ › beside each time, Up / Down in the
+  field and Left / Right on the strip — `RangeStrip.set_step()`, the
+  handle touched last, drawn wider while the strip has the focus — move an
+  end by one frame, Shift by ten; the line under the times reads "a piece
+  of 0:01.5 · 36 frames · frame 25 to 60 of 96"), `LoopPanel` (Repeat /
+  There and back, times, quality), `StampPanel`,
   `SoundPanel` (take out / remove / replace — its BUTTON and TAG follow
   the mode), `GifPanel`, `FramesPanel` (All frames / Every Nth / One
   frame; format, JPG quality, first number + digits with a live example
@@ -1148,7 +1263,12 @@ editing · Adjust · Join (2+ videos) · Compare (exactly 2).
   arguments stay in core/media/recipes.py. Settings are saved on every
   change. A SegmentedControl is as wide as options x its widest label —
   keep labels short ("4444", not "ProRes 4444"): one panel's row sets the
-  minimum width of the whole window.
+  minimum width of the whole window. Measured with the real font, the
+  window's minimum is 520 px on every action (the start row sets it; Trim
+  528) — it was 584 on To video / For editing ("ProRes HQ" is now "HQ")
+  and 578 on Adjust ("90° right" -> "Right", the six speeds are a combo
+  box). A label that was renamed is still read from saved settings and
+  presets (`RENAMED`, `TURNS_RENAMED`).
 - `job_queue.py`: `JobQueue` (one FfmpegRunner; jobs run one after
   another; `outputs()` = names still to be written, so a new job is
   offered another name; `idle`), `JobList` / `_JobRow` (state dot, progress bar
@@ -1303,8 +1423,7 @@ disk. NOT yet tested: against a real Maya installation (actual launch via
   session memory files `ffmpeg-media-tool-idea` / `maya-batch-tool-idea`):
   - "Media" is built (see "Media tool"). Not built of what was offered:
     EXR frames (To frames writes PNG / JPG / TIFF: a video holds no more
-    than 8-10 bits, EXR would only be bigger), a results history across
-    restarts, a Windows notice
+    than 8-10 bits, EXR would only be bigger),
     when the queue is done, "playblast -> the hub" from Maya. A later
     "Batch" tool (headless Maya jobs: render, playblast, export) and Maya
     playblasts reuse the foundation.

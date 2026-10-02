@@ -11,6 +11,7 @@ from msl_tools.msl.ui.ui_resources import UiResources
 from msl_tools.msl.ui.widgets.atoms.buttons.icon_tile_button import IconTileButton
 from msl_tools.msl.ui.widgets.atoms.header.update_button import UpdateButton
 from msl_tools.msl.ui.widgets.atoms.surfaces import BasePanel
+from msl_tools.msl.ui.theme import StylesheetBuilder
 from msl_tools.msl.ui.theme.qss import color_property, repolish
 from msl_tools.msl.ui.widgets.windows.frameless_dialog import FramelessDialog
 
@@ -291,9 +292,14 @@ class HubWindow(FramelessDialog):
     def _show_tool(self, descriptor: ToolDescriptor) -> None:
         page = self._pages.get(descriptor.id)
         if page is None:
+            templates = len(StylesheetBuilder.template_paths())
             page = descriptor.widget_factory()
             self._pages[descriptor.id] = page
             self._stack.addWidget(page)
+            if len(StylesheetBuilder.template_paths()) != templates:
+                # The page was imported just now and registered its own QSS template - after this
+                # window's stylesheet was built. Build it again, or the page stays unstyled.
+                self._apply_theme(self._ui_resources.themeManager.current_theme)
         self._stack.setCurrentWidget(page)
         self.header.set_subtitle(descriptor.title)  # breadcrumb: "MSL Tools › Maya Gate"
         # Tracked by id: QStackedWidget makes its first page current on add,

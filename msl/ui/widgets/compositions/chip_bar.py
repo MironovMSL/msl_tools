@@ -1,6 +1,7 @@
 # ui/widgets/compositions/chip_bar.py
 import msl_tools.msl.ui.qt_bindings as qt
 from msl_tools.msl.ui.theme.qss import make_rounded_popup
+from msl_tools.msl.ui.widgets.atoms.buttons.glyph_button import GlyphButton
 from msl_tools.msl.ui.widgets.atoms.layouts import FlowLayout
 
 
@@ -33,6 +34,8 @@ class ChipBar(qt.QtWidgets.QWidget):
       right click on a removable chip offers "Remove".
 
         bar = ChipBar(add_text="+ Save preset", name_placeholder="Preset name, then Enter")
+        bar = ChipBar(add_text="Save these settings as a preset", add_icon=icon, ...)   # an icon button;
+                                                                                       # the text is its tooltip
         bar.set_chips([("web", "For the web", "720p, small"), ...], removable={"web"})
 
     The bar only shows and reports; what a chip means is the owner's.
@@ -48,7 +51,10 @@ class ChipBar(qt.QtWidgets.QWidget):
     add_requested = qt.QtCore.Signal(str)
     remove_requested = qt.QtCore.Signal(str)
 
-    def __init__(self, add_text: str = "", name_placeholder: str = "", checkable: bool = False, parent=None):
+    ADD_ICON_SIZE = qt.QtCore.QSize(24, 20)
+
+    def __init__(self, add_text: str = "", name_placeholder: str = "", checkable: bool = False,
+                 add_icon: "qt.QtGui.QIcon | None" = None, parent=None):
         super().__init__(parent)
         self._checkable = checkable
         self._chips: dict[str, qt.QtWidgets.QPushButton] = {}
@@ -56,11 +62,15 @@ class ChipBar(qt.QtWidgets.QWidget):
         self._current = ""
         self._layout = FlowLayout(self, spacing=6)
 
-        self._add_button = qt.QtWidgets.QPushButton(add_text, self)
+        if add_icon is not None and not add_icon.isNull():
+            self._add_button = GlyphButton("+", add_text, size=self.ADD_ICON_SIZE, parent=self)
+            self._add_button.set_icon(add_icon)
+        else:
+            self._add_button = qt.QtWidgets.QPushButton(add_text, self)
+            self._add_button.setFlat(True)
+            self._add_button.setCursor(qt.QtCore.Qt.CursorShape.PointingHandCursor)
+            self._add_button.setFocusPolicy(qt.QtCore.Qt.FocusPolicy.NoFocus)
         self._add_button.setObjectName("chipAdd")
-        self._add_button.setFlat(True)
-        self._add_button.setCursor(qt.QtCore.Qt.CursorShape.PointingHandCursor)
-        self._add_button.setFocusPolicy(qt.QtCore.Qt.FocusPolicy.NoFocus)
         self._name_field = _NameField(self)
         self._name_field.setPlaceholderText(name_placeholder)
         self._name_field.setFixedWidth(190)

@@ -62,6 +62,7 @@ SOUND_FORMATS = {"wav": (["-c:a", "pcm_s16le"], ".wav"), "mp3": (["-c:a", "libmp
 AUDIO_KBPS = 96
 MIN_VIDEO_KBPS = 60     # below this a picture is not worth sending
 SAMPLE_SECONDS = 1.5    # how much of a job is encoded to estimate its size and time
+LOOP_MEMORY = 1024 ** 3  # bytes of raw frames a "there and back" loop may hold at once (ffmpeg keeps them ~3 times)
 GAPS_ERROR, GAPS_HOLD = "error", "hold"
 _EVEN = "scale=trunc(iw/2)*2:trunc(ih/2)*2"
 _FONTS = ("C:/Windows/Fonts/consola.ttf", "C:/Windows/Fonts/arial.ttf",
@@ -432,6 +433,44 @@ def adjust(info: MediaInfo, output: str | Path, rotate: int = 0, aspect: str = "
     return Job(title=f"{info.path.name} → {output.name}", output=output, passes=[body + [str(output)]],
                duration=duration, frames=int(round(duration * rate)) if rate else 0,
                sample=_sample(body, info.duration))
+
+
+def loop(info: MediaInfo, output: str | Path, times: int = 3, there_and_back: bool = False,
+         quality: str = "high", speed: str = "balanced") -> Job:
+    """A video repeated `times` times in a row — a walk or gallop cycle that
+    keeps going. `there_and_back` plays it forward, then backward, and
+    repeats THAT (the frames where it turns aren't shown twice, so the
+    motion doesn't stall); it has no sound, and ffmpeg holds the whole
+    video in memory for it — a long one is refused."""
+    output = Path(output)
+    _need_video(info)
+    times = int(times)
+    if times < 2:
+        raise MediaError("A loop repeats the video at least twice.")
+    codec = _video(quality, speed)
+    if not there_and_back:
+        body = ["-stream_loop", str(times - 1), "-i", str(info.path), "-vf", _EVEN, *codec]
+        body += ["-c:a", "aac", "-b:a", f"{AUDIO_KBPS}k"] if info.has_audio else ["-an"]
+        duration, frames = info.duration * times, info.frames * times
+        how = f"×{times}"
+    else:
+        count = info.frames or int(round(info.duration * (info.fps or 24.0)))
+        if count < 3:
+            raise MediaError("The video is too short to play there and back.")
+        if count * info.width * info.height * 1.5 > LOOP_MEMORY:
+            fit = LOOP_MEMORY / (info.width * info.height * 1.5) / (info.fps or 24.0)
+            raise MediaError(f"“There and back” keeps the whole video in memory — {info.duration_text()} of "
+                             f"{info.resolution_text()} is too much (about {fit:.0f} s fit). Trim the cycle first.")
+        cycle = 2 * count - 2
+        graph = (f"[0:v]{_EVEN},split[a][b];"
+                 f"[b]reverse,trim=start_frame=1:end_frame={count - 1},setpts=PTS-STARTPTS[r];"
+                 f"[a][r]concat=n=2:v=1:a=0,loop=loop={times - 1}:size={cycle}:start=0,setpts=N/FRAME_RATE/TB[out]")
+        body = ["-i", str(info.path), "-filter_complex", graph, "-map", "[out]", *codec, "-an"]
+        duration, frames = info.duration * cycle / count * times, cycle * times
+        how = f"there and back ×{times}"
+    body += ["-movflags", "+faststart"]
+    return Job(title=f"{info.path.name} {how} → {output.name}", output=output, passes=[body + [str(output)]],
+               duration=duration, frames=frames, sample=_sample(body, info.duration))
 
 
 def to_frames(info: MediaInfo, folder: str | Path, name: str = "", image_format: str = "png",

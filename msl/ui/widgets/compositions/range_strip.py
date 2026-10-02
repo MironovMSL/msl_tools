@@ -19,6 +19,11 @@ class RangeStrip(qt.QtWidgets.QWidget):
     the whole range; a click outside moves the nearer handle there. The
     ends never cross (MIN_SPAN apart at least).
 
+    With the keyboard: Left / Right move what was touched last (a handle,
+    or the whole range) by one step — set_step(), e.g. one frame of a
+    video — and Shift makes it ten. While the strip has the focus that
+    handle is drawn wider, so one sees which end the keys move.
+
     Colors are Qt properties set by ui/theme/widgets.qss: accentColor (the
     range's frame and handles), dimColor (what is outside), baseColor
     (behind pictures that aren't there yet).
@@ -49,6 +54,9 @@ class RangeStrip(qt.QtWidgets.QWidget):
         self._start, self._end = 0.0, 1.0
         self._drag = ""            # "start" / "end" / "move" while a button is down
         self._grab = 0.0           # where in the range a "move" drag took hold
+        self._active = "start"     # what the arrow keys move: the part touched last
+        self._step = 0.01
+        self.setFocusPolicy(qt.QtCore.Qt.FocusPolicy.StrongFocus)
         self.setFixedHeight(self.HEIGHT)
         self.setMinimumWidth(120)
         self.setMouseTracking(True)
@@ -70,6 +78,10 @@ class RangeStrip(qt.QtWidgets.QWidget):
         if (start, end) != (self._start, self._end):
             self._start, self._end = start, end
             self.update()
+
+    def set_step(self, step: float) -> None:
+        """How far one press of Left / Right moves, as a fraction of the whole."""
+        self._step = min(max(float(step), 0.0001), 0.5)
 
     def _clamped(self, start: float, end: float) -> tuple:
         start = min(max(float(start), 0.0), 1.0 - self.MIN_SPAN)
@@ -98,8 +110,9 @@ class RangeStrip(qt.QtWidgets.QWidget):
             part = "start" if x < self._start * self.width() else "end"
             self._drag = part
             self._move_to(x)
-        self._drag = part
+        self._drag = self._active = part
         self._grab = self._fraction(x) - self._start
+        self.update()
         event.accept()
 
     def mouseMoveEvent(self, event) -> None:
@@ -118,6 +131,35 @@ class RangeStrip(qt.QtWidgets.QWidget):
             self._drag = ""
             self.range_released.emit(self._start, self._end)
         super().mouseReleaseEvent(event)
+
+    def keyPressEvent(self, event) -> None:
+        key = event.key()
+        if key not in (qt.QtCore.Qt.Key.Key_Left, qt.QtCore.Qt.Key.Key_Right):
+            return super().keyPressEvent(event)
+        step = self._step * (10 if event.modifiers() & qt.QtCore.Qt.KeyboardModifier.ShiftModifier else 1)
+        step = -step if key == qt.QtCore.Qt.Key.Key_Left else step
+        if self._active == "start":
+            start, end = self._clamped(min(self._start + step, self._end - self.MIN_SPAN), self._end)
+        elif self._active == "end":
+            start, end = self._clamped(self._start, max(self._end + step, self._start + self.MIN_SPAN))
+        else:
+            span = self._end - self._start
+            start = min(max(self._start + step, 0.0), 1.0 - span)
+            end = start + span
+        if (start, end) != (self._start, self._end):
+            self._start, self._end = start, end
+            self.update()
+            self.range_changed.emit(start, end)
+            self.range_released.emit(start, end)
+        event.accept()
+
+    def focusInEvent(self, event) -> None:
+        super().focusInEvent(event)
+        self.update()
+
+    def focusOutEvent(self, event) -> None:
+        super().focusOutEvent(event)
+        self.update()
 
     def _move_to(self, x: float) -> None:
         at = self._fraction(x)
@@ -169,9 +211,11 @@ class RangeStrip(qt.QtWidgets.QWidget):
         painter.drawRoundedRect(qt.QtCore.QRectF(left + 1, 1, max(right - left - 2, 1), rect.height() - 2), 3, 3)
         painter.setPen(qt.QtCore.Qt.PenStyle.NoPen)
         painter.setBrush(self._accent_color)
-        for x in (left, right - self.HANDLE):
-            x = min(max(x, 0), rect.width() - self.HANDLE)
-            painter.drawRoundedRect(qt.QtCore.QRectF(x, 0, self.HANDLE, rect.height()), 3, 3)
+        for part, edge in (("start", left), ("end", right)):
+            # the handle the arrow keys move is wider while the strip has the focus
+            width = self.HANDLE + (4 if self.hasFocus() and self._active in (part, "move") else 0)
+            x = min(max(edge if part == "start" else edge - width, 0), rect.width() - width)
+            painter.drawRoundedRect(qt.QtCore.QRectF(x, 0, width, rect.height()), 3, 3)
         painter.end()
 
 

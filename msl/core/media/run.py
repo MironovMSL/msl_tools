@@ -3,7 +3,8 @@
 
 ProgressParser reads what ffmpeg prints with `-progress pipe:1`; run_job()
 runs a Job to its end in the calling thread (for scripts, tests and
-headless work). A window uses ui/media/ffmpeg_runner.py instead, which
+headless work); estimate() guesses a job's size and time, preview() makes
+a few seconds of it to look at. A window uses ui/media/ffmpeg_runner.py instead, which
 never blocks — both share the parser and the helpers below.
 """
 from __future__ import annotations
@@ -150,6 +151,7 @@ class Estimate:
         return "  ·  ".join(parts)
 
 
+PREVIEW_SECONDS = 3.0    # how much of a job a preview shows
 STARTUP_SECONDS = 0.7    # what starting ffmpeg costs on top of the encoding itself
 KEYFRAME_EVERY = 250     # x264's default: one full picture, then up to this many that only hold changes
 
@@ -195,6 +197,47 @@ def estimate(tools: FfmpegTools, job: Job) -> Estimate | None:
     runs = 1.7 if len(job.passes) > 1 else 1.0  # the first of two passes writes nothing and is quicker
     seconds = job.duration / speed * runs + STARTUP_SECONDS * len(job.passes) if speed else 0.0
     return Estimate(size=size, seconds=seconds)
+
+
+def preview_arguments(job: Job, seconds: float = PREVIEW_SECONDS) -> list[str]:
+    """The arguments (without an output) that make a short piece of what
+    `job` would make, with the job's own settings: its sample — from the
+    middle — stretched to `seconds`, or, for a job without one, the start
+    of the job itself. [] for a job that can't be previewed (it writes a
+    folder of files)."""
+    if job.folder is not None or not job.passes:
+        return []
+    arguments = list(job.sample) if job.sample else list(job.passes[-1][:-1])
+    length = f"{min(seconds, job.duration) if job.duration else seconds:.3f}"
+    if len(arguments) >= 2 and arguments[-2] == "-t":
+        arguments[-1] = length
+    else:
+        arguments += ["-t", length]
+    return arguments
+
+
+def preview(tools: FfmpegTools, job: Job, target: str | Path, seconds: float = PREVIEW_SECONDS) -> Path:
+    """Writes a short piece of what `job` would make into `target` (see
+    preview_arguments) and returns it. Blocks — call it from a worker
+    thread. Raises MediaError if the job has no preview or ffmpeg fails."""
+    target = Path(target)
+    arguments = preview_arguments(job, seconds)
+    if not arguments:
+        raise MediaError("This action has nothing to preview.")
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryFile(mode="w+", encoding="utf-8", errors="replace") as errors:
+            done = subprocess.run([str(tools.ffmpeg), "-hide_banner", "-nostdin", "-nostats", "-y", *arguments,
+                                   str(target)], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=errors,
+                                  timeout=600, creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
+            errors.seek(0)
+            if done.returncode != 0:
+                raise MediaError(error_summary(errors.read()))
+    except subprocess.TimeoutExpired as error:
+        raise MediaError("The preview took too long.") from error
+    except OSError as error:
+        raise MediaError(f"The preview couldn’t be made: {error}") from error
+    return target
 
 
 def _whole_size(tools: FfmpegTools, sample: str, length: float, job: Job) -> int:

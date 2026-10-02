@@ -134,10 +134,98 @@ ChipBar QPushButton#chip:checked {
     background: alpha(var(--accent), 26%);
     border-color: var(--accent);
 }
+/* ... or, as an icon: the accent, like the link it replaces. */
+ChipBar GlyphButton#chipAdd {
+    qproperty-glyphColor:       var(--accent);
+    qproperty-activeGlyphColor: var(--accent);
+    qproperty-highlightColor:   alpha(var(--accent), 16%);
+}
 ChipBar QPushButton#chipAdd {
     color: var(--accent);
     padding: 2px 6px;
     font-size: 11px;
+}
+
+/* --- ActionStrip: icon buttons of which one is picked (what a tool can do) ---------- */
+
+ActionStrip {
+    background-color: var(--surface-raised);
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    /* the pill under the picked button (painted by the strip: it slides) */
+    qproperty-pillTopColor:    var(--primary-top);
+    qproperty-pillColor:       var(--primary-bottom);
+    qproperty-pillBorderColor: var(--accent);
+    qproperty-dividerColor:    var(--border);
+    /* the hovered button's name and description, written after the buttons */
+    qproperty-titleColor:      var(--text-primary);
+    qproperty-noteColor:       var(--text-secondary);
+}
+ActionStrip IconPushButton#actionStripButton {
+    qproperty-iconColor: var(--text-secondary);
+    background-color: transparent;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    padding: 0px;
+}
+ActionStrip IconPushButton#actionStripButton:hover {
+    background-color: alpha(var(--text-primary), 9%);
+    border: 1px solid alpha(var(--text-primary), 12%);
+}
+ActionStrip IconPushButton#actionStripButton[current="true"] {
+    qproperty-iconColor: var(--on-accent);
+    background-color: transparent;
+    border: 1px solid transparent;
+}
+
+/* --- DropArea: where files are dropped - a dashed frame, a hint, a pill of round buttons --- */
+
+DropArea {
+    qproperty-borderColor:       alpha(var(--text-secondary), 70%);
+    qproperty-fillColor:         alpha(var(--text-primary), 3%);
+    qproperty-activeBorderColor: var(--accent);
+    qproperty-activeFillColor:   alpha(var(--accent), 10%);
+}
+DropArea QLabel#dropAreaTitle {
+    color: var(--text-primary);
+    font-size: 13px;
+}
+DropArea[dragging="true"] QLabel#dropAreaTitle {
+    color: var(--accent);
+}
+DropArea QLabel#dropAreaNote {
+    color: var(--text-secondary);
+    font-size: 11px;
+}
+DropArea TintedIcon {
+    qproperty-iconColor: var(--text-secondary);
+}
+DropArea[dragging="true"] TintedIcon {
+    qproperty-iconColor: var(--accent);
+}
+/* The pill: a raised capsule holding the round "pick it instead" buttons. */
+DropArea QFrame#dropAreaPill {
+    background-color: linear-gradient(to bottom, var(--button-top), var(--button-bottom));
+    border: 1px solid var(--border);
+    border-radius: 21px;
+}
+DropArea IconPushButton#dropAreaButton {
+    qproperty-iconColor: var(--accent);
+    background-color: alpha(var(--text-primary), 6%);
+    border: 1px solid transparent;
+    border-radius: 17px;
+    padding: 0px;
+}
+DropArea IconPushButton#dropAreaButton:hover {
+    background-color: alpha(var(--accent), 18%);
+    border: 1px solid alpha(var(--accent), 60%);
+}
+DropArea IconPushButton#dropAreaButton:pressed {
+    background-color: alpha(var(--accent), 30%);
+    border: 1px solid var(--accent);
+}
+DropArea IconPushButton#dropAreaButton:disabled {
+    background-color: alpha(var(--text-primary), 3%);
 }
 
 /* --- RangeStrip: pictures side by side with a range picked on them ------------------- */

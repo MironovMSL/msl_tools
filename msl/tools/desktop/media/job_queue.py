@@ -6,8 +6,14 @@ from pathlib import Path
 import msl_tools.msl.ui.qt_bindings as qt
 from msl_tools.msl.core.media import Job
 from msl_tools.msl.tools.desktop.media.ffmpeg_bar import link_button
+from msl_tools.msl.tools.desktop.media.history import ResultRecord
+from msl_tools.msl.tools.desktop.media.source import result_thumbnail
 from msl_tools.msl.ui.media import FfmpegRunner
 from msl_tools.msl.ui.theme.qss import make_rounded_popup, repolish
+from msl_tools.msl.ui.ui_resources import UiResources
+from msl_tools.msl.ui.widgets.atoms.buttons.glyph_button import GlyphButton
+from msl_tools.msl.ui.widgets.atoms.icons.tinted_icon import TintedIcon
+from msl_tools.msl.ui.workers.result_worker import ResultWorker
 from msl_tools.msl.ui.widgets.atoms.progress.base_progress_bar import BaseProgressBar, ProgressState
 from msl_tools.msl.ui.widgets.atoms.surfaces import StableScrollArea
 
@@ -29,6 +35,10 @@ class QueueItem:
         seconds: How long it ran.
         size: Bytes of the result (of everything in it, when the result is a folder).
         files: How many files the result holds (a folder of frames; 0 for one file).
+        source_size: Bytes of what the job was made from (0 = nothing to compare the result with).
+        finished: When it was over (seconds since the epoch; 0 while it isn't).
+        gone: A result from an earlier run of the hub whose file isn't there any more.
+        thumbnail: A small picture of the result, once it was made (None: not yet, or it has none).
     """
 
     id: int
@@ -41,12 +51,28 @@ class QueueItem:
     seconds: float = 0.0
     size: int = 0
     files: int = 0
+    source_size: int = 0
+    finished: float = 0.0
+    gone: bool = False
+    thumbnail: Path | None = None
 
 
 class JobQueue(qt.QtCore.QObject):
     """Runs the Media tool's jobs one after another (FfmpegRunner), in the
     order they were added. `tools` is asked for (a callable) at the moment a
     job starts — the ffmpeg in use may change while jobs wait.
+
+    A BATCH is everything added since the queue was last idle: overall()
+    is how far that batch is (for one progress bar over all of it), and
+    last_batch() — read when `idle` fires — is what just ended.
+
+    Results of earlier runs of the hub come back through restore() as
+    finished items; results() is what there is to keep for the next run.
+
+    Every finished result gets a small picture (QueueItem.thumbnail), made
+    one after another on a worker thread; `changed` follows when one is
+    there. refresh_thumbnails() makes the ones still owed — call it when
+    ffmpeg becomes available.
 
     Signals:
         added(object) / changed(object) — a QueueItem appeared / moved on.
@@ -66,6 +92,10 @@ class JobQueue(qt.QtCore.QObject):
         self._next_id = 1
         self._current: QueueItem | None = None
         self._started = 0.0
+        self._batch: list[QueueItem] = []
+        self._last_batch: list[QueueItem] = []
+        self._thumbnails_owed: list[QueueItem] = []
+        self._thumbnail_worker: ResultWorker | None = None
         self._runner = FfmpegRunner(self)
         self._runner.progressed.connect(self._on_progress)
         self._runner.finished.connect(self._on_finished)
@@ -77,14 +107,89 @@ class JobQueue(qt.QtCore.QObject):
         """Files the jobs that aren't over yet will write (so a new job picks another name)."""
         return [item.job.output for item in self._items if item.state in (WAITING, RUNNING)]
 
-    def add(self, job: Job) -> QueueItem:
+    def add(self, job: Job, source_size: int = 0) -> QueueItem:
+        """Puts `job` at the end of the line. `source_size`: bytes of what it
+        is made from — the finished row then says how much smaller the result is."""
         tools = self._tools()
-        item = QueueItem(id=self._next_id, job=job, command=job.command_text(tools))
+        item = QueueItem(id=self._next_id, job=job, command=job.command_text(tools), source_size=int(source_size))
         self._next_id += 1
         self._items.append(item)
+        self._batch.append(item)
         self.added.emit(item)
         self._start_next()
+        self._check_idle()
         return item
+
+    def restore(self, records: list) -> None:
+        """Shows results of earlier runs (ResultRecords, oldest first) as finished jobs."""
+        for record in records:
+            output = Path(record.output)
+            job = Job(title=record.title, output=output, passes=[], folder=output if record.folder else None)
+            item = QueueItem(id=self._next_id, job=job, state=DONE, fraction=1.0, seconds=record.seconds,
+                             size=record.size, files=record.files, source_size=record.source_size,
+                             finished=record.finished, gone=not output.exists())
+            self._next_id += 1
+            self._items.append(item)
+            self.added.emit(item)
+            if not item.gone:
+                self._thumbnails_owed.append(item)
+        self._next_thumbnail()
+
+    def refresh_thumbnails(self) -> None:
+        """Makes the pictures still owed (they wait while there is no ffmpeg)."""
+        self._next_thumbnail()
+
+    def _next_thumbnail(self) -> None:
+        tools = self._tools()
+        if self._thumbnail_worker is not None or not self._thumbnails_owed or tools is None:
+            return
+        item = self._thumbnails_owed.pop(0)
+        if item not in self._items:
+            self._next_thumbnail()
+            return
+        output = item.job.output
+        worker = ResultWorker(lambda: result_thumbnail(tools, output), parent=self)
+        self._thumbnail_worker = worker
+
+        def done(path) -> None:
+            if path is not None and item in self._items:
+                item.thumbnail = path
+                self.changed.emit(item)
+
+        def over() -> None:
+            self._thumbnail_worker = None
+            self._next_thumbnail()
+
+        worker.done.connect(done)
+        worker.finished.connect(over)
+        worker.start()
+
+    def busy(self) -> bool:
+        """Jobs wait or run."""
+        return bool(self._batch)
+
+    def batch_counts(self) -> tuple:
+        """(jobs of the current batch that are over, jobs in it) — (0, 0) while idle."""
+        return sum(1 for item in self._batch if item.state not in (WAITING, RUNNING)), len(self._batch)
+
+    def results(self) -> list:
+        """The finished jobs whose result is still there, oldest first, as ResultRecords."""
+        return [ResultRecord(title=item.job.title, output=str(item.job.output), folder=item.job.folder is not None,
+                             size=item.size, files=item.files, seconds=round(item.seconds, 1),
+                             source_size=item.source_size, finished=item.finished)
+                for item in self._items if item.state == DONE and not item.gone]
+
+    def overall(self) -> float:
+        """How far the current batch is, 0..1 (1 when nothing waits or runs)."""
+        if not self._batch:
+            return 1.0
+        over = sum(1.0 for item in self._batch if item.state not in (WAITING, RUNNING))
+        running = max(self._current.fraction, 0.0) if self._current is not None else 0.0
+        return min((over + running) / len(self._batch), 1.0)
+
+    def last_batch(self) -> list[QueueItem]:
+        """The jobs of the batch that ended last."""
+        return list(self._last_batch)
 
     def cancel(self, item_id: int) -> None:
         """Stops a running job, or takes a waiting one out of the line."""
@@ -101,6 +206,7 @@ class JobQueue(qt.QtCore.QObject):
                 except OSError:
                     pass
             self.changed.emit(item)
+            self._check_idle()
 
     def remove(self, item_id: int) -> None:
         """Takes a job that is over off the list (its result file stays)."""
@@ -141,7 +247,8 @@ class JobQueue(qt.QtCore.QObject):
     def _on_finished(self, ok: bool, message: str) -> None:
         item, self._current = self._current, None
         if item is not None:
-            item.seconds = time.time() - self._started
+            item.finished = time.time()
+            item.seconds = item.finished - self._started
             if ok:
                 item.state, item.fraction = DONE, 1.0
                 try:
@@ -152,14 +259,26 @@ class JobQueue(qt.QtCore.QObject):
                         item.size = item.job.output.stat().st_size
                 except OSError:
                     item.size = 0
+                self._thumbnails_owed.append(item)
             elif message == "Cancelled.":
                 item.state = CANCELLED
             else:
                 item.state, item.message = FAILED, message
             self.changed.emit(item)
         self._start_next()
-        if self._current is None:
+        self._check_idle()
+        self._next_thumbnail()
+
+    def _check_idle(self) -> None:
+        """The batch is over once nothing of it waits or runs."""
+        if self._batch and self._current is None and all(item.state != WAITING for item in self._batch):
+            self._last_batch, self._batch = self._batch, []
             self.idle.emit()
+
+
+def _size_text(size: int) -> str:
+    megabytes = size / 1024 ** 2
+    return f"{megabytes:.1f} MB" if megabytes >= 1 else f"{size / 1024:.0f} KB"
 
 
 class _ResultLabel(qt.QtWidgets.QLabel):
@@ -223,13 +342,18 @@ class _ResultLabel(qt.QtWidgets.QLabel):
 
 
 class _JobRow(qt.QtWidgets.QFrame):
-    """Private: one job of the list — a state dot, what it does, where it
-    stands, a thin progress bar while it runs. When it is done the title is
-    the result file itself (click = open, drag = take it somewhere), "Copy"
-    puts the file on the clipboard, "Show" opens its folder; a right click
-    has the rest (the command, the path, remove)."""
+    """Private: one job of the list — a state dot, the NAME OF ITS RESULT
+    (what it is made from is in the tooltip: with both names the line was
+    too long to read), where it stands, a thin progress bar while it runs.
+    When it is done the name is the result file itself (click = open, drag
+    = take it somewhere) with a play button in front of it; the icon
+    buttons copy the file to the clipboard and show it in its folder; a right click has the rest (the command,
+    the path, remove)."""
 
     COPIED_MS = 1500
+    BUTTON_SIZE = qt.QtCore.QSize(26, 22)
+    THUMBNAIL_SIZE = qt.QtCore.QSize(40, 23)   # the slot of the state dot / the result's picture
+    THUMBNAIL_RADIUS = 3
 
     cancel_requested = qt.QtCore.Signal(int)
     remove_requested = qt.QtCore.Signal(int)
@@ -242,18 +366,42 @@ class _JobRow(qt.QtWidgets.QFrame):
         self.setObjectName("mediaJob")
         self.item_id = item.id
         self._state = ""
+        self._has_command = bool(item.command)  # a result restored from an earlier run has none
         self._dot = qt.QtWidgets.QLabel()
         self._dot.setObjectName("mediaJobDot")
         self._dot.setFixedSize(8, 8)
-        self._title = _ResultLabel(item.job.title)
+        # One slot for both: the state dot while there is nothing to show, then the result's picture.
+        self._picture = qt.QtWidgets.QLabel()
+        self._picture.setFixedSize(self.THUMBNAIL_SIZE)
+        self._picture_path: Path | None = None
+        self._slot = qt.QtWidgets.QWidget()
+        self._slot.setFixedSize(self.THUMBNAIL_SIZE)
+        slot = qt.QtWidgets.QHBoxLayout(self._slot)
+        slot.setContentsMargins(0, 0, 0, 0)
+        slot.setSpacing(0)
+        slot.addWidget(self._dot, 0, qt.QtCore.Qt.AlignmentFlag.AlignCenter)
+        slot.addWidget(self._picture)
+        self._picture.hide()
+        self._title = _ResultLabel(item.job.output.name + ("/" if item.job.folder is not None else ""))
         self._status = qt.QtWidgets.QLabel()
         self._status.setObjectName("mediaJobStatus")
-        self._copy_button = link_button("Copy", "Copy the file — then paste it into a chat or a folder (Ctrl+V)")
-        self._show_button = link_button("Show", "Show the result in its folder")
-        self._cancel_button = link_button("Cancel")
-        self._remove_button = link_button("Remove", "Take this line off the list (the result file stays)")
+        self._status.setSizePolicy(qt.QtWidgets.QSizePolicy.Policy.Ignored, qt.QtWidgets.QSizePolicy.Policy.Preferred)
+        self._status.setAlignment(qt.QtCore.Qt.AlignmentFlag.AlignRight | qt.QtCore.Qt.AlignmentFlag.AlignVCenter)
+        # in front of the name: says that a click plays it (a folder of frames: opens the folder)
+        self._play_button = self._button("play", "▶", "Open it — a video plays in your player")
+        if item.job.folder is not None:
+            self._play_button.set_icon(UiResources().iconManager.get_icon("image_stack", sub_folder="actions"))
+            self._play_button.setToolTip("Open the folder with the frames")
+        policy = self._play_button.sizePolicy()
+        policy.setRetainSizeWhenHidden(True)  # the names of all rows start at the same place
+        self._play_button.setSizePolicy(policy)
+        self._copy_button = self._button("copy", "⧉", "Copy the file — then paste it into a chat or a folder (Ctrl+V)")
+        self._show_button = self._button("browse", "▸", "Show the result in its folder")
+        self._cancel_button = self._button("stop", "■", "Cancel this job")
+        self._remove_button = self._button("clear", "✕", "Take this line off the list (the result file stays)")
         self._bar = BaseProgressBar()
         self._title.activated.connect(lambda: self.open_requested.emit(self.item_id))
+        self._play_button.clicked.connect(lambda: self.open_requested.emit(self.item_id))
         self._copy_button.clicked.connect(self.copy_file)
         self._show_button.clicked.connect(lambda: self.show_requested.emit(self.item_id))
         self._cancel_button.clicked.connect(lambda: self.cancel_requested.emit(self.item_id))
@@ -262,9 +410,11 @@ class _JobRow(qt.QtWidgets.QFrame):
         line = qt.QtWidgets.QHBoxLayout()
         line.setContentsMargins(0, 0, 0, 0)
         line.setSpacing(8)
-        line.addWidget(self._dot)
-        line.addWidget(self._title, 1)
-        line.addWidget(self._status)
+        line.addWidget(self._slot)
+        line.addWidget(self._play_button)
+        # Both give way in a narrow window - the name less than what is said about it.
+        line.addWidget(self._title, 3)
+        line.addWidget(self._status, 2)
         line.addWidget(self._copy_button)
         line.addWidget(self._show_button)
         line.addWidget(self._cancel_button)
@@ -276,13 +426,52 @@ class _JobRow(qt.QtWidgets.QFrame):
         layout.addWidget(self._bar)
         self.update_item(item)
 
+    def _show_picture(self, path: Path | None) -> None:
+        """The result's picture in the slot (cropped to fill it, corners rounded) — or the state dot."""
+        if path is None:
+            self._picture.hide()
+            self._dot.show()
+            return
+        if path != self._picture_path:
+            source = qt.QtGui.QPixmap(str(path))
+            if source.isNull():
+                return
+            ratio = self.devicePixelRatioF()
+            size = self.THUMBNAIL_SIZE * ratio
+            scaled = source.scaled(size, qt.QtCore.Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                                   qt.QtCore.Qt.TransformationMode.SmoothTransformation)
+            picture = qt.QtGui.QPixmap(size)
+            picture.fill(qt.QtCore.Qt.GlobalColor.transparent)
+            painter = qt.QtGui.QPainter(picture)
+            painter.setRenderHint(qt.QtGui.QPainter.RenderHint.Antialiasing)
+            clip = qt.QtGui.QPainterPath()
+            clip.addRoundedRect(qt.QtCore.QRectF(0, 0, size.width(), size.height()),
+                                self.THUMBNAIL_RADIUS * ratio, self.THUMBNAIL_RADIUS * ratio)
+            painter.setClipPath(clip)
+            painter.drawPixmap((size.width() - scaled.width()) // 2, (size.height() - scaled.height()) // 2, scaled)
+            painter.end()
+            picture.setDevicePixelRatio(ratio)
+            self._picture.setPixmap(picture)
+            self._picture_path = path
+        self._dot.hide()
+        self._picture.show()
+
+    def _button(self, icon: str, glyph: str, tooltip: str) -> GlyphButton:
+        button = GlyphButton(glyph, tooltip, size=self.BUTTON_SIZE)
+        button.setObjectName("mediaAction")  # media.qss: accent icons
+        button.set_icon(UiResources().iconManager.get_icon(icon, sub_folder="actions"))
+        return button
+
     def update_item(self, item: QueueItem) -> None:
         state = self._state = item.state
-        if self._dot.property("state") != state:
-            self._dot.setProperty("state", state)        # media.qss: QLabel#mediaJobDot[state=...]
-            self._status.setProperty("state", state)
+        look = "gone" if item.gone else state
+        if self._dot.property("state") != look:
+            self._dot.setProperty("state", look)         # media.qss: QLabel#mediaJobDot[state=...]
+            self._status.setProperty("state", look)
             repolish(self._dot)
             repolish(self._status)
+        there = state == DONE and not item.gone
+        self._show_picture(item.thumbnail if there else None)
         running = state == RUNNING
         self._bar.setVisible(running)
         if running:
@@ -296,41 +485,52 @@ class _JobRow(qt.QtWidgets.QFrame):
             text = (f"{int(item.fraction * 100)}%" if item.fraction >= 0 else "working")
             if item.speed:
                 text += f"  ·  {item.speed:.1f}× real time"
+        elif item.gone:
+            text = "the file is gone"
         elif state == DONE:
-            megabytes = item.size / 1024 ** 2
-            size = f"{megabytes:.1f} MB" if megabytes >= 1 else f"{item.size / 1024:.0f} KB"
+            size = _size_text(item.size)
+            if item.source_size and item.size and not item.files:
+                change = round((item.size / item.source_size - 1) * 100)
+                size = f"{_size_text(item.source_size)} → {size} ({'+' if change > 0 else '−'}{abs(change)} %)"
             text = (f"{item.files} files  ·  " if item.files else "") + f"{size}  ·  {item.seconds:.0f} s"
+            if item.finished and time.strftime("%Y%m%d", time.localtime(item.finished)) != time.strftime("%Y%m%d"):
+                text += "  ·  " + time.strftime("%d %b", time.localtime(item.finished)).lstrip("0")
         elif state == CANCELLED:
             text = "cancelled"
         else:
             text = item.message
         self._status.setText(text)
-        self._status.setToolTip(item.message if state == FAILED else "")
-        self._title.set_result(str(item.job.output) if state == DONE else "")
-        self._title.setToolTip(f"{item.job.output}" + (chr(10) + "Click: open it  ·  drag: take the file somewhere  ·  "
-                                                       "right click: more" if state == DONE else ""))
-        self._copy_button.setVisible(state == DONE)
-        self._show_button.setVisible(state == DONE)
+        self._status.setToolTip(item.message if state == FAILED else
+                                time.strftime("Finished %d %b %Y, %H:%M", time.localtime(item.finished))
+                                if state == DONE and item.finished else "")
+        self._title.set_result(str(item.job.output) if there else "")
+        self._title.setToolTip(item.job.title + chr(10) + f"{item.job.output}"
+                               + (chr(10) + "Click: open it  ·  drag: take the file somewhere  ·  right click: more"
+                                  if there else ""))
+        self._there = there
+        self._play_button.setVisible(there)
+        self._copy_button.setVisible(there)
+        self._show_button.setVisible(there)
         self._cancel_button.setVisible(state in (WAITING, RUNNING))
-        self._remove_button.setVisible(state in (FAILED, CANCELLED))
+        self._remove_button.setVisible(state in (FAILED, CANCELLED) or item.gone)
 
     def copy_file(self) -> None:
         """Puts the result file on the clipboard (as a file: Ctrl+V pastes it into a chat or a folder)."""
         qt.QtGui.QGuiApplication.clipboard().setMimeData(self._title.drag_data())
-        self._copy_button.setText("Copied")
-        qt.QtCore.QTimer.singleShot(self.COPIED_MS, lambda: self._copy_button.setText("Copy"))
+        self._copy_button.flash_icon(UiResources().iconManager.get_icon("check", sub_folder="actions"), self.COPIED_MS)
 
     def contextMenuEvent(self, event) -> None:
         menu = make_rounded_popup(qt.QtWidgets.QMenu(self))
         menu.setAttribute(qt.QtCore.Qt.WidgetAttribute.WA_DeleteOnClose, True)
-        if self._state == DONE:
+        if self._there:
             menu.addAction("Open").triggered.connect(lambda: self.open_requested.emit(self.item_id))
             menu.addAction("Copy the file").triggered.connect(self.copy_file)
             menu.addAction("Copy its path").triggered.connect(
                 lambda: qt.QtGui.QGuiApplication.clipboard().setText(self._title.drag_data().text()))
             menu.addAction("Show in folder").triggered.connect(lambda: self.show_requested.emit(self.item_id))
             menu.addSeparator()
-        menu.addAction("Command").triggered.connect(lambda: self.command_requested.emit(self.item_id))
+        if self._has_command:
+            menu.addAction("Command").triggered.connect(lambda: self.command_requested.emit(self.item_id))
         if self._state in (WAITING, RUNNING):
             menu.addAction("Cancel").triggered.connect(lambda: self.cancel_requested.emit(self.item_id))
         else:
@@ -341,7 +541,8 @@ class _JobRow(qt.QtWidgets.QFrame):
 
 class JobList(qt.QtWidgets.QWidget):
     """The Media tool's list of jobs: a row per QueueItem of a JobQueue,
-    newest first, in a scroll area; a hint while it is empty. It only shows
+    newest first, in a scroll area; a hint while it is empty. Results of
+    earlier runs of the hub are rows like any other (JobQueue.restore). It only shows
     the queue and passes on what was clicked.
 
     Signals:
@@ -356,11 +557,18 @@ class JobList(qt.QtWidgets.QWidget):
         super().__init__(parent)
         self._queue = queue
         self._rows: dict[int, _JobRow] = {}
-        self._empty = qt.QtWidgets.QLabel("What you start shows up here: its progress, then the finished file — "
-                                          "click it to open, drag it into a chat.")
-        self._empty.setObjectName("mediaJobsEmpty")
-        self._empty.setAlignment(qt.QtCore.Qt.AlignmentFlag.AlignCenter)
-        self._empty.setWordWrap(True)
+        empty_icon = TintedIcon(UiResources().iconManager.get_icon("film", sub_folder="actions"), 26)
+        empty_text = qt.QtWidgets.QLabel("What you start shows up here: its progress, then the finished file — "
+                                         "click it to open, drag it into a chat.")
+        empty_text.setObjectName("mediaJobsEmpty")
+        empty_text.setAlignment(qt.QtCore.Qt.AlignmentFlag.AlignCenter)
+        empty_text.setWordWrap(True)
+        self._empty = qt.QtWidgets.QWidget()
+        empty = qt.QtWidgets.QVBoxLayout(self._empty)
+        empty.setContentsMargins(24, 18, 24, 12)
+        empty.setSpacing(8)
+        empty.addWidget(empty_icon, 0, qt.QtCore.Qt.AlignmentFlag.AlignHCenter)
+        empty.addWidget(empty_text)
         self._holder = qt.QtWidgets.QWidget()
         self._list = qt.QtWidgets.QVBoxLayout(self._holder)
         self._list.setContentsMargins(0, 4, 0, 4)

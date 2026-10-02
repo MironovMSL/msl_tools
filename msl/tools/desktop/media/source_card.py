@@ -1,21 +1,96 @@
 # tools/desktop/media/source_card.py
 import msl_tools.msl.ui.qt_bindings as qt
-from msl_tools.msl.tools.desktop.media.ffmpeg_bar import link_button
+from msl_tools.msl.core.theme import ThemeRegistry
 from msl_tools.msl.tools.desktop.media.source import MediaSource, summary
-from msl_tools.msl.ui.theme.qss import repolish
+from msl_tools.msl.ui.theme.qss import color_property, repolish
+from msl_tools.msl.ui.ui_resources import UiResources
 from msl_tools.msl.ui.widgets.atoms.buttons.glyph_button import GlyphButton
 from msl_tools.msl.ui.widgets.atoms.comboboxes.base_combo_box import BaseComboBox
+from msl_tools.msl.ui.widgets.compositions.drop_area import DropArea
+
+
+VIDEO_PATTERNS = ("Video and pictures (*.mp4 *.mov *.avi *.mkv *.webm *.mxf *.m4v *.wmv *.png *.jpg *.jpeg *.tif *.tiff "
+                  "*.exr *.tga *.bmp *.dpx);;All files (*.*)")
+
+
+class SourceThumbnail(qt.QtWidgets.QLabel):
+    """The source's picture. It is a button too: under the pointer it dims
+    and shows a play mark, and a click asks to open the source.
+
+    Colors are Qt properties set by media.qss: overlayColor (the dimming),
+    markColor (the round mark), symbolColor (the triangle on it).
+
+    Signals:
+        clicked() — it was clicked.
+    """
+
+    MARK_RADIUS = 15
+
+    clicked = qt.QtCore.Signal()
+
+    overlayColor = color_property("_overlay_color")
+    markColor = color_property("_mark_color")
+    symbolColor = color_property("_symbol_color")
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        fallback = ThemeRegistry.fallback()  # until QSS applies
+        self._overlay_color = qt.QtGui.QColor(fallback.surface)
+        self._overlay_color.setAlpha(110)
+        self._mark_color = qt.QtGui.QColor(fallback.accent)
+        self._symbol_color = qt.QtGui.QColor(fallback.surface)
+        self._hovered = False
+        self.setCursor(qt.QtCore.Qt.CursorShape.PointingHandCursor)
+
+    def enterEvent(self, event) -> None:
+        self._hovered = True
+        self.update()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        self._hovered = False
+        self.update()
+        super().leaveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        if event.button() == qt.QtCore.Qt.MouseButton.LeftButton and self.rect().contains(event.position().toPoint()):
+            self.clicked.emit()
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+        if not self._hovered:
+            return
+        painter = qt.QtGui.QPainter(self)
+        painter.setRenderHint(qt.QtGui.QPainter.RenderHint.Antialiasing)
+        painter.fillRect(self.rect(), self._overlay_color)
+        centre = qt.QtCore.QPointF(self.rect().center()) + qt.QtCore.QPointF(0.5, 0.5)
+        painter.setPen(qt.QtCore.Qt.PenStyle.NoPen)
+        painter.setBrush(self._mark_color)
+        painter.drawEllipse(centre, self.MARK_RADIUS, self.MARK_RADIUS)
+        side = self.MARK_RADIUS * 0.62
+        triangle = qt.QtGui.QPolygonF([centre + qt.QtCore.QPointF(-side * 0.55, -side),
+                                       centre + qt.QtCore.QPointF(-side * 0.55, side),
+                                       centre + qt.QtCore.QPointF(side * 0.95, 0)])
+        painter.setBrush(self._symbol_color)
+        painter.drawPolygon(triangle)
+        painter.end()
 
 
 class SourceCard(qt.QtWidgets.QFrame):
     """What the Media tool is working on, in one of three looks:
 
-        empty    a dashed drop area: "Drop a video or an image sequence here",
-                 with "Choose a file…" / "Choose a folder…"
-        loading  "Reading <name>…"
-        loaded   a thumbnail, the name, a line of facts, a warning if
-                 something is wrong (missing frames), a chooser when the
-                 folder holds several sequences, and "×" to clear.
+        empty    a DropArea: a dashed frame, "Drop a video or an image
+                 sequence here", and a pill of two round buttons — choose
+                 a file / choose a folder
+        loading  "Reading <name>…" in that frame
+        loaded   a thumbnail (a click plays the source), the name, its
+                 facts as small tiles (frame size, fps, length, size, ...),
+                 a warning if something is wrong (missing frames), a
+                 chooser when the folder holds several sequences; in the
+                 corner "add another video" and "×" to clear.
                  Several sources (set_sources) show as one: "4 videos",
                  their total, their names on a line.
 
@@ -26,14 +101,21 @@ class SourceCard(qt.QtWidgets.QFrame):
 
     Signals:
         open_requested(str) — a file or folder was chosen with the buttons.
+        add_requested(object) — more files (a list of paths) were chosen to work on TOGETHER with what is loaded.
+        play_requested() — the thumbnail was clicked.
         sequence_picked(object) — another ImageSequence of the folder was chosen.
         cleared() — "×" was clicked.
     """
 
-    HEIGHT = 104
+    HEIGHT = 116            # with a source
+    EMPTY_HEIGHT = 148      # the drop area: taller, it is the only thing to do on the page then
     THUMBNAIL_SIZE = qt.QtCore.QSize(144, 81)
+    DROP_TITLE = "Drop a video or an image sequence here"
+    DROP_NOTE = "a folder of frames, or any one frame of it · several at once work too · or pick one:"
 
     open_requested = qt.QtCore.Signal(str)
+    add_requested = qt.QtCore.Signal(object)
+    play_requested = qt.QtCore.Signal()
     sequence_picked = qt.QtCore.Signal(object)
     cleared = qt.QtCore.Signal()
 
@@ -45,40 +127,33 @@ class SourceCard(qt.QtWidgets.QFrame):
         self._syncing = False
 
         # empty
-        self._hint_label = qt.QtWidgets.QLabel("Drop a video, a folder of frames, or one frame of a sequence here")
-        self._hint_label.setObjectName("mediaDropHint")
-        self._hint_label.setAlignment(qt.QtCore.Qt.AlignmentFlag.AlignCenter)
-        self._hint_label.setWordWrap(True)
-        self._file_button = link_button("Choose a file…")
-        self._folder_button = link_button("Choose a folder…", "The folder of an image sequence")
-        buttons = qt.QtWidgets.QHBoxLayout()
-        buttons.setContentsMargins(0, 0, 0, 0)
-        buttons.setSpacing(4)
-        buttons.addStretch(1)
-        buttons.addWidget(self._file_button)
-        buttons.addWidget(self._folder_button)
-        buttons.addStretch(1)
-        self._empty = qt.QtWidgets.QWidget()
-        empty_layout = qt.QtWidgets.QVBoxLayout(self._empty)
-        empty_layout.setContentsMargins(12, 8, 12, 8)
-        empty_layout.setSpacing(4)
-        empty_layout.addStretch(1)
-        empty_layout.addWidget(self._hint_label)
-        empty_layout.addLayout(buttons)
-        empty_layout.addStretch(1)
+        icons = UiResources().iconManager
+        self._empty = DropArea(icons.get_icon("media", sub_folder="tools"), self.DROP_TITLE, self.DROP_NOTE)
+        self._file_button = self._empty.add_button(icons.get_icon("file_video", sub_folder="actions"),
+                                                   "Choose a file — a video, or one frame of an image sequence", "File")
+        self._folder_button = self._empty.add_button(icons.get_icon("browse", sub_folder="actions"),
+                                                     "Choose a folder — the frames of an image sequence", "Folder")
 
         # loaded
-        self._thumbnail = qt.QtWidgets.QLabel()
+        self._thumbnail = SourceThumbnail()
         self._thumbnail.setObjectName("mediaThumbnail")
+        self._thumbnail.setToolTip("Click to open it in your player")
         self._thumbnail.setFixedSize(self.THUMBNAIL_SIZE)
         self._thumbnail.setAlignment(qt.QtCore.Qt.AlignmentFlag.AlignCenter)
         self._title_label = qt.QtWidgets.QLabel()
         self._title_label.setObjectName("mediaSourceTitle")
         # a long name is clipped, it must not widen the window
         self._title_label.setSizePolicy(qt.QtWidgets.QSizePolicy.Policy.Ignored, qt.QtWidgets.QSizePolicy.Policy.Preferred)
-        self._facts_label = qt.QtWidgets.QLabel()
-        self._facts_label.setObjectName("mediaSourceFacts")
-        self._facts_label.setSizePolicy(qt.QtWidgets.QSizePolicy.Policy.Ignored, qt.QtWidgets.QSizePolicy.Policy.Preferred)
+        # The facts, a small tile each. The row has its natural size inside a holder that
+        # CLIPS it in a narrow window (the last tiles matter least): it must not widen the
+        # window, and a layout of the holder's width would squeeze or overlap the tiles.
+        self._facts = qt.QtWidgets.QWidget()
+        self._facts.setSizePolicy(qt.QtWidgets.QSizePolicy.Policy.Ignored, qt.QtWidgets.QSizePolicy.Policy.Fixed)
+        self._facts_row = qt.QtWidgets.QWidget(self._facts)
+        self._facts_layout = qt.QtWidgets.QHBoxLayout(self._facts_row)
+        self._facts_layout.setContentsMargins(0, 1, 0, 1)
+        self._facts_layout.setSpacing(5)
+        self._facts_text = ""
         self._warning_label = qt.QtWidgets.QLabel()
         self._warning_label.setObjectName("mediaSourceWarning")
         self._warning_label.setSizePolicy(qt.QtWidgets.QSizePolicy.Policy.Ignored, qt.QtWidgets.QSizePolicy.Policy.Preferred)
@@ -86,12 +161,14 @@ class SourceCard(qt.QtWidgets.QFrame):
         self._chooser.setToolTip("This folder holds several image sequences")
         self._chooser.setSizeAdjustPolicy(qt.QtWidgets.QComboBox.SizeAdjustPolicy.AdjustToContents)
         self._clear_button = GlyphButton("✕", "Take it away (the file itself stays where it is)")
+        self._add_button = GlyphButton("+", "Add another video — to join them, compare them, or do the same to each")
+        self._add_button.set_icon(UiResources().iconManager.get_icon("file_add", sub_folder="actions"))
         texts = qt.QtWidgets.QVBoxLayout()
         texts.setContentsMargins(0, 0, 0, 0)
         texts.setSpacing(3)
         texts.addStretch(1)
         texts.addWidget(self._title_label)
-        texts.addWidget(self._facts_label)
+        texts.addWidget(self._facts)
         texts.addWidget(self._warning_label)
         texts.addWidget(self._chooser, 0, qt.QtCore.Qt.AlignmentFlag.AlignLeft)
         texts.addStretch(1)
@@ -101,6 +178,7 @@ class SourceCard(qt.QtWidgets.QFrame):
         loaded_layout.setSpacing(12)
         loaded_layout.addWidget(self._thumbnail)
         loaded_layout.addLayout(texts, 1)
+        loaded_layout.addWidget(self._add_button, 0, qt.QtCore.Qt.AlignmentFlag.AlignTop)
         loaded_layout.addWidget(self._clear_button, 0, qt.QtCore.Qt.AlignmentFlag.AlignTop)
 
         self._stack = qt.QtWidgets.QStackedLayout(self)
@@ -111,6 +189,8 @@ class SourceCard(qt.QtWidgets.QFrame):
         self._file_button.clicked.connect(self._on_choose_file)
         self._folder_button.clicked.connect(self._on_choose_folder)
         self._clear_button.clicked.connect(self.cleared)
+        self._add_button.clicked.connect(self._on_add)
+        self._thumbnail.clicked.connect(self.play_requested)
         self._chooser.currentIndexChanged.connect(self._on_chooser)
         self.set_source(None)
 
@@ -123,11 +203,11 @@ class SourceCard(qt.QtWidgets.QFrame):
             self.set_source(sources[0] if sources else None)
             return
         self.set_source(sources[0])
-        title, facts = summary(sources)
+        title, pairs = summary(sources)
         names = [source.title() for source in sources]
         self._title_label.setText(title)
         self._title_label.setToolTip(chr(10).join(names))
-        self._facts_label.setText(facts)
+        self._set_facts(pairs)
         problems = [f"{source.title()}: {source.warning()}" for source in sources if source.warning()]
         self._warning_label.setText(", ".join(names) if not problems else "; ".join(problems))
         self._warning_label.setProperty("plain", not problems)  # media.qss: a list of names isn't a warning
@@ -139,15 +219,14 @@ class SourceCard(qt.QtWidgets.QFrame):
     def set_source(self, source: MediaSource | None) -> None:
         self._source = source
         self._set_look("loaded" if source is not None else "empty")
-        self._hint_label.setText("Drop a video, a folder of frames, or one frame of a sequence here")
-        self._file_button.show()
-        self._folder_button.show()
+        self._empty.set_texts(self.DROP_TITLE, self.DROP_NOTE)
         if source is None:
             self._stack.setCurrentWidget(self._empty)
             return
         self._title_label.setText(source.title())
         self._title_label.setToolTip(str(source.path))
-        self._facts_label.setText(source.facts())
+        self._set_facts(source.fact_pairs())
+        self._add_button.setVisible(not source.is_sequence)
         self._warning_label.setText(source.warning())
         self._warning_label.setToolTip("")
         if self._warning_label.property("plain"):
@@ -176,23 +255,58 @@ class SourceCard(qt.QtWidgets.QFrame):
         self._chooser.setVisible(len(source.siblings) > 1)
         self._stack.setCurrentWidget(self._loaded)
 
+    def _set_facts(self, pairs: list) -> None:
+        """Fills the row of tiles: a value over what it is."""
+        while self._facts_layout.count():
+            item = self._facts_layout.takeAt(0)
+            if item.widget() is not None:
+                item.widget().hide()
+                item.widget().deleteLater()
+        for value, caption in pairs:
+            tile = qt.QtWidgets.QFrame(self._facts_row)
+            tile.setObjectName("mediaFact")
+            value_label = qt.QtWidgets.QLabel(value, tile)
+            value_label.setObjectName("mediaFactValue")
+            caption_label = qt.QtWidgets.QLabel(caption, tile)
+            caption_label.setObjectName("mediaFactCaption")
+            box = qt.QtWidgets.QVBoxLayout(tile)
+            box.setContentsMargins(8, 2, 8, 3)
+            box.setSpacing(0)
+            box.addWidget(value_label)
+            box.addWidget(caption_label)
+            self._facts_layout.addWidget(tile)
+            for widget in (tile, value_label, caption_label):
+                widget.ensurePolished()  # the fonts from QSS, before the row is measured
+            tile.show()
+        self._facts_layout.activate()
+        self._facts_row.resize(self._facts_layout.sizeHint())
+        self._facts.setFixedHeight(self._facts_row.height())
+        self._facts_text = "  ·  ".join(f"{value} {caption}" for value, caption in pairs)
+
+    def facts_text(self) -> str:
+        """The tiles as one line of text."""
+        return self._facts_text
+
+    def _on_add(self) -> None:
+        paths, _filter = qt.QtWidgets.QFileDialog.getOpenFileNames(self, "Videos to add", "", VIDEO_PATTERNS)
+        if paths:
+            self.add_requested.emit(list(paths))
+
     def set_loading(self, name: str) -> None:
         """Shows "Reading <name>…" until set_source() / set_message()."""
         self._set_look("empty")
-        self._hint_label.setText(f"Reading {name}…")
-        self._file_button.hide()
-        self._folder_button.hide()
+        self._empty.set_busy(f"Reading {name}…")
         self._stack.setCurrentWidget(self._empty)
 
     def set_enabled_for_input(self, enabled: bool, reason: str = "") -> None:
         """Without ffmpeg nothing can be read: the choose buttons go off and the hint says why."""
-        self._file_button.setEnabled(enabled)
-        self._folder_button.setEnabled(enabled)
+        self._empty.set_buttons_enabled(enabled)
         if not enabled and self._source is None:
-            self._hint_label.setText(reason)
+            self._empty.set_texts(reason)
 
     def set_dragging(self, dragging: bool) -> None:
         """Something is being dragged over the page: the card shows it is the target."""
+        self._empty.set_dragging(dragging)
         if bool(self.property("dragging")) != dragging:
             self.setProperty("dragging", dragging)  # media.qss: QFrame#mediaSource[dragging="true"]
             repolish(self)
@@ -201,12 +315,11 @@ class SourceCard(qt.QtWidgets.QFrame):
         if self.property("look") != look:
             self.setProperty("look", look)  # media.qss: QFrame#mediaSource[look=...]
             repolish(self)
+            self.setFixedHeight(self.HEIGHT if look == "loaded" else self.EMPTY_HEIGHT)
 
     def _on_choose_file(self) -> None:
         path, _filter = qt.QtWidgets.QFileDialog.getOpenFileName(
-            self, "A video, or one frame of an image sequence", "",
-            "Video and pictures (*.mp4 *.mov *.avi *.mkv *.webm *.mxf *.m4v *.wmv *.png *.jpg *.jpeg *.tif *.tiff *.exr "
-            "*.tga *.bmp *.dpx);;All files (*.*)")
+            self, "A video, or one frame of an image sequence", "", VIDEO_PATTERNS)
         if path:
             self.open_requested.emit(path)
 

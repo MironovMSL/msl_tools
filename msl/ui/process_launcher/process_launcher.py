@@ -2,6 +2,7 @@ import logging
 from pathlib import Path
 
 import msl_tools.msl.ui.qt_bindings as qt
+from msl_tools.msl.core.environment.shell import select_in_file_manager
 from msl_tools.msl.core.fs.maya_paths import MayaPaths
 from msl_tools.msl.core.fs.system_info import SystemInfo
 
@@ -90,6 +91,10 @@ class ProcessLauncher:
 
         system = SystemInfo.get_system()
         if system == SystemInfo.OS_WINDOWS:
+            # A file: selected through the shell, in the window its folder is already open in
+            # (if any). `explorer /select,` - the fallback - opens one more window each time.
+            if not path.is_dir() and select_in_file_manager(path):
+                return True
             args = [str(path)] if path.is_dir() else ["/select,", str(path)]
             return cls.launch_detached(r"C:\Windows\explorer.exe", arguments=args)
         elif system == SystemInfo.OS_MAC:
