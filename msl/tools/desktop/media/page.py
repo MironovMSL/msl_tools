@@ -21,6 +21,7 @@ from msl_tools.msl.ui.theme.stylesheet_builder import StylesheetBuilder
 from msl_tools.msl.ui.ui_resources import UiResources
 from msl_tools.msl.ui.widgets.atoms.buttons.glyph_button import GlyphButton
 from msl_tools.msl.ui.widgets.atoms.buttons.icon_push_button import IconPushButton
+from msl_tools.msl.ui.widgets.atoms.buttons.motion_icon_button import MotionIconButton
 from msl_tools.msl.ui.widgets.atoms.icons.tinted_icon import TintedIcon
 from msl_tools.msl.ui.widgets.compositions.action_strip import ActionStrip
 from msl_tools.msl.ui.widgets.compositions.chip_bar import ChipBar
@@ -419,8 +420,11 @@ class MediaPage(qt.QtWidgets.QWidget):
         for panel in offered:
             panel.set_sources(self._sources)
         icons = UiResources().iconManager
-        self._actions.set_items([(panel.KEY, panel.TITLE, panel.TIP, icons.get_icon(panel.ICON, sub_folder="actions"),
-                                  panel.GROUP) for panel in offered])
+        # the icon by NAME: where there is a motion icon of that name, the button's icon moves
+        self._actions.set_items([(panel.KEY, panel.TITLE, panel.TIP,
+                                  panel.ICON if MotionIconButton.has_icon(panel.ICON)
+                                  else icons.get_icon(panel.ICON, sub_folder="actions"), panel.GROUP)
+                                 for panel in offered])
         remembered = str(self._settings.get("action", "") or "")
         if remembered in self._actions.keys():
             self._actions.set_current(remembered, animate=False)

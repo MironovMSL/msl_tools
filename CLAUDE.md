@@ -900,6 +900,8 @@ compositions/env_var_row.py               EnvVarRow (Notion-style: hover menu at
 compositions/row_hover_menu.py            RowHoverMenu (extensible hover gutter: add_widget(), set_revealed(), set_pinned())
 compositions/bulk_action_bar.py           BulkActionBar (accent pill "N of M selected | select-all, actions | ×"; add_action(danger=) per bulk operation; select_all_requested / clear_requested)
 compositions/copyable_line_edit.py        CopyableLineEdit (copy button appears inside the field on hover)
+atoms/icons/motion_icons.py               motion icons: icons drawn by code at a phase t (0..1) — scissors snip, the loop turns, the clapper claps; at rest identical to the SVG of the same name (same path data, via a small M L H V C Z path reader); paint_motion_icon(name, painter, rect, color, t), MOTION_ICONS
+atoms/buttons/motion_icon_button.py       MotionIconButton (a QPushButton whose motion icon plays once under the pointer and on play(); frame from QSS, icon in qproperty iconColor)
 compositions/action_strip.py              ActionStrip (a strip of icon-only buttons of which one is picked — what a tool can DO, as opposed to settings; set_items([(key, title, description, icon, group)]), current() / set_current(key, animate=), clicked(str); wraps. The strip PAINTS: the accent pill under the picked button — it slides to a new one —, a hairline where the group changes, and the hovered button's name + description in the free room after the buttons, at once, so the icons get learned)
 compositions/drop_area.py                 DropArea (where files are dropped: a painted dashed frame, an icon + a line saying what to drop, a quiet second line, a pill of round icon buttons — add_button(); set_dragging() lights it up, set_busy() shows "Reading…"; it only shows the target, the owner takes the drop)
 compositions/chip_bar.py                  ChipBar (pills that wrap: a checkable picker, or a shelf of saved things with an in-place "+ …" name field and "Remove")
@@ -1210,6 +1212,17 @@ frames · For editing · Adjust · Join (2+ videos) · Compare (exactly 2).
   Actions are grouped by `OptionPanel.GROUP` (make / change / convert /
   combine) — PANELS is in that order. With ONE action to pick from (a
   sequence: To video) the strip is hidden.
+- The action icons MOVE (asked for by the user, after the header's sun /
+  moon toggle): the strip is given each panel's ICON by name, and where a
+  motion icon of that name exists the button is a `MotionIconButton` —
+  the icon plays ~0.5 s under the pointer and when the action is picked:
+  compress = arrows push inward, scissors snip twice, repeat turns half a
+  round, text_frame = the T is stamped, volume = waves appear in turn,
+  gif = the letters hop, image_stack fans apart, clapper claps, crop
+  turns a quarter and back, merge = the pieces meet, split_view = the
+  divider slides, film = the perforation runs. A new action icon needs
+  its SVG (the card's header shows that, still) AND, to move, a function
+  in motion_icons.py with the same rest pose.
 - A long form is cut into sections: `OptionPanel._add_section(title,
   foldable=)` -> `SectionHeader` (capitals + a hairline; a foldable one
   has a chevron and, folded, a summary of what is set under it). To video

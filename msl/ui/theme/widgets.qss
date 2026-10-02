@@ -150,6 +150,13 @@ ChipBar QPushButton#chipAdd {
     font-size: 11px;
 }
 
+/* --- MotionIconButton: a button whose icon plays a short animation ----------------- */
+
+MotionIconButton {
+    qproperty-iconColor: var(--text-primary);
+    padding: 0px;
+}
+
 /* --- ActionStrip: icon buttons of which one is picked (what a tool can do) ---------- */
 
 ActionStrip {
@@ -165,18 +172,18 @@ ActionStrip {
     qproperty-titleColor:      var(--text-primary);
     qproperty-noteColor:       var(--text-secondary);
 }
-ActionStrip IconPushButton#actionStripButton {
+ActionStrip QPushButton#actionStripButton {
     qproperty-iconColor: var(--text-secondary);
     background-color: transparent;
     border: 1px solid transparent;
     border-radius: 6px;
     padding: 0px;
 }
-ActionStrip IconPushButton#actionStripButton:hover {
+ActionStrip QPushButton#actionStripButton:hover {
     background-color: alpha(var(--text-primary), 9%);
     border: 1px solid alpha(var(--text-primary), 12%);
 }
-ActionStrip IconPushButton#actionStripButton[current="true"] {
+ActionStrip QPushButton#actionStripButton[current="true"] {
     qproperty-iconColor: var(--on-accent);
     background-color: transparent;
     border: 1px solid transparent;

@@ -3,6 +3,7 @@ import msl_tools.msl.ui.qt_bindings as qt
 from msl_tools.msl.core.theme import ThemeRegistry
 from msl_tools.msl.ui.theme.qss import color_property, repolish
 from msl_tools.msl.ui.widgets.atoms.buttons.icon_push_button import IconPushButton
+from msl_tools.msl.ui.widgets.atoms.buttons.motion_icon_button import MotionIconButton
 from msl_tools.msl.ui.widgets.atoms.layouts import FlowLayout
 
 
@@ -12,8 +13,15 @@ class ActionStrip(qt.QtWidgets.QFrame):
 
         strip = ActionStrip()
         strip.set_items([("trim", "Trim", "Keep one piece of the video", scissors_icon, "change"), ...])
+        strip.set_items([("trim", "Trim", "Keep one piece of the video", "scissors", "change"), ...])
+                                                 # a NAME of a motion icon instead of a QIcon: it moves
         strip.clicked.connect(...)        # the key of the button that was clicked
         strip.current() / strip.set_current("trim")
+
+    An item's icon is a QIcon — or the name of a motion icon (atoms/icons/
+    motion_icons.py): then the button is a MotionIconButton, and its icon
+    plays a short animation under the pointer and when it is picked
+    (scissors snip, the loop turns) — it shows what the action does.
 
     Icons only, so the strip itself teaches what they are: while the pointer
     is over a button, its name and one-line description are written in the
@@ -63,7 +71,7 @@ class ActionStrip(qt.QtWidgets.QFrame):
         self._divider_color = qt.QtGui.QColor(fallback.border)
         self._title_color = qt.QtGui.QColor(fallback.text_primary)
         self._note_color = qt.QtGui.QColor(fallback.text_secondary)
-        self._buttons: dict[str, IconPushButton] = {}
+        self._buttons: dict[str, qt.QtWidgets.QPushButton] = {}
         self._texts: dict[str, tuple] = {}      # key -> (title, description)
         self._gaps: list[qt.QtWidgets.QWidget] = []
         self._current = ""
@@ -102,9 +110,13 @@ class ActionStrip(qt.QtWidgets.QFrame):
                 gap.show()
                 self._gaps.append(gap)
             previous_group = group
-            button = IconPushButton(icon, title + (chr(10) + description if description else ""),
-                                    icon_size=qt.QtCore.QSize(self.ICON_SIZE, self.ICON_SIZE),
-                                    fallback_text=title[:2], parent=self)
+            tooltip = title + (chr(10) + description if description else "")
+            if isinstance(icon, str) and MotionIconButton.has_icon(icon):
+                button = MotionIconButton(icon, tooltip, icon_size=self.ICON_SIZE, parent=self)
+            else:
+                button = IconPushButton(icon if not isinstance(icon, str) else None, tooltip,
+                                        icon_size=qt.QtCore.QSize(self.ICON_SIZE, self.ICON_SIZE),
+                                        fallback_text=title[:2], parent=self)
             button.setObjectName("actionStripButton")
             button.setFixedSize(self.BUTTON_SIZE)
             button.setCursor(qt.QtCore.Qt.CursorShape.PointingHandCursor)
@@ -162,6 +174,9 @@ class ActionStrip(qt.QtWidgets.QFrame):
     def _on_clicked(self, key: str) -> None:
         if key != self._current:
             self._slide_to(key)
+        button = self._buttons.get(key)
+        if isinstance(button, MotionIconButton):
+            button.play()  # picked: its icon shows once more what it does
         self.clicked.emit(key)
 
     def _on_slide(self, value) -> None:
