@@ -40,11 +40,13 @@ msl_tools/                 (repo root)
         assets/               icons/, themes/ — SVG assets, sparse right now
         core/                 Qt-FREE layer: config, fs, logger,
                               environment, theme, version, installer, network,
+                              media (ffmpeg: find it, probe files, image sequences, recipes),
                               resources.py (core.Resources singleton)
                               (known Qt leftovers: config/ini_config.py uses QSettings,
                               fs/qt_paths.py imports Qt lazily)
         ui/                   Qt-DEPENDENT layer: qt_bindings shim (QtCore/Gui/Widgets/Svg/Network), icon_manager,
                               maya_link/ (MayaLinkServer: the hub's end of the hub <-> Maya link),
+                              media/ (FfmpegRunner: runs a media Job without blocking the window),
                               ui_resources.py (UiResources singleton), theme/,
                               process_launcher/ (ProcessLauncher — QProcess-based, so ui/, not core/),
                               widgets/ (atoms/, compositions/, windows/, app/)
@@ -962,6 +964,65 @@ not every commit. The notes are the release's description on GitHub:
   publish a GitHub release tagged `v<version>` with the notes. No `gh` CLI
   on this machine — the release is created in the browser.
 
+## Media foundation (ffmpeg)
+
+Built (2026-10-02) as the base of the planned "Media" tool; later batch
+jobs and Maya playblasts are meant to reuse it. No tool / UI yet.
+
+`msl/core/media/` — Qt-free:
+- `ffmpeg.py`: `FfmpegLocator(configured=).find() -> FfmpegTools | None`
+  (ffmpeg + ffprobe paths, version, source). Order: the configured path
+  (the exe, its `bin`, or the folder an archive was unpacked to), the
+  managed copy `<tools dir>/ffmpeg/<version>/bin` (newest first), PATH.
+  `tools_dir()` = `%LOCALAPPDATA%\MSL\tools` (MSL_TOOLS_DIR overrides — use
+  it in tests). `run_quiet()` = how every console program is started: no
+  console window (the hub runs under pythonw), stdin closed. `MediaError`:
+  its message is written for the user.
+- `install.py`: `FfmpegInstaller().install(progress)` downloads ONE pinned
+  build (`PINNED_VERSION` 8.0, the gyan.dev "essentials" zip from its GitHub
+  releases, ~101 MB), checks it against the SHA-256 written in the module,
+  takes only ffmpeg / ffprobe / ffplay out of it BY FILE NAME (no path of
+  the archive is followed), checks that they run, moves them into place.
+  MSL_FFMPEG_ARCHIVE_URL overrides the address (a `file:///` URL in tests;
+  no checksum then). Newer ffmpeg versions are not chased: to move on, test
+  the build, then change the version + checksum.
+- `probe.py`: `probe(tools, path) -> MediaInfo` (kind video / audio / image,
+  duration, size, frame size, fps, frames, codecs; `*_text()` for people).
+- `sequence.py`: `find_sequences(folder)` / `sequence_of(file)` ->
+  `ImageSequence` (prefix, padding — 0 = not padded —, suffix, frames,
+  `missing`, `pattern` for ffmpeg with `%` escaped). Reads only file names.
+- `recipes.py`: a task in plain terms -> a `Job` (the argument lists of
+  each ffmpeg run, output, duration / frames for progress, temporary
+  files): `sequence_to_video` (gaps: GAPS_ERROR refuses, GAPS_HOLD holds
+  the frame before a gap — a concat list + `fps` filter + `-frames:v`),
+  `shrink` (scale down to a height, never up; `target_mb` = two passes,
+  lands within ~2 %), `trim` (exact = re-encode; exact=False = stream copy,
+  keyframe-bound), `default_output` (never clashes; a sequence's video goes
+  NEXT TO the frames' folder). Quality / speed are words (`QUALITY`,
+  `SPEED`) mapped to crf / preset. `Job.command_text()` = "Show command".
+- `run.py`: `ProgressParser` (ffmpeg's `-progress pipe:1` blocks ->
+  `Progress`), `fraction()`, `error_summary()`, `clean_up()`, and
+  `run_job()` — blocking, for scripts / tests / headless work.
+
+`msl/ui/media/ffmpeg_runner.py`: `FfmpegRunner` (QProcess per run; signals
+`progressed(float, Progress)`, `finished(bool, str)`; `cancel()`). One job
+at a time; `finished` always comes from the event loop, never from inside
+`start()`; a failed or cancelled job leaves no half-written output.
+
+What ffmpeg does that the recipes / runners guard against (all measured,
+8.0): started from a program it can HANG after writing its file, waiting on
+stdin (`-nostdin` + a closed stdin; and never leave its stderr in a pipe
+nobody reads); a gap in a sequence's numbering = it stops there and exits
+0; numbering that doesn't start near 0 needs `-start_number`; an odd frame
+size can't be yuv420p (sizes are rounded down to even); it creates no
+folders. Numbers on a 399-frame 1080p PNG sequence: mp4 in 3-6 s; 720p
+"small" 4 MB -> 0.8 MB; "fit into 1 MB" -> 0.99 MB.
+
+Tests ran against the real 8.0 build with the user's sequence as read-only
+input and everything written into `sandbox/` (blocking and Qt runner,
+cancel, failure, installer with a fake and a real-layout archive through
+`file:///`). NOT run: the real 101 MB download from GitHub.
+
 ## Install (the hub is where everything starts)
 
 Setup no longer goes through Maya: `setup_drag_drop_maya.py` and
@@ -1093,8 +1154,10 @@ disk. NOT yet tested: against a real Maya installation (actual launch via
 - Planned, nothing built yet (decisions taken 2026-10-02; details in the
   session memory files `ffmpeg-media-tool-idea` / `maya-batch-tool-idea`):
   - "Media": a hub tool on ffmpeg for quick work with video and image
-    sequences, on a Qt-free media foundation that a later "Batch" tool
-    (headless Maya jobs: render, playblast, export) and Maya playblasts reuse.
+    sequences. Its foundation IS built (see "Media foundation"); the tool
+    itself is next, with three operations first: sequence -> video, make
+    smaller for sending, trim. A later "Batch" tool (headless Maya jobs:
+    render, playblast, export) and Maya playblasts reuse the foundation.
   - ffmpeg is never committed or shipped in a release. A managed copy lives
     next to the runtime (`%LOCALAPPDATA%\MSL	oolsfmpeg\<version>`),
     downloaded on request (a pinned, tested build) - or the user points at a
