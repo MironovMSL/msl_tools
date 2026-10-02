@@ -23,6 +23,7 @@ than Python 3.9 at runtime.
 from __future__ import annotations
 
 import os
+import sys
 
 try:
     from PySide6 import QtCore, QtNetwork, QtWidgets
@@ -123,6 +124,7 @@ class HubLink(QtCore.QObject):
             full_version=full_version,
             environment=os.environ.get(ENVIRONMENT_VARIABLE, ""),
             boosted=BOOST_VARIABLE in os.environ,
+            skipped=[name for name in os.environ.get(BOOST_VARIABLE, "").split(os.pathsep) if name],
             scene=self._sent_scene,
             msl_version=_msl_version))
 
@@ -137,12 +139,82 @@ class HubLink(QtCore.QObject):
                 self._on_request(message)
 
     def _on_request(self, message: dict) -> None:
-        """Requests from the hub. Only "ping" so far; anything else is refused by name."""
+        """Requests from the hub: a FIXED list (_HANDLERS) — a name that isn't
+        on it is refused; nothing that arrives is executed as code. A handler
+        runs here, in Maya's main thread, and its result is the reply; an
+        exception becomes a failure reply, never an error in Maya."""
         name, message_id = message.get("name"), message.get("id", 0)
-        if name == protocol.PING:
-            self._send(protocol.reply(message_id))
-        else:
+        data = message.get("data") if isinstance(message.get("data"), dict) else {}
+        handler = self._HANDLERS.get(name)
+        if handler is None:
             self._send(protocol.reply(message_id, success=False, error="unknown request: %s" % name))
+            return
+        try:
+            result = handler(self, data) or {}
+        except Exception as error:
+            self._send(protocol.reply(message_id, success=False, error="%s: %s" % (type(error).__name__, error)))
+            return
+        self._send(protocol.reply(message_id, **result))
+        self._socket.flush()
+
+    # --- what the hub may ask for --------------------------------------------------------
+
+    def _handle_ping(self, _data: dict) -> dict:
+        return {}
+
+    def _handle_launch_report(self, _data: dict) -> dict:
+        from msl_tools.msl.tools.maya.launch_report import build_launch_report
+        return {"text": build_launch_report()}
+
+    def _handle_reload_code(self, _data: dict) -> dict:
+        """Drops msl_tools from sys.modules (the next import reads the files
+        again), rebuilds the MSL menu if this Maya has one, and restarts
+        this link on the new code — after the reply went out."""
+        removed = [name for name in list(sys.modules) if name == "msl_tools" or name.startswith("msl_tools.")]
+        for name in removed:
+            del sys.modules[name]
+        menu = False
+        try:
+            import maya.cmds as cmds
+            if cmds.menu("MSLToolsMenu", exists=True):  # rebuild the menu only where there is one
+                from msl_tools.msl.startup import rebuild_menu
+                menu = bool(rebuild_menu())
+        except Exception:
+            menu = False  # e.g. Maya 2023: the menu needs Python 3.10
+        QtCore.QTimer.singleShot(300, _restart_on_fresh_code)
+        return {"modules": len(removed), "menu": menu}
+
+    def _handle_plugin_state(self, data: dict) -> dict:
+        import maya.cmds as cmds
+        loaded = []
+        for name in data.get("names") or []:
+            try:
+                if cmds.pluginInfo(str(name), query=True, loaded=True):
+                    loaded.append(name)
+            except Exception:
+                pass
+        return {"loaded": loaded}
+
+    def _handle_load_plugins(self, data: dict) -> dict:
+        import maya.cmds as cmds
+        loaded, failed = [], {}
+        for name in data.get("names") or []:
+            name = str(name)
+            try:
+                if not cmds.pluginInfo(name, query=True, loaded=True):
+                    cmds.loadPlugin(name, quiet=True)
+                loaded.append(name)
+            except Exception as error:
+                failed[name] = str(error).strip()
+        return {"loaded": loaded, "failed": failed}
+
+    _HANDLERS = {
+        protocol.PING: _handle_ping,
+        protocol.LAUNCH_REPORT: _handle_launch_report,
+        protocol.RELOAD_CODE: _handle_reload_code,
+        protocol.PLUGIN_STATE: _handle_plugin_state,
+        protocol.LOAD_PLUGINS: _handle_load_plugins,
+    }
 
     # --- the scene ---------------------------------------------------------------------
 
@@ -189,6 +261,17 @@ def start() -> bool:
     link = HubLink(int(port), token, parent=application)
     link.open()
     return True
+
+
+def _restart_on_fresh_code() -> None:
+    """After "reload code": the running link is still the OLD class — replace
+    it with one from the freshly imported module."""
+    try:
+        from msl_tools.msl.tools.maya import hub_link as fresh
+        fresh.start()
+    except Exception:
+        import traceback
+        traceback.print_exc()
 
 
 def stop() -> None:

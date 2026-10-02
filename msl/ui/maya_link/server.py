@@ -10,6 +10,12 @@ and the hub knows at once when a Maya is gone (its connection drops).
 Lives in ui/ (like process_launcher): it is built on QTcpServer. Nothing
 blocks — Qt delivers connections and data as signals in the GUI thread.
 
+Requests. `request(session_id, name, on_reply, ...)` asks a Maya to do
+something from the fixed list in core/link/protocol.py and calls
+`on_reply(reply)` when the answer comes — or with a failure reply if the
+Maya left or took longer than the timeout. Replies are matched by id, so a
+slow answer is never mistaken for the answer to a later question.
+
 Safety: it listens on 127.0.0.1 only (not reachable from the network), and
 a connection is a session only after a hello carrying the hub's token, which
 only a Maya launched by this hub was given (environment variable). Anything
@@ -68,6 +74,9 @@ class MayaLinkServer(qt.QtCore.QObject):
         self._peers: list[_Peer] = []
         self._token = ""
         self._next_id = 1
+        self._next_request_id = 1
+        # request id -> (peer, on_reply, timeout timer): the questions still waiting for an answer
+        self._pending: dict[int, tuple[_Peer, object, qt.QtCore.QTimer]] = {}
 
     # --- listening ---------------------------------------------------------------
 
@@ -131,6 +140,47 @@ class MayaLinkServer(qt.QtCore.QObject):
         """Connected Mayas, oldest connection first."""
         return [peer.session for peer in self._peers if peer.session is not None]
 
+    def session(self, session_id: int) -> MayaSession | None:
+        return next((s for s in self.sessions() if s.session_id == session_id), None)
+
+    # --- requests --------------------------------------------------------------------
+
+    def request(self, session_id: int, name: str, on_reply=None, timeout_ms: int = 10_000, **data) -> bool:
+        """Asks session `session_id` to do `name` (a protocol.* request).
+
+        `on_reply(reply: dict)` is called exactly once, in the GUI thread:
+        with Maya's reply ({"success": bool, "data": {...}, "error": str}),
+        or with {"success": False, "error": ...} if the Maya disconnected or
+        didn't answer within `timeout_ms`. Returns False (and calls
+        `on_reply` with a failure) if there is no such session.
+        """
+        peer = next((p for p in self._peers if p.session is not None and p.session.session_id == session_id), None)
+        if peer is None:
+            if on_reply is not None:
+                on_reply({"success": False, "error": "That Maya is no longer connected.", "data": {}})
+            return False
+        request_id = self._next_request_id
+        self._next_request_id += 1
+        timer = qt.QtCore.QTimer(self)
+        timer.setSingleShot(True)
+        timer.timeout.connect(lambda: self._finish(request_id, {
+            "success": False, "error": "Maya didn\u2019t answer in time (it may be busy).", "data": {}}))
+        self._pending[request_id] = (peer, on_reply, timer)
+        timer.start(timeout_ms)
+        peer.socket.write(protocol.encode(protocol.request(name, request_id, **data)))
+        return True
+
+    def _finish(self, request_id: int, reply: dict) -> None:
+        """Hands `reply` to whoever asked request `request_id` — once."""
+        entry = self._pending.pop(request_id, None)
+        if entry is None:
+            return  # already answered / timed out
+        _peer, on_reply, timer = entry
+        timer.stop()
+        timer.deleteLater()
+        if on_reply is not None:
+            on_reply(reply)
+
     def _on_new_connection(self) -> None:
         while self._server.hasPendingConnections():
             socket = self._server.nextPendingConnection()
@@ -176,11 +226,22 @@ class MayaLinkServer(qt.QtCore.QObject):
                 self.sessions_changed.emit()
         elif kind == protocol.REQUEST and name == protocol.PING:
             peer.socket.write(protocol.encode(protocol.reply(message.get("id", 0))))
+        elif kind == protocol.REPLY:
+            request_id = message.get("id")
+            entry = self._pending.get(request_id) if isinstance(request_id, int) else None
+            if entry is not None and entry[0] is peer:  # only the Maya that was asked may answer
+                self._finish(request_id, {"success": bool(message.get("success")), "data": data,
+                                          "error": str(message.get("error") or "")})
 
     def _on_disconnected(self, peer: _Peer) -> None:
         if peer not in self._peers:
             return
         self._peers.remove(peer)
-        peer.socket.deleteLater()
-        if peer.session is not None:
-            self.sessions_changed.emit()
+        try:
+            peer.socket.deleteLater()
+            for request_id in [key for key, entry in self._pending.items() if entry[0] is peer]:
+                self._finish(request_id, {"success": False, "error": "Maya disconnected.", "data": {}})
+            if peer.session is not None:
+                self.sessions_changed.emit()
+        except RuntimeError:
+            pass  # the application is shutting down: Qt already deleted this server / the socket

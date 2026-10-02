@@ -33,6 +33,11 @@ EVENT, REQUEST, REPLY = "event", "request", "reply"
 HELLO = "hello"      # event, Maya -> hub, first message: who am I (with the token)
 SCENE = "scene"      # event, Maya -> hub: the open scene changed
 PING = "ping"        # request, either way
+# Requests hub -> Maya (handled in tools/maya/hub_link.py; replies carry the result in "data"):
+LAUNCH_REPORT = "launch_report"   # -> {"text": the launch report}
+RELOAD_CODE = "reload_code"       # -> {"modules": how many msl_tools modules were dropped}
+PLUGIN_STATE = "plugin_state"     # {"names": [...]} -> {"loaded": [those of them that are loaded]}
+LOAD_PLUGINS = "load_plugins"     # {"names": [...]} -> {"loaded": [...], "failed": {name: why}}
 
 
 class ProtocolError(Exception):

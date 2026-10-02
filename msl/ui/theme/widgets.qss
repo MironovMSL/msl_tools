@@ -100,6 +100,17 @@ SlimScrollBar {
     qproperty-handlePressedColor: alpha(var(--accent), 75%);
 }
 
+/* --- TextDialog: a report to read and copy ----------------------------------------- */
+
+TextDialog QPlainTextEdit#textDialogView {
+    background-color: var(--editor-background);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px;
+    selection-background-color: alpha(var(--accent), 35%);
+}
+
 /* --- TintedIcon: a passive one-color icon ---------------------------------------- */
 
 TintedIcon {

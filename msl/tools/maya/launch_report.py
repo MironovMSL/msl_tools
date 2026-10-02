@@ -4,7 +4,12 @@ Maya session was started — to see at a glance whether Maya Gate's environment,
 boost start did what they were set up to do.
 
 Runs inside Maya. Read-only: it prints, it changes nothing.
+
+Also asked for by the hub over the link (tools/maya/hub_link.py), so it must
+run in every Maya the link runs in — Maya 2023 is Python 3.9: no newer
+syntax at runtime, and no imports of msl modules that use it.
 """
+from __future__ import annotations
 
 import json
 import os
@@ -68,15 +73,14 @@ def build_launch_report() -> str:
     import maya.cmds as cmds
 
     from msl_tools.msl import __version__
-    from msl_tools.msl.core.environment.maya.maya_environment import MayaEnvironment
 
     environ = os.environ
     lines = ["", "=" * _WIDTH, " MSL launch report", "=" * _WIDTH]
 
     # --- the session -----------------------------------------------------------------
     lines.append(_title("Maya"))
-    lines.append(f"  version      : {MayaEnvironment.get_version()}  ({cmds.about(installedVersion=True)})")
-    lines.append(f"  state        : {MayaEnvironment.get_state().value}")
+    lines.append(f"  version      : {cmds.about(version=True)}  ({cmds.about(installedVersion=True)})")
+    lines.append(f"  state        : {'batch' if cmds.about(batch=True) else 'interactive'}")
     lines.append(f"  executable   : {sys.executable}")
     lines.append(f"  Python       : {sys.version.split()[0]}")
     lines.append(f"  msl_tools    : {__version__}  at {Path(__file__).resolve().parents[3]}")

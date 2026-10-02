@@ -19,6 +19,7 @@ class MayaSession:
         environment: The Maya Gate environment it was started in ("" = not from Maya Gate).
         scene: Path of the open scene ("" = untitled).
         boosted: Started with boost start.
+        skipped: Plug-ins boost start left out at startup (they may have been loaded since).
         msl_version: Version of msl_tools loaded in that Maya.
         connected_at: time.time() when it connected.
     """
@@ -30,6 +31,7 @@ class MayaSession:
     environment: str = ""
     scene: str = ""
     boosted: bool = False
+    skipped: list[str] = field(default_factory=list)
     msl_version: str = ""
     connected_at: float = field(default_factory=time.time)
 
@@ -58,4 +60,5 @@ class MayaSession:
                    environment=str(data.get("environment") or ""),
                    scene=str(data.get("scene") or ""),
                    boosted=bool(data.get("boosted")),
+                   skipped=[str(name) for name in data.get("skipped") or [] if name],
                    msl_version=str(data.get("msl_version") or ""))

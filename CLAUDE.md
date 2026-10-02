@@ -541,12 +541,31 @@ What changed vs. the original (all deliberate, not oversights):
   - `sessions_tab.py`: every connected Maya (not per environment): dot,
     version, environment, boost, scene, time connected; the tab's title
     carries the count ("Sessions · 2"). Read-only so far.
+  - Requests hub -> Maya (step 2): `MayaLinkServer.request(session_id,
+    name, on_reply, timeout_ms, **data)` — `on_reply(reply)` runs exactly
+    once: Maya's answer, or a failure if it left or didn't answer in time;
+    only the Maya that was asked may answer (matched by id AND connection).
+    Maya's side (`HubLink._HANDLERS`) is a FIXED list, each handler runs in
+    Maya's main thread, an exception becomes a failure reply:
+    `launch_report` (-> text; launch_report.py is Python-3.9-safe and
+    imports no other msl module for that reason), `reload_code` (drops
+    msl_tools from sys.modules, rebuilds the MSL menu only if that Maya has
+    one, then restarts its own link on the fresh code — the session leaves
+    and comes back with a new id), `plugin_state` / `load_plugins` (names
+    -> loaded / failed). The hello carries `skipped` (what boost left out).
+    Session rows have quiet link buttons — Report (shown in `TextDialog`,
+    ui/widgets/windows/text_dialog.py: fixed-width text + "Copy all"),
+    Reload code, Plug-ins (boosted sessions: a menu of the skipped plug-ins,
+    "Load all N" or one; already loaded ones are greyed) — and the outcome
+    of the last request is the line under the list. A row is busy (buttons
+    off) while its Maya works.
   Verified with real windowed Maya 2023, 2024, 2025 (copies of the
   preferences): connect, scene change, hub away and back (rejoined in
-  ~2 s), exit. Next steps agreed in outline: commands hub -> Maya (launch
-  report into the hub, reload code, load a skipped plug-in in a running
-  Maya), events Maya -> hub (log stream), a dev console. Long work in Maya
-  must answer later by `id`, never block the socket.
+  ~2 s), exit; and in 2023 + 2025 every request above — report ~1 s,
+  loading MASH into a boosted Maya 0.15 s, reload + rejoin 0.3 s, an unknown
+  request refused, Maya's own auto-load list intact after loading a plug-in
+  this way. Still to come: events Maya -> hub (log stream), a dev console.
+  Long work in Maya must answer later by `id`, never block the socket.
 - Every launch tells Maya what it is: `MSL_GATE_ENVIRONMENT` (the
   environment) and `MSL_GATE_VARIABLES` (names of the variables this launch
   set). The MSL menu's Dev > "Print Launch Report"
@@ -633,6 +652,7 @@ compositions/bulk_action_bar.py           BulkActionBar (accent pill "N of M sel
 compositions/copyable_line_edit.py        CopyableLineEdit (copy button appears inside the field on hover)
 themed_widget_playground_dialog.py        ThemedWidgetPlaygroundDialog
 windows/confirm_dialog.py                 ConfirmDialog (themed rounded question window; ask() -> choice key or None)
+windows/text_dialog.py                    TextDialog (a block of fixed-width text to read and copy: reports, logs; show_for(parent, title, text))
 windows/whats_new_dialog.py               WhatsNewDialog (release notes per published version; show_for(parent, fetch_releases, current_version, releases_url))
 ```
 
@@ -824,8 +844,9 @@ disk. NOT yet tested: against a real Maya installation (actual launch via
   environment creation, install / reinstall / uninstall, shortcut, hub
   start from the installed copy. Not yet run by hand on a clean machine.
 - Real icon assets for add/delete/copy/drag (currently Unicode placeholders).
-- The Maya connection: step 1 (sessions list) is built on our own link, not
-  `cmds.commandPort`; commands, the log stream and a dev console are next.
+- The Maya connection: steps 1-2 (sessions list, requests hub -> Maya) are
+  built on our own link, not `cmds.commandPort`; the log stream (Maya ->
+  hub) and a dev console are next.
 - Boost start: built and verified against real Maya 2020 / 2025 / 2026 on
   COPIES of the preferences (MAYA_APP_DIR in %TEMP%); not yet used on the
   user's real preferences, nor released.
