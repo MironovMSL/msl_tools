@@ -91,6 +91,7 @@ class MediaPage(qt.QtWidgets.QWidget):
         self._estimate_token = 0
         self._preview_token = 0
         self._preview_count = 0
+        self._sound_target_lit = False  # a sound file is being dragged over the page
         self._workers: list = []
         self._output_edited = False    # the user typed their own name: don't replace it
         self._located = False
@@ -933,35 +934,58 @@ class MediaPage(qt.QtWidgets.QWidget):
         letting go there must simply cancel the drag."""
         return not self._is_own_drag(event) or self._card.geometry().contains(event.position().toPoint())
 
+    def _is_sound_drop(self, paths: list) -> bool:
+        """One sound file over one open source: it is that source's sound, not a new source."""
+        return len(paths) == 1 and Path(paths[0]).suffix.lower() in AUDIO_SUFFIXES and len(self._sources) == 1
+
+    def _show_drop_target(self, paths: list, takes: bool) -> None:
+        """Lights up WHAT WOULD TAKE the drop — and only that: the source card
+        for a new source; for a sound file the sound field it lands in (with a
+        line saying so — the field may be on another action's panel)."""
+        sound = takes and self._is_sound_drop(paths)
+        self._card.set_dragging(takes and not sound)
+        if sound == self._sound_target_lit:
+            return
+        self._sound_target_lit = sound
+        sequence = bool(self._sources) and self._sources[0].is_sequence
+        self._panels["sequence" if sequence else "sound"].set_sound_target(sound)
+        if sound:
+            self._say("Drop it anywhere here — it becomes the sound of the video." if sequence else
+                      "Drop it anywhere here — it is set as the new sound of the video.")
+        else:
+            self._message_label.hide()
+
     def dragEnterEvent(self, event) -> None:
-        if not self._dropped_paths(event):
+        paths = self._dropped_paths(event)
+        if not paths:
             event.ignore()
             return
         # Accepted even where a drop won't be taken: only then do the move events follow.
-        self._card.set_dragging(self._takes_drop_at(event))
+        self._show_drop_target(paths, self._takes_drop_at(event))
         event.acceptProposedAction()
 
     def dragMoveEvent(self, event) -> None:
-        takes = bool(self._dropped_paths(event)) and self._takes_drop_at(event)
-        self._card.set_dragging(takes)
+        paths = self._dropped_paths(event)
+        takes = bool(paths) and self._takes_drop_at(event)
+        self._show_drop_target(paths, takes)
         if takes:
             event.acceptProposedAction()
         else:
             event.ignore()
 
     def dragLeaveEvent(self, event) -> None:
-        self._card.set_dragging(False)
+        self._show_drop_target([], False)
         super().dragLeaveEvent(event)
 
     def dropEvent(self, event) -> None:
-        self._card.set_dragging(False)
         paths = self._dropped_paths(event)
+        self._show_drop_target([], False)
         if not paths or not self._takes_drop_at(event):
             event.ignore()
             return
         event.acceptProposedAction()
         # One sound file dropped on one open source is its new sound, not a new source.
-        if len(paths) == 1 and Path(paths[0]).suffix.lower() in AUDIO_SUFFIXES and len(self._sources) == 1:
+        if self._is_sound_drop(paths):
             name = Path(paths[0]).name
             if self._sources[0].is_sequence:
                 self._panels["sequence"].set_sound(paths[0])

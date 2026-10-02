@@ -148,6 +148,11 @@ MediaPage QFrame#mediaDivider {
     background-color: alpha(var(--border), 70%);
     border: none;
 }
+/* The sound field while a sound file is dragged over the page: this is where it lands. */
+MediaPage QLineEdit[dropTarget="true"] {
+    border: 1px dashed var(--accent);
+    background-color: alpha(var(--accent), 12%);
+}
 /* A heading across an action's form ("PICTURE", "SOUND"). */
 MediaPage QLabel#mediaSection {
     color: var(--text-secondary);

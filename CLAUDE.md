@@ -1134,7 +1134,12 @@ frames · For editing · Adjust · Join (2+ videos) · Compare (exactly 2).
   the target) — except a result dragged out of the page's OWN jobs list
   (`_is_own_drag`: the drag's source is a child of the page): that one is
   taken only on the source card, to work on it further; anywhere else on
-  the page letting go cancels the drag, and nothing lights up. One sound file dropped on one open source is its sound
+  the page letting go cancels the drag, and nothing lights up.
+  What lights up is what WOULD TAKE the drop (`_show_drop_target`): the
+  source card for a new source — but for one sound file over one open
+  source the SOUND FIELD it lands in (`OptionPanel.set_sound_target`,
+  `QLineEdit[dropTarget="true"]`) plus a line saying so. (The card used
+  to light up for a sound file too, as if it would replace the source.) One sound file dropped on one open source is its sound
   (under a sequence; "Replace" for a video), not a new source. Reading
   what was dropped runs on a `ResultWorker` — a token makes only the
   newest load count.
@@ -1216,7 +1221,12 @@ frames · For editing · Adjust · Join (2+ videos) · Compare (exactly 2).
   anything drawn) for a hub that goes back to an older version.
   Frame number / Time / Date are toggle pills (`ChipBar(multiple=True)`,
   `checked()` / `set_checked()`); the watermark's two lists say "wide" /
-  "solid". `OptionPanel.source_facts(sources)` adds tiles to the source
+  "solid", and the `brand_mark` button beside "browse" puts the path of
+  OUR OWN mark into the field: `assets/icons/brand/watermark.png` — the
+  letters "msl" in white on a see-through plate (the user found the lone
+  "M" monogram less clear), 800 x 400, drawn as strokes, rendered from
+  `watermark.svg` next to it with Qt's SVG renderer (ffmpeg takes no SVG;
+  render it again after changing the SVG). `OptionPanel.source_facts(sources)` adds tiles to the source
   card (`SourceCard.set_extra_facts`): To video's "0:06.7 / at 30 fps",
   live with the frame rate; a sequence's own tiles include its range.
   The preset whose settings are exactly the ones on screen is outlined

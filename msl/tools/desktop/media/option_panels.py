@@ -15,8 +15,10 @@ from msl_tools.msl.core.media import (Job, MediaError, Overlays, adjust, compare
                                       sequence_to_video, shrink, stamp, to_frames, trim)
 from msl_tools.msl.core.media.recipes import FORMATS, GAPS_ERROR, GAPS_HOLD, IMAGE_FORMATS, SOUND_FORMATS
 from msl_tools.msl.core.media.thumbnail import frames_at
+from msl_tools.msl.core.resources import Resources
 from msl_tools.msl.tools.desktop.media.ffmpeg_bar import link_button
 from msl_tools.msl.tools.desktop.media.source import AUDIO_SUFFIXES, MediaSource, format_time, parse_time
+from msl_tools.msl.ui.theme.qss import repolish
 from msl_tools.msl.ui.ui_resources import UiResources
 from msl_tools.msl.ui.widgets.atoms.buttons.icon_push_button import IconPushButton
 from msl_tools.msl.ui.widgets.atoms.checkboxes.base_checkbox import BaseCheckbox
@@ -196,6 +198,16 @@ class OptionPanel(qt.QtWidgets.QFrame):
         label.setObjectName("mediaHint")
         return label
 
+    def set_sound_target(self, lit: bool) -> None:
+        """A sound file is being dragged over the page and would land in this
+        panel's sound field: the field shows that it is the target."""
+
+    @staticmethod
+    def _light_field(field: qt.QtWidgets.QLineEdit, lit: bool) -> None:
+        if bool(field.property("dropTarget")) != lit:
+            field.setProperty("dropTarget", lit)  # media.qss: QLineEdit[dropTarget="true"]
+            repolish(field)
+
     def source_facts(self, sources: list) -> list:
         """(value, what it is) pairs this action adds to the source's tiles —
         something about the source that depends on the settings here."""
@@ -283,6 +295,8 @@ FORMAT_TIP = ("MP4: small, plays everywhere — for watching and sending." + NL
               + "ProRes / HQ (ProRes HQ) / DNxHR: big files that keep far more of the picture — for editing "
                 "and grading.")
 RENAMED = {"ProRes HQ": "HQ"}  # labels of earlier versions, as saved settings and presets still spell them
+# The "msl" mark as a picture ffmpeg can lay over a video (rendered from watermark.svg beside it).
+BRAND_WATERMARK = Resources().fsManager.icons / "brand" / "watermark.png"
 IMAGE_PATTERNS = "Pictures (*.png *.jpg *.jpeg *.tif *.tiff *.tga *.bmp *.webp)"
 SOUND_PATTERNS = "Sound (" + " ".join(f"*{suffix}" for suffix in AUDIO_SUFFIXES) + ")"
 
@@ -308,6 +322,13 @@ class _OverlayRows:
         self._label.textChanged.connect(lambda _text: self.changed.emit())
         self._mark, self._mark_button = self._file_field("none — a picture for the bottom-right corner",
                                                          "A picture to use as a watermark", IMAGE_PATTERNS)
+        # One click instead of browsing: our own mark, shipped with the tool.
+        self._mark_brand = IconPushButton(UiResources().iconManager.get_icon("brand_mark", sub_folder="actions"),
+                                          "Use the msl mark as the watermark", fallback_text="M")
+        self._mark_brand.setFixedSize(26, 22)
+        self._mark_brand.clicked.connect(lambda: self._mark.setText(str(BRAND_WATERMARK)))
+        if not BRAND_WATERMARK.is_file():
+            self._mark_brand.hide()
         self._mark_size = BaseComboBox(list(self.MARK_SIZES), "15%")
         self._mark_size.setFixedWidth(64)
         self._mark_size.setToolTip("The watermark’s width, as a part of the frame’s width")
@@ -318,8 +339,10 @@ class _OverlayRows:
             combo.currentIndexChanged.connect(lambda _index: self.changed.emit())
         return [self._add_row("Show", self._burn),
                 self._add_row("Label", self._label),
-                self._add_row("Watermark", self._mark, self._mark_button, self._mark_size, self._note("wide"),
-                              self._mark_opacity, self._note("solid"))]
+                self._add_row("Watermark", self._mark, self._mark_button, self._mark_brand),
+                # on a line of their own: in one row with the field they made the window 604 px wide at least
+                self._add_row("", self._mark_size, self._note("of the frame's width"), self._mark_opacity,
+                              self._note("solid"))]
 
     def _overlay_summary(self) -> str:
         """What is drawn, in a few words ("frame number · date · a label"), or "nothing"."""
@@ -429,6 +452,9 @@ class SequencePanel(_OverlayRows, OptionPanel):
 
     def set_sound(self, path: str) -> None:
         self._sound.setText(path)
+
+    def set_sound_target(self, lit: bool) -> None:
+        self._light_field(self._sound, lit)
 
     def source_facts(self, sources: list) -> list:
         """How long the video will be at the picked frame rate."""
@@ -941,6 +967,9 @@ class SoundPanel(OptionPanel):
     TAG = property(lambda self: {self.EXTRACT: "", self.REMOVE: "_silent", self.REPLACE: "_sound"}[self._mode.current()])
 
     accepts = staticmethod(_videos)
+
+    def set_sound_target(self, lit: bool) -> None:
+        self._light_field(self._new, lit)
 
     def set_sound(self, path: str) -> None:
         self._mode.set_current(self.REPLACE, animate=False)

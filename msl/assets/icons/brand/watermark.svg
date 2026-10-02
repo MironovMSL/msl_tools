@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 200" width="400" height="200">
+  <!-- The "msl" mark as a WATERMARK for video (Media: Stamp / To video): the letters in white
+       on a see-through dark plate, with a soft shadow, so they read on light and on dark
+       pictures alike. Drawn as strokes, not as text - no font is needed to render it.
+       ffmpeg takes a raster image: watermark.png is this file rendered at 800 x 400 -
+       render it again after changing this one. -->
+  <rect x="12" y="18" width="376" height="172" rx="46" fill="#000000" fill-opacity="0.16"/>
+  <rect x="12" y="14" width="376" height="172" rx="46" fill="#000000" fill-opacity="0.30" stroke="#ffffff" stroke-width="9"/>
+  <g transform="translate(19 8)" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M70 140V82 M70 104a22 22 0 0 1 44 0V140 M114 104a22 22 0 0 1 44 0V140 M244 94c-5-8-14-12-24-12-13 0-22 6-22 15 0 9 9 12 23 14 14 3 23 6 23 16 0 8-10 13-23 13-11 0-20-4-26-12 M292 50V140" stroke="#000000" stroke-opacity="0.35" stroke-width="22" transform="translate(0 4)"/>
+    <path d="M70 140V82 M70 104a22 22 0 0 1 44 0V140 M114 104a22 22 0 0 1 44 0V140 M244 94c-5-8-14-12-24-12-13 0-22 6-22 15 0 9 9 12 23 14 14 3 23 6 23 16 0 8-10 13-23 13-11 0-20-4-26-12 M292 50V140" stroke="#ffffff" stroke-width="20"/>
+  </g>
+</svg>
