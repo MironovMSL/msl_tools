@@ -1,7 +1,7 @@
 # tools/desktop/media/source_card.py
 import msl_tools.msl.ui.qt_bindings as qt
 from msl_tools.msl.tools.desktop.media.ffmpeg_bar import link_button
-from msl_tools.msl.tools.desktop.media.source import MediaSource
+from msl_tools.msl.tools.desktop.media.source import MediaSource, summary
 from msl_tools.msl.ui.theme.qss import repolish
 from msl_tools.msl.ui.widgets.atoms.buttons.glyph_button import GlyphButton
 from msl_tools.msl.ui.widgets.atoms.comboboxes.base_combo_box import BaseComboBox
@@ -15,7 +15,9 @@ class SourceCard(qt.QtWidgets.QFrame):
         loading  "Reading <name>…"
         loaded   a thumbnail, the name, a line of facts, a warning if
                  something is wrong (missing frames), a chooser when the
-                 folder holds several sequences, and "×" to clear
+                 folder holds several sequences, and "×" to clear.
+                 Several sources (set_sources) show as one: "4 videos",
+                 their total, their names on a line.
 
     The card shows and asks; it reads nothing itself — the page loads what
     was picked and hands the MediaSource back with set_source(). Drops are
@@ -115,6 +117,25 @@ class SourceCard(qt.QtWidgets.QFrame):
     def source(self) -> MediaSource | None:
         return self._source
 
+    def set_sources(self, sources: list) -> None:
+        """Shows several sources as one card (one: the same as set_source())."""
+        if len(sources) <= 1:
+            self.set_source(sources[0] if sources else None)
+            return
+        self.set_source(sources[0])
+        title, facts = summary(sources)
+        names = [source.title() for source in sources]
+        self._title_label.setText(title)
+        self._title_label.setToolTip(chr(10).join(names))
+        self._facts_label.setText(facts)
+        problems = [f"{source.title()}: {source.warning()}" for source in sources if source.warning()]
+        self._warning_label.setText(", ".join(names) if not problems else "; ".join(problems))
+        self._warning_label.setProperty("plain", not problems)  # media.qss: a list of names isn't a warning
+        repolish(self._warning_label)
+        self._warning_label.setToolTip(chr(10).join(names))
+        self._warning_label.show()
+        self._chooser.hide()
+
     def set_source(self, source: MediaSource | None) -> None:
         self._source = source
         self._set_look("loaded" if source is not None else "empty")
@@ -128,6 +149,10 @@ class SourceCard(qt.QtWidgets.QFrame):
         self._title_label.setToolTip(str(source.path))
         self._facts_label.setText(source.facts())
         self._warning_label.setText(source.warning())
+        self._warning_label.setToolTip("")
+        if self._warning_label.property("plain"):
+            self._warning_label.setProperty("plain", False)
+            repolish(self._warning_label)
         self._warning_label.setVisible(bool(source.warning()))
         pixmap = qt.QtGui.QPixmap(str(source.thumbnail)) if source.thumbnail is not None else qt.QtGui.QPixmap()
         if pixmap.isNull():

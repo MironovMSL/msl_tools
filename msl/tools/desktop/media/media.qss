@@ -86,6 +86,11 @@ MediaPage QLabel#mediaSourceFacts {
 MediaPage QLabel#mediaSourceWarning {
     color: var(--warning);
 }
+/* Several sources: the line under the facts lists their names - not a warning. */
+MediaPage QLabel#mediaSourceWarning[plain="true"] {
+    color: var(--text-secondary);
+    font-size: 11px;
+}
 
 /* An action's settings: a panel raised off the page, like Maya Gate's groups. */
 MediaPage QFrame#mediaOptions {
@@ -109,6 +114,10 @@ MediaPage QFrame#mediaJob {
 }
 MediaPage QLabel#mediaJobTitle {
     color: var(--text-primary);
+}
+/* A finished job's title is its result file: click to open, drag to take it somewhere. */
+MediaPage QLabel#mediaJobTitle[link="true"]:hover {
+    color: var(--accent);
 }
 MediaPage QLabel#mediaJobStatus {
     color: var(--text-secondary);

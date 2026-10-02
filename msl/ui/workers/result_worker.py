@@ -12,6 +12,8 @@ class ResultWorker(qt.QtCore.QThread):
         worker.start()
 
     Keep a reference to the worker (or give it a parent) until it is over.
+    When the application quits while it runs, it is waited for (up to
+    QUIT_WAIT_MS): a QThread destroyed while running takes the process down.
 
     Signals:
         done(object) — the callable returned; carries what it returned.
@@ -21,9 +23,18 @@ class ResultWorker(qt.QtCore.QThread):
     done = qt.QtCore.Signal(object)
     failed = qt.QtCore.Signal(object)
 
+    QUIT_WAIT_MS = 5000
+
     def __init__(self, target, parent=None):
         super().__init__(parent)
         self._target = target
+        application = qt.QtCore.QCoreApplication.instance()
+        if application is not None:
+            application.aboutToQuit.connect(self._wait_on_quit)
+
+    def _wait_on_quit(self) -> None:
+        if self.isRunning():
+            self.wait(self.QUIT_WAIT_MS)
 
     def run(self) -> None:
         try:

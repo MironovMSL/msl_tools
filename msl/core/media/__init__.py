@@ -6,19 +6,23 @@ foundation under the Media tool (and, later, batch jobs and Maya playblasts).
     install.py   the managed copy: FfmpegInstaller downloads a pinned build
     probe.py     what a file is: probe() -> MediaInfo
     sequence.py  image sequences in a folder: find_sequences() -> ImageSequence
-    recipes.py   tasks as ffmpeg arguments: sequence_to_video / shrink / trim -> Job
-    run.py       following a run: ProgressParser, run_job() (blocking)
-    thumbnail.py a small picture of a file: thumbnail()
+    recipes.py   tasks as ffmpeg arguments -> Job: sequence_to_video, shrink,
+                 trim, stamp (burn-ins, watermark), convert (editing formats),
+                 extract / remove / replace the sound, join, gif, compare, adjust
+    run.py       following a run: ProgressParser, run_job() (blocking), estimate()
+    thumbnail.py a small picture of a file: thumbnail(), frame_at()
 
 A window runs jobs with ui/media/ffmpeg_runner.py (never blocks).
 """
 from .ffmpeg import FfmpegLocator, FfmpegTools, MediaError, tools_dir
 from .install import FfmpegInstaller
 from .probe import MediaInfo, probe
-from .recipes import Job, default_output, sequence_to_video, shrink, trim
-from .run import Progress, ProgressParser, run_job
+from .recipes import (Job, Overlays, adjust, compare, convert, default_output, extract_audio, gif, join,
+                      remove_audio, replace_audio, sequence_to_video, shrink, stamp, trim)
+from .run import Estimate, Progress, ProgressParser, estimate, run_job
 from .sequence import ImageSequence, find_sequences, sequence_of
 
-__all__ = ["FfmpegInstaller", "FfmpegLocator", "FfmpegTools", "ImageSequence", "Job", "MediaError", "MediaInfo",
-           "Progress", "ProgressParser", "default_output", "find_sequences", "probe", "run_job", "sequence_of",
-           "sequence_to_video", "shrink", "tools_dir", "trim"]
+__all__ = ["Estimate", "FfmpegInstaller", "FfmpegLocator", "FfmpegTools", "ImageSequence", "Job", "MediaError",
+           "MediaInfo", "Overlays", "Progress", "ProgressParser", "adjust", "compare", "convert", "default_output",
+           "estimate", "extract_audio", "find_sequences", "gif", "join", "probe", "remove_audio", "replace_audio",
+           "run_job", "sequence_of", "sequence_to_video", "shrink", "stamp", "tools_dir", "trim"]

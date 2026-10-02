@@ -8,9 +8,11 @@ never blocks — both share the parser and the helpers below.
 """
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -102,6 +104,105 @@ def clean_up(job: Job, remove_output: bool) -> None:
             Path(path).unlink()
         except OSError:
             pass
+
+
+@dataclass(frozen=True)
+class Estimate:
+    """What a job is expected to produce.
+
+    Attributes:
+        size: Bytes of the result (0 = unknown).
+        seconds: How long the job will take (0 = unknown).
+    """
+
+    size: int = 0
+    seconds: float = 0.0
+
+    def text(self) -> str:
+        """"≈ 4.1 MB  ·  ≈ 6 s" ("" when nothing is known)."""
+        parts = []
+        if self.size:
+            megabytes = self.size / 1024 ** 2
+            parts.append(f"≈ {megabytes:.1f} MB" if megabytes >= 1 else f"≈ {self.size / 1024:.0f} KB")
+        if self.seconds:
+            parts.append(f"≈ {self.seconds:.0f} s" if self.seconds < 90 else f"≈ {self.seconds / 60:.0f} min")
+        return "  ·  ".join(parts)
+
+
+STARTUP_SECONDS = 0.7    # what starting ffmpeg costs on top of the encoding itself
+KEYFRAME_EVERY = 250     # x264's default: one full picture, then up to this many that only hold changes
+
+
+def estimate(tools: FfmpegTools, job: Job) -> Estimate | None:
+    """Encodes the job's short sample (a second or two from its middle) and
+    scales the result up to the whole job: its size and its time. Blocks for
+    about as long as the sample takes — call it from a worker thread.
+    None when the job has no sample (it is instant, or can't be sampled) or
+    the sample failed.
+
+    Two things keep a short sample honest: the time comes from the speed
+    ffmpeg itself reports (starting the program isn't encoding), and the
+    sample's full pictures (key frames) are counted apart from the frames
+    that only hold changes — a sample always starts with a key frame, which
+    a real video has once in a few hundred frames."""
+    if not job.sample or not job.duration:
+        return Estimate(size=job.expected_size) if job.expected_size else None
+    try:
+        length = min(float(job.sample[-1]), job.duration)
+    except (ValueError, IndexError):
+        return None
+    flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+    handle, name = tempfile.mkstemp(suffix=job.output.suffix or ".mp4", prefix="msl_sample_")
+    os.close(handle)
+    try:
+        done = subprocess.run([str(tools.ffmpeg), "-hide_banner", "-nostdin", "-nostats", "-v", "error", "-progress",
+                               "pipe:1", "-y", *job.sample, name], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                              stderr=subprocess.DEVNULL, text=True, encoding="utf-8", errors="replace",
+                              timeout=60, creationflags=flags)
+        if done.returncode != 0:
+            return None
+        reports = ProgressParser().feed(done.stdout or "")
+        speed = next((report.speed for report in reversed(reports) if report.speed > 0), 0.0)
+        size = job.expected_size or _whole_size(tools, name, length, job)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    finally:
+        try:
+            os.remove(name)
+        except OSError:
+            pass
+    runs = 1.7 if len(job.passes) > 1 else 1.0  # the first of two passes writes nothing and is quicker
+    seconds = job.duration / speed * runs + STARTUP_SECONDS * len(job.passes) if speed else 0.0
+    return Estimate(size=size, seconds=seconds)
+
+
+def _whole_size(tools: FfmpegTools, sample: str, length: float, job: Job) -> int:
+    """Bytes the whole job will come to, from its encoded sample."""
+    total = os.path.getsize(sample)
+    plain = int(total / length * job.duration)
+    try:
+        listing = subprocess.run([str(tools.ffprobe), "-v", "error", "-select_streams", "v:0", "-show_entries",
+                                  "packet=size,flags", "-of", "csv=p=0", sample], stdin=subprocess.DEVNULL,
+                                 capture_output=True, text=True, timeout=30,
+                                 creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0).stdout
+    except (OSError, subprocess.SubprocessError):
+        return plain
+    key_bytes = key_count = other_bytes = other_count = 0
+    for line in listing.splitlines():
+        size, _, kind = line.partition(",")
+        if not size.strip().isdigit():
+            continue
+        if "K" in kind:
+            key_bytes, key_count = key_bytes + int(size), key_count + 1
+        else:
+            other_bytes, other_count = other_bytes + int(size), other_count + 1
+    if not key_count or not other_count:
+        return plain  # every frame is a full picture (ProRes, DNxHR): the sample scales as it is
+    frames = (key_count + other_count) / length * job.duration
+    changed, full = other_bytes / other_count, key_bytes / key_count
+    picture = frames * changed + (frames / KEYFRAME_EVERY + 1) * max(full - changed, 0)
+    rest = max(total - key_bytes - other_bytes, 0) / length * job.duration  # the sound and the container
+    return int(picture + rest)
 
 
 def run_job(tools: FfmpegTools, job: Job, on_progress=None, should_cancel=None) -> None:

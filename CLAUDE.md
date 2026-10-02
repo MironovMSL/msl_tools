@@ -894,6 +894,8 @@ compositions/env_var_row.py               EnvVarRow (Notion-style: hover menu at
 compositions/row_hover_menu.py            RowHoverMenu (extensible hover gutter: add_widget(), set_revealed(), set_pinned())
 compositions/bulk_action_bar.py           BulkActionBar (accent pill "N of M selected | select-all, actions | ×"; add_action(danger=) per bulk operation; select_all_requested / clear_requested)
 compositions/copyable_line_edit.py        CopyableLineEdit (copy button appears inside the field on hover)
+compositions/chip_bar.py                  ChipBar (pills that wrap: a checkable picker, or a shelf of saved things with an in-place "+ …" name field and "Remove")
+compositions/range_strip.py               RangeStrip (pictures side by side with a range picked by two handles; range_changed / range_released)
 themed_widget_playground_dialog.py        ThemedWidgetPlaygroundDialog
 windows/confirm_dialog.py                 ConfirmDialog (themed rounded question window; ask() -> choice key or None)
 windows/text_dialog.py                    TextDialog (a block of fixed-width text to read and copy: reports, logs; show_for(parent, title, text))
@@ -994,18 +996,45 @@ batch jobs and Maya playblasts are meant to reuse it.
   `missing`, `pattern` for ffmpeg with `%` escaped). Reads only file names.
 - `recipes.py`: a task in plain terms -> a `Job` (the argument lists of
   each ffmpeg run, output, duration / frames for progress, temporary
-  files): `sequence_to_video` (gaps: GAPS_ERROR refuses, GAPS_HOLD holds
-  the frame before a gap — a concat list + `fps` filter + `-frames:v`),
-  `shrink` (scale down to a height, never up; `target_mb` = two passes,
-  lands within ~2 %), `trim` (exact = re-encode; exact=False = stream copy,
-  keyframe-bound), `default_output` (never clashes; a sequence's video goes
-  NEXT TO the frames' folder). Quality / speed are words (`QUALITY`,
-  `SPEED`) mapped to crf / preset. `Job.command_text()` = "Show command".
+  files, `sample` = a short run from its middle for the estimate,
+  `expected_size`): `sequence_to_video` (gaps: GAPS_ERROR refuses,
+  GAPS_HOLD holds the frame before a gap — a concat list + `fps` filter +
+  `-frames:v`; `overlays=`, `video_format=`), `shrink` (scale down to a
+  height, never up; `target_mb` = two passes, lands within ~2 %), `trim`
+  (exact = re-encode; exact=False = stream copy, keyframe-bound), `stamp`
+  (burn-ins + watermark on a video), `convert` (ProRes / DNxHR),
+  `extract_audio` / `remove_audio` / `replace_audio` (the picture is
+  copied), `join` (concat FILTER: every clip scaled + padded to the first
+  one's size and rate; sound only if all have it), `gif` (palettegen /
+  paletteuse), `compare` (hstack / vstack, same height, the shorter one's
+  length), `adjust` (rotate, crop to a shape, fps, speed — `atempo`
+  chained past 0.5..2), `default_output` (never clashes, also not with
+  `taken`; a sequence's video goes NEXT TO the frames' folder).
+  Quality / speed / format are words (`QUALITY`, `SPEED`, `FORMATS`,
+  `SOUND_FORMATS`). `Job.command_text()` = "Show command".
+  `Overlays` = what is drawn on the picture: frame number (bottom right),
+  time (bottom centre, `%{pts\:hms}`), a label (top left), the date (top
+  right), a watermark image (bottom right; width in % of the frame,
+  opacity). Text goes in as a FILE (`textfile=` + `expansion=none`) — no
+  character needs escaping. A path inside a filter: quoted, forward
+  slashes, the drive's colon escaped ONCE (`_value()`); quoted AND
+  escaped twice fails (measured, 7.1.1 + 8.0). The font is a fixed-width
+  one (Consolas) so numbers don't jump.
 - `thumbnail.py`: `thumbnail(tools, info, target, width)` — a JPEG of a
-  video's middle or of a picture (None for sound).
+  video's middle or of a picture (None for sound); `frame_at()`;
+  `frames_at(tools, info, times, folder)` — many frames in ONE ffmpeg run
+  (several `-ss t -i file` inputs): starting ffmpeg costs ~0.7 s here,
+  a seek almost nothing (10 frames: 1.5 s instead of 8 s).
 - `run.py`: `ProgressParser` (ffmpeg's `-progress pipe:1` blocks ->
-  `Progress`), `fraction()`, `error_summary()`, `clean_up()`, and
-  `run_job()` — blocking, for scripts / tests / headless work.
+  `Progress`), `fraction()`, `error_summary()`, `clean_up()`,
+  `run_job()` — blocking, for scripts / tests / headless work — and
+  `estimate(tools, job) -> Estimate` (size, seconds): encodes `job.sample`
+  (1.5 s from the middle) and scales it up. The time comes from the speed
+  ffmpeg itself reports (starting the program isn't encoding); key frames
+  are counted apart from the frames that only hold changes (a sample
+  always starts with one; a real video has one in ~250). Measured: size
+  within about x0.7..1.5, time x1..1.5 (exact for ProRes / "fit into N
+  MB") — hence the "≈".
 
 `msl/ui/media/ffmpeg_runner.py`: `FfmpegRunner` (QProcess per run; signals
 `progressed(float, Progress)`, `finished(bool, str)`; `cancel()`). One job
@@ -1032,17 +1061,43 @@ tools folder): 101 MB in ~4 s, checksum matched, installed and usable in
 
 `msl/tools/desktop/media/` — a hub tool (sidebar "Media", icon
 `tools/media`): quick work with video and image sequences without knowing
-ffmpeg. Three actions so far — the ones the user does most.
+ffmpeg. Actions (`option_panels.PANELS`, in the picker's order): To video
+(sequences) · Make smaller · Trim · Stamp · Sound · GIF · For editing ·
+Adjust · Join (2+ videos) · Compare (exactly 2).
 
 - `page.py` `MediaPage` (registers `media.qss`), top to bottom:
   header (+ the "ffmpeg 8.0" link) · `FfmpegBar` · `SourceCard` · the
-  action (a label for a sequence's one action, a SegmentedControl for a
-  video's two) · that action's panel · "Save as" + "Command" + the start
-  button · a message line · the jobs.
+  actions (a checkable `ChipBar` of the panels whose `accepts(sources)` is
+  true) · presets (a `ChipBar` shelf) · that action's panel · "Save as"
+  (one result) or a note (several) · "Results: … ▾" (the folder) + the
+  estimate + "Command" + the start button · a message line · the jobs.
   Drops are taken by the PAGE, anywhere on it (the card only shows it is
-  the target); sound dropped while a sequence is open goes under that
-  sequence. Reading what was dropped runs on a `ResultWorker` — a token
-  makes only the newest load count.
+  the target). One sound file dropped on one open source is its sound
+  (under a sequence; "Replace" for a video), not a new source. Reading
+  what was dropped runs on a `ResultWorker` — a token makes only the
+  newest load count.
+- Several sources at once (`load_sources`): all videos, or all image
+  sequences (the first readable one decides; the rest are named in a
+  message; repeats are dropped). The card shows them as one ("3 videos",
+  the total, the names). A panel with `COMBINES = False` makes ONE JOB PER
+  SOURCE (`_one_result()` False: no "Save as", each result gets its own
+  free name); Join / Compare (`COMBINES = True`) make one job of all
+  (`combined_job`).
+- Presets: `panel.PRESETS` are built in (code); once the user saves or
+  removes one, that panel's set lives in the config (`presets.<KEY>`). A
+  click applies the preset's settings OVER the current ones; "+ Save
+  preset" asks for the name in place.
+- Where results go: `settings.output_folder` ("" = next to each source);
+  the "Results: … ▾" link's menu switches it.
+- The estimate ("≈ 4.1 MB · ≈ 6 s", "… each" for several): rebuilt
+  ESTIMATE_DELAY_MS after any change, on a worker (`core estimate()`);
+  the old value is wiped at once (`_schedule_estimate`). Jobs built only
+  to be looked at (estimate, "Command", a refused start) are cleaned up
+  (`clean_up` / `_discard`) — burn-in texts and pass logs are files.
+- A finished job's title is the result file (`_ResultLabel`): click =
+  open it with its program, drag = a file drag (a chat, a folder);
+  "Copy" puts the FILE on the clipboard (urls + the path as text) —
+  Ctrl+V pastes it into a chat; a right click has the rest.
 - `ffmpeg_bar.py` `FfmpegBar`: looking / ready / missing / working. Ready =
   the bar is hidden and its `status_button()` (in the page's header) shows
   "ffmpeg 8.0" with a menu; missing = a notice with "Download ffmpeg
@@ -1060,29 +1115,43 @@ ffmpeg. Three actions so far — the ones the user does most.
   missing frames, a chooser when the folder holds several sequences, "×").
 - `option_panels.py`: `OptionPanel` (a caption / control form;
   `job(source, output)`, `output_for(source, taken)`, `settings()` /
-  `apply_settings()`) -> `SequencePanel` (frame rate, quality, encoding,
-  sound, "Gaps" — only when frames are missing; not ticked = the job is
-  refused with the missing numbers), `ShrinkPanel` (frame size; by quality
-  or "Fit into a size" in MB; keep the sound), `TrimPanel` (from / to as
-  typed times, Exact / Fast). Choices are words; the ffmpeg arguments stay
-  in core/media/recipes.py. Settings are saved on every change.
+  `apply_settings()`, `accepts(sources)`, `COMBINES`, `PRESETS`, `TAG` /
+  `suffix()` for the result's name) -> `SequencePanel` (frame rate, format
+  MP4 / ProRes / DNxHR, quality, encoding, sound, "Draw on the picture" ->
+  the overlay rows, "Gaps" — only when frames are missing; not ticked =
+  the job is refused with the missing numbers), `ShrinkPanel`, `TrimPanel`
+  (a `RangeStrip` of 12 frames with two handles <-> the From / to fields;
+  the first and last frame of the piece shown, refreshed 350 ms after a
+  change; all pictures made by `frames_at` on workers), `StampPanel`,
+  `SoundPanel` (take out / remove / replace — its BUTTON and TAG follow
+  the mode), `GifPanel`, `EditingPanel`, `AdjustPanel`, `JoinPanel`,
+  `ComparePanel`. `_OverlayRows` is the mixin with the burn-in / label /
+  watermark rows (sequence + stamp). Choices are words; the ffmpeg
+  arguments stay in core/media/recipes.py. Settings are saved on every
+  change. A SegmentedControl is as wide as options x its widest label —
+  keep labels short ("4444", not "ProRes 4444"): one panel's row sets the
+  minimum width of the whole window.
 - `job_queue.py`: `JobQueue` (one FfmpegRunner; jobs run one after
   another; `outputs()` = names still to be written, so a new job is
-  offered another name), `JobList` / `_JobRow` (state dot, progress bar
-  while running, then size + time; Show / Command / Cancel / Remove).
-- Config `configs/desktop/media/config.json`: `settings.ffmpeg_path`,
-  `panels.<key>` (each panel's remembered choices).
+  offered another name; `idle`), `JobList` / `_JobRow` (state dot, progress bar
+  while running, then size + time; Copy / Show, Cancel while it runs).
+- Config `configs/desktop/media/config.json`: `settings` (ffmpeg_path,
+  output_folder, action — the last picked one), `panels.<key>` (each
+  panel's remembered choices), `presets.<key>`.
 - The result never replaces its own source; an existing file is asked
   about (ConfirmDialog); "Save as" suggests a free name next to the source
   (`default_output`) unless the user typed one.
 
-Verified offscreen in the hub against the real ffmpeg 8.0 (inputs read
-only, outputs in `sandbox/`): no ffmpeg -> notice; a folder without it ->
-said so; sequence by folder and by one frame; sound dropped on it; a
-folder with two sequences and gaps; smaller by quality and into 1 MB; an
-exact trim; cancel of a running and a waiting job; things that aren't
-media. NOT tried in the real GUI: the look at other window sizes, a drop
-from the real file manager, the native file dialogs.
+Verified offscreen in the hub against real ffmpeg (8.0 for the
+foundation; the whole second round of the tool ran on 7.1.1 — the copy on
+PATH — so both work; inputs read only, outputs in `sandbox/`): every
+action end to end (20 jobs, none failed), presets (apply / save / remove),
+the estimate, the results folder, several videos (per-source jobs, join,
+compare), two sequence folders at once, mixed and unusable drops, copy /
+open / the row menu. NOT tried in the real GUI: dragging a result out
+and a drop from the real file manager, pasting a copied file into a
+chat, the native file dialogs, dragging the RangeStrip's handles with a
+real mouse.
 
 ## Install (the hub is where everything starts)
 
@@ -1214,10 +1283,11 @@ disk. NOT yet tested: against a real Maya installation (actual launch via
   started from the hub joining it, Maya 2020 (Python 2).
 - Planned, nothing built yet (decisions taken 2026-10-02; details in the
   session memory files `ffmpeg-media-tool-idea` / `maya-batch-tool-idea`):
-  - "Media" is built with its first three actions (see "Media tool"). Next
-    for it, as planned: sound / join / burn-ins and a watermark, video ->
-    frames, presets as chips. A later "Batch" tool (headless Maya jobs:
-    render, playblast, export) and Maya playblasts reuse the foundation.
+  - "Media" is built (see "Media tool"). Not built of what was offered:
+    video -> frames, a results history across restarts, a Windows notice
+    when the queue is done, "playblast -> the hub" from Maya. A later
+    "Batch" tool (headless Maya jobs: render, playblast, export) and Maya
+    playblasts reuse the foundation.
   - ffmpeg is never committed or shipped in a release. A managed copy lives
     next to the runtime (`%LOCALAPPDATA%\MSL	oolsfmpeg\<version>`),
     downloaded on request (a pinned, tested build) - or the user points at a

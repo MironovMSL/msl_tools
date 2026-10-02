@@ -111,6 +111,43 @@ SlimScrollBar {
     qproperty-handlePressedColor: alpha(var(--accent), 75%);
 }
 
+/* --- ChipBar: small pills that wrap (a picker, or a shelf of saved things) ------------ */
+
+ChipBar QPushButton#chip {
+    color: var(--text-primary);
+    background: alpha(var(--text-primary), 8%);
+    border: 1px solid transparent;
+    border-radius: 9px;
+    padding: 0px 9px;
+    min-height: 18px;
+    max-height: 18px;
+    font-size: 11px;
+}
+ChipBar QPushButton#chip:hover {
+    background: alpha(var(--accent), 18%);
+    border-color: alpha(var(--accent), 55%);
+}
+ChipBar QPushButton#chip:pressed {
+    background: alpha(var(--accent), 30%);
+}
+ChipBar QPushButton#chip:checked {
+    background: alpha(var(--accent), 26%);
+    border-color: var(--accent);
+}
+ChipBar QPushButton#chipAdd {
+    color: var(--accent);
+    padding: 2px 6px;
+    font-size: 11px;
+}
+
+/* --- RangeStrip: pictures side by side with a range picked on them ------------------- */
+
+RangeStrip {
+    qproperty-accentColor: var(--accent);
+    qproperty-dimColor:    alpha(var(--surface), 72%);
+    qproperty-baseColor:   alpha(var(--text-primary), 8%);
+}
+
 /* --- BarStrip: a handful of measurements as thin bars ------------------------------- */
 
 BarStrip {

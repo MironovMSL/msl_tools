@@ -98,6 +98,49 @@ def load_source(tools: FfmpegTools, path: str | Path, chosen: ImageSequence | No
                        thumbnail=_thumbnail(tools, info))
 
 
+def load_sources(tools: FfmpegTools, paths: list) -> tuple:
+    """Reads several dropped things at once. Returns (sources, problems):
+    the sources that can be worked on TOGETHER — all videos, or all image
+    sequences, whichever the first readable one is — and a line for each
+    path that was left out and why. Raises MediaError when none is usable."""
+    sources, problems = [], []
+    for path in paths:
+        try:
+            source = load_source(tools, path)
+        except MediaError as error:
+            problems.append(str(error))
+            continue
+        if sources and source.is_sequence != sources[0].is_sequence:
+            problems.append(f"“{Path(path).name}” was left out: videos and image sequences can’t be worked on together.")
+        elif any(same(source, other) for other in sources):
+            continue  # two frames of one sequence, or the same file twice
+        else:
+            sources.append(source)
+    if not sources:
+        raise MediaError(problems[0] if problems else "Nothing to work on.")
+    return sources, problems
+
+
+def same(first: MediaSource, second: MediaSource) -> bool:
+    """Both are the same video file / the same image sequence."""
+    if first.is_sequence != second.is_sequence:
+        return False
+    if first.is_sequence:
+        return (first.sequence.folder, first.sequence.pattern) == (second.sequence.folder, second.sequence.pattern)
+    return first.path == second.path
+
+
+def summary(sources: list) -> tuple:
+    """(title, facts) for several sources shown as one: "4 videos", "1:23 in all  ·  45.0 MB"."""
+    count = len(sources)
+    if sources[0].is_sequence:
+        frames = sum(source.sequence.count for source in sources)
+        return f"{count} image sequences", f"{frames} frames in all"
+    seconds = sum(source.info.duration for source in sources)
+    megabytes = sum(source.info.size for source in sources) / 1024 ** 2
+    return f"{count} videos", f"{format_time(round(seconds, 1))} in all  ·  {megabytes:.1f} MB"
+
+
 def _thumbnail(tools: FfmpegTools, info: MediaInfo) -> Path | None:
     """A cached thumbnail of `info` in the temp folder (the name follows the
     file and its change time, so an edited file gets a new one)."""

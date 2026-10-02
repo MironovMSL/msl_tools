@@ -7,7 +7,7 @@ import msl_tools.msl.ui.qt_bindings as qt
 from msl_tools.msl.core.media import Job
 from msl_tools.msl.tools.desktop.media.ffmpeg_bar import link_button
 from msl_tools.msl.ui.media import FfmpegRunner
-from msl_tools.msl.ui.theme.qss import repolish
+from msl_tools.msl.ui.theme.qss import make_rounded_popup, repolish
 from msl_tools.msl.ui.widgets.atoms.progress.base_progress_bar import BaseProgressBar, ProgressState
 from msl_tools.msl.ui.widgets.atoms.surfaces import StableScrollArea
 
@@ -49,11 +49,13 @@ class JobQueue(qt.QtCore.QObject):
     Signals:
         added(object) / changed(object) — a QueueItem appeared / moved on.
         removed(int) — the item with this id is gone from the queue.
+        idle() — the last job of the line is over (nothing waits or runs).
     """
 
     added = qt.QtCore.Signal(object)
     changed = qt.QtCore.Signal(object)
     removed = qt.QtCore.Signal(int)
+    idle = qt.QtCore.Signal()
 
     def __init__(self, tools, parent=None):
         super().__init__(parent)
@@ -150,37 +152,104 @@ class JobQueue(qt.QtCore.QObject):
                 item.state, item.message = FAILED, message
             self.changed.emit(item)
         self._start_next()
+        if self._current is None:
+            self.idle.emit()
+
+
+class _ResultLabel(qt.QtWidgets.QLabel):
+    """Private: a job's title. Once the job is done it is a handle on the
+    RESULT FILE: a click opens it (plays it), and it can be dragged — into
+    a chat, a folder, another program — like a file from the file manager."""
+
+    activated = qt.QtCore.Signal()
+
+    def __init__(self, text: str, parent=None):
+        super().__init__(text, parent)
+        self.setObjectName("mediaJobTitle")
+        self.setSizePolicy(qt.QtWidgets.QSizePolicy.Policy.Ignored, qt.QtWidgets.QSizePolicy.Policy.Preferred)
+        self._path = ""            # the result file; "" while there is none
+        self._pressed = False
+        self._press_position = qt.QtCore.QPoint()
+
+    def set_result(self, path: str) -> None:
+        self._path = path
+        if path:
+            self.setCursor(qt.QtCore.Qt.CursorShape.PointingHandCursor)
+        else:
+            self.unsetCursor()
+        if bool(self.property("link")) != bool(path):
+            self.setProperty("link", bool(path))  # media.qss: QLabel#mediaJobTitle[link="true"]:hover
+            repolish(self)
+
+    def drag_data(self) -> qt.QtCore.QMimeData:
+        """What a drag (or "Copy") of the result carries: the file, and its path as text."""
+        data = qt.QtCore.QMimeData()
+        data.setUrls([qt.QtCore.QUrl.fromLocalFile(self._path)])
+        data.setText(self._path)
+        return data
+
+    def mousePressEvent(self, event) -> None:
+        if self._path and event.button() == qt.QtCore.Qt.MouseButton.LeftButton:
+            self._pressed = True
+            self._press_position = event.position().toPoint()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:
+        if self._pressed and (event.position().toPoint() - self._press_position).manhattanLength() \
+                >= qt.QtWidgets.QApplication.startDragDistance():
+            self._pressed = False  # it became a drag: the release that follows is not a click
+            drag = qt.QtGui.QDrag(self)
+            drag.setMimeData(self.drag_data())
+            drag.exec(qt.QtCore.Qt.DropAction.CopyAction)
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        if self._pressed:
+            self._pressed = False
+            if self.rect().contains(event.position().toPoint()):
+                self.activated.emit()
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
 
 
 class _JobRow(qt.QtWidgets.QFrame):
     """Private: one job of the list — a state dot, what it does, where it
-    stands, and what can be done with it; a thin progress bar while it runs."""
+    stands, a thin progress bar while it runs. When it is done the title is
+    the result file itself (click = open, drag = take it somewhere), "Copy"
+    puts the file on the clipboard, "Show" opens its folder; a right click
+    has the rest (the command, the path, remove)."""
+
+    COPIED_MS = 1500
 
     cancel_requested = qt.QtCore.Signal(int)
     remove_requested = qt.QtCore.Signal(int)
     show_requested = qt.QtCore.Signal(int)
+    open_requested = qt.QtCore.Signal(int)
     command_requested = qt.QtCore.Signal(int)
 
     def __init__(self, item: QueueItem, parent=None):
         super().__init__(parent)
         self.setObjectName("mediaJob")
         self.item_id = item.id
+        self._state = ""
         self._dot = qt.QtWidgets.QLabel()
         self._dot.setObjectName("mediaJobDot")
         self._dot.setFixedSize(8, 8)
-        self._title = qt.QtWidgets.QLabel(item.job.title)
-        self._title.setObjectName("mediaJobTitle")
-        self._title.setSizePolicy(qt.QtWidgets.QSizePolicy.Policy.Ignored, qt.QtWidgets.QSizePolicy.Policy.Preferred)
-        self._title.setToolTip(str(item.job.output))
+        self._title = _ResultLabel(item.job.title)
         self._status = qt.QtWidgets.QLabel()
         self._status.setObjectName("mediaJobStatus")
+        self._copy_button = link_button("Copy", "Copy the file — then paste it into a chat or a folder (Ctrl+V)")
         self._show_button = link_button("Show", "Show the result in its folder")
-        self._command_button = link_button("Command", "What ffmpeg was asked to do")
         self._cancel_button = link_button("Cancel")
         self._remove_button = link_button("Remove", "Take this line off the list (the result file stays)")
         self._bar = BaseProgressBar()
+        self._title.activated.connect(lambda: self.open_requested.emit(self.item_id))
+        self._copy_button.clicked.connect(self.copy_file)
         self._show_button.clicked.connect(lambda: self.show_requested.emit(self.item_id))
-        self._command_button.clicked.connect(lambda: self.command_requested.emit(self.item_id))
         self._cancel_button.clicked.connect(lambda: self.cancel_requested.emit(self.item_id))
         self._remove_button.clicked.connect(lambda: self.remove_requested.emit(self.item_id))
 
@@ -190,8 +259,8 @@ class _JobRow(qt.QtWidgets.QFrame):
         line.addWidget(self._dot)
         line.addWidget(self._title, 1)
         line.addWidget(self._status)
+        line.addWidget(self._copy_button)
         line.addWidget(self._show_button)
-        line.addWidget(self._command_button)
         line.addWidget(self._cancel_button)
         line.addWidget(self._remove_button)
         layout = qt.QtWidgets.QVBoxLayout(self)
@@ -202,7 +271,7 @@ class _JobRow(qt.QtWidgets.QFrame):
         self.update_item(item)
 
     def update_item(self, item: QueueItem) -> None:
-        state = item.state
+        state = self._state = item.state
         if self._dot.property("state") != state:
             self._dot.setProperty("state", state)        # media.qss: QLabel#mediaJobDot[state=...]
             self._status.setProperty("state", state)
@@ -231,29 +300,58 @@ class _JobRow(qt.QtWidgets.QFrame):
             text = item.message
         self._status.setText(text)
         self._status.setToolTip(item.message if state == FAILED else "")
+        self._title.set_result(str(item.job.output) if state == DONE else "")
+        self._title.setToolTip(f"{item.job.output}" + (chr(10) + "Click: open it  ·  drag: take the file somewhere  ·  "
+                                                       "right click: more" if state == DONE else ""))
+        self._copy_button.setVisible(state == DONE)
         self._show_button.setVisible(state == DONE)
-        self._command_button.setVisible(state in (DONE, FAILED))
         self._cancel_button.setVisible(state in (WAITING, RUNNING))
-        self._remove_button.setVisible(state in (DONE, FAILED, CANCELLED))
+        self._remove_button.setVisible(state in (FAILED, CANCELLED))
+
+    def copy_file(self) -> None:
+        """Puts the result file on the clipboard (as a file: Ctrl+V pastes it into a chat or a folder)."""
+        qt.QtGui.QGuiApplication.clipboard().setMimeData(self._title.drag_data())
+        self._copy_button.setText("Copied")
+        qt.QtCore.QTimer.singleShot(self.COPIED_MS, lambda: self._copy_button.setText("Copy"))
+
+    def contextMenuEvent(self, event) -> None:
+        menu = make_rounded_popup(qt.QtWidgets.QMenu(self))
+        menu.setAttribute(qt.QtCore.Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        if self._state == DONE:
+            menu.addAction("Open").triggered.connect(lambda: self.open_requested.emit(self.item_id))
+            menu.addAction("Copy the file").triggered.connect(self.copy_file)
+            menu.addAction("Copy its path").triggered.connect(
+                lambda: qt.QtGui.QGuiApplication.clipboard().setText(self._title.drag_data().text()))
+            menu.addAction("Show in folder").triggered.connect(lambda: self.show_requested.emit(self.item_id))
+            menu.addSeparator()
+        menu.addAction("Command").triggered.connect(lambda: self.command_requested.emit(self.item_id))
+        if self._state in (WAITING, RUNNING):
+            menu.addAction("Cancel").triggered.connect(lambda: self.cancel_requested.emit(self.item_id))
+        else:
+            menu.addAction("Remove from the list").triggered.connect(lambda: self.remove_requested.emit(self.item_id))
+        self._menu = menu  # for tests; the menu deletes itself on close
+        menu.popup(event.globalPos())
 
 
 class JobList(qt.QtWidgets.QWidget):
     """The Media tool's list of jobs: a row per QueueItem of a JobQueue,
-    newest first, in a scroll area; "Jobs appear here" while it is empty.
-    It only shows the queue and passes on what was clicked.
+    newest first, in a scroll area; a hint while it is empty. It only shows
+    the queue and passes on what was clicked.
 
     Signals:
-        show_requested(object) / command_requested(object) — for a QueueItem.
+        show_requested(object) / open_requested(object) / command_requested(object) — for a QueueItem.
     """
 
     show_requested = qt.QtCore.Signal(object)
+    open_requested = qt.QtCore.Signal(object)
     command_requested = qt.QtCore.Signal(object)
 
     def __init__(self, queue: JobQueue, parent=None):
         super().__init__(parent)
         self._queue = queue
         self._rows: dict[int, _JobRow] = {}
-        self._empty = qt.QtWidgets.QLabel("What you start shows up here: its progress, then the finished file.")
+        self._empty = qt.QtWidgets.QLabel("What you start shows up here: its progress, then the finished file — "
+                                          "click it to open, drag it into a chat.")
         self._empty.setObjectName("mediaJobsEmpty")
         self._empty.setAlignment(qt.QtCore.Qt.AlignmentFlag.AlignCenter)
         self._empty.setWordWrap(True)
@@ -278,6 +376,7 @@ class JobList(qt.QtWidgets.QWidget):
         row.cancel_requested.connect(self._queue.cancel)
         row.remove_requested.connect(self._queue.remove)
         row.show_requested.connect(lambda item_id: self._forward(self.show_requested, item_id))
+        row.open_requested.connect(lambda item_id: self._forward(self.open_requested, item_id))
         row.command_requested.connect(lambda item_id: self._forward(self.command_requested, item_id))
         self._rows[item.id] = row
         self._list.insertWidget(0, row)  # newest on top
