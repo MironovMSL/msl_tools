@@ -31,6 +31,9 @@ msl_tools/                 (repo root)
     ref/                    the user's local collection of OTHER people's scripts, kept as
                             references to learn from — NOT in git (.gitignore), not part of
                             msl_tools, never installed. Read it for ideas; don't edit or import it.
+    sandbox/                local scratch for test media (clips, image sequences, renders) while
+                            developing - NOT in git (.gitignore). Run media experiments here, never
+                            in the user's working folders.
     msl/
         run_hub.py            standalone entry point for the desktop hub
         run_installer.py      standalone entry point of the setup window (run by path, see "Install")
@@ -1087,6 +1090,23 @@ disk. NOT yet tested: against a real Maya installation (actual launch via
   the hub INTO A RUNNING Maya (it can discard unsaved work — needs a
   confirmation; starting a new Maya with a scene is built), Mayas not
   started from the hub joining it, Maya 2020 (Python 2).
+- Planned, nothing built yet (decisions taken 2026-10-02; details in the
+  session memory files `ffmpeg-media-tool-idea` / `maya-batch-tool-idea`):
+  - "Media": a hub tool on ffmpeg for quick work with video and image
+    sequences, on a Qt-free media foundation that a later "Batch" tool
+    (headless Maya jobs: render, playblast, export) and Maya playblasts reuse.
+  - ffmpeg is never committed or shipped in a release. A managed copy lives
+    next to the runtime (`%LOCALAPPDATA%\MSL	oolsfmpeg\<version>`),
+    downloaded on request (a pinned, tested build) - or the user points at a
+    copy they already have. Search order: the path in settings, the managed
+    copy, PATH.
+  - Where media goes: INPUTS are never copied (only their paths are kept);
+    RESULTS go next to the source by default, or to an output folder the
+    user picks - never into the tool's own folders (an uninstall with
+    "remove everything" would delete them). The tool's own data follows the
+    usual split: `configs/desktop/media/` (settings, presets, queue,
+    history), `logs/desktop/media/`, throwaway files (thumbnails, concat
+    lists) in `%TEMP%/msl_tools/media`.
 - Boost start: built and verified against real Maya 2020 / 2025 / 2026 on
   COPIES of the preferences (MAYA_APP_DIR in %TEMP%); not yet used on the
   user's real preferences, nor released.
