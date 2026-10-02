@@ -1,6 +1,7 @@
 # tools/desktop/media/source_card.py
 import msl_tools.msl.ui.qt_bindings as qt
 from msl_tools.msl.core.theme import ThemeRegistry
+from msl_tools.msl.tools.desktop.media.fact_tiles import FactTiles
 from msl_tools.msl.tools.desktop.media.source import MediaSource, summary
 from msl_tools.msl.ui.theme.qss import color_property, repolish
 from msl_tools.msl.ui.ui_resources import UiResources
@@ -144,16 +145,7 @@ class SourceCard(qt.QtWidgets.QFrame):
         self._title_label.setObjectName("mediaSourceTitle")
         # a long name is clipped, it must not widen the window
         self._title_label.setSizePolicy(qt.QtWidgets.QSizePolicy.Policy.Ignored, qt.QtWidgets.QSizePolicy.Policy.Preferred)
-        # The facts, a small tile each. The row has its natural size inside a holder that
-        # CLIPS it in a narrow window (the last tiles matter least): it must not widen the
-        # window, and a layout of the holder's width would squeeze or overlap the tiles.
-        self._facts = qt.QtWidgets.QWidget()
-        self._facts.setSizePolicy(qt.QtWidgets.QSizePolicy.Policy.Ignored, qt.QtWidgets.QSizePolicy.Policy.Fixed)
-        self._facts_row = qt.QtWidgets.QWidget(self._facts)
-        self._facts_layout = qt.QtWidgets.QHBoxLayout(self._facts_row)
-        self._facts_layout.setContentsMargins(0, 1, 0, 1)
-        self._facts_layout.setSpacing(5)
-        self._facts_text = ""
+        self._facts = FactTiles()  # the facts, a small tile each
         self._base_facts: list = []
         self._extra_facts: list = []
         self._warning_label = qt.QtWidgets.QLabel()
@@ -260,32 +252,7 @@ class SourceCard(qt.QtWidgets.QFrame):
         self._stack.setCurrentWidget(self._loaded)
 
     def _set_facts(self, pairs: list) -> None:
-        """Fills the row of tiles: a value over what it is."""
-        while self._facts_layout.count():
-            item = self._facts_layout.takeAt(0)
-            if item.widget() is not None:
-                item.widget().hide()
-                item.widget().deleteLater()
-        for value, caption in pairs:
-            tile = qt.QtWidgets.QFrame(self._facts_row)
-            tile.setObjectName("mediaFact")
-            value_label = qt.QtWidgets.QLabel(value, tile)
-            value_label.setObjectName("mediaFactValue")
-            caption_label = qt.QtWidgets.QLabel(caption, tile)
-            caption_label.setObjectName("mediaFactCaption")
-            box = qt.QtWidgets.QVBoxLayout(tile)
-            box.setContentsMargins(8, 2, 8, 3)
-            box.setSpacing(0)
-            box.addWidget(value_label)
-            box.addWidget(caption_label)
-            self._facts_layout.addWidget(tile)
-            for widget in (tile, value_label, caption_label):
-                widget.ensurePolished()  # the fonts from QSS, before the row is measured
-            tile.show()
-        self._facts_layout.activate()
-        self._facts_row.resize(self._facts_layout.sizeHint())
-        self._facts.setFixedHeight(self._facts_row.height())
-        self._facts_text = "  ·  ".join(f"{value} {caption}" for value, caption in pairs)
+        self._facts.set_pairs(pairs)
 
     def set_extra_facts(self, pairs: list) -> None:
         """Tiles the picked action adds after the source's own (e.g. how long a
@@ -296,7 +263,7 @@ class SourceCard(qt.QtWidgets.QFrame):
 
     def facts_text(self) -> str:
         """The tiles as one line of text."""
-        return self._facts_text
+        return self._facts.text()
 
     def _on_add(self) -> None:
         paths, _filter = qt.QtWidgets.QFileDialog.getOpenFileNames(self, "Videos to add", "", VIDEO_PATTERNS)

@@ -98,16 +98,8 @@ MediaPage GlyphButton#mediaAction {
     qproperty-highlightColor:   alpha(var(--accent), 16%);
 }
 
-/* About how big / how long: a quiet pill at the start of the row with the start button. */
-MediaPage QLabel#mediaEstimate {
-    color: var(--text-primary);
-    background-color: alpha(var(--text-primary), 7%);
-    border-radius: 10px;
-    padding: 2px 10px;
-    font-size: 11px;
-}
-
-/* The source's facts: a small tile each - the value over what it is. */
+/* Data, a small tile each - the value over what it is: the source's facts, and what the
+   result is expected to be (FactTiles). */
 MediaPage QFrame#mediaFact {
     background-color: alpha(var(--text-primary), 5%);
     border: 1px solid alpha(var(--border), 60%);

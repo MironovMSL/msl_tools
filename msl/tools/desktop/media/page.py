@@ -5,9 +5,10 @@ from pathlib import Path
 
 import msl_tools.msl.ui.qt_bindings as qt
 from msl_tools.msl.core.environment.taskbar import TaskbarProgress
-from msl_tools.msl.core.media import MediaError, estimate, preview
+from msl_tools.msl.core.media import Estimate, MediaError, estimate, preview
 from msl_tools.msl.core.media.run import clean_up
 from msl_tools.msl.core.resources import Resources
+from msl_tools.msl.tools.desktop.media.fact_tiles import FactTiles
 from msl_tools.msl.tools.desktop.media.ffmpeg_bar import FfmpegBar, link_button
 from msl_tools.msl.tools.desktop.media.history import ResultHistory
 from msl_tools.msl.tools.desktop.media.job_queue import DONE, FAILED, JobList, JobQueue
@@ -155,11 +156,10 @@ class MediaPage(qt.QtWidgets.QWidget):
         self._output_note.setObjectName("mediaCaption")
         self._output_note.setWordWrap(True)
         self._folder_button = self._action_button("folder_into", "▾")  # its menu: where results go
-        self._estimate_label = qt.QtWidgets.QLabel()
-        self._estimate_label.setObjectName("mediaEstimate")  # a small pill at the start of the row
-        self._estimate_label.setToolTip("About how big the result will be and how long it will take — "
+        # What to expect, as DATA: tiles like the source's facts (a pill here read as one more control).
+        self._estimate_tiles = FactTiles()
+        self._estimate_tiles.setToolTip("About how big the result will be and how long it will take — "
                                         "guessed from a second of it")
-        self._estimate_label.hide()
         self._preview_button = self._action_button("eye", "◉")
         self._command_button = self._action_button("code", "</>", "The command: what ffmpeg will be asked to do — "
                                                                   "to read, or to copy")
@@ -231,8 +231,7 @@ class MediaPage(qt.QtWidgets.QWidget):
         start = qt.QtWidgets.QHBoxLayout()
         start.setContentsMargins(12, 0, 12, 10)
         start.setSpacing(8)
-        start.addWidget(self._estimate_label)
-        start.addStretch(1)
+        start.addWidget(self._estimate_tiles, 1)  # takes what is left; clipped, never widening the window
         start.addWidget(self._folder_button)
         start.addWidget(self._preview_button)
         start.addWidget(self._command_button)
@@ -869,15 +868,30 @@ class MediaPage(qt.QtWidgets.QWidget):
         window.raise_()
         window.activateWindow()
 
-    def _set_estimate(self, text: str) -> None:
-        """The estimate pill: shown only while it says something."""
-        self._estimate_label.setText(text)
-        self._estimate_label.setVisible(bool(text))
+    ESTIMATING = [("…", "estimating")]
+
+    def _set_estimate(self, pairs: list) -> None:
+        """The estimate's tiles ([] = nothing to say)."""
+        self._estimate_tiles.set_pairs(pairs)
+
+    def _estimate_pairs(self, guess, count: int, source_size: int) -> list:
+        """An Estimate as tiles: the result's size, how it compares with the source, the time."""
+        if guess is None:
+            return []
+        pairs = []
+        if guess.size:
+            pairs.append((Estimate(size=guess.size).text(), "each result" if count > 1 else "result"))
+            if source_size:
+                change = max(round((guess.size / source_size - 1) * 100), -99)  # "−100 %" would say nothing is left
+                pairs.append((f"{'+' if change > 0 else '−'}{abs(change)} %", "bigger" if change > 0 else "smaller"))
+        if guess.seconds:
+            pairs.append((Estimate(seconds=guess.seconds).text(), "each, to make" if count > 1 else "to make"))
+        return pairs
 
     def _schedule_estimate(self) -> None:
         """What is on screen changed: the old guess is gone at once, a new one follows shortly."""
         self._estimate_token += 1  # an estimate still on its way is for the old settings
-        self._set_estimate("…" if self._panel() is not None and self._ffmpeg.tools() is not None else "")
+        self._set_estimate(self.ESTIMATING if self._panel() is not None and self._ffmpeg.tools() is not None else [])
         self._estimate_timer.start()
 
     def _estimate(self) -> None:
@@ -887,11 +901,14 @@ class MediaPage(qt.QtWidgets.QWidget):
         tools = self._ffmpeg.tools()
         jobs = self._jobs(quiet=True) if tools is not None else None
         if not jobs:
-            self._set_estimate("")
+            self._set_estimate([])
             return
         job, count = jobs[0], len(jobs)
         self._discard(jobs[1:])
-        self._set_estimate("…")
+        self._set_estimate(self.ESTIMATING)
+        panel = self._panel()
+        compared = panel.COMPARES_SIZE and not panel.COMBINES and job.folder is None
+        source_size = self._source_size(self._sources[0]) if compared else 0
 
         def work():
             try:
@@ -901,8 +918,7 @@ class MediaPage(qt.QtWidgets.QWidget):
 
         def done(guess) -> None:
             if token == self._estimate_token:
-                text = guess.text() if guess is not None else ""
-                self._set_estimate(text + ("  each" if text and count > 1 else ""))
+                self._set_estimate(self._estimate_pairs(guess, count, source_size))
 
         self._run(work, done, lambda _error: done(None))
 

@@ -1203,9 +1203,12 @@ frames · For editing · Adjust · Join (2+ videos) · Compare (exactly 2).
   is a button (`SourceThumbnail`: dims + a play mark under the pointer,
   a click opens the source — `play_requested`), and beside "×" a
   `file_add` button adds more videos to what is loaded (`add_requested`
-  -> the page opens the loaded paths + the new ones). The estimate is a
-  pill at the START of the start row (`QLabel#mediaEstimate`, hidden
-  while empty). The jobs card's header counts ("JOBS · 4", while running
+  -> the page opens the loaded paths + the new ones). The estimate is shown as
+  tiles too, at the START of the start row — "≈ 68 KB / result", "−65 % /
+  smaller" (for the panels that compare sizes), "≈ 2 s / to make": the
+  same `FactTiles` (fact_tiles.py) as the source's facts, because tiles
+  are how this page shows DATA; a pill there read as one more control
+  (the user's words: "these numbers look like a setting"). The jobs card's header counts ("JOBS · 4", while running
   "JOBS · 1 of 3 done" — `JobQueue.batch_counts()`), and a click on it
   FOLDS the list away (`settings.jobs_folded`; a hidden filler widget
   takes the room then). The empty list shows an icon over its hint.

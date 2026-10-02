@@ -490,7 +490,7 @@ class _JobRow(qt.QtWidgets.QFrame):
         elif state == DONE:
             size = _size_text(item.size)
             if item.source_size and item.size and not item.files:
-                change = round((item.size / item.source_size - 1) * 100)
+                change = max(round((item.size / item.source_size - 1) * 100), -99)  # never "−100 %": something is left
                 size = f"{_size_text(item.source_size)} → {size} ({'+' if change > 0 else '−'}{abs(change)} %)"
             text = (f"{item.files} files  ·  " if item.files else "") + f"{size}  ·  {item.seconds:.0f} s"
             if item.finished and time.strftime("%Y%m%d", time.localtime(item.finished)) != time.strftime("%Y%m%d"):
