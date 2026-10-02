@@ -70,6 +70,27 @@ SessionsTab QPushButton#sessionAction {
 SessionsTab QPushButton#sessionAction:disabled {
     color: alpha(var(--text-secondary), 55%);
 }
+/* An on / off switch among the quiet links ("Wrap"): dimmed while off. */
+SessionsTab QPushButton#sessionToggle {
+    color: var(--text-secondary);
+    padding: 2px 6px;
+    font-size: 11px;
+}
+SessionsTab QPushButton#sessionToggle:hover {
+    color: var(--text-primary);
+}
+SessionsTab QPushButton#sessionToggle:checked {
+    color: var(--accent);
+}
+/* The caption of the sessions that are over: a click folds / unfolds them. */
+SessionsTab QPushButton#sessionsHistoryToggle {
+    color: var(--text-secondary);
+    padding: 2px 4px;
+    text-align: left;
+}
+SessionsTab QPushButton#sessionsHistoryToggle:hover {
+    color: var(--text-primary);
+}
 /* The last request's outcome, under the list. */
 SessionsTab QLabel#sessionsMessage                  { color: var(--text-secondary); }
 SessionsTab QLabel#sessionsMessage[state="success"] { color: var(--success); }

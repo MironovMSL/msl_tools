@@ -24,11 +24,17 @@ class MayaVersionRow(qt.QtWidgets.QWidget):
 
     Signals:
         clicked(str) — emits the selected version's year, e.g. "2025".
+        scene_dropped(str, str) — a .ma / .mb file was dropped on a version: (year, path).
+        menu_requested(str, QPoint) — a right click on a version: (year, global position).
     """
+
+    SCENE_SUFFIXES = (".ma", ".mb")
 
     HEIGHT = 68
 
     clicked = qt.QtCore.Signal(str)
+    scene_dropped = qt.QtCore.Signal(str, str)
+    menu_requested = qt.QtCore.Signal(str, qt.QtCore.QPoint)
 
     def __init__(self, min_year: str, parent=None):
         super().__init__(parent)
@@ -57,7 +63,8 @@ class MayaVersionRow(qt.QtWidgets.QWidget):
         with the Dev environment") — the row itself launches nothing."""
         for _, year, widget in self.maya_list:
             suffix = f" with the {environment} environment" if environment else ""
-            widget.setToolTip(f"Launch Maya {year}{suffix}")
+            widget.setToolTip(f"Launch Maya {year}{suffix}" + chr(10)
+                              + "Drop a scene here to open it  ·  right click: recent scenes")
 
     def set_running(self, counts: dict) -> None:
         """Marks each version's tile with how many of that Maya are running
@@ -94,6 +101,9 @@ class MayaVersionRow(qt.QtWidgets.QWidget):
         # ApplicationButton emits its own application_path — the row
         # translates that into "this year was picked" for its own callers.
         button.clicked.connect(lambda _path, y=year: self.clicked.emit(str(y)))
+        button.set_drop_suffixes(self.SCENE_SUFFIXES)
+        button.file_dropped.connect(lambda path, y=year: self.scene_dropped.emit(str(y), path))
+        button.menu_requested.connect(lambda position, y=year: self.menu_requested.emit(str(y), position))
         return button
 
     def on_min_year_changed(self, year) -> None:

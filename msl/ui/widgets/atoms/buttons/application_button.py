@@ -33,8 +33,15 @@ class ApplicationButton(qt.QtWidgets.QWidget):
     show/hide transitions it orchestrates itself. This atom doesn't drive
     its own opacity.
 
+    Files can be dropped on the tile once set_drop_suffixes() names what it
+    takes (".ma", ".mb"): a drop starts the same busy state as a click and
+    emits file_dropped. A right click emits menu_requested — the tile has
+    no menu of its own.
+
     Signals:
         clicked(str) — emits application_path when the button is pressed.
+        file_dropped(str) — a file with an accepted suffix was dropped on the tile.
+        menu_requested(QPoint) — a right click, with the global position.
     """
 
     BUTTON_SIZE = qt.QtCore.QSize(48, 48)
@@ -48,6 +55,8 @@ class ApplicationButton(qt.QtWidgets.QWidget):
     CARD_RADIUS = 8
 
     clicked = qt.QtCore.Signal(str)
+    file_dropped = qt.QtCore.Signal(str)
+    menu_requested = qt.QtCore.Signal(qt.QtCore.QPoint)
 
     hoverColor = color_property("_hover_color")
     hoverBorderColor = color_property("_hover_border_color")
@@ -71,6 +80,7 @@ class ApplicationButton(qt.QtWidgets.QWidget):
         self._hover_color = qt.QtGui.QColor(0, 0, 0, 0)          # until QSS applies
         self._hover_border_color = qt.QtGui.QColor(0, 0, 0, 0)
         self._badge: qt.QtWidgets.QLabel | None = None
+        self._drop_suffixes: tuple = ()
         self.setCursor(qt.QtCore.Qt.CursorShape.PointingHandCursor)
 
         self._build_widgets()
@@ -162,6 +172,47 @@ class ApplicationButton(qt.QtWidgets.QWidget):
             self._on_clicked()
         super().mouseReleaseEvent(event)
 
+    # --- dropped files, right click ------------------------------------------
+
+    def set_drop_suffixes(self, suffixes) -> None:
+        """Files with one of these suffixes (".ma", ...) may be dropped on the tile; () = none."""
+        self._drop_suffixes = tuple(str(suffix).lower() for suffix in suffixes)
+        self.setAcceptDrops(bool(self._drop_suffixes))
+
+    def _dropped_file(self, event) -> str:
+        """The first local file of a drag that this tile takes ("" = none)."""
+        data = event.mimeData()
+        for url in (data.urls() if data.hasUrls() else []):
+            if url.isLocalFile() and url.toLocalFile().lower().endswith(self._drop_suffixes):
+                return url.toLocalFile()
+        return ""
+
+    def dragEnterEvent(self, event) -> None:
+        if not self._busy and self._drop_suffixes and self._dropped_file(event):
+            self._hovered = True  # the hover card shows where the file will land
+            self.update()
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dragLeaveEvent(self, event) -> None:
+        self._hovered = False
+        self.update()
+        super().dragLeaveEvent(event)
+
+    def dropEvent(self, event) -> None:
+        path = self._dropped_file(event)
+        self._hovered = False
+        self.update()
+        if path and self._begin():
+            event.acceptProposedAction()
+            self.file_dropped.emit(path)
+        else:
+            event.ignore()
+
+    def contextMenuEvent(self, event) -> None:
+        self.menu_requested.emit(event.globalPos())
+
     def set_badge(self, text: str) -> None:
         """A small pill over the icon's top-right corner ("2": two of this
         application are running); "" removes it. Styled by widgets.qss
@@ -226,14 +277,20 @@ class ApplicationButton(qt.QtWidgets.QWidget):
         self._button.setIconSize(size)
 
     def _on_clicked(self) -> None:
+        if self._begin():
+            self.clicked.emit(self.application_path)
+
+    def _begin(self) -> bool:
+        """Click feedback + the busy state. False while already busy: a double
+        click (or a drop right after a click) must not launch twice."""
         if self._busy:
-            return  # already starting: a double click must not launch twice
+            return False
         self._stop_shake()
         self._pulse.stop()
         self._pulse.start()
         self._set_busy(True)
         qt.QtCore.QTimer.singleShot(self.BUSY_MS, lambda: self._set_busy(False))
-        self.clicked.emit(self.application_path)
+        return True
 
     # --- busy state ----------------------------------------------------------
 

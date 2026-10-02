@@ -6,11 +6,16 @@ record per Maya that left (it quit, or its connection just broke), newest
 first, in `<base_dir>/sessions/history.json`. It survives a hub restart, so
 "Maya 2025 ended unexpectedly yesterday, here is its log" is still there the
 next day.
+
+A session's log (what its Script Editor reported to the hub) is kept as a
+plain text file next to the hub's logs: write_log() / read_log() are the
+two ends of that format.
 """
 from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -43,6 +48,11 @@ class SessionRecord:
     ended_at: float = 0.0
     clean: bool = True
     log_file: str = ""
+
+    @property
+    def key(self) -> tuple:
+        """What tells one record from another."""
+        return (self.pid, self.ended_at)
 
     @property
     def scene_name(self) -> str:
@@ -103,7 +113,10 @@ class SessionHistory:
         return list(self._records)
 
     def add(self, record: SessionRecord) -> None:
-        self._records = ([record] + self.records())[:self.KEPT]
+        records = [record] + self.records()
+        for dropped in records[self.KEPT:]:  # the log of a session that falls out of the history goes with it
+            _remove_log(dropped.log_file)
+        self._records = records[:self.KEPT]
         self._write()
 
     def discard(self, pid: int, ended_at: float) -> None:
@@ -130,5 +143,72 @@ class SessionHistory:
             self._path.parent.mkdir(parents=True, exist_ok=True)
             payload = {"sessions": [asdict(record) for record in self._records or []]}
             self._path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        except OSError:
+            pass
+
+
+# --- a session's log as a file ---------------------------------------------------------------------
+
+LOG_FOLDER_NAME = "sessions"
+_LOG_RULE = "--- what its Script Editor reported"
+_TEXT_COLUMN = 19   # "HH:MM:SS  level    " - where an entry's text starts; more lines of it are indented this far
+_CLOCK = re.compile(r"\d\d:\d\d:\d\d$")
+
+
+def write_log(folder: str | Path, record: SessionRecord, entries, full_version: str = "") -> Path | None:
+    """Writes a finished session's log into `folder` and returns the file
+    (None if it couldn't be written). `entries`: (level, text, time.time()) tuples."""
+    try:
+        folder = Path(folder)
+        folder.mkdir(parents=True, exist_ok=True)
+        stamp = time.strftime("%Y%m%d_%H%M%S", time.localtime(record.ended_at))
+        path = folder / f"maya{record.version}_{stamp}_pid{record.pid}.log"
+        clock = "%Y-%m-%d %H:%M:%S"
+        lines = [f"Maya {full_version or record.version}, process {record.pid}",
+                 f"Environment: {record.environment or '-'}   boost: {'on' if record.boosted else 'off'}",
+                 f"Scene: {record.scene or 'untitled'}",
+                 f"Unsaved changes in the scene: {'yes' if record.modified else 'no'}",
+                 "Connected: " + time.strftime(clock, time.localtime(record.connected_at)),
+                 ("Closed: " if record.clean else "Ended unexpectedly: ")
+                 + time.strftime(clock, time.localtime(record.ended_at)),
+                 "", _LOG_RULE + " (warnings and errors; everything if \"All\" was on) ---"]
+        for level, text, at in entries:
+            first, *rest = (str(text).rstrip(chr(10)).split(chr(10)) or [""])
+            lines.append(f"{time.strftime('%H:%M:%S', time.localtime(at))}  {level:7s}  {first}")
+            lines += [" " * _TEXT_COLUMN + line for line in rest]
+        if not entries:
+            lines.append("(nothing was reported)")
+        path.write_text(chr(10).join(lines) + chr(10), encoding="utf-8")
+        return path
+    except OSError:
+        return None
+
+
+def read_log(path: str | Path, day: float) -> list[tuple[str, str, float]] | None:
+    """The entries of a file written by write_log(), as (level, text, time)
+    tuples; None if the file can't be read. The file only keeps the clock
+    time of an entry — `day` (any time.time() of that day) supplies the date."""
+    try:
+        lines = Path(path).read_text(encoding="utf-8").split(chr(10))
+    except (OSError, ValueError):
+        return None
+    start = next((index + 1 for index, line in enumerate(lines) if line.startswith(_LOG_RULE)), len(lines))
+    date = time.localtime(day)
+    entries: list[list] = []
+    for line in lines[start:]:
+        if _CLOCK.match(line[:8]) and line[8:10] == "  ":
+            hours, minutes, seconds = (int(part) for part in line[:8].split(":"))
+            at = time.mktime((date.tm_year, date.tm_mon, date.tm_mday, hours, minutes, seconds, 0, 0, -1))
+            entries.append([line[10:17].strip() or "info", line[_TEXT_COLUMN:], at])
+        elif entries and line.startswith(" " * _TEXT_COLUMN):
+            entries[-1][1] += chr(10) + line[_TEXT_COLUMN:]
+    return [(level, text, at) for level, text, at in entries]
+
+
+def _remove_log(path: str) -> None:
+    """Deletes a session log — only one of ours (inside a "sessions" folder)."""
+    if path and Path(path).parent.name == LOG_FOLDER_NAME:
+        try:
+            Path(path).unlink()
         except OSError:
             pass

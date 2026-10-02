@@ -88,6 +88,13 @@ class LogView(qt.QtWidgets.QPlainTextEdit):
         self._entries = []
         self.clear()
 
+    def set_wrap(self, wrap: bool) -> None:
+        """Long lines continue on the next line (True) or run off to the right
+        behind a horizontal scroll bar (False, the start state)."""
+        self.setLineWrapMode(qt.QtWidgets.QPlainTextEdit.LineWrapMode.WidgetWidth if wrap
+                             else qt.QtWidgets.QPlainTextEdit.LineWrapMode.NoWrap)
+        self.setWordWrapMode(qt.QtGui.QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
+
     def plain_text(self) -> str:
         """Everything shown, as text (for the clipboard)."""
         return self.toPlainText()

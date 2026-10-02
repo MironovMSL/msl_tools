@@ -42,6 +42,10 @@ RELOAD_CODE = "reload_code"       # -> {"modules": how many msl_tools modules we
 PLUGIN_STATE = "plugin_state"     # {"names": [...]} -> {"loaded": [those of them that are loaded]}
 LOAD_PLUGINS = "load_plugins"     # {"names": [...]} -> {"loaded": [...], "failed": {name: why}}
 SET_LOG_LEVEL = "set_log_level"   # {"all": bool}: also send plain messages, not only warnings / errors
+# Closes Maya. {"save": true} saves the scene first; otherwise a scene with unsaved changes makes
+# Maya refuse (the reply's error holds QUIT_UNSAVED) unless {"discard": true} says they may go.
+QUIT = "quit_maya"                # {"save": bool, "discard": bool} -> {"quitting": true}
+QUIT_UNSAVED = "the scene has unsaved changes now - nothing was closed"
 # The one request that runs code. Maya refuses it unless it was started with the console
 # allowed (MSL_GATE_CONSOLE=1 - Maya Gate sets it for the Dev environment only).
 RUN_PYTHON = "run_python"         # {"code": str} -> {"output": str, "result": str, "traceback": str}

@@ -285,6 +285,22 @@ class HubLink(QtCore.QObject):
         QtCore.QTimer.singleShot(300, _restart_on_fresh_code)
         return {"modules": len(removed), "menu": menu}
 
+    def _handle_quit(self, data: dict) -> dict:
+        """Closes this Maya - after the reply went out. {"save": True} saves
+        the scene first (a failed save closes nothing); otherwise a scene with
+        unsaved changes refuses, unless {"discard": True} says they may go:
+        the hub asked its user with what it knew a moment ago, Maya checks
+        what is true now."""
+        import maya.cmds as cmds
+        if data.get("save"):
+            if not self._scene():
+                raise RuntimeError("the scene has no file yet - save it in Maya first")
+            cmds.file(save=True)
+        elif self._modified() and not data.get("discard"):
+            raise RuntimeError(protocol.QUIT_UNSAVED)
+        QtCore.QTimer.singleShot(300, _quit_maya)
+        return {"quitting": True}
+
     def _handle_plugin_state(self, data: dict) -> dict:
         import maya.cmds as cmds
         loaded = []
@@ -375,6 +391,7 @@ class HubLink(QtCore.QObject):
         protocol.PLUGIN_STATE: _handle_plugin_state,
         protocol.LOAD_PLUGINS: _handle_load_plugins,
         protocol.SET_LOG_LEVEL: _handle_set_log_level,
+        protocol.QUIT: _handle_quit,
         protocol.RUN_PYTHON: _handle_run_python,
     }
 
@@ -477,6 +494,11 @@ def start() -> bool:
     link = HubLink(int(port), token, parent=application)
     link.open()
     return True
+
+
+def _quit_maya() -> None:
+    import maya.cmds as cmds
+    cmds.quit(force=True)  # unsaved changes were dealt with by the request's handler
 
 
 def _restart_on_fresh_code() -> None:

@@ -5,7 +5,9 @@ import msl_tools.msl.ui.qt_bindings as qt
 from msl_tools.msl.core.resources import Resources
 from msl_tools.msl.core.fs.maya_paths import MayaPaths
 from msl_tools.msl.ui.process_launcher.process_launcher import ProcessLauncher
+from msl_tools.msl.ui.theme.qss import make_rounded_popup
 from msl_tools.msl.ui.widgets.atoms.surfaces import StableScrollArea
+from msl_tools.msl.ui.widgets.windows.confirm_dialog import ConfirmDialog
 from msl_tools.msl.ui.widgets.atoms.tabs import BaseTabWidget
 from msl_tools.msl.tools.desktop.maya_gate.toolbar import MayaGateToolbar
 from msl_tools.msl.tools.desktop.maya_gate.version_row import MayaVersionRow
@@ -91,6 +93,7 @@ class MayaGatePage(qt.QtWidgets.QWidget):
     # Environments whose Mayas accept code from the Sessions tab's console. The launched Maya
     # is told with MSL_GATE_CONSOLE=1 and enforces it itself (tools/maya/hub_link.py).
     CONSOLE_ENVIRONMENTS = ("Dev",)
+    RECENT_SCENES_SHOWN = 8   # in a version's right-click menu
     CONSOLE_VARIABLE = "MSL_GATE_CONSOLE"
     TAB_KEYS = ("variables", "user_setup", "boost", "sessions")  # tab order; stored by key, not index
     SESSIONS_TAB_TITLE = "Sessions"
@@ -153,7 +156,8 @@ class MayaGatePage(qt.QtWidgets.QWidget):
                                    blocked_reason_for=lambda: BoostStore.blocked_reason(self._launch_variables()))
         self._tabs.addTab(self._indented(self._boost_tab), "Boost start")
         self._link = MayaLinkServer.instance()  # the hub's one server; run_hub starts it listening
-        self._sessions_tab = SessionsTab(self._link, self._session_history)
+        self._sessions_tab = SessionsTab(self._link, self._session_history,
+                                         launch=self._launch_scene, settings=self._ui)
         self._tabs.addTab(self._indented(self._sessions_tab), self.SESSIONS_TAB_TITLE)
         self._link.sessions_changed.connect(self._update_sessions_tab_title)
         self._link.attention_changed.connect(self._update_sessions_tab_title)
@@ -211,6 +215,8 @@ class MayaGatePage(qt.QtWidgets.QWidget):
         self._toolbar.environment_changed.connect(self._on_environment_changed)
         self._tabs.currentChanged.connect(lambda index: self._save_ui("tab", self.TAB_KEYS[index]))
         self._version_row.clicked.connect(self._launch)
+        self._version_row.scene_dropped.connect(lambda year, path: self._launch(year, scene=path))
+        self._version_row.menu_requested.connect(self._on_version_menu)
 
         self._adder.known_variable_added.connect(self._maya_group.add_variable)
         self._adder.custom_variable_added.connect(self._custom_group.add_variable)
@@ -305,45 +311,118 @@ class MayaGatePage(qt.QtWidgets.QWidget):
         """Opens the Sessions tab (the header's link indicator leads here)."""
         self._tabs.setCurrentIndex(self._tabs.indexOf(self._sessions_tab.parentWidget()))
 
-    def _launch_variables(self) -> dict[str, str]:
-        """The current environment's variables as a launch passes them
-        (Maya + custom, empty ones left out)."""
+    def _launch_variables(self, environment: str | None = None) -> dict[str, str]:
+        """An environment's variables as a launch passes them (Maya + custom,
+        empty ones left out); the current environment unless one is named."""
+        environment = environment or self._environment
         variables: dict[str, str] = {}
-        variables.update(dict(self._config[self.MAYA_KEY][self._environment]))
-        variables.update(dict(self._config[self.CUSTOM_KEY][self._environment]))
+        variables.update(dict(self._config[self.MAYA_KEY][environment]))
+        variables.update(dict(self._config[self.CUSTOM_KEY][environment]))
         # Empty = not passed: a flag switched off, a choice not made, a blank field.
         return launch_values(variables)
 
-    def _launch(self, year: str) -> None:
-        environment_vars = self._launch_variables()
+    def _boost_settings(self, environment: str) -> dict:
+        """{"enabled", "skip"} of `environment`'s boost start (as BoostTab stores them)."""
+        try:
+            node = dict(self._config[self.BOOST_KEY][environment])
+        except (KeyError, TypeError):
+            node = {}
+        return {"enabled": bool(node.get("enabled", False)), "skip": [str(name) for name in node.get("skip", [])]}
+
+    def _launch(self, year: str, environment: str | None = None, scene: str = "") -> bool:
+        """Starts Maya `year` in `environment` (the current one unless named —
+        a restart or a reopened session names its own), opening `scene` if given."""
+        environment = environment if environment in self.ENVIRONMENTS else self._environment
+        environment_vars = self._launch_variables(environment)
+        boost = self._boost_settings(environment)
         # Boost: only when its loader can run and has a list to work from - otherwise Maya,
         # started without auto-load, would save an (almost) empty auto-load list of its own.
-        boosted = (self._boost_tab.is_enabled() and not BoostStore.blocked_reason(environment_vars)
+        boosted = (boost["enabled"] and not BoostStore.blocked_reason(environment_vars)
                    and bool(self._boost_store.autoload_plugins(year, environment_vars.get("MAYA_APP_DIR") or None)))
         set_here = list(environment_vars)
         if "PYTHONPATH" not in set_here:
             set_here.append("PYTHONPATH")  # always extended by the launch (msl_tools, userSetup)
-        environment_vars[self.ENVIRONMENT_VARIABLE] = self._environment
+        environment_vars[self.ENVIRONMENT_VARIABLE] = environment
         environment_vars[self.VARIABLES_VARIABLE] = os.pathsep.join(set_here)
-        if self._environment in self.CONSOLE_ENVIRONMENTS:
+        if environment in self.CONSOLE_ENVIRONMENTS:
             environment_vars[self.CONSOLE_VARIABLE] = "1"
 
-        self._user_setup_tab.save()  # launch with what's on screen, not the last autosave
-        environment_vars = self._user_setup_store.launch_environment(self._environment, environment_vars)
+        if environment == self._environment:
+            self._user_setup_tab.save()  # launch with what's on screen, not the last autosave
+        environment_vars = self._user_setup_store.launch_environment(environment, environment_vars)
         arguments: list[str] = []
         # The loader goes along in every launch: it also measures the startup time.
         environment_vars = self._boost_store.attach_loader(environment_vars)
         if boosted:
             environment_vars, arguments = self._boost_store.prepare_launch(
-                self._environment, year, self._boost_tab.skipped(), environment_vars)
+                environment, year, boost["skip"], environment_vars)
+        if scene:
+            arguments = arguments + ["-file", scene]
         self._link.ensure_listening()  # normally already is (run_hub); a Maya can't join a hub that isn't
         environment_vars.update(self._link.launch_variables())
         environment_vars = self._boost_store.launch_log().start(
-            year, self._environment, boosted, len(self._boost_tab.skipped()) if boosted else 0, environment_vars)
-        self._logger.info(f'Launching Maya {year}, environment "{self._environment}"'
-                          + (" (boost start)" if boosted else ""))
-        if not ProcessLauncher.launch_maya(version=year, environment=environment_vars, arguments=arguments):
-            self._logger.warning(f'Maya {year} did not start (environment "{self._environment}")')
+            year, environment, boosted, len(boost["skip"]) if boosted else 0, environment_vars)
+        self._logger.info(f'Launching Maya {year}, environment "{environment}"'
+                          + (" (boost start)" if boosted else "") + (f", scene {scene}" if scene else ""))
+        started = ProcessLauncher.launch_maya(version=year, environment=environment_vars, arguments=arguments)
+        if not started:
+            self._logger.warning(f'Maya {year} did not start (environment "{environment}")')
+        return started
+
+    # --- launching with a scene -------------------------------------------------------
+
+    def _launch_scene(self, year: str, environment: str | None, scene: str) -> str:
+        """Starts Maya `year` with `scene` ("" = no scene) after checking that
+        both are still there. Returns "" or what went wrong, for the caller to show."""
+        if str(year) not in {str(version) for version in MayaPaths.get_available_installs()}:
+            return f"Maya {year} isn’t installed here any more."
+        if scene and not os.path.isfile(scene):
+            return f"That scene isn’t there any more: {scene}"
+        if not self._launch(str(year), environment=environment, scene=scene):
+            return f"Maya {year} didn’t start."
+        return ""
+
+    def _recent_scenes(self) -> list[str]:
+        """Scenes of the running and the recent sessions, newest first, each once."""
+        scenes = [session.scene for session in reversed(self._link.sessions())]
+        scenes += [record.scene for record in self._session_history.records()]
+        unique: list[str] = []
+        for scene in scenes:
+            if scene and scene not in unique:
+                unique.append(scene)
+        return unique[:self.RECENT_SCENES_SHOWN]
+
+    def _on_version_menu(self, year: str, position) -> None:
+        """Right click on a version: launch it, or open a scene in it."""
+        menu = make_rounded_popup(qt.QtWidgets.QMenu(self))
+        menu.setAttribute(qt.QtCore.Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        menu.setToolTipsVisible(True)
+        menu.addAction(f"Launch Maya {year}").triggered.connect(lambda: self._launch(year))
+        menu.addAction("Open a scene…").triggered.connect(lambda: self._browse_scene(year))
+        recent = self._recent_scenes()
+        if recent:
+            menu.addSeparator()
+            header = menu.addAction(f"Recent scenes — open in Maya {year}, {self._environment}")
+            header.setEnabled(False)
+            for scene in recent:
+                action = menu.addAction(os.path.basename(scene))
+                action.setToolTip(scene)
+                action.triggered.connect(lambda _checked=False, scene=scene: self._open_scene(year, scene))
+        self._version_menu = menu  # for tests; the menu deletes itself on close
+        menu.popup(position)
+
+    def _open_scene(self, year: str, scene: str) -> None:
+        error = self._launch_scene(year, None, scene)
+        if error:
+            ConfirmDialog.ask(self, "Scene not opened", error, choices=[("ok", "OK")], kind="warning")
+
+    def _browse_scene(self, year: str) -> None:
+        recent = self._recent_scenes()
+        path, _filter = qt.QtWidgets.QFileDialog.getOpenFileName(
+            self, f"Open a scene in Maya {year}", os.path.dirname(recent[0]) if recent else "",
+            "Maya scenes (*.ma *.mb)")
+        if path:
+            self._open_scene(year, path)
 
 
 if __name__ == "__main__":

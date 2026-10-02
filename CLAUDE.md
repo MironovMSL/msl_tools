@@ -307,7 +307,8 @@ NEVER runs inside Maya; it's a pure standalone desktop app. Future
   scrolled content can't be cut off by narrowing the window.
 - `msl/tools/desktop/registry.py` — `TOOLS: list[ToolDescriptor]`, one import
   + one line per tool. The hub iterates this and knows nothing about any
-  individual tool.
+  individual tool. The stub tools are listed only in a git checkout (a
+  `.git` folder at the root): an installed copy shows real tools only.
 - `msl/run_hub.py` — the only place a `QApplication` gets created
   for the hub, via `QtApplicationContext`. It passes the `brand/hub` icon to HubWindow
   (header + OS window icon: FramelessWindowMixin sets both) and gives the
@@ -661,15 +662,55 @@ What changed vs. the original (all deliberate, not oversights):
       `configs/desktop/maya_gate/sessions/history.json` — version,
       environment, scene, unsaved flag, start / end, clean or not, the saved
       log's path. Recorded on session_ended for reasons quit and "" only: a
-      link restart and the hub's own shutdown are NOT ends. While nothing
-      is running (and no "ended unexpectedly" line waits) the list shows
-      "Recent sessions" (`_HistoryRow`: hollow dot = closed, red = ended
-      unexpectedly + "Log file"; "Clear" forgets them, log files stay)
-      instead of an empty box. The file is first read when the tab is shown.
+      link restart and the hub's own shutdown are NOT ends. What a session
+      reported is saved with it (any end with entries, every unclean end):
+      `write_log()` / `read_log()` in the same module are the two ends of
+      that text format (`logs/desktop/maya_gate/sessions/`); a log leaves
+      with its record (history overflow, "Clear").
+      On the tab "Recent sessions" sits under the live rows: open while
+      nothing runs, folded while a Maya does — a click on the caption
+      (`QPushButton#sessionsHistoryToggle`) flips it until that situation
+      changes. `_HistoryRow`: hollow dot = closed, red = ended unexpectedly;
+      a click shows its saved log in the log panel (`_history_selected`;
+      Clear is off there), "Log file" shows the file, "Reopen" starts that
+      Maya again with the scene. A session still waiting as an "ended
+      unexpectedly" line isn't listed twice. The history file is first read
+      when the tab is shown.
+    - Close / Restart (a row's "Close" -> menu): the request `quit_maya`
+      {"save", "discard"}. The hub asks first (ConfirmDialog: with unsaved
+      changes "Save and close" / "Close without saving" / Cancel — no save
+      offered for an untitled scene, and that dialog is "danger"); MAYA
+      checks again — without save / discard a modified scene refuses
+      (`protocol.QUIT_UNSAVED`), so a change made after the question can't
+      be lost. Maya replies, then quits 300 ms later (`cmds.quit(force=True)`).
+      Restart: once the session ended cleanly, `_start_when_gone` waits
+      until the PROCESS is gone (`core/environment/processes.py:
+      is_process_running` — never `os.kill(pid, 0)` on Windows, it
+      terminates; Maya still writes its preferences for ~0.3 s after its
+      goodbye), then starts the same version + environment + scene.
+    - The tab launches nothing itself: the page hands it
+      `launch(year, environment, scene) -> "" | error`
+      (`MayaGatePage._launch_scene`: version still installed, scene still
+      there) and `settings` (the `_ui` node: "log_wrap").
+      `MayaGatePage._launch(year, environment=None, scene="")` takes the
+      named environment's variables, userSetup and boost settings — not
+      the toolbar's — and passes the scene as `-file <path>`.
+    - Launch with a scene: drop a .ma / .mb on a version tile
+      (`ApplicationButton.set_drop_suffixes()` -> `file_dropped`), or right
+      click it (`menu_requested` -> the page's menu: Launch, "Open a
+      scene…", the scenes of running + recent sessions) — in the CURRENT
+      environment. Measured with real Maya 2025, boost on: the scene opens,
+      unmodified. (A hand-written minimal .ma shows as modified right after
+      opening — that is Maya filling in what the file lacks, not the launch.)
+    - Log lines wrap by default ("Wrap" switch, `LogView.set_wrap()`,
+      remembered in `_ui.log_wrap`).
     - Selection: a Maya that left with an EMPTY log holds the selection only
       RELOAD_GRACE_S (5 s — a "Reload code" comes back sooner) and the log
       title stays blank; one with a log keeps it GONE_GRACE_S, titled
       "· Maya 2025 · Dev · closed".
+    Verified with real Maya 2023 + 2025 too: `quit_maya` refused on an
+    unsaved scene, then save + quit (the file grew, the session ended
+    clean and unmodified); 2025 also with discard.
     Verified with real Maya 2023 + 2025: quit -> clean, killed process ->
     not clean, busy on and off. Tests that read raw requests from a fake
     Maya stop the ping timer first (`server._ping_timer.stop()`).
@@ -752,7 +793,7 @@ maya_gate/
 
 New generic pieces added to `ui/widgets/` along the way:
 ```
-atoms/buttons/application_button.py          ApplicationButton (was ApplicationButtonWdg; set_badge(text): a small pill on the icon's corner)
+atoms/buttons/application_button.py          ApplicationButton (was ApplicationButtonWdg; set_badge(text): a small pill on the icon's corner; set_drop_suffixes() -> file_dropped; right click -> menu_requested)
 atoms/header/link_status_button.py        LinkStatusButton (header status dot + count: off / on / attention with a pulse; shows what it is told — set_state())
 atoms/buttons/icon_push_button.py         IconPushButton (framed button with a QSS-tinted one-color icon)
 atoms/buttons/icon_tile_button.py         IconTileButton (QToolButton tile: QSS-tinted icon over a short label; icon-less tiles keep the icon row empty so a column stays aligned)
@@ -966,7 +1007,8 @@ disk. NOT yet tested: against a real Maya installation (actual launch via
 - Real icon assets for add/delete/copy/drag (currently Unicode placeholders).
 - The Maya connection (sessions, requests, log stream, console) is built
   on our own link, not `cmds.commandPort`. Not built: "open a scene" from
-  the hub (it can discard unsaved work — needs a confirmation), Mayas not
+  the hub INTO A RUNNING Maya (it can discard unsaved work — needs a
+  confirmation; starting a new Maya with a scene is built), Mayas not
   started from the hub joining it, Maya 2020 (Python 2).
 - Boost start: built and verified against real Maya 2020 / 2025 / 2026 on
   COPIES of the preferences (MAYA_APP_DIR in %TEMP%); not yet used on the
