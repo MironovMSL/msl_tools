@@ -10,10 +10,12 @@ import tempfile
 from pathlib import Path
 
 import msl_tools.msl.ui.qt_bindings as qt
-from msl_tools.msl.core.media import (Job, MediaError, Overlays, adjust, compare, convert, default_output,
-                                      extract_audio, frame, gif, join, loop, remove_audio, replace_audio,
-                                      sequence_to_video, shrink, stamp, to_frames, trim)
+from msl_tools.msl.core.media import (Job, MediaError, Overlays, adjust, adjust_audio, chain, compare, contact_sheet,
+                                      convert, convert_sequence, default_output, extract_audio, fit, frame, gif,
+                                      gpu_encoding_works, join, loop, remove_audio, replace_audio, sequence_to_video,
+                                      shrink, stamp, to_frames, trim, trim_pieces)
 from msl_tools.msl.core.media.recipes import FORMATS, GAPS_ERROR, GAPS_HOLD, IMAGE_FORMATS, SOUND_FORMATS
+from msl_tools.msl.core.media.run import clean_up, quality_crops
 from msl_tools.msl.core.media.thumbnail import frames_at
 from msl_tools.msl.core.resources import Resources
 from msl_tools.msl.tools.desktop.media.ffmpeg_bar import link_button
@@ -25,6 +27,7 @@ from msl_tools.msl.ui.widgets.atoms.checkboxes.base_checkbox import BaseCheckbox
 from msl_tools.msl.ui.widgets.atoms.comboboxes.base_combo_box import BaseComboBox
 from msl_tools.msl.ui.widgets.atoms.icons.tinted_icon import TintedIcon
 from msl_tools.msl.ui.widgets.compositions.chip_bar import ChipBar
+from msl_tools.msl.ui.widgets.compositions.crop_picker import CropPicker
 from msl_tools.msl.ui.widgets.atoms.segmented.segmented_control import SegmentedControl
 from msl_tools.msl.ui.widgets.compositions.range_strip import RangeStrip
 from msl_tools.msl.ui.workers.result_worker import ResultWorker
@@ -170,7 +173,8 @@ class OptionPanel(qt.QtWidgets.QFrame):
         line.setSpacing(8)
         stretches = False
         for widget in widgets:
-            grows = (isinstance(widget, (qt.QtWidgets.QLineEdit, RangeStrip, ChipBar)) and widget.maximumWidth() > 1000)                 or (isinstance(widget, qt.QtWidgets.QLabel) and widget.wordWrap())
+            grows = (isinstance(widget, (qt.QtWidgets.QLineEdit, RangeStrip, ChipBar, CropPicker))
+                     and widget.maximumWidth() > 1000)                 or (isinstance(widget, qt.QtWidgets.QLabel) and widget.wordWrap())
             stretches = stretches or grows
             line.addWidget(widget, 1 if grows else 0)
         if hint:
@@ -262,8 +266,21 @@ class OptionPanel(qt.QtWidgets.QFrame):
     def job(self, source: MediaSource, output: Path) -> Job:
         raise NotImplementedError
 
+    def jobs(self, source: MediaSource, output: Path) -> list:
+        """The jobs for ONE source — one, unless the action makes several
+        results of it (Trim's separate pieces: each gets a name of its own
+        derived from `output`)."""
+        return [self.job(source, output)]
+
     def combined_job(self, sources: list, output: Path) -> Job:
         raise NotImplementedError
+
+    def bind(self, panels: dict) -> None:
+        """Called once by the page with every panel by KEY — for an action
+        that uses the settings of others ("Several at once")."""
+
+    def refresh(self) -> None:
+        """Called when this action is picked: bring anything that depends on other panels up to date."""
 
     def suffix(self, source: MediaSource) -> str:
         """The file suffix of a result."""
@@ -515,6 +532,7 @@ class ShrinkPanel(OptionPanel):
     HEIGHTS = {"Keep": 0, "1080p": 1080, "720p": 720, "480p": 480}
     BY_QUALITY, BY_SIZE = "By quality", "Fit into a size"
     QUALITIES = {"Good": "good", "Small": "small", "Smallest": "smallest"}
+    CODECS = {"H.264": "h264", "H.265": "h265"}
     PRESETS = {
         "Messenger · 10 MB": {"height": "720p", "mode": BY_SIZE, "megabytes": "10"},
         "Mail · 25 MB": {"height": "1080p", "mode": BY_SIZE, "megabytes": "25"},
@@ -537,12 +555,33 @@ class ShrinkPanel(OptionPanel):
         self._megabytes_note = qt.QtWidgets.QLabel("MB")
         self._megabytes_note.setObjectName("mediaHint")
         self._sound = self._check("Keep the sound", True)
+        self._codec = self._switch(self.CODECS, "H.264",
+                                   "H.264: plays everywhere." + NL + "H.265: about a third smaller at the same "
+                                   "quality — but old players and some chats don’t open it.")
+        self._gpu = self._check("On the graphics card", False,
+                                "Encode on the graphics card: several times faster, a somewhat bigger file "
+                                "for the same look")
+        self._gpu_works = False
+        self._gpu_asked = False
+        self._workers: list = []
+        # Before / after: the middle of the frame at 1:1, as it is and as it will be.
+        self._source: MediaSource | None = None
+        self._look_token = 0
+        self._before, self._after = self._look_picture("as it is"), self._look_picture("as it will be")
+        self._look_timer = qt.QtCore.QTimer(self)
+        self._look_timer.setSingleShot(True)
+        self._look_timer.setInterval(self.LOOK_DELAY_MS)
+        self._look_timer.timeout.connect(self._load_look)
+        self.changed.connect(self._schedule_look)
 
         self._add_row("Frame size", self._height)
         self._add_row("Aim for", self._mode)
         self._quality_row = self._add_row("Quality", self._quality)
         self._size_row = self._add_row("File size", self._megabytes, self._megabytes_note)
+        self._codec_row = self._add_row("Codec", self._codec, self._gpu)
         self._sound_row = self._add_row("Sound", self._sound)
+        self._look_row = self._add_row("Look", self._before, self._after,
+                                       hint="the middle of the frame, pixel for pixel: as it is · as it will be")
         self._mode.current_changed.connect(lambda _option: self._sync())
         self._sync()
 
@@ -550,11 +589,98 @@ class ShrinkPanel(OptionPanel):
         by_size = self._mode.current() == self.BY_SIZE
         self._set_row_visible(self._quality_row, not by_size)
         self._set_row_visible(self._size_row, by_size)
+        self._set_row_visible(self._codec_row, not by_size)  # fitting a size is always H.264 (see core shrink)
+        self._gpu.setVisible(self._gpu_works and not by_size)
 
     accepts = staticmethod(_videos)
 
+    LOOK_SIZE = qt.QtCore.QSize(136, 77)   # two of them side by side: wider ones made the window 626 px at least
+    LOOK_DELAY_MS = 900
+
+    def _look_picture(self, tip: str) -> qt.QtWidgets.QLabel:
+        label = qt.QtWidgets.QLabel()
+        label.setObjectName("mediaThumbnail")
+        label.setFixedSize(self.LOOK_SIZE)
+        label.setAlignment(qt.QtCore.Qt.AlignmentFlag.AlignCenter)
+        label.setToolTip(tip)
+        return label
+
+    def _schedule_look(self) -> None:
+        self._look_token += 1  # a picture on its way is for the old settings
+        self._look_timer.start()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._schedule_look()
+
+    def _load_look(self) -> None:
+        """Encodes a short piece with the settings on screen and shows the same spot before and after."""
+        tools, source = self._tools(), self._source
+        if tools is None or source is None or not self.isVisible():
+            return
+        try:
+            job = self.job(source, Path(tempfile.gettempdir()) / "msl_tools" / "media" / "look" / "look.mp4")
+        except MediaError:
+            return
+        token = self._look_token
+        folder = Path(tempfile.gettempdir()) / "msl_tools" / "media" / "look"
+        for label in (self._before, self._after):
+            label.setText("…")
+
+        def work():
+            try:
+                return quality_crops(tools, job, source.info, folder, f"look_{id(self)}",
+                                     (self.LOOK_SIZE.width(), self.LOOK_SIZE.height()))
+            finally:
+                clean_up(job, remove_output=False)
+
+        def done(paths) -> None:
+            if token != self._look_token:
+                return
+            for label, path in zip((self._before, self._after), paths):
+                label.setText("")
+                label.setPixmap(qt.QtGui.QPixmap(str(path)))
+
+        def failed(_error) -> None:
+            if token == self._look_token:
+                for label in (self._before, self._after):
+                    label.setText("—")
+
+        worker = ResultWorker(work, parent=self)
+        self._workers.append(worker)
+        worker.done.connect(done)
+        worker.failed.connect(failed)
+        worker.finished.connect(lambda: self._workers.remove(worker) if worker in self._workers else None)
+        worker.start()
+
     def set_sources(self, sources: list) -> None:
+        self._source = sources[0]
+        self._schedule_look()
         self._set_row_visible(self._sound_row, any(source.info.has_audio for source in sources))
+        tools = self._tools()
+        if tools is not None and not self._gpu_asked:
+            self._gpu_asked = True  # asked once, by encoding a few frames - on a worker
+
+            def done(works) -> None:
+                self._gpu_works = bool(works)
+                self._sync()
+
+            worker = ResultWorker(lambda: gpu_encoding_works(tools), parent=self)
+            self._workers.append(worker)
+            worker.done.connect(done)
+            worker.finished.connect(lambda: self._workers.remove(worker) if worker in self._workers else None)
+            worker.start()
+
+    def chain_settings(self) -> dict:
+        """What "Several at once" takes from here: the frame size, the quality, the codec."""
+        return {"max_height": self.HEIGHTS[self._height.current()], "quality": self.QUALITIES[self._quality.current()],
+                "keep_audio": self._sound.isChecked(), "codec": self.CODECS[self._codec.current()],
+                "gpu": self._gpu.isChecked() and self._gpu_works}
+
+    def summary(self) -> str:
+        height = self._height.current()
+        return (f"{'the frame as it is' if height == 'Keep' else height}  ·  {self._quality.current().lower()} quality"
+                f"  ·  {self._codec.current()}")
 
     def job(self, source: MediaSource, output: Path) -> Job:
         target = None
@@ -567,11 +693,12 @@ class ShrinkPanel(OptionPanel):
                 raise MediaError("The size must be more than zero.")
         return shrink(source.info, output, max_height=self.HEIGHTS[self._height.current()],
                       quality=self.QUALITIES[self._quality.current()], target_mb=target,
-                      keep_audio=self._sound.isChecked())
+                      keep_audio=self._sound.isChecked(), codec=self.CODECS[self._codec.current()],
+                      gpu=self._gpu.isChecked() and self._gpu_works)
 
     def settings(self) -> dict:
         return {"height": self._height.current(), "mode": self._mode.current(), "quality": self._quality.current(),
-                "megabytes": self._megabytes.text()}
+                "megabytes": self._megabytes.text(), "codec": self._codec.current(), "gpu": self._gpu.isChecked()}
 
     def apply_settings(self, settings: dict) -> None:
         self._height.set_current(str(settings.get("height", "")), animate=False)
@@ -579,6 +706,8 @@ class ShrinkPanel(OptionPanel):
         self._quality.set_current(str(settings.get("quality", "")), animate=False)
         if str(settings.get("megabytes", "")).strip():
             self._megabytes.setText(str(settings["megabytes"]))
+        self._codec.set_current(str(settings.get("codec", "")), animate=False)
+        self._gpu.set_checked_immediate(bool(settings.get("gpu", False)))
         self._sync()
 
 
@@ -611,6 +740,7 @@ class TrimPanel(OptionPanel):
     TIP = "Keep one piece of the video"
     PREVIEW_TEXT = "Play the piece"
     PREVIEW_TIP = "Play the piece as it will be cut (its first minute)"
+    ONE, SEPARATE = "One video", "Separate files"
     PREVIEW_SECONDS = 60.0
     PREVIEW_FROM_START = True
     COMPARES_SIZE = False
@@ -652,6 +782,16 @@ class TrimPanel(OptionPanel):
         self._preview_timer.setInterval(self.PREVIEW_DELAY_MS)
         self._preview_timer.timeout.connect(self._load_previews)
 
+        # Several pieces of one video: each is added from what is picked above.
+        self._pieces: list[tuple] = []
+        self._add_piece = link_button("+ Add this piece", "Keep the piece picked above and pick another — "
+                                                         "all of them are cut out in one go")
+        self._piece_chips = ChipBar()
+        self._piece_chips.clicked.connect(self._on_piece_clicked)
+        self._together = self._switch([self.ONE, self.SEPARATE], self.ONE,
+                                      "One video: the pieces one after another in one file." + NL
+                                      + "Separate files: a file for each piece.")
+        self._add_piece.clicked.connect(self._on_add_piece)
         to_caption = qt.QtWidgets.QLabel("to")
         to_caption.setObjectName("mediaCaption")
         self._strip_row = self._add_row("Piece", self._strip)
@@ -659,6 +799,9 @@ class TrimPanel(OptionPanel):
         self._add_row("", self._length_label)
         self._add_row("Frames", self._first_preview, self._last_preview, hint="the first and the last frame of the piece")
         self._add_row("Cut", self._mode)
+        self._add_row("More pieces", self._add_piece, self._piece_chips)
+        self._together_row = self._add_row("Make", self._together)
+        self._set_row_visible(self._together_row, False)
         self._strip.range_changed.connect(self._on_strip_moved)
 
     def _preview(self) -> qt.QtWidgets.QLabel:
@@ -705,6 +848,8 @@ class TrimPanel(OptionPanel):
         # With several videos the same times are cut out of each; the strip shows the first.
         self._source, self._duration = source, min(other.info.duration for other in sources)
         self._fps = source.info.fps or 24.0
+        self._pieces = []  # they belonged to the previous video
+        self._show_pieces()
         self._strip.set_step(1.0 / max(self._duration * self._fps, 1.0))
         self._syncing = True
         self._start.setText("0:00")
@@ -816,19 +961,72 @@ class TrimPanel(OptionPanel):
 
     # --- the job -------------------------------------------------------------------------------
 
-    def job(self, source: MediaSource, output: Path) -> Job:
+    # --- several pieces ------------------------------------------------------------------------
+
+    BUTTON = property(lambda self: f"Cut {len(self._pieces)} pieces" if len(self._pieces) > 1 else "Cut this piece")
+
+    def _on_add_piece(self) -> None:
+        start, end = self._times()
+        if start is None or end is None or end <= start:
+            return
+        piece = (round(start, 3), round(min(end, self._duration or end), 3))
+        if piece not in self._pieces:
+            self._pieces.append(piece)
+            self._show_pieces()
+            self.changed.emit()
+
+    def _on_piece_clicked(self, key: str) -> None:
+        """A click on a piece's chip takes it out again."""
+        self._pieces = [piece for index, piece in enumerate(self._pieces) if str(index) != key]
+        self._show_pieces()
+        self.changed.emit()
+
+    def _show_pieces(self) -> None:
+        self._piece_chips.set_chips([(str(index), f"{format_time(start)} – {format_time(end)}  ✕",
+                                      "Click to take this piece out") for index, (start, end) in enumerate(self._pieces)])
+        self._set_row_visible(self._together_row, len(self._pieces) > 1)
+
+    def summary(self) -> str:
+        """The piece that is picked, in words (for "Several at once")."""
+        start, end = self._times()
+        if start is None or end is None or end <= start:
+            return "no piece picked"
+        return f"{format_time(start)} – {format_time(min(end, self._duration or end))}"
+
+    def piece(self) -> tuple:
+        """(start, end) of the piece that is picked; raises MediaError if the times aren't usable."""
         start, end = self._times()
         if start is None or end is None:
             raise MediaError("Type the times as seconds or minutes:seconds, for example 0:12.5.")
+        return start, end
+
+    # --- the job -------------------------------------------------------------------------------
+
+    def job(self, source: MediaSource, output: Path) -> Job:
+        start, end = self.piece()
         if start >= (source.info.duration or start + 1):
             raise MediaError(f"The video is only {format_time(source.info.duration)} long.")
         return trim(source.info, output, start, end, exact=self._mode.current() == self.EXACT)
 
+    def jobs(self, source: MediaSource, output: Path) -> list:
+        """One piece: the one picked. Several (added with "+ Add this piece"):
+        all of them as one video, or a file each (`<name>_1`, `<name>_2`, ...)."""
+        if not self._pieces:
+            return [self.job(source, output)]
+        exact = self._mode.current() == self.EXACT
+        if len(self._pieces) == 1:
+            return [trim(source.info, output, *self._pieces[0], exact=exact)]
+        if self._together.current() == self.ONE:
+            return [trim_pieces(source.info, output.with_suffix(".mp4"), self._pieces)]
+        return [trim(source.info, output.with_name(f"{output.stem}_{index}{output.suffix}"), start, end, exact=exact)
+                for index, (start, end) in enumerate(self._pieces, 1)]
+
     def settings(self) -> dict:
-        return {"mode": self._mode.current()}
+        return {"mode": self._mode.current(), "together": self._together.current()}
 
     def apply_settings(self, settings: dict) -> None:
         self._mode.set_current(str(settings.get("mode", "")), animate=False)
+        self._together.set_current(str(settings.get("together", "")), animate=False)
 
 
 class StampPanel(_OverlayRows, OptionPanel):
@@ -936,22 +1134,41 @@ class SoundPanel(OptionPanel):
     KEY, TITLE = "sound", "Sound"
     ICON, GROUP = "volume", "change"
     COMPARES_SIZE = False
-    TIP = "Take the sound out, remove it, or replace it"
-    EXTRACT, REMOVE, REPLACE = "Take it out", "Remove", "Replace"
+    TIP = "Take the sound out, remove it, replace it — or make it louder, even, fade it"
+    EXTRACT, REMOVE, REPLACE, CHANGE = "Extract", "Remove", "Replace", "Adjust"
+    MODES_RENAMED = {"Take it out": "Extract"}  # as versions up to 0.1.6 saved it
     SOUND_KINDS = {"WAV": "wav", "MP3": "mp3", "M4A": "m4a"}
+    EVEN = "Even out"
+    VOLUMES = {"As it is": 1.0, EVEN: 1.0, "50%": 0.5, "75%": 0.75, "150%": 1.5, "200%": 2.0}
+    FADES = {"None": 0.0, "0.5 s": 0.5, "1 s": 1.0, "2 s": 2.0, "3 s": 3.0}
 
     def __init__(self, tools=None, parent=None):
         super().__init__(tools, parent)
-        self._mode = self._switch([self.EXTRACT, self.REMOVE, self.REPLACE], self.EXTRACT,
-                                  "Take it out: the sound as a file of its own." + NL
+        self._mode = self._switch([self.EXTRACT, self.REMOVE, self.REPLACE, self.CHANGE], self.EXTRACT,
+                                  "Extract: the sound as a file of its own." + NL
                                   + "Remove: the same video without sound." + NL
-                                  + "Replace: the same video with another sound.")
+                                  + "Replace: the same video with another sound." + NL
+                                  + "Adjust: the same video, its sound louder or quieter, evened out, faded.")
+        self._volume = BaseComboBox(list(self.VOLUMES), "As it is")
+        self._volume.setFixedWidth(96)
+        self._volume.setToolTip("How loud. “Even out” brings the sound to the usual loudness of videos — "
+                                "quiet places up, loud ones down")
+        self._fade_in = BaseComboBox(list(self.FADES), "None")
+        self._fade_out = BaseComboBox(list(self.FADES), "None")
+        for combo, tip in ((self._fade_in, "The sound rises from silence at the start"),
+                           (self._fade_out, "The sound dies away at the end")):
+            combo.setFixedWidth(72)
+            combo.setToolTip(tip)
+        for combo in (self._volume, self._fade_in, self._fade_out):
+            combo.currentIndexChanged.connect(lambda _index: self.changed.emit())
         self._kind = self._switch(self.SOUND_KINDS, "WAV", "WAV: exactly as it is, big. MP3 / M4A: small.")
         self._new, self._new_button = self._file_field("the sound file to use", "The sound to put under the video",
                                                        SOUND_PATTERNS)
         self._add_row("Do", self._mode)
         self._kind_row = self._add_row("As", self._kind)
         self._new_row = self._add_row("New sound", self._new, self._new_button)
+        self._volume_row = self._add_row("Volume", self._volume)
+        self._fade_row = self._add_row("Fade", self._fade_in, self._note("in"), self._fade_out, self._note("out"))
         self._note_row = self._add_row("", hint="The picture is copied as it is — instant, nothing is lost.")
         self._mode.current_changed.connect(lambda _option: self._sync())
         self._sync()
@@ -960,11 +1177,15 @@ class SoundPanel(OptionPanel):
         mode = self._mode.current()
         self._set_row_visible(self._kind_row, mode == self.EXTRACT)
         self._set_row_visible(self._new_row, mode == self.REPLACE)
+        self._set_row_visible(self._volume_row, mode == self.CHANGE)
+        self._set_row_visible(self._fade_row, mode == self.CHANGE)
         self._set_row_visible(self._note_row, mode != self.EXTRACT)
 
     BUTTON = property(lambda self: {self.EXTRACT: "Take the sound out", self.REMOVE: "Remove the sound",
-                                    self.REPLACE: "Replace the sound"}[self._mode.current()])
-    TAG = property(lambda self: {self.EXTRACT: "", self.REMOVE: "_silent", self.REPLACE: "_sound"}[self._mode.current()])
+                                    self.REPLACE: "Replace the sound",
+                                    self.CHANGE: "Change the sound"}[self._mode.current()])
+    TAG = property(lambda self: {self.EXTRACT: "", self.REMOVE: "_silent", self.REPLACE: "_sound",
+                                 self.CHANGE: "_sound"}[self._mode.current()])
 
     accepts = staticmethod(_videos)
 
@@ -987,6 +1208,11 @@ class SoundPanel(OptionPanel):
             return extract_audio(source.info, output, self.SOUND_KINDS[self._kind.current()])
         if mode == self.REMOVE:
             return remove_audio(source.info, output)
+        if mode == self.CHANGE:
+            return adjust_audio(source.info, output, volume=self.VOLUMES[self._volume.currentText()],
+                                even=self._volume.currentText() == self.EVEN,
+                                fade_in=self.FADES[self._fade_in.currentText()],
+                                fade_out=self.FADES[self._fade_out.currentText()])
         sound = self._new.text().strip()
         if not sound:
             raise MediaError("Choose the sound file to put under the video.")
@@ -995,11 +1221,17 @@ class SoundPanel(OptionPanel):
         return replace_audio(source.info, output, sound)
 
     def settings(self) -> dict:
-        return {"mode": self._mode.current(), "kind": self._kind.current()}
+        return {"mode": self._mode.current(), "kind": self._kind.current(), "volume": self._volume.currentText(),
+                "fade_in": self._fade_in.currentText(), "fade_out": self._fade_out.currentText()}
 
     def apply_settings(self, settings: dict) -> None:
-        self._mode.set_current(str(settings.get("mode", "")), animate=False)
+        mode = str(settings.get("mode", ""))
+        self._mode.set_current(self.MODES_RENAMED.get(mode, mode), animate=False)
         self._kind.set_current(str(settings.get("kind", "")), animate=False)
+        for combo, key, known in ((self._volume, "volume", self.VOLUMES), (self._fade_in, "fade_in", self.FADES),
+                                  (self._fade_out, "fade_out", self.FADES)):
+            if str(settings.get(key, "")) in known:
+                combo.setCurrentText(str(settings[key]))
         self._sync()
 
 
@@ -1079,7 +1311,8 @@ class AdjustPanel(OptionPanel):
     TIP = "Turn, crop, change the frame rate or the speed"
     TURNS = {"No": 0, "Right": 90, "Left": -90, "180°": 180}
     TURNS_RENAMED = {"90° right": "Right", "90° left": "Left"}  # as earlier versions saved them
-    SHAPES = {"Keep": "", "16:9": "16:9", "4:3": "4:3", "1:1": "1:1", "9:16": "9:16"}
+    DRAW = "Draw"
+    SHAPES = {"Keep": "", "16:9": "16:9", "4:3": "4:3", "1:1": "1:1", "9:16": "9:16", DRAW: ""}
     RATES = {"Keep": None, "24": 24.0, "25": 25.0, "30": 30.0, "60": 60.0}
     FACTORS = {"0.25×": 0.25, "0.5×": 0.5, "1×": 1.0, "1.5×": 1.5, "2×": 2.0, "4×": 4.0}
     PRESETS = {"Vertical 9:16": {"turn": "No", "shape": "9:16", "rate": "Keep", "factor": "1×"},
@@ -1090,7 +1323,20 @@ class AdjustPanel(OptionPanel):
         super().__init__(tools, parent)
         self._turn = self._switch(self.TURNS, "No", "Turn the picture: a quarter to the right or to the left, "
                                                     "or upside down")
-        self._shape = self._switch(self.SHAPES, "Keep", "Crop the picture around its centre to this shape")
+        self._shape = BaseComboBox(list(self.SHAPES), "Keep")
+        self._shape.setFixedWidth(96)
+        self._shape.setToolTip("Crop the picture around its centre to this shape — or “Draw”: mark what to keep "
+                               "on the picture yourself")
+        self._shape.currentIndexChanged.connect(lambda _index: self.changed.emit())
+        self._source: MediaSource | None = None
+        self._workers: list = []
+        self._token = 0
+        self._crop = CropPicker()
+        self._crop.setToolTip("Drag a corner or an edge to resize what is kept; drag inside to move it")
+        self._crop.set_box(0.1, 0.1, 0.8, 0.8)
+        self._crop_note = self._note("")
+        self._crop.box_changed.connect(lambda *_box: self._on_crop_changed())
+        self._shape.currentIndexChanged.connect(lambda _index: self._sync())
         self._rate = self._switch(self.RATES, "Keep", "Frames per second of the result")
         # six options: a list, not a switch (a switch is as wide as options x its widest label)
         self._factor = BaseComboBox(list(self.FACTORS), "1×")
@@ -1099,27 +1345,80 @@ class AdjustPanel(OptionPanel):
         self._factor.currentIndexChanged.connect(lambda _index: self.changed.emit())
         self._add_row("Turn", self._turn)
         self._add_row("Crop to", self._shape)
+        self._crop_row = self._add_row("", self._crop)
+        self._crop_note_row = self._add_row("", self._crop_note)
         self._add_row("Frame rate", self._rate)
         self._add_row("Speed", self._factor, hint="1× = as it is")
+        self._sync()
 
     accepts = staticmethod(_videos)
 
+    def _drawing(self) -> bool:
+        return self._shape.currentText() == self.DRAW
+
+    def _sync(self) -> None:
+        self._set_row_visible(self._crop_row, self._drawing())
+        self._set_row_visible(self._crop_note_row, self._drawing())
+        if self._drawing():
+            self._on_crop_changed(emit=False)
+            self._load_picture()
+
+    def _on_crop_changed(self, emit: bool = True) -> None:
+        if self._source is not None:
+            _x, _y, width, height = self._crop.box()
+            info = self._source.info
+            self._crop_note.setText(f"keeps {int(info.width * width) // 2 * 2}×{int(info.height * height) // 2 * 2} "
+                                    f"of {info.resolution_text()}")
+        if emit:
+            self.changed.emit()
+
+    def set_sources(self, sources: list) -> None:
+        self._source = sources[0]
+        self._token += 1
+        self._crop.set_picture(None)
+        self._crop.set_box(0.1, 0.1, 0.8, 0.8)
+        if self._drawing():
+            self._on_crop_changed(emit=False)
+            self._load_picture()
+
+    def _load_picture(self) -> None:
+        """A frame from the middle of the video to draw the crop on (made on a worker)."""
+        tools, source = self._tools(), self._source
+        if tools is None or source is None:
+            return
+        token = self._token
+
+        def done(paths) -> None:
+            if token == self._token and paths and paths[0] is not None:
+                self._crop.set_picture(qt.QtGui.QPixmap(str(paths[0])))
+
+        cache = Path(tempfile.gettempdir()) / "msl_tools" / "media" / "trim"
+        worker = ResultWorker(lambda: frames_at(tools, source.info, [source.info.duration / 2], cache,
+                                                f"crop_{id(self)}", 640), parent=self)
+        self._workers.append(worker)
+        worker.done.connect(done)
+        worker.finished.connect(lambda: self._workers.remove(worker) if worker in self._workers else None)
+        worker.start()
+
     def job(self, source: MediaSource, output: Path) -> Job:
         return adjust(source.info, output, rotate=self.TURNS[self._turn.current()],
-                      aspect=self.SHAPES[self._shape.current()], fps=self.RATES[self._rate.current()],
-                      speed_factor=self.FACTORS[self._factor.currentText()])
+                      aspect=self.SHAPES[self._shape.currentText()], fps=self.RATES[self._rate.current()],
+                      speed_factor=self.FACTORS[self._factor.currentText()],
+                      crop_box=self._crop.box() if self._drawing() else None)
 
     def settings(self) -> dict:
-        return {"turn": self._turn.current(), "shape": self._shape.current(), "rate": self._rate.current(),
+        return {"turn": self._turn.current(), "shape": self._shape.currentText(), "rate": self._rate.current(),
                 "factor": self._factor.currentText()}
 
     def apply_settings(self, settings: dict) -> None:
         turn = str(settings.get("turn", ""))
         self._turn.set_current(self.TURNS_RENAMED.get(turn, turn), animate=False)
-        self._shape.set_current(str(settings.get("shape", "")), animate=False)
+        if str(settings.get("shape", "")) in self.SHAPES:
+            self._shape.setCurrentText(str(settings["shape"]))
         self._rate.set_current(str(settings.get("rate", "")), animate=False)
         if str(settings.get("factor", "")) in self.FACTORS:
             self._factor.setCurrentText(str(settings["factor"]))
+        self._sync()
 
 
 class FramesPanel(OptionPanel):
@@ -1298,6 +1597,235 @@ class FramesPanel(OptionPanel):
         self._sync()
 
 
+class FitPanel(OptionPanel):
+    """Video -> the same video in a frame of another shape, nothing cut off:
+    for a place that wants 9:16, 1:1, 16:9."""
+
+    KEY, TITLE, BUTTON = "fit", "Fit a shape", "Fit the video"
+    ICON, GROUP = "frame_fit", "change"
+    TIP = "Put the whole picture into 9:16, 1:1 or 16:9 — with a blurred background or bars"
+    SHAPES = ("9:16", "1:1", "4:5", "16:9")
+    HEIGHTS = {"1080p": 1080, "720p": 720}
+    FILLS = {"Blurred": "blur", "Bars": "bars"}
+    PRESETS = {"Shorts · 9:16": {"shape": "9:16", "height": "1080p", "fill": "Blurred"},
+               "Square": {"shape": "1:1", "height": "1080p", "fill": "Blurred"}}
+
+    def __init__(self, tools=None, parent=None):
+        super().__init__(tools, parent)
+        self._shape = self._switch(self.SHAPES, "9:16", "The shape of the new frame (width : height)")
+        self._height = self._switch(self.HEIGHTS, "1080p", "The height of the new frame")
+        self._fill = self._switch(self.FILLS, "Blurred",
+                                  "Blurred: around the picture, the same picture blown up and blurred." + NL
+                                  + "Bars: black bars.")
+        self._add_row("Shape", self._shape)
+        self._add_row("Height", self._height)
+        self._add_row("Around it", self._fill)
+        self._add_row("", hint="Nothing is cut off. To CUT the picture to a shape instead, use Adjust → Crop to.")
+
+    accepts = staticmethod(_videos)
+    TAG = property(lambda self: "_" + self._shape.current().replace(":", "x"))
+
+    def job(self, source: MediaSource, output: Path) -> Job:
+        return fit(source.info, output, aspect=self._shape.current(), height=self.HEIGHTS[self._height.current()],
+                   fill=self.FILLS[self._fill.current()])
+
+    def settings(self) -> dict:
+        return {"shape": self._shape.current(), "height": self._height.current(), "fill": self._fill.current()}
+
+    def apply_settings(self, settings: dict) -> None:
+        self._shape.set_current(str(settings.get("shape", "")), animate=False)
+        self._height.set_current(str(settings.get("height", "")), animate=False)
+        self._fill.set_current(str(settings.get("fill", "")), animate=False)
+
+
+class SheetPanel(OptionPanel):
+    """Video -> ONE picture with frames taken evenly along it: the whole shot at a glance."""
+
+    KEY, TITLE, BUTTON, TAG = "sheet", "Contact sheet", "Make the sheet", "_sheet"
+    ICON, GROUP = "grid", "convert"
+    TIP = "One picture with frames from along the video — the whole shot at a glance"
+    COLUMNS = ("3", "4", "5", "6", "8")
+    ROWS = ("1", "2", "3", "4", "5", "6")
+    KINDS = {"JPG": ".jpg", "PNG": ".png"}
+    WIDTHS = {"1920": 1920, "2560": 2560, "3840": 3840}
+    PREVIEW = False            # it is one picture, made in a moment
+    COMPARES_SIZE = False
+
+    def __init__(self, tools=None, parent=None):
+        super().__init__(tools, parent)
+        self._across = BaseComboBox(list(self.COLUMNS), "4")
+        self._down = BaseComboBox(list(self.ROWS), "3")
+        for combo in (self._across, self._down):
+            combo.setFixedWidth(56)
+            combo.currentIndexChanged.connect(lambda _index: self._on_changed())
+        self._count = self._note("")
+        self._times = self._check("Write each frame’s time on it", True)
+        self._kind = self._switch(self.KINDS, "JPG")
+        self._width = self._switch(self.WIDTHS, "1920", "How wide the whole sheet is, in pixels")
+        self._add_row("Frames", self._across, self._note("across"), self._down, self._note("down"), self._count)
+        self._add_row("Times", self._times)
+        self._add_row("Width", self._width)
+        self._add_row("Format", self._kind)
+        self._on_changed(emit=False)
+
+    def _on_changed(self, emit: bool = True) -> None:
+        self._count.setText(f"= {int(self._across.currentText()) * int(self._down.currentText())} frames")
+        if emit:
+            self.changed.emit()
+
+    accepts = staticmethod(_videos)
+
+    def suffix(self, source: MediaSource) -> str:
+        return self.KINDS[self._kind.current()]
+
+    def job(self, source: MediaSource, output: Path) -> Job:
+        return contact_sheet(source.info, output, columns=int(self._across.currentText()),
+                             rows=int(self._down.currentText()), width=self.WIDTHS[self._width.current()],
+                             times=self._times.isChecked())
+
+    def settings(self) -> dict:
+        return {"columns": self._across.currentText(), "rows": self._down.currentText(),
+                "times": self._times.isChecked(), "kind": self._kind.current(), "width": self._width.current()}
+
+    def apply_settings(self, settings: dict) -> None:
+        if str(settings.get("columns", "")) in self.COLUMNS:
+            self._across.setCurrentText(str(settings["columns"]))
+        if str(settings.get("rows", "")) in self.ROWS:
+            self._down.setCurrentText(str(settings["rows"]))
+        self._times.set_checked_immediate(bool(settings.get("times", True)))
+        self._kind.set_current(str(settings.get("kind", "")), animate=False)
+        self._width.set_current(str(settings.get("width", "")), animate=False)
+        self._on_changed(emit=False)
+
+
+class ReframePanel(OptionPanel):
+    """Image sequence -> another image sequence: another picture format and / or
+    a smaller frame, the same frame numbers."""
+
+    KEY, TITLE, BUTTON = "reframe", "Convert frames", "Convert the frames"
+    ICON, GROUP = "image_stack", "convert"
+    TIP = "The same frames in another format or a smaller size — still an image sequence"
+    KINDS = {"PNG": "png", "JPG": "jpg", "TIFF": "tiff"}
+    JPG_QUALITIES = {"Best": "best", "Good": "good", "Small": "small"}
+    HEIGHTS = {"Keep": 0, "1080p": 1080, "720p": 720, "480p": 480}
+    INTO_FOLDER = True
+    PREVIEW = False
+    COMPARES_SIZE = False
+
+    def __init__(self, tools=None, parent=None):
+        super().__init__(tools, parent)
+        self._kind = self._switch(self.KINDS, "JPG", "PNG: exact, big. JPG: small, slightly lossy. TIFF: exact.")
+        self._jpg = self._switch(self.JPG_QUALITIES, "Best", "How good the JPG pictures are — better is bigger")
+        self._height = self._switch(self.HEIGHTS, "Keep", "The height of the frames. Smaller frames are never enlarged.")
+        self._add_row("Format", self._kind)
+        self._jpg_row = self._add_row("Quality", self._jpg)
+        self._add_row("Frame size", self._height)
+        self._kind.current_changed.connect(lambda _option: self._sync())
+        self._sync()
+
+    def _sync(self) -> None:
+        self._set_row_visible(self._jpg_row, self._kind.current() == "JPG")
+
+    @staticmethod
+    def accepts(sources: list) -> bool:
+        return bool(sources) and all(source.is_sequence for source in sources)
+
+    TAG = property(lambda self: "_" + self.KINDS[self._kind.current()])
+
+    def suffix(self, source: MediaSource) -> str:
+        return ""  # the result is a folder
+
+    def job(self, source: MediaSource, output: Path) -> Job:
+        if output.resolve() == source.sequence.folder.resolve():
+            raise MediaError("The new frames can’t go into the folder of the frames they are made from — "
+                             "pick another folder.")
+        return convert_sequence(source.sequence, output, image_format=self.KINDS[self._kind.current()],
+                                max_height=self.HEIGHTS[self._height.current()],
+                                jpg_quality=self.JPG_QUALITIES[self._jpg.current()],
+                                frame_size=(source.info.width, source.info.height))
+
+    def settings(self) -> dict:
+        return {"kind": self._kind.current(), "jpg": self._jpg.current(), "height": self._height.current()}
+
+    def apply_settings(self, settings: dict) -> None:
+        self._kind.set_current(str(settings.get("kind", "")), animate=False)
+        self._jpg.set_current(str(settings.get("jpg", "")), animate=False)
+        self._height.set_current(str(settings.get("height", "")), animate=False)
+        self._sync()
+
+
+class ChainPanel(OptionPanel):
+    """Video -> several things done to it in ONE run: a piece cut out, the frame
+    made smaller, burn-ins drawn — each with the settings its own action has.
+    One run means one loss of quality instead of one per step, and one wait."""
+
+    KEY, TITLE, BUTTON, TAG = "chain", "Several at once", "Do it all", "_edit"
+    ICON, GROUP = "steps", "several"
+    TIP = "Cut a piece, make it smaller and stamp it — in one run"
+    STEPS = (("trim", "Cut the piece", "the piece picked on Trim"),
+             ("shrink", "Make it smaller", "the frame size, quality and codec of Make smaller"),
+             ("stamp", "Stamp it", "what Stamp draws on the picture"))
+    PRESETS = {"Review cut": {"trim": True, "shrink": True, "stamp": True},
+               "Small + stamp": {"trim": False, "shrink": True, "stamp": True}}
+
+    def __init__(self, tools=None, parent=None):
+        super().__init__(tools, parent)
+        self._panels: dict = {}
+        self._checks, self._notes = {}, {}
+        for key, title, tip in self.STEPS:
+            self._checks[key] = self._check(title, True, f"Uses {tip}")
+            self._notes[key] = self._note("")
+            self._notes[key].setWordWrap(True)  # so the row gives it the room that is left
+            self._checks[key].toggled.connect(lambda _checked: self.refresh())
+        self._add_row("Steps", self._checks["trim"])
+        self._add_row("", self._notes["trim"])
+        self._add_row("", self._checks["shrink"])
+        self._add_row("", self._notes["shrink"])
+        self._add_row("", self._checks["stamp"])
+        self._add_row("", self._notes["stamp"])
+        self._add_row("", hint="Each step takes its settings from its own action — set them there, come back here.")
+
+    accepts = staticmethod(_videos)
+
+    def bind(self, panels: dict) -> None:
+        self._panels = panels
+        for key in self._checks:
+            if key in panels:
+                panels[key].changed.connect(self.refresh)
+
+    def refresh(self) -> None:
+        """Says under each step what it will do, from that action's settings."""
+        trim_panel, shrink_panel, stamp_panel = (self._panels.get(key) for key in ("trim", "shrink", "stamp"))
+        texts = {"trim": trim_panel.summary() if trim_panel else "",
+                 "shrink": shrink_panel.summary() if shrink_panel else "",
+                 "stamp": stamp_panel._overlay_summary() if stamp_panel else ""}
+        for key, note in self._notes.items():
+            note.setText(texts[key] if self._checks[key].isChecked() else "not done")
+
+    def set_sources(self, sources: list) -> None:
+        self.refresh()
+
+    def job(self, source: MediaSource, output: Path) -> Job:
+        if not all(key in self._panels for key in ("trim", "shrink", "stamp")):
+            raise MediaError("The steps’ own actions aren’t available.")
+        start = end = None
+        if self._checks["trim"].isChecked():
+            start, end = self._panels["trim"].piece()
+        size = self._panels["shrink"].chain_settings()
+        if not self._checks["shrink"].isChecked():
+            size = {**size, "max_height": 0, "quality": "high"}
+        overlays = self._panels["stamp"]._overlays() if self._checks["stamp"].isChecked() else None
+        return chain(source.info, output, start=start, end=end, overlays=overlays, **size)
+
+    def settings(self) -> dict:
+        return {key: check.isChecked() for key, check in self._checks.items()}
+
+    def apply_settings(self, settings: dict) -> None:
+        for key, check in self._checks.items():
+            check.set_checked_immediate(bool(settings.get(key, True)))
+        self.refresh()
+
+
 class JoinPanel(OptionPanel):
     """Several videos -> one, in the order they were dropped."""
 
@@ -1378,5 +1906,5 @@ class ComparePanel(OptionPanel):
         self._labels.set_checked_immediate(bool(settings.get("labels", True)))
 
 
-PANELS = (SequencePanel, ShrinkPanel, TrimPanel, LoopPanel, StampPanel, SoundPanel, AdjustPanel, GifPanel,
-          FramesPanel, EditingPanel, JoinPanel, ComparePanel)
+PANELS = (SequencePanel, ReframePanel, ShrinkPanel, TrimPanel, LoopPanel, StampPanel, SoundPanel, AdjustPanel,
+          FitPanel, GifPanel, FramesPanel, SheetPanel, EditingPanel, ChainPanel, JoinPanel, ComparePanel)

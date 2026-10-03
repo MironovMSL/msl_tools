@@ -1,4 +1,6 @@
 # tools/desktop/media/source_card.py
+from pathlib import Path
+
 import msl_tools.msl.ui.qt_bindings as qt
 from msl_tools.msl.core.theme import ThemeRegistry
 from msl_tools.msl.tools.desktop.media.fact_tiles import FactTiles
@@ -7,6 +9,7 @@ from msl_tools.msl.ui.theme.qss import color_property, repolish
 from msl_tools.msl.ui.ui_resources import UiResources
 from msl_tools.msl.ui.widgets.atoms.buttons.glyph_button import GlyphButton
 from msl_tools.msl.ui.widgets.atoms.comboboxes.base_combo_box import BaseComboBox
+from msl_tools.msl.ui.widgets.compositions.chip_bar import ChipBar
 from msl_tools.msl.ui.widgets.compositions.drop_area import DropArea
 
 
@@ -103,6 +106,7 @@ class SourceCard(qt.QtWidgets.QFrame):
     Signals:
         open_requested(str) — a file or folder was chosen with the buttons.
         add_requested(object) — more files (a list of paths) were chosen to work on TOGETHER with what is loaded.
+        recent_requested(object) — a recent source was clicked (its list of paths).
         play_requested() — the thumbnail was clicked.
         sequence_picked(object) — another ImageSequence of the folder was chosen.
         cleared() — "×" was clicked.
@@ -110,12 +114,15 @@ class SourceCard(qt.QtWidgets.QFrame):
 
     HEIGHT = 116            # with a source
     EMPTY_HEIGHT = 148      # the drop area: taller, it is the only thing to do on the page then
+    RECENT_HEIGHT = 30      # ... and a line of recent sources under its buttons, when there are any
+    RECENT_WIDTH = 560      # the line of recent sources is cut off beyond this
     THUMBNAIL_SIZE = qt.QtCore.QSize(144, 81)
     DROP_TITLE = "Drop a video or an image sequence here"
     DROP_NOTE = "a folder of frames, or any one frame of it · several at once work too · or pick one:"
 
     open_requested = qt.QtCore.Signal(str)
     add_requested = qt.QtCore.Signal(object)
+    recent_requested = qt.QtCore.Signal(object)
     play_requested = qt.QtCore.Signal()
     sequence_picked = qt.QtCore.Signal(object)
     cleared = qt.QtCore.Signal()
@@ -134,6 +141,23 @@ class SourceCard(qt.QtWidgets.QFrame):
                                                    "Choose a file — a video, or one frame of an image sequence", "File")
         self._folder_button = self._empty.add_button(icons.get_icon("browse", sub_folder="actions"),
                                                      "Choose a folder — the frames of an image sequence", "Folder")
+        # What was worked on lately, a chip each: a click opens it again.
+        self._recent: list = []
+        self._recent_line = qt.QtWidgets.QWidget()
+        # It asks for its width but never insists (Ignored): in a narrow card it is cut off
+        # instead of widening the window — the card's pages share one minimum width.
+        self._recent_line.setSizePolicy(qt.QtWidgets.QSizePolicy.Policy.Ignored, qt.QtWidgets.QSizePolicy.Policy.Fixed)
+        recent = qt.QtWidgets.QHBoxLayout(self._recent_line)
+        recent.setContentsMargins(0, 4, 0, 0)
+        recent.setSpacing(6)
+        recent_caption = qt.QtWidgets.QLabel("Recent")
+        recent_caption.setObjectName("mediaHint")
+        self._recent_chips = ChipBar()
+        self._recent_chips.clicked.connect(lambda key: self.recent_requested.emit(self._recent[int(key)]))
+        recent.addWidget(recent_caption)
+        recent.addWidget(self._recent_chips)
+        self._empty.add_widget(self._recent_line)
+        self._recent_line.hide()
 
         # loaded
         self._thumbnail = SourceThumbnail()
@@ -251,6 +275,25 @@ class SourceCard(qt.QtWidgets.QFrame):
         self._chooser.setVisible(len(source.siblings) > 1)
         self._stack.setCurrentWidget(self._loaded)
 
+    def set_recent(self, entries: list) -> None:
+        """Recent sources, newest first — each a list of paths (several = loaded together)."""
+        self._recent = [list(entry) for entry in entries if entry]
+        chips = []
+        for index, entry in enumerate(self._recent):
+            name = Path(entry[0]).name + (f"  +{len(entry) - 1}" if len(entry) > 1 else "")
+            chips.append((str(index), name, chr(10).join(entry)))
+        self._recent_chips.set_chips(chips)
+        # one line, as wide as its chips (a flow layout asks only for its widest item and would stack them)
+        width = sum(chip.sizeHint().width() + 6 for chip in self._recent_chips.findChildren(qt.QtWidgets.QPushButton)
+                    if chip.objectName() == "chip")
+        self._recent_chips.setFixedWidth(min(width, self.RECENT_WIDTH))
+        self._recent_line.setVisible(bool(chips))
+        self._fit_height()
+
+    def _fit_height(self) -> None:
+        loaded = self.property("look") == "loaded"
+        self.setFixedHeight(self.HEIGHT if loaded else self.EMPTY_HEIGHT + (self.RECENT_HEIGHT if self._recent else 0))
+
     def _set_facts(self, pairs: list) -> None:
         self._facts.set_pairs(pairs)
 
@@ -293,7 +336,7 @@ class SourceCard(qt.QtWidgets.QFrame):
         if self.property("look") != look:
             self.setProperty("look", look)  # media.qss: QFrame#mediaSource[look=...]
             repolish(self)
-            self.setFixedHeight(self.HEIGHT if look == "loaded" else self.EMPTY_HEIGHT)
+            self._fit_height()
 
     def _on_choose_file(self) -> None:
         path, _filter = qt.QtWidgets.QFileDialog.getOpenFileName(

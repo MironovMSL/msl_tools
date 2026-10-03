@@ -1,9 +1,11 @@
 # tools/desktop/media/page.py
 import os
+import sys
 import tempfile
 from pathlib import Path
 
 import msl_tools.msl.ui.qt_bindings as qt
+from msl_tools.msl.core.environment.send_to import create_send_to, has_send_to, remove_send_to
 from msl_tools.msl.core.environment.taskbar import TaskbarProgress
 from msl_tools.msl.core.media import Estimate, MediaError, estimate, preview
 from msl_tools.msl.core.media.run import clean_up
@@ -17,13 +19,15 @@ from msl_tools.msl.tools.desktop.media.option_panels import PANELS
 from msl_tools.msl.tools.desktop.media.source import AUDIO_SUFFIXES, load_source, load_sources
 from msl_tools.msl.tools.desktop.media.source_card import SourceCard
 from msl_tools.msl.ui.process_launcher.process_launcher import ProcessLauncher
-from msl_tools.msl.ui.theme.qss import make_rounded_popup, repolish
+from msl_tools.msl.core.theme import ThemeRegistry
+from msl_tools.msl.ui.theme.qss import color_property, make_rounded_popup, repolish
 from msl_tools.msl.ui.theme.stylesheet_builder import StylesheetBuilder
 from msl_tools.msl.ui.ui_resources import UiResources
 from msl_tools.msl.ui.widgets.atoms.buttons.glyph_button import GlyphButton
 from msl_tools.msl.ui.widgets.atoms.buttons.icon_push_button import IconPushButton
 from msl_tools.msl.ui.widgets.atoms.buttons.motion_icon_button import MotionIconButton
 from msl_tools.msl.ui.widgets.atoms.icons.tinted_icon import TintedIcon
+from msl_tools.msl.ui.widgets.atoms.labels import ElidedLabel
 from msl_tools.msl.ui.widgets.compositions.action_strip import ActionStrip
 from msl_tools.msl.ui.widgets.compositions.chip_bar import ChipBar
 from msl_tools.msl.ui.widgets.windows.confirm_dialog import ConfirmDialog
@@ -31,6 +35,48 @@ from msl_tools.msl.ui.widgets.windows.text_dialog import TextDialog
 from msl_tools.msl.ui.workers.result_worker import ResultWorker
 
 StylesheetBuilder.register_template(Path(__file__).with_name("media.qss"))
+
+
+class StartButton(IconPushButton):
+    """The button that starts the picked action: its icon beside its text,
+    and — while jobs run — a thin bar along its bottom edge showing how far
+    the whole batch is. Colors: qproperty iconColor (IconPushButton),
+    progressColor / progressTrackColor (media.qss)."""
+
+    BAR_HEIGHT = 3
+
+    progressColor = color_property("_progress_color")
+    progressTrackColor = color_property("_progress_track_color")
+
+    def __init__(self, parent=None):
+        super().__init__(None, parent=parent)
+        fallback = ThemeRegistry.fallback()  # until QSS applies
+        self._progress_color = qt.QtGui.QColor(fallback.surface)
+        self._progress_track_color = qt.QtGui.QColor(fallback.surface)
+        self._progress_track_color.setAlpha(70)
+        self._progress: float | None = None
+
+    def set_progress(self, fraction: float | None) -> None:
+        """0..1 while jobs run, None when nothing does."""
+        if fraction != self._progress:
+            self._progress = fraction
+            self.update()
+
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+        if self._progress is None:
+            return
+        painter = qt.QtGui.QPainter(self)
+        painter.setRenderHint(qt.QtGui.QPainter.RenderHint.Antialiasing)
+        painter.setPen(qt.QtCore.Qt.PenStyle.NoPen)
+        track = qt.QtCore.QRectF(6, self.height() - self.BAR_HEIGHT - 3, self.width() - 12, self.BAR_HEIGHT)
+        painter.setBrush(self._progress_track_color)
+        painter.drawRoundedRect(track, self.BAR_HEIGHT / 2, self.BAR_HEIGHT / 2)
+        done = qt.QtCore.QRectF(track)
+        done.setWidth(track.width() * min(max(self._progress, 0.0), 1.0))
+        painter.setBrush(self._progress_color)
+        painter.drawRoundedRect(done, self.BAR_HEIGHT / 2, self.BAR_HEIGHT / 2)
+        painter.end()
 
 
 class MediaPage(qt.QtWidgets.QWidget):
@@ -73,9 +119,11 @@ class MediaPage(qt.QtWidgets.QWidget):
 
     TOOL_NAME = "media"
     DEFAULTS = {"settings": {"ffmpeg_path": "", "output_folder": "", "action": "", "notify": True,
-                             "jobs_folded": False},
+                             "jobs_folded": False, "recent": []},
                 "panels": {}, "presets": {}}
     MESSAGE_MS = 9000
+    RECENT_KEPT = 6
+    SEND_TO_NAME = "MSL Media"   # Explorer: right click -> Send to -> MSL Media
     ESTIMATE_DELAY_MS = 700
     SEQUENCE_SIZE_FRAMES = 3000  # a longer sequence's files aren't added up for "how much smaller"
 
@@ -94,6 +142,7 @@ class MediaPage(qt.QtWidgets.QWidget):
         self._preview_token = 0
         self._preview_count = 0
         self._sound_target_lit = False  # a sound file is being dragged over the page
+        self._pending_recipe: dict | None = None   # "set up again": applied once its sources are loaded
         self._workers: list = []
         self._output_edited = False    # the user typed their own name: don't replace it
         self._located = False
@@ -108,15 +157,26 @@ class MediaPage(qt.QtWidgets.QWidget):
     # --- construction -----------------------------------------------------------------
 
     def _build_widgets(self) -> None:
-        self._title_label = qt.QtWidgets.QLabel("Media")
-        self._title_label.setObjectName("mediaTitle")
-        self._subtitle_label = qt.QtWidgets.QLabel("· video and image sequences")
-        self._subtitle_label.setObjectName("mediaSubtitle")
+        # The page's heading, like a card's: an accent icon, the name in capitals, a quiet line.
+        self._title_icon = TintedIcon(UiResources().iconManager.get_icon("media", sub_folder="tools"), 16)
+        self._title_icon.setObjectName("mediaCardIcon")
+        self._title_label = qt.QtWidgets.QLabel("MEDIA")
+        self._title_label.setObjectName("mediaCardTitle")
+        self._subtitle_label = qt.QtWidgets.QLabel("video and image sequences")
+        self._subtitle_label.setObjectName("mediaHint")
         self._ffmpeg = FfmpegBar(self._settings)
+        # ffmpeg's state as a status pill: a green dot + "ffmpeg 8.0" (a click: its menu).
+        self._ffmpeg_pill = qt.QtWidgets.QFrame()
+        self._ffmpeg_pill.setObjectName("mediaStatusPill")
+        self._ffmpeg_dot = qt.QtWidgets.QLabel()
+        self._ffmpeg_dot.setObjectName("mediaStatusDot")
+        self._ffmpeg_dot.setFixedSize(8, 8)
+        self._ffmpeg_pill.hide()
         self._card = SourceCard()
 
         self._panels = {panel.KEY: panel(self._ffmpeg.tools) for panel in PANELS}
         for key, panel in self._panels.items():
+            panel.bind(self._panels)
             saved = self._node("panels", key)
             if saved:
                 panel.apply_settings(saved)
@@ -147,8 +207,14 @@ class MediaPage(qt.QtWidgets.QWidget):
 
         self._output_caption = TintedIcon(icons.get_icon("save", sub_folder="actions"), 16)
         self._output_caption.setToolTip("Save as")
+        # The field holds the result's NAME; the folder it goes into is the quiet line under it
+        # (a whole path in the field was cut off at the left - the name was what one couldn't see).
         self._output = qt.QtWidgets.QLineEdit()
-        self._output.setToolTip("Where the result is written. A name that is free is suggested; change it if you like.")
+        self._output.setToolTip("The result's name. A name that is free is suggested; change it if you like"
+                                + chr(10) + "(a whole path can be typed or pasted here too).")
+        self._output_dir = Path()
+        self._output_folder = ElidedLabel(elide=qt.QtCore.Qt.TextElideMode.ElideLeft)
+        self._output_folder.setObjectName("mediaHint")
         self._output_button = IconPushButton(UiResources().iconManager.get_icon("browse", sub_folder="actions"),
                                              "Choose where to save the result", fallback_text="…")
         self._output_button.setFixedSize(26, 22)
@@ -163,9 +229,16 @@ class MediaPage(qt.QtWidgets.QWidget):
         self._preview_button = self._action_button("eye", "◉")
         self._command_button = self._action_button("code", "</>", "The command: what ffmpeg will be asked to do — "
                                                                   "to read, or to copy")
-        self._start_button = qt.QtWidgets.QPushButton("Create video")
+        self._start_button = StartButton()
+        self._start_button.setObjectName("mediaStart")
+        self._start_button.setText("Create video")
         self._start_button.setProperty("primary", True)
-        self._start_button.setMinimumWidth(120)
+        self._start_button.setMinimumWidth(130)
+        self._card_animation = qt.QtCore.QVariantAnimation(self)   # the action card's height, on a switch
+        self._card_animation.setDuration(170)
+        self._card_animation.setEasingCurve(qt.QtCore.QEasingCurve.Type.OutCubic)
+        self._card_animation.valueChanged.connect(lambda value: self._action_card.setFixedHeight(int(value)))
+        self._card_animation.finished.connect(self._free_card_height)
         self._estimate_timer = qt.QtCore.QTimer(self)
         self._estimate_timer.setSingleShot(True)
         self._estimate_timer.setInterval(self.ESTIMATE_DELAY_MS)
@@ -202,9 +275,15 @@ class MediaPage(qt.QtWidgets.QWidget):
         header = qt.QtWidgets.QHBoxLayout()
         header.setContentsMargins(0, 0, 0, 0)
         header.setSpacing(6)
+        header.addWidget(self._title_icon)
         header.addWidget(self._title_label)
         header.addWidget(self._subtitle_label, 1)
-        header.addWidget(self._ffmpeg.status_button())
+        pill = qt.QtWidgets.QHBoxLayout(self._ffmpeg_pill)
+        pill.setContentsMargins(9, 1, 3, 1)
+        pill.setSpacing(2)
+        pill.addWidget(self._ffmpeg_dot)
+        pill.addWidget(self._ffmpeg.status_button())
+        header.addWidget(self._ffmpeg_pill)
 
         # The picked action's card: header · presets · its panel · where the result goes + start.
         action_header = qt.QtWidgets.QHBoxLayout()
@@ -227,6 +306,9 @@ class MediaPage(qt.QtWidgets.QWidget):
         output.addWidget(self._output, 1)
         output.addWidget(self._output_button)
         output.addWidget(self._output_note, 1)
+        output_folder = qt.QtWidgets.QHBoxLayout()
+        output_folder.setContentsMargins(12 + 16 + 8 + 2, 0, 12, 0)  # under the field, past the icon
+        output_folder.addWidget(self._output_folder, 1)
 
         start = qt.QtWidgets.QHBoxLayout()
         start.setContentsMargins(12, 0, 12, 10)
@@ -246,6 +328,7 @@ class MediaPage(qt.QtWidgets.QWidget):
         action_card.addWidget(self._stack)
         action_card.addWidget(self._divider())
         action_card.addLayout(output)
+        action_card.addLayout(output_folder)
         action_card.addLayout(start)
 
         jobs = qt.QtWidgets.QHBoxLayout(self._jobs_header)
@@ -297,6 +380,11 @@ class MediaPage(qt.QtWidgets.QWidget):
         self._card.cleared.connect(lambda: self._show_sources([]))
         self._card.sequence_picked.connect(self._on_sequence_picked)
         self._card.add_requested.connect(self._on_add_sources)
+        self._card.recent_requested.connect(lambda paths: self.open(paths))
+        self._job_list.again_requested.connect(self._set_up_again)
+        paste = qt.QtGui.QShortcut(qt.QtGui.QKeySequence(qt.QtGui.QKeySequence.StandardKey.Paste), self)
+        paste.setContext(qt.QtCore.Qt.ShortcutContext.WidgetWithChildrenShortcut)  # a field with the focus pastes text
+        paste.activated.connect(self._on_paste)
         self._card.play_requested.connect(self._on_play_source)
         self._actions.clicked.connect(self._on_action_picked)
         self._presets.clicked.connect(self._on_preset_clicked)
@@ -305,6 +393,7 @@ class MediaPage(qt.QtWidgets.QWidget):
         for panel in self._panels.values():
             panel.changed.connect(self._on_panel_changed)
         self._output.textEdited.connect(self._on_output_edited)
+        self._output.editingFinished.connect(self._on_output_typed)
         self._output_button.clicked.connect(self._on_browse_output)
         self._folder_button.clicked.connect(self._on_folder_menu)
         self._preview_button.clicked.connect(self._on_preview)
@@ -326,6 +415,7 @@ class MediaPage(qt.QtWidgets.QWidget):
         if not self._located:  # ffmpeg is first looked for when the tool is opened, not when it is built
             self._located = True
             self._ffmpeg.locate()
+            self._card.set_recent(self._recent())
             self._queue.restore(self._history.load())  # what was made before the hub was last closed
             self._history_loaded = True
 
@@ -351,6 +441,7 @@ class MediaPage(qt.QtWidgets.QWidget):
     # --- ffmpeg ---------------------------------------------------------------------------
 
     def _on_tools_changed(self, tools) -> None:
+        self._ffmpeg_pill.setVisible(tools is not None)
         self._card.set_enabled_for_input(tools is not None, "Media needs ffmpeg first — see the line above.")
         self._queue.refresh_thumbnails()  # the pictures of earlier results waited for ffmpeg
         self._refresh_controls()
@@ -398,6 +489,72 @@ class MediaPage(qt.QtWidgets.QWidget):
         worker.finished.connect(lambda: self._workers.remove(worker) if worker in self._workers else None)
         worker.start()
 
+    # --- recent sources, paste, set up again ----------------------------------------------------
+
+    def _recent(self) -> list:
+        """The recent sources that are still there, newest first."""
+        entries = self._settings.get("recent", []) or []
+        return [list(entry) for entry in entries if isinstance(entry, list) and entry and Path(entry[0]).exists()]
+
+    def _remember_recent(self, paths: list) -> None:
+        entries = [entry for entry in self._recent() if entry != paths]
+        self._settings["recent"] = [paths] + entries[:self.RECENT_KEPT - 1]
+        self._card.set_recent(self._settings["recent"])
+
+    def _on_paste(self) -> None:
+        """Ctrl+V on the page: files copied in Explorer, or a path copied as text, are opened."""
+        data = qt.QtGui.QGuiApplication.clipboard().mimeData()
+        paths = [url.toLocalFile() for url in (data.urls() if data is not None and data.hasUrls() else [])
+                 if url.isLocalFile()]
+        if not paths and data is not None and data.hasText():
+            lines = [line.strip().strip('"') for line in data.text().splitlines()]
+            paths = [line for line in lines if line and Path(line).exists()]
+        if not paths:
+            self._say("Nothing to open on the clipboard — copy a video or a folder of frames first.", "error")
+            return
+        if self._is_sound_drop(paths):
+            self._take_sound(paths[0])
+            return
+        self.open(paths)
+
+    def _set_up_again(self, item) -> None:
+        """A job's video and its settings, back on the page — to change something and start again."""
+        recipe = item.recipe
+        sources = [path for path in recipe.get("sources", []) if Path(path).exists()]
+        if not sources:
+            self._say("The video it was made from isn’t there any more.", "error")
+            return
+        self._pending_recipe = recipe
+        self.open(sources)
+
+    def _recipe(self, panel, index: int, count: int) -> dict:
+        """What makes job `index` of `count`: the action, its settings, its source(s)."""
+        paths = [str(source.path) for source in self._sources]
+        if not panel.COMBINES and count == len(self._sources):
+            paths = [paths[index]]
+        return {"action": panel.KEY, "settings": panel.settings(), "sources": paths}
+
+    # --- Explorer's "Send to" -------------------------------------------------------------------
+
+    def _send_to_command(self) -> tuple:
+        """(program, arguments, working folder) that start this hub and hand it files."""
+        python = Path(sys.executable)
+        windowed = python.with_name("pythonw.exe")
+        program = windowed if windowed.is_file() else python
+        return program, ["-m", "msl_tools.msl.run_hub", "--open"], Resources().fsManager.PARENT_DIR
+
+    def _set_send_to(self, wanted: bool) -> None:
+        if not wanted:
+            remove_send_to(self.SEND_TO_NAME)
+            self._say("“Send to → MSL Media” is gone from Explorer.")
+            return
+        program, arguments, folder = self._send_to_command()
+        icon = Resources().fsManager.icons / "brand" / "hub.ico"
+        if create_send_to(self.SEND_TO_NAME, program, arguments, folder, icon):
+            self._say("In Explorer: right click a video or a folder of frames → Send to → MSL Media.")
+        else:
+            self._say("Couldn’t add it to Explorer’s “Send to” menu.", "error")
+
     def _on_add_sources(self, paths: list) -> None:
         """More files to work on together with what is loaded."""
         self.open([str(source.path) for source in self._sources] + list(paths))
@@ -413,6 +570,8 @@ class MediaPage(qt.QtWidgets.QWidget):
 
     def _show_sources(self, sources: list) -> None:
         self._sources = list(sources)
+        if self._sources:
+            self._remember_recent([str(source.path) for source in self._sources])
         self._card.set_sources(self._sources)
         self._output_edited = False
         offered = self._offered()
@@ -427,6 +586,16 @@ class MediaPage(qt.QtWidgets.QWidget):
         remembered = str(self._settings.get("action", "") or "")
         if remembered in self._actions.keys():
             self._actions.set_current(remembered, animate=False)
+        recipe, self._pending_recipe = self._pending_recipe, None
+        if recipe and self._sources and recipe.get("action") in self._actions.keys():
+            self._actions.set_current(recipe["action"], animate=False)   # "set up again": its action ...
+            self._settings["action"] = recipe["action"]
+            self._applying = True
+            try:
+                self._panels[recipe["action"]].apply_settings(dict(recipe.get("settings") or {}))  # ... and settings
+            finally:
+                self._applying = False
+            self._save_settings()
         if self._sources:
             self._message_label.hide()
         self._show_action()
@@ -442,7 +611,27 @@ class MediaPage(qt.QtWidgets.QWidget):
     def _on_action_picked(self, key: str) -> None:
         self._settings["action"] = key
         self._output_edited = False
+        height = self._action_card.height() if self._action_card.isVisible() else 0
         self._show_action()
+        self._animate_card_from(height)
+
+    def _animate_card_from(self, height: int) -> None:
+        """The action card moves from `height` to what the newly picked action needs, instead of jumping."""
+        card, layout = self._action_card, self._action_card.layout()
+        self._card_animation.stop()
+        self._free_card_height()
+        layout.activate()
+        wanted = layout.totalHeightForWidth(card.width()) if layout.hasHeightForWidth() else card.sizeHint().height()
+        if not self.isVisible() or height <= 0 or abs(wanted - height) < 4:
+            return
+        self._card_animation.setStartValue(height)
+        self._card_animation.setEndValue(wanted)
+        card.setFixedHeight(height)
+        self._card_animation.start()
+
+    def _free_card_height(self) -> None:
+        self._action_card.setMinimumHeight(0)
+        self._action_card.setMaximumHeight(16777215)  # QWIDGETSIZE_MAX
 
     def _show_action(self) -> None:
         panel = self._panel()
@@ -453,6 +642,7 @@ class MediaPage(qt.QtWidgets.QWidget):
         self._actions.setVisible(panel is not None and len(self._actions.keys()) > 1)
         self._action_card.setVisible(panel is not None)
         if panel is not None:
+            panel.refresh()
             self._action_icon.set_icon(UiResources().iconManager.get_icon(panel.ICON, sub_folder="actions"))
             self._action_title.setText(panel.TITLE.upper())
             self._action_tip.setText(panel.TIP)
@@ -499,6 +689,7 @@ class MediaPage(qt.QtWidgets.QWidget):
         if panel is None:
             return
         self._start_button.setText(panel.BUTTON)
+        self._start_button.set_source_icon(UiResources().iconManager.get_icon(panel.ICON, sub_folder="actions"))
         self._preview_token += 1  # a preview still being made is for other settings
         self._preview_button.setEnabled(self._ffmpeg.tools() is not None)
         self._preview_button.setToolTip("Preview: " + panel.PREVIEW_TIP[0].lower() + panel.PREVIEW_TIP[1:])
@@ -510,6 +701,7 @@ class MediaPage(qt.QtWidgets.QWidget):
         for widget in (self._output_caption, self._output, self._output_button):
             widget.setVisible(single)
         self._output_note.setVisible(shown and not single)
+        self._output_folder.setVisible(single)
         for widget in (self._folder_button, self._command_button, self._start_button):
             widget.setVisible(shown)
         self._preview_button.setVisible(shown and panel.PREVIEW)
@@ -608,6 +800,12 @@ class MediaPage(qt.QtWidgets.QWidget):
         notify.setChecked(self._notifies())
         notify.setToolTip("A notice from Windows when the last job is over and this window isn’t in front")
         notify.triggered.connect(lambda checked: self._settings.__setitem__("notify", bool(checked)))
+        send_to = menu.addAction("Explorer: “Send to → MSL Media”")
+        send_to.setCheckable(True)
+        send_to.setChecked(has_send_to(self.SEND_TO_NAME))
+        send_to.setToolTip("Adds “MSL Media” to the “Send to” menu of Explorer’s right click: files sent there "
+                           "open here — in the hub that is open, or a new one")
+        send_to.triggered.connect(lambda checked: self._set_send_to(bool(checked)))
         self._folder_menu = menu  # for tests; the menu deletes itself on close
         menu.popup(self._folder_button.mapToGlobal(qt.QtCore.QPoint(0, self._folder_button.height())))
 
@@ -627,20 +825,42 @@ class MediaPage(qt.QtWidgets.QWidget):
         panel = self._panel()
         if panel is None or self._output_edited or not self._one_result():
             return
-        self._output.setText(str(panel.output_for(self._sources[0], self._folder() or None, self._queue.outputs())))
+        self._set_output(panel.output_for(self._sources[0], self._folder() or None, self._queue.outputs()))
         self._output_caption.setToolTip("Save into this folder" if panel.INTO_FOLDER else "Save as")
+
+    def _set_output(self, path: Path) -> None:
+        """Where the one result goes: its name into the field, its folder onto the line under it."""
+        path = Path(path)
+        self._output_dir = path.parent
+        self._output.setText(path.name)
+        self._output_folder.setText(f"in {path.parent}")
+
+    def _output_path(self) -> Path | None:
+        """The path the field stands for (None while it is empty). A name is taken in the
+        folder shown under the field; a whole path typed into the field is taken as it is."""
+        text = self._output.text().strip()
+        if not text:
+            return None
+        typed = Path(text)
+        return typed if typed.is_absolute() else self._output_dir / typed
+
+    def _on_output_typed(self) -> None:
+        """A whole path was typed or pasted: its folder moves to the line under the field."""
+        text = self._output.text().strip()
+        if text and Path(text).is_absolute() and Path(text).name:
+            self._set_output(Path(text))
 
     def _on_browse_output(self) -> None:
         panel = self._panel()
+        current = self._output_path() or Path(".")
         if panel is not None and panel.INTO_FOLDER:
-            start = Path(self._output.text().strip() or ".")
             path = qt.QtWidgets.QFileDialog.getExistingDirectory(
-                self, "The folder for the frames", str(start if start.is_dir() else start.parent))
+                self, "The folder for the frames", str(current if current.is_dir() else current.parent))
         else:
-            path, _filter = qt.QtWidgets.QFileDialog.getSaveFileName(self, "Save the result as", self._output.text(),
+            path, _filter = qt.QtWidgets.QFileDialog.getSaveFileName(self, "Save the result as", str(current),
                                                                      "All files (*.*)")
         if path:
-            self._output.setText(path)
+            self._set_output(Path(path))
             self._output_edited = True
 
     # --- the jobs ----------------------------------------------------------------------------
@@ -653,10 +873,9 @@ class MediaPage(qt.QtWidgets.QWidget):
             return None
         try:
             if self._one_result():
-                text = self._output.text().strip()
-                if not text:
+                output = self._output_path()
+                if output is None:
                     raise MediaError("Say where to save the result.")
-                output = Path(text)
                 if panel.INTO_FOLDER:
                     if output.is_file():
                         raise MediaError(f"{output.name} is a file — the frames need a folder.")
@@ -666,12 +885,13 @@ class MediaPage(qt.QtWidgets.QWidget):
                     raise MediaError("The result can’t replace the file it is made from — pick another name.")
                 if panel.COMBINES:
                     return [panel.combined_job(self._sources, output)]
-                return [panel.job(self._sources[0], output)]
+                return panel.jobs(self._sources[0], output)
             jobs, taken = [], list(self._queue.outputs())
             for source in self._sources:
                 output = panel.output_for(source, self._folder() or None, taken)
-                taken.append(output)
-                jobs.append(panel.job(source, output))
+                made = panel.jobs(source, output)
+                taken += [job.output for job in made]
+                jobs += made
             return jobs
         except MediaError as error:
             if not quiet:
@@ -700,9 +920,11 @@ class MediaPage(qt.QtWidgets.QWidget):
                 self._discard(jobs)
                 return
         panel = self._panel()
-        compared = panel.COMPARES_SIZE and not panel.COMBINES  # then jobs and sources pair up one to one
+        # compared with its source only where jobs and sources pair up one to one
+        compared = panel.COMPARES_SIZE and not panel.COMBINES and len(jobs) == len(self._sources)
         for index, job in enumerate(jobs):
-            self._queue.add(job, self._source_size(self._sources[index]) if compared else 0)
+            self._queue.add(job, self._source_size(self._sources[index]) if compared else 0,
+                            recipe=self._recipe(panel, index, len(jobs)))
         self._message_label.hide()
         self._output_edited = False
         self._suggest_output()  # the next job gets the next free name
@@ -808,6 +1030,7 @@ class MediaPage(qt.QtWidgets.QWidget):
             self._taskbar = TaskbarProgress(int(self.window().winId())
                                             if qt.QtGui.QGuiApplication.platformName() == "windows" else 0)
         self._taskbar.set(self._queue.overall())
+        self._start_button.set_progress(self._queue.overall())
 
     # --- the jobs card's header ----------------------------------------------------------------------
 
@@ -815,6 +1038,7 @@ class MediaPage(qt.QtWidgets.QWidget):
         """"JOBS · 4", and while jobs run "JOBS · 1 of 3 done"."""
         over, batch = self._queue.batch_counts()
         total = len(self._queue.items())
+        self._fit_jobs_card()
         self._jobs_title.setText(f"JOBS  ·  {over} of {batch} done" if batch else f"JOBS  ·  {total}" if total else "JOBS")
 
     def eventFilter(self, watched, event) -> bool:
@@ -828,15 +1052,26 @@ class MediaPage(qt.QtWidgets.QWidget):
         """Folds the jobs list away (only its header stays) or brings it back."""
         self._job_list.setVisible(not folded)
         self._jobs_divider.setVisible(not folded)
-        self._filler.setVisible(folded)
-        self.layout().setStretchFactor(self._jobs_card, 0 if folded else 1)
+        self._fit_jobs_card()
         self._jobs_fold.set_icon(UiResources().iconManager.get_icon("chevron_right" if folded else "chevron_down",
                                                                     sub_folder="actions"))
         if remember:
             self._settings["jobs_folded"] = folded
 
+    EMPTY_JOBS_HEIGHT = 92   # the list while it only says what will show up in it
+
+    def _fit_jobs_card(self) -> None:
+        """The jobs card takes the room that is left only while it has jobs to show: folded, or
+        empty, it is as small as it can be, and a filler takes the room under it."""
+        empty = not self._queue.items()
+        grows = self._job_list.isVisibleTo(self._jobs_card) and not empty
+        self._job_list.setMaximumHeight(self.EMPTY_JOBS_HEIGHT if empty else 16777215)
+        self._filler.setVisible(not grows)
+        self.layout().setStretchFactor(self._jobs_card, 1 if grows else 0)
+
     def _on_queue_idle(self) -> None:
         batch = self._queue.last_batch()
+        self._start_button.set_progress(None)
         if self._taskbar is not None:
             self._taskbar.clear()
         done = [item for item in batch if item.state == DONE]
@@ -1006,17 +1241,21 @@ class MediaPage(qt.QtWidgets.QWidget):
         event.acceptProposedAction()
         # One sound file dropped on one open source is its new sound, not a new source.
         if self._is_sound_drop(paths):
-            name = Path(paths[0]).name
-            if self._sources[0].is_sequence:
-                self._panels["sequence"].set_sound(paths[0])
-                self._say(f"{name} will be the sound of the video.")
-            else:
-                self._panels["sound"].set_sound(paths[0])
-                self._actions.set_current("sound")
-                self._on_action_picked("sound")
-                self._say(f"{name} is set as the new sound — “Replace the sound” puts it under the video.")
+            self._take_sound(paths[0])
             return
         self.open(paths)
+
+    def _take_sound(self, path: str) -> None:
+        """One sound file for the one open source (dropped or pasted): it becomes its sound."""
+        name = Path(path).name
+        if self._sources[0].is_sequence:
+            self._panels["sequence"].set_sound(path)
+            self._say(f"{name} will be the sound of the video.")
+        else:
+            self._panels["sound"].set_sound(path)
+            self._actions.set_current("sound")
+            self._on_action_picked("sound")
+            self._say(f"{name} is set as the new sound — “Replace the sound” puts it under the video.")
 
     # --- small things -----------------------------------------------------------------------------
 

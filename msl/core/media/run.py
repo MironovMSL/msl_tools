@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from msl_tools.msl.core.media.ffmpeg import FfmpegTools, MediaError
+from msl_tools.msl.core.media.probe import probe
 from msl_tools.msl.core.media.recipes import Job
 
 
@@ -238,6 +239,40 @@ def preview(tools: FfmpegTools, job: Job, target: str | Path, seconds: float = P
     except OSError as error:
         raise MediaError(f"The preview couldn’t be made: {error}") from error
     return target
+
+
+def quality_crops(tools: FfmpegTools, job: Job, info, folder: str | Path, tag: str,
+                  size: tuple = (176, 99)) -> tuple:
+    """Before / after at the pixel: the same moment of the source and of what
+    `job` would make (a short piece of it is encoded with the job's own
+    settings), each cut to the middle `size` (width, height) of the RESULT's
+    frame at 1:1 — the source scaled to the result's frame size first — so
+    blur and blocks show as they will. Returns (source picture, result
+    picture). Blocks — call it from a worker thread; raises MediaError."""
+    folder = Path(folder)
+    folder.mkdir(parents=True, exist_ok=True)
+    encoded = preview(tools, job, folder / f"{tag}_piece{job.output.suffix or '.mp4'}", seconds=0.8)
+    result = probe(tools, encoded)
+    width, height = (min(int(size[0]), result.width) // 2 * 2, min(int(size[1]), result.height) // 2 * 2)
+    crop = f"crop={width}:{height}:(iw-{width})/2:(ih-{height})/2"
+    start = float(job.sample[1]) if len(job.sample) > 1 and job.sample[0] == "-ss" else 0.0
+    at = 0.4  # into the piece: past its very first frame (a key frame, the best one)
+    after, before = folder / f"{tag}_after.png", folder / f"{tag}_before.png"
+    flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+    for command in ([str(tools.ffmpeg), "-hide_banner", "-nostdin", "-v", "error", "-y", "-ss", f"{at:.3f}", "-i",
+                     str(encoded), "-frames:v", "1", "-update", "1", "-vf", crop, str(after)],
+                    [str(tools.ffmpeg), "-hide_banner", "-nostdin", "-v", "error", "-y", "-ss", f"{start + at:.3f}",
+                     "-i", str(info.path), "-frames:v", "1", "-update", "1", "-vf",
+                     f"scale={result.width}:{result.height},{crop}", str(before)]):
+        done = subprocess.run(command, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60,
+                              creationflags=flags)
+        if done.returncode != 0:
+            raise MediaError(error_summary(done.stderr))
+    try:
+        encoded.unlink()
+    except OSError:
+        pass
+    return before, after
 
 
 def _whole_size(tools: FfmpegTools, sample: str, length: float, job: Job) -> int:

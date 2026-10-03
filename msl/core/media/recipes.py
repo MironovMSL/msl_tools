@@ -57,6 +57,13 @@ FORMATS = {
 # Still pictures a video can be taken apart into -> (arguments, file suffix).
 IMAGE_FORMATS = {"png": ([], ".png"), "jpg": (["-q:v", "2"], ".jpg"), "tiff": ([], ".tif")}
 JPG_QUALITY = {"best": 2, "good": 5, "small": 10}   # ffmpeg's -q:v for JPEG: 2 is the best, 31 the worst
+# The video codec of an mp4: H.264 plays everywhere; H.265 is about a third smaller at the same
+# quality, but old players and some chats don't take it.
+CODECS = ("h264", "h265")
+# x265's CRF runs about five steps "softer" than x264's for the same look; the graphics card's
+# constant-quality scale sits about four above x264's CRF.
+H265_CRF_SHIFT, GPU_CQ_SHIFT = 5, 4
+GPU_SPEED = {"fast": "p3", "balanced": "p5", "compact": "p7"}
 SOUND_FORMATS = {"wav": (["-c:a", "pcm_s16le"], ".wav"), "mp3": (["-c:a", "libmp3lame", "-q:a", "2"], ".mp3"),
                  "m4a": (["-c:a", "aac", "-b:a", "192k"], ".m4a")}
 AUDIO_KBPS = 96
@@ -196,17 +203,20 @@ def sequence_to_video(sequence: ImageSequence, output: str | Path, fps: float = 
 
 def shrink(info: MediaInfo, output: str | Path, max_height: int = 720, quality: str = "small",
            target_mb: float | None = None, speed: str = "balanced", keep_audio: bool = True,
-           work_dir: str | Path | None = None) -> Job:
+           work_dir: str | Path | None = None, codec: str = "h264", gpu: bool = False) -> Job:
     """A smaller copy of a video for sending: scaled down to `max_height`
     (never up) and re-encoded — at `quality`, or, with `target_mb`, to fit
-    that many megabytes (two runs; lands within a few percent)."""
+    that many megabytes (two runs; lands within a few percent). `codec` /
+    `gpu` (see _video) apply to the quality way; fitting a size is always
+    H.264 on the processor — the one way that lands on the size."""
     output = Path(output)
     _need_video(info)
     scale = f"scale=-2:{int(max_height) // 2 * 2}" if max_height and info.height > max_height else _EVEN
     sound = ["-c:a", "aac", "-b:a", f"{AUDIO_KBPS}k"] if info.has_audio and keep_audio else ["-an"]
     title = f"{info.path.name} → {output.name}"
     if target_mb is None:
-        body = ["-i", str(info.path), "-vf", scale, *_video(quality, speed), *sound, "-movflags", "+faststart"]
+        body = ["-i", str(info.path), "-vf", scale, *_video(quality, speed, codec, gpu), *sound,
+                "-movflags", "+faststart"]
         return Job(title=title, output=output, passes=[body + [str(output)]], duration=info.duration,
                    frames=info.frames, sample=_sample(body, info.duration))
 
@@ -396,14 +406,24 @@ def compare(first: MediaInfo, second: MediaInfo, output: str | Path, stacked: bo
 
 
 def adjust(info: MediaInfo, output: str | Path, rotate: int = 0, aspect: str = "", fps: float | None = None,
-           speed_factor: float = 1.0, quality: str = "high", speed: str = "balanced") -> Job:
+           speed_factor: float = 1.0, quality: str = "high", speed: str = "balanced",
+           crop_box: tuple | None = None) -> Job:
     """A corrected copy of a video: turned (`rotate`: 90 = clockwise, -90,
     180), cropped around its centre to a shape (`aspect`: "16:9", "1:1",
-    "9:16", ...), at another frame rate, faster or slower (`speed_factor`:
-    2 = twice as fast; the sound follows, at its own pitch)."""
+    "9:16", ...) or to a rectangle drawn on the picture (`crop_box`: x, y,
+    width, height as parts of the frame, 0..1 — the picture as it is
+    BEFORE turning), at another frame rate, faster or slower
+    (`speed_factor`: 2 = twice as fast; the sound follows, at its own pitch)."""
     output = Path(output)
     _need_video(info)
     filters, sound = [], []
+    if crop_box is not None:
+        x, y, width, height = (min(max(float(value), 0.0), 1.0) for value in crop_box)
+        width, height = min(width, 1.0 - x), min(height, 1.0 - y)
+        if width * info.width < 16 or height * info.height < 16:
+            raise MediaError("The crop is too small.")
+        if (x, y, width, height) != (0.0, 0.0, 1.0, 1.0):
+            filters.append(f"crop=iw*{width:.5f}:ih*{height:.5f}:iw*{x:.5f}:ih*{y:.5f}")
     if rotate in (90, -90, 270):
         filters.append("transpose=1" if rotate == 90 else "transpose=2")
     elif rotate == 180:
@@ -473,6 +493,185 @@ def loop(info: MediaInfo, output: str | Path, times: int = 3, there_and_back: bo
                duration=duration, frames=frames, sample=_sample(body, info.duration))
 
 
+def fit(info: MediaInfo, output: str | Path, aspect: str = "9:16", height: int = 1080, fill: str = "blur",
+        quality: str = "high", speed: str = "balanced") -> Job:
+    """A video put into a frame of another shape WITHOUT cutting anything
+    off — for a place that wants 9:16, 1:1, 16:9: the whole picture, as big
+    as it fits, and around it either the same picture blown up and blurred
+    (`fill` "blur") or black bars ("bars")."""
+    output = Path(output)
+    _need_video(info)
+    try:
+        across, down = (float(part) for part in aspect.split(":"))
+        ratio = across / down
+    except (ValueError, ZeroDivisionError) as error:
+        raise MediaError(f"“{aspect}” isn’t a shape like 9:16.") from error
+    tall = max(int(height), 16) // 2 * 2
+    wide = int(round(tall * ratio)) // 2 * 2
+    inside = f"scale={wide}:{tall}:force_original_aspect_ratio=decrease"
+    if fill == "bars":
+        picture = ["-vf", f"{inside},pad={wide}:{tall}:(ow-iw)/2:(oh-ih)/2,setsar=1"]
+    else:
+        blur = max(min(wide, tall) // 40, 2)
+        picture = ["-filter_complex",
+                   f"[0:v]split[a][b];[a]scale={wide}:{tall}:force_original_aspect_ratio=increase,crop={wide}:{tall},"
+                   f"boxblur={blur}:2[back];[b]{inside}[front];[back][front]overlay=(W-w)/2:(H-h)/2,setsar=1[out]",
+                   "-map", "[out]"]
+    body = ["-i", str(info.path), *picture, *_video(quality, speed)]
+    body += ((["-map", "0:a"] if "-map" in picture else []) + ["-c:a", "aac", "-b:a", f"{AUDIO_KBPS}k"]) \
+        if info.has_audio else ["-an"]
+    body += ["-movflags", "+faststart"]
+    return Job(title=f"{info.path.name} → {output.name} ({aspect})", output=output, passes=[body + [str(output)]],
+               duration=info.duration, frames=info.frames, sample=_sample(body, info.duration))
+
+
+def contact_sheet(info: MediaInfo, output: str | Path, columns: int = 4, rows: int = 3, width: int = 1920,
+                  times: bool = True) -> Job:
+    """ONE picture with `columns` x `rows` frames of a video, taken evenly
+    along it — the whole shot at a glance, for a review or a note. `times`
+    writes each frame's time into its corner. `width` is the sheet's."""
+    output = Path(output)
+    _need_video(info)
+    columns, rows = max(int(columns), 1), max(int(rows), 1)
+    count = columns * rows
+    cell = max(int(width) // columns // 2 * 2, 32)
+    cell_height = max(int(cell * info.height / max(info.width, 1)), 16)
+    filters = [f"fps={count}/{_number(max(info.duration, 0.1))}", f"scale={cell}:-2"]
+    if times:
+        filters.append(_drawtext(cell_height * 2, "text='%{pts" + chr(92) + ":hms}'", "{m}", "h-th-{m}"))
+    filters.append(f"tile={columns}x{rows}:padding=4:margin=4")
+    quality = ["-q:v", "3"] if output.suffix.lower() in (".jpg", ".jpeg") else []
+    body = ["-i", str(info.path), "-vf", ",".join(filters), "-frames:v", "1", "-update", "1", *quality]
+    return Job(title=f"{info.path.name} → {output.name} ({columns}×{rows} frames)", output=output,
+               passes=[body + [str(output)]], duration=info.duration)
+
+
+def convert_sequence(sequence: ImageSequence, folder: str | Path, image_format: str = "png", max_height: int = 0,
+                     jpg_quality: str = "best", frame_size: tuple = (0, 0)) -> Job:
+    """An image sequence written again as another one, frame for frame with
+    the same numbers: another picture format and / or a smaller frame
+    (`max_height`; never bigger — it needs `frame_size`, the frames' width
+    and height). The job's output IS the folder. Missing frames are refused:
+    ffmpeg stops at a gap without saying so."""
+    folder = Path(folder)
+    if sequence.missing:
+        raise MediaError(f"{len(sequence.missing)} frame(s) of {sequence.name} are missing: {sequence.missing_text()}.")
+    arguments, suffix = IMAGE_FORMATS.get(image_format, IMAGE_FORMATS["png"])
+    arguments = ["-q:v", str(JPG_QUALITY.get(jpg_quality, JPG_QUALITY["best"]))] if image_format == "jpg" \
+        else list(arguments)
+    height = int(frame_size[1] or 0) if frame_size else 0
+    scale = ["-vf", f"scale=-2:{int(max_height) // 2 * 2}"] if max_height and height > max_height else []
+    name = (sequence.prefix.rstrip("._- ") or sequence.folder.name).replace("%", "%%")
+    digits = f"%0{sequence.padding}d" if sequence.padding else "%d"
+    pattern = folder / f"{name}.{digits}{suffix}"
+    body = ["-start_number", str(sequence.first), "-i", sequence.pattern_path, *scale, *arguments,
+            "-start_number", str(sequence.first), str(pattern)]
+    return Job(title=f"{sequence.name} → {folder.name}/ ({suffix.lstrip('.').upper()})", output=folder, passes=[body],
+               frames=sequence.count, folder=folder)
+
+
+def adjust_audio(info: MediaInfo, output: str | Path, volume: float = 1.0, even: bool = False,
+                 fade_in: float = 0.0, fade_out: float = 0.0) -> Job:
+    """A copy of a video whose SOUND is changed (the picture is copied, not
+    re-encoded): `even` brings it to the usual loudness (loudnorm), `volume`
+    is a factor (0.5 = half, 2 = twice), `fade_in` / `fade_out` are seconds
+    of rising at the start and of dying away at the end."""
+    output = Path(output)
+    _need_video(info)
+    if not info.has_audio:
+        raise MediaError(f"{info.path.name} has no sound.")
+    filters = ["loudnorm=I=-16:TP=-1.5:LRA=11"] if even else []
+    if abs(float(volume) - 1.0) > 1e-6:
+        if not 0.0 <= volume <= 8.0:
+            raise MediaError("The volume must be between 0 and 8 times.")
+        filters.append(f"volume={_number(volume)}")
+    if fade_in > 0:
+        filters.append(f"afade=t=in:st=0:d={_number(min(fade_in, info.duration))}")
+    if fade_out > 0:
+        length = min(float(fade_out), info.duration)
+        filters.append(f"afade=t=out:st={_number(max(info.duration - length, 0.0))}:d={_number(length)}")
+    if not filters:
+        raise MediaError("Pick something to change in the sound first.")
+    body = ["-i", str(info.path), "-c:v", "copy", "-af", ",".join(filters), "-c:a", "aac", "-b:a",
+            f"{AUDIO_KBPS * 2}k", "-movflags", "+faststart"]
+    return Job(title=f"{info.path.name} → {output.name}", output=output, passes=[body + [str(output)]],
+               duration=info.duration, frames=info.frames)
+
+
+def trim_pieces(info: MediaInfo, output: str | Path, pieces: list, quality: str = "high",
+                speed: str = "balanced") -> Job:
+    """Several pieces of a video — `pieces`: (start, end) in seconds, in the
+    order they should play — cut out and put one after another as ONE
+    video. Exact to the frame (the result is re-encoded)."""
+    output = Path(output)
+    _need_video(info)
+    cuts = []
+    for start, end in pieces:
+        start, end = max(float(start), 0.0), min(float(end), info.duration or float(end))
+        if end - start <= 0:
+            raise MediaError("The end of every piece must be after its start.")
+        cuts.append((start, end))
+    if len(cuts) < 2:
+        raise MediaError("Putting pieces together needs at least two of them.")
+    parts, joined = [], ""
+    for index, (start, end) in enumerate(cuts):
+        parts.append(f"[0:v]trim=start={_number(start)}:end={_number(end)},setpts=PTS-STARTPTS[v{index}]")
+        joined += f"[v{index}]"
+        if info.has_audio:
+            parts.append(f"[0:a]atrim=start={_number(start)}:end={_number(end)},asetpts=PTS-STARTPTS[a{index}]")
+            joined += f"[a{index}]"
+    graph = ";".join(parts) + f";{joined}concat=n={len(cuts)}:v=1:a={1 if info.has_audio else 0}[joined]" \
+        + ("[sound]" if info.has_audio else "") + f";[joined]{_EVEN}[out]"
+    body = ["-i", str(info.path), "-filter_complex", graph, "-map", "[out]"]
+    body += (["-map", "[sound]", "-c:a", "aac", "-b:a", f"{AUDIO_KBPS}k"] if info.has_audio else []) \
+        + _video(quality, speed) + ["-movflags", "+faststart"]
+    length = sum(end - start for start, end in cuts)
+    return Job(title=f"{info.path.name} [{len(cuts)} pieces] → {output.name}", output=output,
+               passes=[body + [str(output)]], duration=length,
+               frames=int(round(length * info.fps)) if info.fps else 0)
+
+
+def chain(info: MediaInfo, output: str | Path, start: float | None = None, end: float | None = None,
+          max_height: int = 0, overlays: Overlays | None = None, quality: str = "small", speed: str = "balanced",
+          keep_audio: bool = True, codec: str = "h264", gpu: bool = False,
+          work_dir: str | Path | None = None) -> Job:
+    """Several things in ONE run — and one loss of quality instead of one
+    per step: a piece cut out (`start` .. `end`), the frame made smaller
+    (`max_height`), burn-ins / a watermark drawn (`overlays`). What isn't
+    asked for is left out. Frame numbers count from the source's frames, so
+    a burnt-in number still names the frame of the original."""
+    output = Path(output)
+    _need_video(info)
+    piece = start is not None or end is not None
+    first = max(float(start or 0.0), 0.0)
+    last = min(float(end), info.duration) if end is not None and info.duration else (end or info.duration)
+    if piece and last - first <= 0:
+        raise MediaError("The end of the cut must be after its start.")
+    smaller = bool(max_height) and info.height > max_height
+    drawn = overlays is not None and overlays.any()
+    if not (piece or smaller or drawn):
+        raise MediaError("Nothing to do: switch on at least one step that changes the video.")
+    tall = int(max_height) // 2 * 2 if smaller else info.height // 2 * 2
+    wide = int(round(info.width * tall / max(info.height, 1))) // 2 * 2
+    inputs = [(["-ss", _number(first), "-to", _number(last)] if piece else []) + ["-i", str(info.path)]]
+    if drawn:
+        overlays.first_frame = int(round(first * info.fps)) if info.fps else 0
+    picture, temporary = _picture(inputs, [f"scale=-2:{tall}" if smaller else _EVEN], overlays if drawn else None,
+                                  (wide, tall), work_dir)
+    tail = _video(quality, speed, codec, gpu)
+    if info.has_audio and keep_audio:
+        tail += (["-map", "0:a"] if "-map" in picture else []) + ["-c:a", "aac", "-b:a", f"{AUDIO_KBPS}k"]
+    else:
+        tail += ["-an"]
+    tail += ["-movflags", "+faststart"]
+    body = _flat(inputs) + picture + tail
+    length = (last - first) if piece else info.duration
+    return Job(title=f"{info.path.name} → {output.name}", output=output, passes=[body + [str(output)]],
+               duration=length, frames=int(round(length * info.fps)) if info.fps else info.frames,
+               temporary=temporary,
+               sample=(body + ["-t", _number(min(SAMPLE_SECONDS, length))]) if piece else _sample(body, info.duration))
+
+
 def to_frames(info: MediaInfo, folder: str | Path, name: str = "", image_format: str = "png",
               jpg_quality: str = "best", first_number: int = 1, padding: int = 4, every: int = 1) -> Job:
     """A video taken apart into numbered pictures in `folder`:
@@ -537,9 +736,42 @@ def _need_video(info: MediaInfo) -> None:
         raise MediaError(f"{info.path.name} isn’t a video.")
 
 
-def _video(quality: str, speed: str) -> list[str]:
-    return ["-c:v", "libx264", "-crf", str(QUALITY.get(quality, QUALITY["good"])),
-            "-preset", SPEED.get(speed, SPEED["balanced"]), "-pix_fmt", "yuv420p"]
+def _video(quality: str, speed: str, codec: str = "h264", gpu: bool = False) -> list[str]:
+    """The picture's encoder arguments: `codec` "h264" / "h265", on the
+    processor or — `gpu` — on an NVIDIA graphics card (much faster, a
+    somewhat bigger file for the same look; see gpu_encoding_works())."""
+    crf = QUALITY.get(quality, QUALITY["good"])
+    h265 = codec == "h265"
+    if gpu:
+        arguments = ["-c:v", "hevc_nvenc" if h265 else "h264_nvenc", "-rc", "vbr", "-cq", str(crf + GPU_CQ_SHIFT),
+                     "-b:v", "0", "-preset", GPU_SPEED.get(speed, GPU_SPEED["balanced"]), "-pix_fmt", "yuv420p"]
+    elif h265:
+        arguments = ["-c:v", "libx265", "-crf", str(crf + H265_CRF_SHIFT), "-preset",
+                     SPEED.get(speed, SPEED["balanced"]), "-pix_fmt", "yuv420p", "-x265-params", "log-level=error"]
+    else:
+        arguments = ["-c:v", "libx264", "-crf", str(crf), "-preset", SPEED.get(speed, SPEED["balanced"]),
+                     "-pix_fmt", "yuv420p"]
+    return arguments + (["-tag:v", "hvc1"] if h265 else [])  # the tag Apple's players need to open H.265
+
+
+_gpu_checked: dict[str, bool] = {}
+
+
+def gpu_encoding_works(tools: FfmpegTools) -> bool:
+    """Can this ffmpeg encode on the graphics card here? Asked by ENCODING a
+    few frames (the encoder is listed even without a card or a driver).
+    Blocks for a moment the first time — call it from a worker thread."""
+    key = str(tools.ffmpeg)
+    if key not in _gpu_checked:
+        try:
+            done = subprocess.run([key, "-hide_banner", "-nostdin", "-v", "error", "-f", "lavfi", "-i",
+                                   "color=c=black:s=256x144:r=24:d=0.3", "-c:v", "h264_nvenc", "-f", "null", os.devnull],
+                                  stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                  timeout=20, creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+            _gpu_checked[key] = done.returncode == 0
+        except (OSError, subprocess.SubprocessError):
+            _gpu_checked[key] = False
+    return _gpu_checked[key]
 
 
 def _number(value: float) -> str:

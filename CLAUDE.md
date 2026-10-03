@@ -1247,6 +1247,71 @@ frames · For editing · Adjust · Join (2+ videos) · Compare (exactly 2).
   live with the frame rate; a sequence's own tiles include its range.
   The preset whose settings are exactly the ones on screen is outlined
   (`ChipBar.set_marked`, `MediaPage._mark_preset`).
+- The round of 18 (2026-10-03; the Maya links — playblast to Media, a
+  watched render folder — were left for later by the user):
+  - Heading: the tool's icon + "MEDIA" like a card's header; ffmpeg's
+    state is a green pill (`QFrame#mediaStatusPill` + dot), shown while
+    ffmpeg is there.
+  - "Save as": the field holds the result's NAME, the folder is the line
+    under it (`ElidedLabel`, atoms/labels/, elided at the left).
+    `_output_path()` = folder + name; a whole path typed / pasted into the
+    field is taken as it is and split back on editingFinished.
+  - `StartButton` (page.py): the action's icon beside the text; while jobs
+    run, a thin bar along its bottom = the batch's progress.
+  - A running job FILLS its row from the left (`_JobRow.paintEvent`,
+    qproperty progressColor) — no separate progress bar. A new row grows
+    in (`appear()`, maximumHeight animated; restored rows don't); the action
+    card animates its height on a switch (`_animate_card_from`; the fixed
+    height is freed at the end). An empty jobs card is small
+    (`EMPTY_JOBS_HEIGHT`; `_fit_jobs_card` gives the room to the filler).
+  - New actions: Fit a shape (`fit`: 9:16 / 1:1 / 4:5 / 16:9, blurred
+    background or bars, nothing cut off), Contact sheet (`contact_sheet`:
+    columns x rows frames, times in the corners, one JPG / PNG), Convert
+    frames for SEQUENCES (`convert_sequence`: format / size, same numbers;
+    refuses gaps and its own folder), Several at once (`chain`: Trim's
+    piece + Make smaller's size / quality / codec + Stamp's burn-ins in ONE
+    run — `OptionPanel.bind(panels)` gives it the other panels,
+    `refresh()` runs when an action is picked). Sound got "Adjust"
+    (`adjust_audio`: volume, "Even out" = loudnorm, fades; the picture is
+    copied); "Take it out" is now "Extract" (old settings mapped).
+    Make smaller: Codec H.264 / H.265 (`_video(codec=)`, x265 CRF +5,
+    `-tag:v hvc1`) and "On the graphics card" (NVENC; shown only where
+    `gpu_encoding_works()` — a real 0.3 s test encode, cached — says yes;
+    it does on this machine). Fitting a SIZE stays H.264 on the processor.
+    Trim: "+ Add this piece" collects pieces (chips, a click removes one);
+    two or more = one video (`trim_pieces`, concat filter) or a file each
+    (`<name>_1`, ... via `OptionPanel.jobs()` — one source may give several
+    jobs now). Adjust: Crop to "Draw" = a `CropPicker` (compositions/: drag
+    corners / edges / inside; dims what is cut; thirds) on a frame of the
+    video; `adjust(crop_box=)` in parts of the frame. Crop to became a combo
+    box (six options made the window 568 px). Icons: `frame_fit`, `grid`,
+    `steps` (all moving too).
+  - Make smaller shows BEFORE / AFTER (`run.quality_crops`): a 0.8 s piece
+    is encoded with the settings on screen and the middle of the frame is
+    shown at 1:1 as it is and as it will be, 0.9 s after a change
+    (136 x 77 each: two wider ones made the window 626 px at least).
+  - The window's minimum after this round: 449-546 px depending on the
+    action (Make smaller 546 with its before / after). The recent line is
+    Ignored-width: the card's pages share ONE minimum width, and a fixed
+    chip line on the empty page made it 770.
+  - Ctrl+V on the page opens copied files or a copied path (a sound file
+    goes to the sound, like a drop); a field with the focus keeps its own
+    paste. The empty drop area lists RECENT sources (`settings.recent`,
+    6, still existing ones; `DropArea.add_widget`).
+  - Every job keeps its RECIPE (action, settings, sources; also in
+    history.json): "Set up again" (a row button / menu) loads the sources
+    and applies the action's settings — change and start. A waiting job's
+    menu has "Run next" (`JobQueue.run_next`, the rows follow).
+  - Explorer: the page's menu (the folder button) puts "Send to → MSL
+    Media" into Explorer (`core/environment/send_to.py`, a shortcut in
+    %APPDATA%/…/SendTo running `<pythonw> -m msl_tools.msl.run_hub --open`
+    in the folder that holds msl_tools; MSL_SENDTO_DIR overrides in tests).
+    `run_hub --open <files>` hands the files to the hub already running FOR
+    THIS FOLDER (`ui/app/instance_link.py`: QLocalServer named after the
+    install folder + user) and quits — before QtApplicationContext, whose
+    exit always runs the event loop; with no hub running, it starts one and
+    opens the files in Media. Tested with a private name only — a test must
+    never send to the real name: the user's running hub would open the files.
 - "Show in folder" (`ProcessLauncher.open_file_explorer`, used by Maya
   Gate too): a FILE is selected through the shell —
   `core/environment/shell.py:select_in_file_manager()`

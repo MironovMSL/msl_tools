@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
 
@@ -20,6 +20,7 @@ class ResultRecord:
         seconds: How long the job ran.
         source_size: Bytes of what it was made from (0 = not compared).
         finished: When it was over (seconds since the epoch).
+        recipe: What made it, to set it up again: {"action", "settings", "sources"}.
     """
 
     title: str
@@ -30,6 +31,7 @@ class ResultRecord:
     seconds: float = 0.0
     source_size: int = 0
     finished: float = 0.0
+    recipe: dict = field(default_factory=dict)
 
 
 class ResultHistory:

@@ -7,6 +7,10 @@ QApplication by hand.
 In a source checkout, theme files hot-reload (edit assets/themes/*.css or
 ui/theme/base.qss, save, the hub repaints). MSL_THEME_HOT_RELOAD=0/1
 forces it off/on.
+
+`--open <files...>` (what Explorer's "Send to → MSL Media" runs): the files
+are opened in Media — handed to the hub that is running already, if there
+is one (InstanceLink), and this start quits without a window.
 """
 import sys
 import threading
@@ -18,6 +22,7 @@ from msl_tools.msl.core.installer.hub_updater import HubUpdater, UpdateResult
 from msl_tools.msl.core.resources import Resources
 from msl_tools.msl.core.version.version import Version
 from msl_tools.msl.ui.app.application_context import QtApplicationContext
+from msl_tools.msl.ui.app.instance_link import InstanceLink
 from msl_tools.msl.ui.theme import ThemeHotReloader
 from msl_tools.msl.ui.ui_resources import UiResources
 from msl_tools.msl.tools.desktop.registry import TOOLS
@@ -114,7 +119,31 @@ def _add_link_indicator(window: HubWindow, link: MayaLinkServer) -> None:
     refresh()
 
 
+def _files_to_open(argv: list) -> list:
+    """The paths after `--open` (Explorer's "Send to" appends the files it was given)."""
+    if "--open" not in argv:
+        return []
+    return [argument for argument in argv[argv.index("--open") + 1:] if not argument.startswith("--")]
+
+
+def _open_in_media(window: HubWindow, paths: list) -> None:
+    """Media, in front, with `paths` loaded."""
+    page = window.open_tool("media")
+    if page is not None and paths:
+        page.open(paths)
+    if window.isMinimized():
+        window.showNormal()
+    window.raise_()
+    window.activateWindow()
+
+
 def main() -> None:
+    # One hub per install: a start that only brings files hands them to the hub that is running
+    # and quits - BEFORE the application context, whose exit runs the event loop in any case.
+    instance_name = InstanceLink.instance_name(Resources().fsManager.ROOT_DIR)
+    files = _files_to_open(sys.argv)
+    if files and InstanceLink.send(instance_name, {"open": files}):
+        return
     _use_own_taskbar_icon()
     with QtApplicationContext():
         if ThemeHotReloader.enabled_by_default(_REPO_ROOT):
@@ -196,6 +225,10 @@ def main() -> None:
         link.ensure_listening()
         if last_update is not None:
             qt.QtCore.QTimer.singleShot(300, lambda: report_update(last_update))
+        instance_link = InstanceLink(instance_name, window)
+        instance_link.received.connect(lambda message: _open_in_media(window, list(message.get("open") or [])))
+        if files:
+            qt.QtCore.QTimer.singleShot(0, lambda: _open_in_media(window, files))
 
 
 if __name__ == "__main__":

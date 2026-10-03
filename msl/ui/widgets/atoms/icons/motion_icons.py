@@ -214,13 +214,46 @@ def _film(p, t) -> None:
     p.setClipping(False)
 
 
+def _frame_fit(p, t) -> None:
+    """The picture settles into the tall frame."""
+    p.drawPath(path("M8 2H16C17.1 2 18 2.9 18 4V20C18 21.1 17.1 22 16 22H8C6.9 22 6 21.1 6 20V4C6 2.9 6.9 2 8 2Z"))
+    spread = 2.4 * there_and_back(t)
+    p.drawLine(qt.QtCore.QPointF(6, 9 - spread), qt.QtCore.QPointF(18, 9 - spread))
+    p.drawLine(qt.QtCore.QPointF(6, 15 + spread), qt.QtCore.QPointF(18, 15 + spread))
+
+
+def _grid(p, t) -> None:
+    """The cells are drawn in: the lines across, then the lines down."""
+    p.drawPath(path("M5 3H19C20.1 3 21 3.9 21 5V19C21 20.1 20.1 21 19 21H5C3.9 21 3 20.1 3 19V5C3 3.9 3.9 3 5 3Z"))
+    across = window(t, 0.05, 0.5) if _moving(t) else 1.0
+    down = window(t, 0.45, 0.95) if _moving(t) else 1.0
+    for y in (9.0, 15.0):
+        if across > 0.0:
+            p.drawLine(qt.QtCore.QPointF(3, y), qt.QtCore.QPointF(3 + 18 * across, y))
+    for x in (9.0, 15.0):
+        if down > 0.0:
+            p.drawLine(qt.QtCore.QPointF(x, 3), qt.QtCore.QPointF(x, 3 + 18 * down))
+
+
+def _steps(p, t) -> None:
+    """The steps are ticked one after another."""
+    for index, y in enumerate((6.0, 12.0, 18.0)):
+        p.drawLine(qt.QtCore.QPointF(11, y), qt.QtCore.QPointF(21, y))
+        shown = window(t, 0.12 + 0.24 * index, 0.36 + 0.24 * index) if _moving(t) else 1.0
+        if shown > 0.0:
+            p.setOpacity(shown)
+            p.drawPath(path(f"M3 {y:g}L4.5 {y + 1.5:g}L7.5 {y - 1.5:g}"))
+            p.setOpacity(1.0)
+
+
 MOTION_ICONS = {
+    "frame_fit": _frame_fit, "grid": _grid, "steps": _steps,
     "compress": _compress, "scissors": _scissors, "repeat": _repeat, "text_frame": _text_frame, "volume": _volume,
     "gif": _gif, "image_stack": _image_stack, "clapper": _clapper, "crop": _crop, "merge": _merge,
     "split_view": _split_view, "film": _film,
 }
 # How long each one plays, in milliseconds (a snip is quick, a hop of three letters takes longer).
-DURATIONS = {"scissors": 520, "gif": 760, "volume": 700, "repeat": 560, "film": 560, "split_view": 700}
+DURATIONS = {"grid": 620, "steps": 760, "scissors": 520, "gif": 760, "volume": 700, "repeat": 560, "film": 560, "split_view": 700}
 DEFAULT_DURATION = 480
 
 

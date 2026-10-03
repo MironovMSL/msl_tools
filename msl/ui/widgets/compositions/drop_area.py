@@ -97,6 +97,10 @@ class DropArea(qt.QtWidgets.QWidget):
         self._pill.show()
         return button
 
+    def add_widget(self, widget: qt.QtWidgets.QWidget) -> None:
+        """Puts `widget` under the pill (e.g. a line of recent files)."""
+        self.layout().insertWidget(self.layout().count() - 1, widget, 0, qt.QtCore.Qt.AlignmentFlag.AlignHCenter)
+
     def set_texts(self, title: str, note: str = "") -> None:
         """What to drop (and the quiet line under it); the buttons are shown again."""
         self._title.setText(title)

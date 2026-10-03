@@ -91,6 +91,31 @@ MediaPage QLabel#mediaSourceWarning[plain="true"] {
     font-size: 11px;
 }
 
+/* ffmpeg's state in the page's heading: a pill with a green dot. */
+MediaPage QFrame#mediaStatusPill {
+    background-color: alpha(var(--success), 10%);
+    border: 1px solid alpha(var(--success), 38%);
+    border-radius: 10px;
+}
+MediaPage QLabel#mediaStatusDot {
+    background-color: var(--success);
+    border-radius: 4px;
+}
+MediaPage QFrame#mediaStatusPill QPushButton#mediaLink {
+    color: var(--text-primary);
+}
+/* The start button: the action's icon in the color of its text; the batch's progress along its bottom. */
+MediaPage QPushButton#mediaStart {
+    qproperty-iconColor:          var(--on-accent);
+    qproperty-progressColor:      var(--on-accent);
+    qproperty-progressTrackColor: alpha(var(--on-accent), 30%);
+    padding: 3px 12px;
+}
+/* A running job fills its row from the left. */
+MediaPage QFrame#mediaJob {
+    qproperty-progressColor: alpha(var(--accent), 18%);
+}
+
 /* The small icon buttons beside the start button (preview, command) and in a job's row. */
 MediaPage GlyphButton#mediaAction {
     qproperty-glyphColor:       var(--accent);

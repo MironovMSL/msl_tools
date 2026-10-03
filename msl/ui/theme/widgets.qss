@@ -239,6 +239,15 @@ DropArea IconPushButton#dropAreaButton:disabled {
     background-color: alpha(var(--text-primary), 3%);
 }
 
+/* --- CropPicker: a picture with a rectangle drawn on it by hand ---------------------- */
+
+CropPicker {
+    qproperty-accentColor: var(--accent);
+    qproperty-dimColor:    alpha(var(--surface), 72%);
+    qproperty-baseColor:   alpha(var(--text-primary), 8%);
+    qproperty-guideColor:  alpha(var(--accent), 40%);
+}
+
 /* --- RangeStrip: pictures side by side with a range picked on them ------------------- */
 
 RangeStrip {

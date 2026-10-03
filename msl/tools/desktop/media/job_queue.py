@@ -1,6 +1,6 @@
 # tools/desktop/media/job_queue.py
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import msl_tools.msl.ui.qt_bindings as qt
@@ -14,7 +14,8 @@ from msl_tools.msl.ui.ui_resources import UiResources
 from msl_tools.msl.ui.widgets.atoms.buttons.glyph_button import GlyphButton
 from msl_tools.msl.ui.widgets.atoms.icons.tinted_icon import TintedIcon
 from msl_tools.msl.ui.workers.result_worker import ResultWorker
-from msl_tools.msl.ui.widgets.atoms.progress.base_progress_bar import BaseProgressBar, ProgressState
+from msl_tools.msl.core.theme import ThemeRegistry
+from msl_tools.msl.ui.theme.qss import color_property
 from msl_tools.msl.ui.widgets.atoms.surfaces import StableScrollArea
 
 WAITING, RUNNING, DONE, FAILED, CANCELLED = "waiting", "running", "done", "failed", "cancelled"
@@ -39,6 +40,7 @@ class QueueItem:
         finished: When it was over (seconds since the epoch; 0 while it isn't).
         gone: A result from an earlier run of the hub whose file isn't there any more.
         thumbnail: A small picture of the result, once it was made (None: not yet, or it has none).
+        recipe: What made it — {"action", "settings", "sources"} — so it can be set up again ({} = unknown).
     """
 
     id: int
@@ -55,6 +57,7 @@ class QueueItem:
     finished: float = 0.0
     gone: bool = False
     thumbnail: Path | None = None
+    recipe: dict = field(default_factory=dict)
 
 
 class JobQueue(qt.QtCore.QObject):
@@ -83,6 +86,7 @@ class JobQueue(qt.QtCore.QObject):
     added = qt.QtCore.Signal(object)
     changed = qt.QtCore.Signal(object)
     removed = qt.QtCore.Signal(int)
+    moved = qt.QtCore.Signal()   # the order of the jobs changed
     idle = qt.QtCore.Signal()
 
     def __init__(self, tools, parent=None):
@@ -107,11 +111,14 @@ class JobQueue(qt.QtCore.QObject):
         """Files the jobs that aren't over yet will write (so a new job picks another name)."""
         return [item.job.output for item in self._items if item.state in (WAITING, RUNNING)]
 
-    def add(self, job: Job, source_size: int = 0) -> QueueItem:
+    def add(self, job: Job, source_size: int = 0, recipe: dict | None = None) -> QueueItem:
         """Puts `job` at the end of the line. `source_size`: bytes of what it
-        is made from — the finished row then says how much smaller the result is."""
+        is made from — the finished row then says how much smaller the result
+        is. `recipe`: what made it ({"action", "settings", "sources"}), kept
+        with the result so it can be set up again."""
         tools = self._tools()
-        item = QueueItem(id=self._next_id, job=job, command=job.command_text(tools), source_size=int(source_size))
+        item = QueueItem(id=self._next_id, job=job, command=job.command_text(tools), source_size=int(source_size),
+                         recipe=dict(recipe or {}))
         self._next_id += 1
         self._items.append(item)
         self._batch.append(item)
@@ -127,7 +134,7 @@ class JobQueue(qt.QtCore.QObject):
             job = Job(title=record.title, output=output, passes=[], folder=output if record.folder else None)
             item = QueueItem(id=self._next_id, job=job, state=DONE, fraction=1.0, seconds=record.seconds,
                              size=record.size, files=record.files, source_size=record.source_size,
-                             finished=record.finished, gone=not output.exists())
+                             finished=record.finished, gone=not output.exists(), recipe=dict(record.recipe or {}))
             self._next_id += 1
             self._items.append(item)
             self.added.emit(item)
@@ -176,8 +183,20 @@ class JobQueue(qt.QtCore.QObject):
         """The finished jobs whose result is still there, oldest first, as ResultRecords."""
         return [ResultRecord(title=item.job.title, output=str(item.job.output), folder=item.job.folder is not None,
                              size=item.size, files=item.files, seconds=round(item.seconds, 1),
-                             source_size=item.source_size, finished=item.finished)
+                             source_size=item.source_size, finished=item.finished, recipe=item.recipe)
                 for item in self._items if item.state == DONE and not item.gone]
+
+    def run_next(self, item_id: int) -> None:
+        """A waiting job goes to the front of the line: it starts as soon as the running one is over."""
+        item = self._find(item_id)
+        if item is None or item.state != WAITING:
+            return
+        first = next((other for other in self._items if other.state == WAITING), None)
+        if first is item:
+            return
+        self._items.remove(item)
+        self._items.insert(self._items.index(first), item)
+        self.moved.emit()
 
     def overall(self) -> float:
         """How far the current batch is, 0..1 (1 when nothing waits or runs)."""
@@ -344,7 +363,8 @@ class _ResultLabel(qt.QtWidgets.QLabel):
 class _JobRow(qt.QtWidgets.QFrame):
     """Private: one job of the list — a state dot, the NAME OF ITS RESULT
     (what it is made from is in the tooltip: with both names the line was
-    too long to read), where it stands, a thin progress bar while it runs.
+    too long to read), where it stands; while it runs, the row itself is
+    filled from the left as far as the job is.
     When it is done the name is the result file itself (click = open, drag
     = take it somewhere) with a play button in front of it; the icon
     buttons copy the file to the clipboard and show it in its folder; a right click has the rest (the command,
@@ -352,11 +372,17 @@ class _JobRow(qt.QtWidgets.QFrame):
 
     COPIED_MS = 1500
     BUTTON_SIZE = qt.QtCore.QSize(26, 22)
+    APPEAR_MS = 170
+
+    # A running job fills its row from the left as far as it is (media.qss sets the color).
+    progressColor = color_property("_progress_color")
     THUMBNAIL_SIZE = qt.QtCore.QSize(40, 23)   # the slot of the state dot / the result's picture
     THUMBNAIL_RADIUS = 3
 
     cancel_requested = qt.QtCore.Signal(int)
     remove_requested = qt.QtCore.Signal(int)
+    again_requested = qt.QtCore.Signal(int)
+    run_next_requested = qt.QtCore.Signal(int)
     show_requested = qt.QtCore.Signal(int)
     open_requested = qt.QtCore.Signal(int)
     command_requested = qt.QtCore.Signal(int)
@@ -366,6 +392,10 @@ class _JobRow(qt.QtWidgets.QFrame):
         self.setObjectName("mediaJob")
         self.item_id = item.id
         self._state = ""
+        self._fraction: float | None = None   # None = not running; < 0 = running, how far isn't known
+        self._progress_color = qt.QtGui.QColor(ThemeRegistry.fallback().accent)  # until QSS applies
+        self._progress_color.setAlpha(40)
+        self._appear: qt.QtCore.QPropertyAnimation | None = None
         self._has_command = bool(item.command)  # a result restored from an earlier run has none
         self._dot = qt.QtWidgets.QLabel()
         self._dot.setObjectName("mediaJobDot")
@@ -399,13 +429,16 @@ class _JobRow(qt.QtWidgets.QFrame):
         self._show_button = self._button("browse", "▸", "Show the result in its folder")
         self._cancel_button = self._button("stop", "■", "Cancel this job")
         self._remove_button = self._button("clear", "✕", "Take this line off the list (the result file stays)")
-        self._bar = BaseProgressBar()
+        self._again_button = self._button("restart", "↻", "Set it up again: its video and its settings, on the "
+                                                          "page — change what you like and start")
+        self._has_recipe = bool(item.recipe)
         self._title.activated.connect(lambda: self.open_requested.emit(self.item_id))
         self._play_button.clicked.connect(lambda: self.open_requested.emit(self.item_id))
         self._copy_button.clicked.connect(self.copy_file)
         self._show_button.clicked.connect(lambda: self.show_requested.emit(self.item_id))
         self._cancel_button.clicked.connect(lambda: self.cancel_requested.emit(self.item_id))
         self._remove_button.clicked.connect(lambda: self.remove_requested.emit(self.item_id))
+        self._again_button.clicked.connect(lambda: self.again_requested.emit(self.item_id))
 
         line = qt.QtWidgets.QHBoxLayout()
         line.setContentsMargins(0, 0, 0, 0)
@@ -415,6 +448,7 @@ class _JobRow(qt.QtWidgets.QFrame):
         # Both give way in a narrow window - the name less than what is said about it.
         line.addWidget(self._title, 3)
         line.addWidget(self._status, 2)
+        line.addWidget(self._again_button)
         line.addWidget(self._copy_button)
         line.addWidget(self._show_button)
         line.addWidget(self._cancel_button)
@@ -423,8 +457,30 @@ class _JobRow(qt.QtWidgets.QFrame):
         layout.setContentsMargins(12, 6, 8, 6)
         layout.setSpacing(4)
         layout.addLayout(line)
-        layout.addWidget(self._bar)
         self.update_item(item)
+
+    def appear(self) -> None:
+        """Grows into place instead of popping in (for a job that was just added)."""
+        height = self.sizeHint().height()
+        self.setMaximumHeight(0)
+        self._appear = qt.QtCore.QPropertyAnimation(self, b"maximumHeight", self)
+        self._appear.setDuration(self.APPEAR_MS)
+        self._appear.setEasingCurve(qt.QtCore.QEasingCurve.Type.OutCubic)
+        self._appear.setStartValue(0)
+        self._appear.setEndValue(height)
+        self._appear.finished.connect(lambda: self.setMaximumHeight(16777215))  # QWIDGETSIZE_MAX: free again
+        self._appear.start()
+
+    def paintEvent(self, event) -> None:
+        if self._fraction is not None:
+            painter = qt.QtGui.QPainter(self)
+            width = self.width() * (min(max(self._fraction, 0.0), 1.0) if self._fraction >= 0 else 1.0)
+            color = qt.QtGui.QColor(self._progress_color)
+            if self._fraction < 0:
+                color.setAlpha(color.alpha() // 2)  # how far isn't known: the whole row, fainter
+            painter.fillRect(qt.QtCore.QRectF(0, 0, width, self.height()), color)
+            painter.end()
+        super().paintEvent(event)
 
     def _show_picture(self, path: Path | None) -> None:
         """The result's picture in the slot (cropped to fill it, corners rounded) — or the state dot."""
@@ -473,12 +529,10 @@ class _JobRow(qt.QtWidgets.QFrame):
         there = state == DONE and not item.gone
         self._show_picture(item.thumbnail if there else None)
         running = state == RUNNING
-        self._bar.setVisible(running)
-        if running:
-            self._bar.set_state(ProgressState.NORMAL)
-            self._bar.set_indeterminate(item.fraction < 0)
-            if item.fraction >= 0:
-                self._bar.set_progress(int(item.fraction * 100))
+        fraction = item.fraction if running else None
+        if fraction != self._fraction:
+            self._fraction = fraction
+            self.update()
         if state == WAITING:
             text = "waiting"
         elif running:
@@ -513,6 +567,7 @@ class _JobRow(qt.QtWidgets.QFrame):
         self._show_button.setVisible(there)
         self._cancel_button.setVisible(state in (WAITING, RUNNING))
         self._remove_button.setVisible(state in (FAILED, CANCELLED) or item.gone)
+        self._again_button.setVisible(self._has_recipe and state in (DONE, FAILED, CANCELLED))
 
     def copy_file(self) -> None:
         """Puts the result file on the clipboard (as a file: Ctrl+V pastes it into a chat or a folder)."""
@@ -531,6 +586,10 @@ class _JobRow(qt.QtWidgets.QFrame):
             menu.addSeparator()
         if self._has_command:
             menu.addAction("Command").triggered.connect(lambda: self.command_requested.emit(self.item_id))
+        if self._state == WAITING:
+            menu.addAction("Run next").triggered.connect(lambda: self.run_next_requested.emit(self.item_id))
+        if self._has_recipe and self._state in (DONE, FAILED, CANCELLED):
+            menu.addAction("Set up again").triggered.connect(lambda: self.again_requested.emit(self.item_id))
         if self._state in (WAITING, RUNNING):
             menu.addAction("Cancel").triggered.connect(lambda: self.cancel_requested.emit(self.item_id))
         else:
@@ -552,6 +611,7 @@ class JobList(qt.QtWidgets.QWidget):
     show_requested = qt.QtCore.Signal(object)
     open_requested = qt.QtCore.Signal(object)
     command_requested = qt.QtCore.Signal(object)
+    again_requested = qt.QtCore.Signal(object)
 
     def __init__(self, queue: JobQueue, parent=None):
         super().__init__(parent)
@@ -584,6 +644,7 @@ class JobList(qt.QtWidgets.QWidget):
         queue.added.connect(self._on_added)
         queue.changed.connect(self._on_changed)
         queue.removed.connect(self._on_removed)
+        queue.moved.connect(self._on_moved)
 
     def _on_added(self, item: QueueItem) -> None:
         row = _JobRow(item)
@@ -592,9 +653,21 @@ class JobList(qt.QtWidgets.QWidget):
         row.show_requested.connect(lambda item_id: self._forward(self.show_requested, item_id))
         row.open_requested.connect(lambda item_id: self._forward(self.open_requested, item_id))
         row.command_requested.connect(lambda item_id: self._forward(self.command_requested, item_id))
+        row.again_requested.connect(lambda item_id: self._forward(self.again_requested, item_id))
+        row.run_next_requested.connect(self._queue.run_next)
         self._rows[item.id] = row
         self._list.insertWidget(0, row)  # newest on top
         self._empty.hide()
+        if item.state in (WAITING, RUNNING) and self.isVisible():
+            row.appear()  # a job just started: results restored from an earlier run are simply there
+
+    def _on_moved(self) -> None:
+        """The rows follow the queue's order (newest — and last to run — on top)."""
+        for item in self._queue.items():
+            row = self._rows.get(item.id)
+            if row is not None:
+                self._list.removeWidget(row)
+                self._list.insertWidget(0, row)
 
     def _on_changed(self, item: QueueItem) -> None:
         row = self._rows.get(item.id)

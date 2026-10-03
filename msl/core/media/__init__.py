@@ -9,7 +9,9 @@ foundation under the Media tool (and, later, batch jobs and Maya playblasts).
     recipes.py   tasks as ffmpeg arguments -> Job: sequence_to_video, shrink,
                  trim, stamp (burn-ins, watermark), convert (editing formats),
                  extract / remove / replace the sound, join, gif, compare, adjust,
-                 to_frames / frame (a video taken apart into pictures), loop
+                 to_frames / frame (a video taken apart into pictures), loop, fit
+                 (another shape, nothing cut off), contact_sheet, convert_sequence,
+                 adjust_audio, trim_pieces, chain (several steps in one run)
     run.py       following a run: ProgressParser, run_job() (blocking), estimate(), preview()
     thumbnail.py a small picture of a file: thumbnail(), frame_at()
 
@@ -18,12 +20,14 @@ A window runs jobs with ui/media/ffmpeg_runner.py (never blocks).
 from .ffmpeg import FfmpegLocator, FfmpegTools, MediaError, tools_dir
 from .install import FfmpegInstaller
 from .probe import MediaInfo, probe
-from .recipes import (Job, Overlays, adjust, compare, convert, default_output, extract_audio, frame, gif,
-                      join, loop, remove_audio, replace_audio, sequence_to_video, shrink, stamp, to_frames, trim)
+from .recipes import (Job, Overlays, adjust, adjust_audio, chain, compare, contact_sheet, convert, convert_sequence,
+                      default_output, extract_audio, fit, frame, gif, gpu_encoding_works, join, loop, remove_audio,
+                      replace_audio, sequence_to_video, shrink, stamp, to_frames, trim, trim_pieces)
 from .run import Estimate, Progress, ProgressParser, estimate, preview, run_job
 from .sequence import ImageSequence, find_sequences, sequence_of
 
 __all__ = ["Estimate", "FfmpegInstaller", "FfmpegLocator", "FfmpegTools", "ImageSequence", "Job", "MediaError",
-           "MediaInfo", "Overlays", "Progress", "ProgressParser", "adjust", "compare", "convert", "default_output",
+           "MediaInfo", "Overlays", "Progress", "ProgressParser", "adjust", "adjust_audio", "chain", "compare",
+           "contact_sheet", "convert", "convert_sequence", "default_output", "fit", "gpu_encoding_works", "trim_pieces",
            "estimate", "extract_audio", "find_sequences", "frame", "gif", "join", "loop", "preview", "probe",
            "remove_audio", "replace_audio", "run_job", "sequence_of", "sequence_to_video", "shrink", "stamp", "to_frames", "tools_dir", "trim"]
