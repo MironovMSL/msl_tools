@@ -37,7 +37,7 @@ class _ConsoleInput(CodeEditor):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedHeight(self.HEIGHT)
+        self.setMinimumHeight(self.HEIGHT)  # the least; the splitter above it gives it more
         self.setPlaceholderText("Python for the selected Maya \u2014 Ctrl+Enter runs it, Ctrl+Up / Down: earlier code")
         self._history: list[str] = []
         self._history_index = 0   # == len(history): the line being written, not an old one
@@ -798,8 +798,19 @@ class SessionsTab(qt.QtWidgets.QWidget):
         layout.addWidget(self._scroll)
         layout.addWidget(self._message_label)
         layout.addLayout(log_header)
-        layout.addWidget(self._log_view, 1)
-        layout.addWidget(self._console)
+        # The log over the console, with a handle between them: drag it to give the console the
+        # room of a real editor (taken from the log) or to get the log back. Remembered.
+        self._split = qt.QtWidgets.QSplitter(qt.QtCore.Qt.Orientation.Vertical)
+        self._split.setObjectName("sessionsSplit")
+        self._split.setChildrenCollapsible(False)
+        self._split.setHandleWidth(6)
+        self._split.addWidget(self._log_view)
+        self._split.addWidget(self._console)
+        self._split.setStretchFactor(0, 1)
+        self._split.setStretchFactor(1, 0)
+        self._split.splitterMoved.connect(self._on_split_moved)
+        self._log_view.setMinimumHeight(60)
+        layout.addWidget(self._split, 1)
         layout.addWidget(self._hint_label)
 
         self._server.log_received.connect(self._on_log)
@@ -815,6 +826,25 @@ class SessionsTab(qt.QtWidgets.QWidget):
         self._server.sessions_changed.connect(self.refresh)
         self._server.listening_changed.connect(self.refresh)
         self.refresh()
+
+    def _place_split(self) -> None:
+        """The console at its remembered height (the first time: just its few lines)."""
+        if not self._console.isVisible():
+            return
+        least = self._console.minimumSizeHint().height()
+        wanted = least
+        if self._settings is not None:
+            try:
+                wanted = int(self._settings.get("console_height", least) or least)
+            except (TypeError, ValueError):
+                wanted = least
+        total = self._split.height() - self._split.handleWidth()
+        height = max(least, min(wanted, total - self._log_view.minimumHeight()))
+        self._split.setSizes([max(0, total - height), height])
+
+    def _on_split_moved(self, *_args) -> None:
+        if self._settings is not None and self._console.isVisible():
+            self._settings["console_height"] = self._split.sizes()[1]
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
@@ -953,7 +983,10 @@ class SessionsTab(qt.QtWidgets.QWidget):
         self._update_log_title(pids.get(self._selected_pid))
         # The console: only for a selected Maya that is here and accepts code.
         selected = pids.get(self._selected_pid)
+        console_was_shown = self._console.isVisible()
         self._console.setVisible(selected is not None and selected.console)
+        if self._console.isVisible() and not console_was_shown:
+            qt.QtCore.QTimer.singleShot(0, self._place_split)  # once the splitter knows its own height
         if self._console.isVisible() and not self._snippets_shown:
             self._snippets_shown = True  # first time the console is on screen: read the snippets
             self._rebuild_snippets()

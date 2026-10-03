@@ -18,6 +18,38 @@ ACTIVE_VIEW = ""   # CaptureSettings.camera: whatever the viewport looks through
 RESOLUTIONS = {"HD 1080": (1920, 1080), "HD 720": (1280, 720), "HD 540": (960, 540)}
 RANGE_PLAYBACK, RANGE_ANIMATION, RANGE_RENDER = "Playback", "Animation", "Render"
 
+# What a viewport can show or hide, by kind: (group, [(modelEditor flag, what the user reads)]).
+# Every flag was checked against Maya 2025 (queried and set on a model panel).
+VISIBILITY_GROUPS = (
+    ("Geometry", [("polymeshes", "Polygons"), ("nurbsSurfaces", "NURBS surfaces"),
+                  ("subdivSurfaces", "Subdiv surfaces"), ("planes", "Planes")]),
+    ("Curves and rig", [("nurbsCurves", "NURBS curves"), ("controllers", "Controllers"), ("cv", "NURBS CVs"),
+                        ("hulls", "NURBS hulls"), ("joints", "Joints"), ("ikHandles", "IK handles"),
+                        ("deformers", "Deformers"), ("locators", "Locators"), ("handles", "Handles"),
+                        ("pivots", "Pivots")]),
+    ("Scene", [("cameras", "Cameras"), ("lights", "Lights"), ("imagePlane", "Image planes"),
+               ("textures", "Texture placements"), ("dimensions", "Dimensions"), ("strokes", "Strokes"),
+               ("motionTrails", "Motion trails"), ("clipGhosts", "Clip ghosts"),
+               ("greasePencils", "Grease pencil"), ("bluePencil", "Blue pencil"),
+               ("pluginShapes", "Plug-in shapes"), ("hos", "Hold-outs")]),
+    ("Dynamics", [("dynamics", "Dynamics"), ("fluids", "Fluids"), ("nParticles", "nParticles"),
+                  ("nCloths", "nCloths"), ("nRigids", "nRigids"), ("hairSystems", "Hair systems"),
+                  ("follicles", "Follicles"), ("particleInstancers", "Particle instancers"),
+                  ("dynamicConstraints", "Dynamic constraints")]),
+    ("Viewport", [("grid", "Grid"), ("manipulators", "Manipulators"),
+                  ("selectionHiliteDisplay", "Selection highlighting")]),
+)
+VISIBILITY = tuple(flag for _group, entries in VISIBILITY_GROUPS for flag, _label in entries)
+VISIBILITY_LABELS = {flag: label for _group, entries in VISIBILITY_GROUPS for flag, label in entries}
+_GEOMETRY = ["polymeshes", "nurbsSurfaces", "subdivSurfaces"]
+# name -> the kinds shown; everything else is hidden for the playblast
+VISIBILITY_PRESETS = {
+    "Geometry": _GEOMETRY,
+    "Geometry + controls": _GEOMETRY + ["nurbsCurves", "controllers", "locators"],
+    "Geometry + image planes": _GEOMETRY + ["imagePlane"],
+    "Dynamics": _GEOMETRY + ["dynamics", "fluids", "nParticles", "nCloths", "hairSystems", "particleInstancers"],
+}
+
 
 class CaptureError(Exception):
     """A playblast couldn't be made; the message is written for the user."""
@@ -35,6 +67,8 @@ class CaptureSettings:
         camera: The camera to look through (ACTIVE_VIEW = as the viewport is).
         image_format: "png" or "jpg".
         ornaments: Keep the viewport's own overlays (HUD, axis) in the picture.
+        visibility: The kinds of objects shown (flags of VISIBILITY), everything else
+            hidden for the capture; None = as the viewport is.
     """
 
     folder: Path
@@ -46,6 +80,7 @@ class CaptureSettings:
     camera: str = ACTIVE_VIEW
     image_format: str = "png"
     ornaments: bool = False
+    visibility: tuple | None = None
 
 
 @dataclass
@@ -102,6 +137,12 @@ def viewport_panel() -> str:
     raise CaptureError("No viewport is open — open one and try again.")
 
 
+def visibility_state(panel: str = "") -> dict:
+    """flag -> shown, for every kind of VISIBILITY, as `panel` (default: the active viewport) is now."""
+    panel = panel or viewport_panel()
+    return {flag: bool(cmds.modelEditor(panel, query=True, **{flag: True})) for flag in VISIBILITY}
+
+
 def active_camera() -> str:
     """The camera the viewport looks through ("" without a viewport)."""
     try:
@@ -153,7 +194,7 @@ class CaptureSession:
 
     `abort()` instead of `finish()` gives up (everything is put back too).
     The viewport's camera, the selection, the current frame and the scene's
-    "modified" mark are restored whatever happens; nothing of it reaches the
+    "modified" mark and what it shows are restored whatever happens; nothing of it reaches the
     undo queue — and the undo queue is only switched off INSIDE a step, so
     what the user does between two frames stays undoable.
     """
@@ -173,8 +214,12 @@ class CaptureSession:
         self._selection = cmds.ls(selection=True, long=True) or []
         self._time = cmds.currentTime(query=True)
         self._modified = cmds.file(query=True, modified=True)
+        self._shown = visibility_state(self._panel) if settings.visibility is not None else None
         self._open = True
         with _NoUndo():
+            if settings.visibility is not None:
+                wanted = set(settings.visibility)
+                cmds.modelEditor(self._panel, edit=True, **{flag: flag in wanted for flag in VISIBILITY})
             if settings.camera:
                 cmds.lookThru(self._panel, settings.camera)
             cmds.select(clear=True)  # selection highlights and manipulators don't belong in the picture
@@ -228,6 +273,8 @@ class CaptureSession:
                 if self._selection:
                     cmds.select([name for name in self._selection if cmds.objExists(name)], replace=True)
                 cmds.currentTime(self._time, edit=True)
+                if self._shown is not None:
+                    cmds.modelEditor(self._panel, edit=True, **self._shown)
             finally:
                 if not self._modified:
                     cmds.file(modified=False)  # looking through another camera marks the scene as changed

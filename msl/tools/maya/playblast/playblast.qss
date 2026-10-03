@@ -40,13 +40,18 @@ PlayblastPanel QLineEdit[state="shown"] {
     background: transparent;
     border: 1px solid alpha(var(--border), 60%);
 }
-PlayblastPanel QPushButton#playblastToken {
-    padding: 0;
-    font-size: 11px;
-}
 PlayblastPanel IconPushButton#playblastStart {
     qproperty-iconColor: var(--on-accent);
     padding: 4px 12px;
+}
+/* VisibilityDialog (a window of its own: no PlayblastPanel above these) */
+QLabel#visibilityGroup {
+    color: var(--text-secondary);
+    font-size: 10px;
+    font-weight: 700;
+}
+QLabel#visibilityCaption {
+    color: var(--text-secondary);
 }
 PlayblastPanel QLabel#playblastThumb {
     background-color: alpha(var(--text-primary), 6%);

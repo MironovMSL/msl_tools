@@ -625,7 +625,10 @@ What changed vs. the original (all deliberate, not oversights):
     Gate sets for `MayaGatePage.CONSOLE_ENVIRONMENTS` = ("Dev",). The
     decision is made in Maya (`hub_link.console_allowed()`, checked on
     every call) — the hub merely hides the console for sessions whose
-    hello says `console: false`. On the tab: `_ConsoleInput` (a small
+    hello says `console: false`. The log and the console share a
+    QSplitter (`#sessionsSplit`): dragging the grip between them gives
+    the console the room of a real editor, taken from the log; its
+    height is remembered (`_ui.console_height`). On the tab: `_ConsoleInput` (a small
     CodeEditor; Ctrl+Enter runs, Ctrl+Up / Down walk the history) + Run,
     under the log, shown only for a selected Maya that allows it; the
     code (level "input", ">>>" in the accent), its output, result and
@@ -1580,6 +1583,22 @@ scratch on Maya's public API. Step 1 of 4 is built (2026-10-03):
   From the same study, not built: attribute values in slots
   (`{attr:ctrl.stretch}`), safe frames, a separate "Labels" tool (live attribute values
   as a HUD / next to objects, colored by value, per namespace).
+- What a playblast SHOWS (2026-10-03): the PICTURE card's "Show" list —
+  "As in the viewport", the built-in `capture.VISIBILITY_PRESETS`
+  (Geometry / Geometry + controls / Geometry + image planes / Dynamics),
+  the user's own (config `show_presets`) and "Custom"
+  (`settings.show_custom`). The pencil beside it opens
+  `VisibilityDialog` (visibility_dialog.py, a FramelessDialog): a check
+  box per kind, grouped (`capture.VISIBILITY_GROUPS` — 37 modelEditor
+  flags, every one queried and set on Maya 2025), All / None / "As the
+  viewport is now", a name to save it as a preset, "Remove this
+  preset" for one of the user's. `CaptureSettings.visibility` (None =
+  leave the viewport alone): the session sets exactly those flags and
+  puts the viewport's own back afterwards. The shot mask stays whatever
+  is hidden — also with "Plug-in shapes" off and with
+  `allObjects=False` (measured). "Viewport HUD" stays its own check
+  box (showOrnaments). The tool's `{ }` token buttons are gone: a right
+  click in the field does it.
 - Progress (2026-10-03): the capture runs ONE FRAME PER TURN of the event
   loop — `capture.CaptureSession` (`step()` = `cmds.playblast(startTime=f,
   endTime=f)`, so files keep real frame numbers; `frame=[f]` numbers

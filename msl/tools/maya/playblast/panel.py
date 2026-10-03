@@ -11,9 +11,10 @@ from msl_tools.msl.core.media import FfmpegLocator, MediaError, find_sequences, 
 from msl_tools.msl.core.resources import Resources
 from msl_tools.msl.tools.maya.playblast import capture, mask, naming
 from msl_tools.msl.tools.maya.playblast.recent import RecentCard, open_result, size_text
+from msl_tools.msl.tools.maya.playblast.visibility_dialog import VisibilityDialog
 from msl_tools.msl.ui.process_launcher.process_launcher import ProcessLauncher
 from msl_tools.msl.ui.theme import StylesheetBuilder
-from msl_tools.msl.ui.theme.qss import make_rounded_popup, repolish
+from msl_tools.msl.ui.theme.qss import repolish
 from msl_tools.msl.ui.ui_resources import UiResources
 from msl_tools.msl.ui.widgets.atoms.buttons.color_swatch_button import ColorSwatchButton
 from msl_tools.msl.ui.widgets.atoms.buttons.glyph_button import GlyphButton
@@ -37,6 +38,7 @@ SIZE_RENDER, SIZE_CUSTOM = "Render settings", "Custom"
 RANGE_CUSTOM = "Custom"
 FORMAT_MP4, FORMAT_FRAMES = "MP4", "Frames"
 QUALITY = {"Best": "best", "High": "high", "Good": "good", "Small": "small"}  # the word shown -> core/media's
+SHOW_VIEWPORT, SHOW_CUSTOM = "As in the viewport", "Custom"
 MASK_TEXT = {"Small": 0.8, "Medium": 1.0, "Large": 1.3}       # the word shown -> the mask's text scale
 MASK_BARS = {"Solid": 1.0, "75 %": 0.75, "50 %": 0.5, "None": 0.0}  # ... -> how solid its bars are
 # The mask's looks that come with the tool (name -> what a click sets; the switch and the note stay).
@@ -96,7 +98,7 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
     DEFAULTS = {"camera": "", "size": "HD 1080", "width": 1920, "height": 1080, "range": capture.RANGE_PLAYBACK,
                 "start": 1, "end": 24, "folder": naming.DEFAULT_FOLDER, "name": naming.DEFAULT_NAME,
                 "format": FORMAT_MP4, "quality": "High", "sound": True, "overwrite": False, "open": True,
-                "ornaments": False,
+                "ornaments": False, "show": SHOW_VIEWPORT, "show_custom": list(capture.VISIBILITY_PRESETS["Geometry"]),
                 "mask": {"shown": False, "texts": dict(mask.DEFAULT_TEXTS), "text": "Medium", "bars": "Solid",
                          "text_color": "#ffffff", "bar_color": "#000000", "note": "", "warn": True,
                          "top_bar": True, "bottom_bar": True, "logo": ""}}
@@ -145,6 +147,10 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
         self._camera = BaseComboBox([ACTIVE_VIEW], ACTIVE_VIEW)
         self._camera.setToolTip("The camera the playblast is seen through.\n"
                                 "The viewport gets its own camera back afterwards.")
+        self._visible = BaseComboBox([SHOW_VIEWPORT], SHOW_VIEWPORT)
+        self._visible_edit = IconPushButton(icons.get_icon("edit", sub_folder="actions"),
+                                         "Choose what the playblast shows, and save it as a preset…")
+        self._visible_edit.setFixedSize(24, 22)
         self._size = BaseComboBox([SIZE_RENDER, *capture.RESOLUTIONS, SIZE_CUSTOM], "HD 1080")
         self._width, self._height = self._number_field(4), self._number_field(4)
         self._times = qt.QtWidgets.QLabel("×")
@@ -167,11 +173,6 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
         self._name = TokenLineEdit(naming.TOKENS)
         self._name.setPlaceholderText(naming.DEFAULT_NAME)
         self._name.setToolTip("The file's name, without the extension. It may hold:\n" + tokens + hint)
-        self._token = qt.QtWidgets.QPushButton("{ }")
-        self._token.setObjectName("playblastToken")
-        self._token.setToolTip("Put a token into the name")
-        self._token.setFixedSize(24, 22)
-        self._token.setFocusPolicy(qt.QtCore.Qt.FocusPolicy.NoFocus)
         self._path = ElidedLabel("", qt.QtCore.Qt.TextElideMode.ElideLeft)
         self._path.setObjectName("playblastHint")
 
@@ -200,7 +201,6 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
             field.setToolTip(f"The text at the {place} of the frame. A | starts a new line.\n"
                              f"It may hold:\n{mask_tokens}{hint}")
             self._mask_fields[slot] = field
-        self._mask_field = self._mask_fields["topLeft"]  # the one a token goes into: touched last
         self._mask_text = BaseComboBox(list(MASK_TEXT), "Medium")
         self._mask_text.setToolTip("The size of the mask's text")
         self._mask_bars = BaseComboBox(list(MASK_BARS), "Solid")
@@ -237,11 +237,6 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
                                    "outside the range chosen above — a frame the playblast won't take.")
         self._mask_presets = ChipBar(add_text="Save this mask as a preset", name_placeholder="Preset name, then Enter",
                                      add_icon=UiResources().iconManager.get_icon("bookmark_add", sub_folder="actions"))
-        self._mask_token = qt.QtWidgets.QPushButton("{ }")
-        self._mask_token.setObjectName("playblastToken")
-        self._mask_token.setToolTip("Put a token into the text you clicked last\n(or right click a text)")
-        self._mask_token.setFixedSize(24, 22)
-        self._mask_token.setFocusPolicy(qt.QtCore.Qt.FocusPolicy.NoFocus)
 
         self._status = qt.QtWidgets.QLabel()
         self._status.setObjectName("playblastStatus")
@@ -282,12 +277,13 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
 
         picture = self._card("PICTURE", [
             ("Camera", [self._camera]),
+            ("Show", [self._visible, self._visible_edit]),
             ("Size", [self._size, self._width, self._times, self._height]),
             ("Frames", [self._range, self._start, self._dash, self._end]),
         ])
         output = self._card("RESULT", [
             ("Folder", [self._folder, self._browse]),
-            ("Name", [self._name, self._token]),
+            ("Name", [self._name]),
             ("", [self._path]),
             ("Format", [self._format, self._quality]),
         ])
@@ -359,7 +355,7 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
         rows = (("Text", [(self._mask_font, 3), (self._mask_text, 2), (self._mask_text_opacity, 2),
                           (self._mask_text_color, 0)]),
                 ("Bars", [(self._mask_bars, 2), (self._mask_letterbox, 2), (self._mask_bar_color, 0)]),
-                ("Counter", [(self._mask_digits, 0), (self._mask_token, 0)]))
+                ("Counter", [(self._mask_digits, 0)]))
         for index, (caption, widgets) in enumerate(rows):
             label = qt.QtWidgets.QLabel(caption)
             label.setObjectName("playblastCaption")
@@ -445,6 +441,8 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
 
     def _connect(self) -> None:
         self._camera.currentTextChanged.connect(self._on_changed)
+        self._visible.currentTextChanged.connect(self._on_changed)
+        self._visible_edit.clicked.connect(self._on_show_edit)
         self._size.currentTextChanged.connect(self._on_size_changed)
         self._range.currentTextChanged.connect(self._on_range_changed)
         for field in (self._width, self._height, self._start, self._end, self._folder, self._name):
@@ -456,7 +454,6 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
         self._folder.token_inserted.connect(self._on_changed)
         self._name.token_inserted.connect(self._on_changed)
         self._browse.clicked.connect(self._on_browse)
-        self._token.clicked.connect(self._on_token_menu)
         self._start_button.clicked.connect(self._on_start)
         self._play.clicked.connect(lambda: self._result and open_result(self._result))
         self._show.clicked.connect(lambda: self._result and ProcessLauncher.open_file_explorer(self._result))
@@ -465,10 +462,8 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
         for field in self._mask_fields.values():
             field.textEdited.connect(self._on_mask_changed)
             field.token_inserted.connect(self._on_mask_changed)
-            field.focused.connect(self._on_mask_field_touched)  # also an EMPTY field that was only clicked
         self._mask_text.currentTextChanged.connect(self._on_mask_changed)
         self._mask_bars.currentTextChanged.connect(self._on_mask_changed)
-        self._mask_token.clicked.connect(self._on_mask_token_menu)
         self._mask_text_color.color_changed.connect(self._on_mask_changed)
         self._mask_bar_color.color_changed.connect(self._on_mask_changed)
         self._mask_note.textEdited.connect(self._on_mask_changed)
@@ -490,6 +485,7 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
         """The saved choices onto the controls (without saving them back)."""
         self._loading = True
         get = lambda key: self._settings.get(key, self.DEFAULTS[key])
+        self._fill_show(get("show"))
         self._set_combo(self._size, get("size"))
         self._set_combo(self._range, get("range"))
         self._width.setText(str(get("width")))
@@ -526,6 +522,7 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
                   "name": self._name.text().strip(), "format": self._format.current(),
                   "quality": self._quality.currentText(), "sound": self._sound.isChecked(),
                   "ornaments": self._ornaments.isChecked(), "overwrite": self._overwrite.isChecked(),
+                  "show": self._visible.currentText(),
                   "open": self._open.isChecked()}
         if self._size.currentText() == SIZE_CUSTOM:
             values["width"], values["height"] = self._frame_size()
@@ -643,6 +640,7 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
         self._sync_enabled()
         self._save_settings()
         self._refresh_facts()
+        self._describe_show()
         if self._mask_on.isChecked():
             self._sync_mask()  # the frame it frames, {resolution} and the range it warns about follow
 
@@ -654,6 +652,73 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
 
     def _on_range_changed(self, *_args) -> None:
         self._on_size_changed()
+
+    # ------------------------------------------------------------------ what the playblast shows
+
+    def _show_presets(self) -> dict:
+        """name -> the kinds shown: the built-in presets, then the user's own (a same name replaces)."""
+        presets = {name: list(kinds) for name, kinds in capture.VISIBILITY_PRESETS.items()}
+        if "show_presets" in self._config.data:
+            for name, kinds in _plain(self._config["show_presets"]).items():
+                presets[str(name)] = [str(kind) for kind in kinds]
+        return presets
+
+    def _own_show_presets(self) -> dict:
+        return dict(_plain(self._config["show_presets"])) if "show_presets" in self._config.data else {}
+
+    def _fill_show(self, current: str) -> None:
+        loading, self._loading = self._loading, True
+        names = [SHOW_VIEWPORT, *self._show_presets(), SHOW_CUSTOM]
+        self._visible.clear()
+        self._visible.addItems(names)
+        self._set_combo(self._visible, current if current in names else SHOW_VIEWPORT)
+        self._loading = loading
+        self._describe_show()
+
+    def _shown_kinds(self):
+        """The kinds the playblast shows, or None = whatever the viewport shows."""
+        choice = self._visible.currentText()
+        if choice == SHOW_VIEWPORT:
+            return None
+        if choice == SHOW_CUSTOM:
+            return tuple(_plain(self._settings.get("show_custom") or []))
+        return tuple(self._show_presets().get(choice, ()))
+
+    def _describe_show(self) -> None:
+        kinds = self._shown_kinds()
+        if kinds is None:
+            text = "The playblast shows what the viewport shows."
+        else:
+            names = [capture.VISIBILITY_LABELS.get(kind, kind) for kind in kinds]
+            text = "The playblast shows only:\n" + (", ".join(names) or "nothing")
+        self._visible.setToolTip(text + "\n\nThe viewport itself is put back afterwards.")
+
+    def _on_show_edit(self) -> None:
+        choice = self._visible.currentText()
+        own = self._own_show_presets()
+        kinds = self._shown_kinds()
+        if kinds is None:
+            try:
+                kinds = [kind for kind, shown in capture.visibility_state().items() if shown]
+            except capture.CaptureError:
+                kinds = []
+        answer = VisibilityDialog.ask(self.window(), kinds, preset=choice if choice in own else "",
+                                      removable=choice in own)
+        if answer is None:
+            return
+        kinds, name, removed = answer
+        if removed:
+            own.pop(choice, None)
+            self._config["show_presets"] = own
+            self._fill_show(SHOW_VIEWPORT)
+        elif name and name not in (SHOW_VIEWPORT, SHOW_CUSTOM):
+            own[name] = list(kinds)
+            self._config["show_presets"] = own
+            self._fill_show(name)
+        else:
+            self._settings["show_custom"] = list(kinds)
+            self._fill_show(SHOW_CUSTOM)
+        self._on_changed()
 
     def _on_browse(self) -> None:
         values = naming.token_values(capture.project_folder(), capture.scene_name(), self._camera_name())
@@ -839,35 +904,6 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
         self._mask_logo.setText("")
         self._on_mask_changed()
 
-    def _on_mask_field_touched(self, *_args) -> None:
-        field = self.sender()
-        if field in self._mask_fields.values():
-            self._mask_field = field
-
-    def _on_mask_token_menu(self) -> None:
-        menu = make_rounded_popup(qt.QtWidgets.QMenu(self))
-        for token, meaning in mask.TOKENS.items():
-            action = menu.addAction(f"{{{token}}}")
-            action.setToolTip(meaning)
-            action.triggered.connect(lambda _checked=False, text=f"{{{token}}}": self._insert_mask_token(text))
-        menu.setToolTipsVisible(True)
-        menu.exec(self._mask_token.mapToGlobal(qt.QtCore.QPoint(0, self._mask_token.height() + 2)))
-
-    def _insert_mask_token(self, text: str) -> None:
-        self._mask_field.insert_token(text)  # token_inserted -> _on_mask_changed
-
-    def _on_token_menu(self) -> None:
-        menu = make_rounded_popup(qt.QtWidgets.QMenu(self))
-        for token, meaning in naming.TOKENS.items():
-            action = menu.addAction(f"{{{token}}}")
-            action.setToolTip(meaning)
-            action.triggered.connect(lambda _checked=False, text=f"{{{token}}}": self._insert_token(text))
-        menu.setToolTipsVisible(True)
-        menu.exec(self._token.mapToGlobal(qt.QtCore.QPoint(0, self._token.height() + 2)))
-
-    def _insert_token(self, text: str) -> None:
-        self._name.insert_token(text)  # token_inserted -> _on_changed
-
     # ------------------------------------------------------------------ ffmpeg
 
     def _find_ffmpeg(self) -> None:
@@ -935,7 +971,8 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
             frames_folder, frames_name = target, target.name
         settings = capture.CaptureSettings(
             folder=frames_folder, name=frames_name, start=start, end=end, width=width, height=height,
-            camera=capture.ACTIVE_VIEW if chosen == ACTIVE_VIEW else chosen, ornaments=self._ornaments.isChecked())
+            camera=capture.ACTIVE_VIEW if chosen == ACTIVE_VIEW else chosen, ornaments=self._ornaments.isChecked(),
+            visibility=self._shown_kinds())
         self._set_busy(True)
         self._say("Maya is drawing the frames…")
         # a moment later, so the line above is on screen before Maya takes over (and never

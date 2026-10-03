@@ -300,3 +300,15 @@ CollapsibleVariableGroup QLabel#groupCount {
     font-size: 11px;
     font-weight: 600;
 }
+
+/* The handle between the log and the console: the gap between them (QSplitter.setHandleWidth),
+   nothing painted until the pointer is on it — then a soft accent bar. (A splitter handle takes
+   neither margin, padding nor background-clip: a hairline or a short grip can't be made in QSS;
+   whatever is painted fills the whole handle.) */
+SessionsTab QSplitter#sessionsSplit::handle:vertical {
+    background-color: transparent;
+}
+SessionsTab QSplitter#sessionsSplit::handle:vertical:hover,
+SessionsTab QSplitter#sessionsSplit::handle:vertical:pressed {
+    background-color: alpha(var(--accent), 55%);
+}
