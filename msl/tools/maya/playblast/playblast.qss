@@ -48,6 +48,13 @@ PlayblastPanel IconPushButton#playblastStart {
     qproperty-iconColor: var(--on-accent);
     padding: 4px 12px;
 }
+PlayblastPanel QLabel#playblastThumb {
+    background-color: alpha(var(--text-primary), 6%);
+    border-radius: 4px;
+}
+PlayblastPanel QLabel#playblastRecentName {
+    color: var(--text-primary);
+}
 PlayblastPanel QLabel#playblastStatus               { color: var(--text-secondary); }
 PlayblastPanel QLabel#playblastStatus[state="done"]  { color: var(--text-primary); }
 PlayblastPanel QLabel#playblastStatus[state="error"] { color: var(--error); }

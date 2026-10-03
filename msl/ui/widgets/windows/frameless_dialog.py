@@ -58,6 +58,7 @@ class FramelessDialog(FramelessWindowMixin, qt.QtWidgets.QDialog):
 
         self.content_surface = BasePanel(corner_radius=self.CORNER_RADIUS)
         self.content_surface.setCursor(qt.QtCore.Qt.CursorShape.ArrowCursor)
+        self._forget_edge_cursor_on_enter(self.content_surface)
 
         if self._theme_toggle is not None:
             self._theme_toggle.set_checked_immediate(self._ui_resources.themeManager.current_theme.name == "dark")

@@ -50,6 +50,9 @@ msl_tools/                 (repo root)
                               ui_resources.py (UiResources singleton), theme/,
                               process_launcher/ (ProcessLauncher — QProcess-based, so ui/, not core/),
                               widgets/ (atoms/, compositions/, windows/, app/)
+        maya_module/          the Maya MODULE of msl_tools: mslTools.mod + plug-ins/ (msl_shot_mask.py),
+                              scripts/ (what Maya looks up by name), later icons/ - not a Python package:
+                              Maya reads it through MAYA_MODULE_PATH (see "Maya module")
         tools/                DCC-specific instruments
             desktop/            NEW: tools that run as part of the desktop hub
                 maya_gate/        fully ported Maya Gate tool (see below)
@@ -1501,6 +1504,57 @@ scratch on Maya's public API. Step 1 of 4 is built (2026-10-03):
   first shows (the FIRST ffmpeg start from inside Maya takes ~4 s, later
   ones ~0.9 s; measured — environment, priority, threads make no
   difference).
+- Shot mask (step 2, 2026-10-03): `msl/maya_module/plug-ins/msl_shot_mask.py` — a Maya
+  plug-in of our own, SELF-CONTAINED (no msl_tools / Qt imports; API 2.0):
+  node `mslShotMask` (MPxLocatorNode, attributes only) + an
+  MPxDrawOverride that draws bars along the top / bottom of the frame and
+  six texts (top / bottom x left / centre / right) with MUIDrawManager.
+  Tokens filled in on every draw: {scene} {camera} {frame} {counter}
+  {focal_length} {fps} {date} {user}. The viewport draws it, so it is
+  seen while animating and a playblast simply contains it; `aspect` (the
+  playblast's width / height) makes it frame that shape inside a
+  differently shaped viewport; perspective cameras only; stays when
+  Show > Locators is off (`excludeAsLocator` False).
+  `mask.py` (maya.cmds, no Qt) drives it: `show(MaskSettings)` /
+  `update` / `hide` / `is_shown` / `last_draw_error()`. The node is a
+  helper of the SESSION: "do not write" on transform + shape, hidden in
+  the outliner, made and removed outside the undo queue with the scene's
+  modified mark put back; and it steps out for the moment of a save
+  (MSceneMessage kBeforeSave / kAfterSave) — else the saved scene gets a
+  `requires "msl_shot_mask.py"` line. What it shows lives in the config
+  (`settings.mask`: shown, texts, text, bars); the panel puts it back
+  after a scene change (`_sync_mask` in refresh()).
+  Traps, all met: (1) MAYA ASKS before loading a plug-in BY PATH from a
+  folder that isn't trusted ("Untrusted Plugin Loading - Security
+  Warning", a modal dialog — in a scripted test Maya just hangs on
+  loadPlugin; it asks again whenever the file changed). Solved by the
+  Maya module (below): found by NAME through it, the plug-in loads with
+  no question. We never change Maya's security settings ourselves.
+  `mask._load_plugin()` tries the name first, the path second (a Maya
+  not started from Maya Gate: it asks). (2) attribute SHORT names must not
+  clash with a locator's own ("bb", "tb"...): addAttribute fails without
+  a word and the attribute simply doesn't exist — ours start with "sm".
+  (3) Maya swallows exceptions of a draw override: the plug-in keeps the
+  traceback in the environment variable MSL_SHOT_MASK_ERROR
+  (`mask.last_draw_error()`). (4) `MFileIO` has no API 2.0 form (API 1.0
+  is used for the scene's name). (5) a `rect2d` is drawn OVER every
+  text, whatever the order or depth priority — the bars are the
+  background boxes of empty `text2d` calls. Not built of the mask: colors
+  (white on black for now), a logo, a letterbox by aspect ratio.
+- Progress (2026-10-03): the capture runs ONE FRAME PER TURN of the event
+  loop — `capture.CaptureSession` (`step()` = `cmds.playblast(startTime=f,
+  endTime=f)`, so files keep real frame numbers; `frame=[f]` numbers
+  them from 0000) driven by a 0 ms QTimer in the panel: "Frame 34 of 96",
+  the bar moves, the start button reads "Cancel". Cost measured: 72
+  frames 1280x720 in 5.7 s instead of 5.0 s in one call. The undo queue
+  is switched off only INSIDE a step. Closing the window mid-capture
+  aborts it (hideEvent). `capture.capture()` is the blocking form.
+- Recent results (2026-10-03): `recent.py` `RecentCard` — the scene's
+  last 4 playblasts that still exist (config `history`, 40 kept for all
+  scenes): a picture (core/media thumbnail on a worker, cached in
+  %TEMP%/msl_tools/playblast/thumbs; a folder of frames shows its first
+  frame), the name (click = open, drag = the file), size / frames ·
+  camera · time, open / show in folder.
 - Traps met: workers are kept by the CLASS and are parentless — a docked
   panel can be closed (deleted) any moment, and a QThread destroyed while
   running takes Maya down; their signals go to bound methods (auto-
@@ -1524,10 +1578,36 @@ scratch on Maya's public API. Step 1 of 4 is built (2026-10-03):
   close, reopen, restored by Maya at the next start (2025 + 2026); camera / selection / frame / undo
   name / modified mark unchanged. NOT tried: Esc during the capture, the
   player opening by itself (switched off in the tests).
-- Next steps (not built): 2. the shot mask visible in the VIEWPORT while
-  animating (our own overlay) + its settings; 3. presets, viewport
-  visibility with restore; 4. batch cameras, versions, the result into
-  the hub's Media jobs.
+- Next steps (not built): mask colors + logo; presets, viewport
+  visibility with restore; versions ({version}); batch cameras; the
+  result into the hub's Media jobs; the rest of the idea list given to
+  the user on 2026-10-03 (compare with the previous one, repeat the
+  last on a hotkey, an estimate, a light copy for a messenger...).
+
+## Maya module
+
+`msl/maya_module/` — what MAYA ITSELF reads, as opposed to the Python
+package of tools (`msl/tools/maya`): `mslTools.mod` (`+ mslTools 1.0 .`
+— the path is relative to the .mod file, so it works wherever the
+install is), `plug-ins/`, `scripts/`, later `icons/`. Maya adds those
+folders to its plug-in / script / icon paths itself. Inside `msl/` on
+purpose: install and update copy only `msl/`.
+Maya Gate puts the folder first on `MAYA_MODULE_PATH` in every launch
+(`UserSetupStore.launch_environment()`, like the package's PYTHONPATH
+entry: baked in, not an editable variable; what the environment sets or
+the hub inherited follows it).
+Why a module and not `loadPlugin(<path>)`: measured with real Maya 2025
+and untouched security preferences (nothing trusted) — a plug-in found
+by name through MAYA_PLUG_IN_PATH set before the start, or through a
+module, loads without Maya's "untrusted plug-in" question; loaded by
+path from anywhere else, Maya asks (and again after every change of
+the file). A test folder under %TEMP% is useless for this: its 8.3
+short name (`S_MIRO~1`) made Maya report the plug-in as "not found on
+MAYA_PLUG_IN_PATH".
+Planned, not built: hotkey actions as functions of the package
+registered as Maya runTimeCommands at startup (they show up in the
+Hotkey Editor by name); `scripts/` is for MEL and the few things Maya
+looks up by name.
 
 ## Install (the hub is where everything starts)
 

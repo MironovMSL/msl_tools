@@ -142,52 +142,114 @@ def timeline_sound() -> tuple[str, float]:
     return cmds.sound(node, query=True, file=True) or "", float(cmds.getAttr(f"{node}.offset"))
 
 
+class CaptureSession:
+    """A playblast taken ONE FRAME AT A TIME, so whoever drives it can show
+    how far it is and stop it between frames:
+
+        session = CaptureSession(settings)      # looks through the camera, clears the selection
+        while session.step():                   # one frame each; False after the last one
+            ...                                 # e.g. back to the event loop
+        shot = session.finish()                 # everything put back -> Capture
+
+    `abort()` instead of `finish()` gives up (everything is put back too).
+    The viewport's camera, the selection, the current frame and the scene's
+    "modified" mark are restored whatever happens; nothing of it reaches the
+    undo queue — and the undo queue is only switched off INSIDE a step, so
+    what the user does between two frames stays undoable.
+    """
+
+    def __init__(self, settings: CaptureSettings):
+        if settings.end < settings.start:
+            raise CaptureError("The last frame must not be before the first one.")
+        if settings.camera and not cmds.objExists(settings.camera):
+            raise CaptureError(f"The camera “{settings.camera}” isn’t in the scene any more.")
+        self.settings = settings
+        self.total = settings.end - settings.start + 1
+        self.done = 0
+        self._panel = viewport_panel()
+        self._folder = Path(settings.folder)
+        self._folder.mkdir(parents=True, exist_ok=True)
+        self._previous_camera = cmds.modelPanel(self._panel, query=True, camera=True)
+        self._selection = cmds.ls(selection=True, long=True) or []
+        self._time = cmds.currentTime(query=True)
+        self._modified = cmds.file(query=True, modified=True)
+        self._open = True
+        with _NoUndo():
+            if settings.camera:
+                cmds.lookThru(self._panel, settings.camera)
+            cmds.select(clear=True)  # selection highlights and manipulators don't belong in the picture
+
+    def step(self) -> bool:
+        """Draws the next frame. True while there are more to draw."""
+        if not self._open or self.done >= self.total:
+            return False
+        settings, frame = self.settings, self.settings.start + self.done
+        try:
+            with _NoUndo():
+                written = cmds.playblast(
+                    format="image", compression=settings.image_format, quality=100,
+                    filename=(self._folder / settings.name).as_posix(), startTime=frame, endTime=frame,
+                    widthHeight=(settings.width // 2 * 2, settings.height // 2 * 2), percent=100, viewer=False,
+                    offScreen=True, forceOverwrite=True, framePadding=4, showOrnaments=settings.ornaments,
+                    clearCache=self.done == 0, editorPanelName=self._panel)
+        except RuntimeError as error:
+            self.abort()
+            raise CaptureError(f"Maya couldn’t playblast: {str(error).strip()}") from error
+        if not written:
+            self.abort()
+            raise CaptureError("The playblast was cancelled.")
+        self.done += 1
+        return self.done < self.total
+
+    def finish(self) -> Capture:
+        """Puts the viewport back and says what was made."""
+        settings = self.settings
+        camera = settings.camera or active_camera()
+        self._restore()
+        suffix = "." + settings.image_format
+        frames = len([entry for entry in self._folder.iterdir() if entry.suffix.lower() == suffix])
+        fps = frame_rate()
+        sound, sound_frame = timeline_sound()
+        return Capture(folder=self._folder, fps=fps, frames=frames, sound=sound,
+                       sound_start=(settings.start - sound_frame) / fps if sound else 0.0, camera=camera)
+
+    def abort(self) -> None:
+        """Gives up: the viewport is put back (the frames drawn so far stay where they are)."""
+        self._restore()
+
+    def _restore(self) -> None:
+        if not self._open:
+            return
+        self._open = False
+        with _NoUndo():
+            try:
+                if self._previous_camera:
+                    cmds.lookThru(self._panel, self._previous_camera)
+                if self._selection:
+                    cmds.select([name for name in self._selection if cmds.objExists(name)], replace=True)
+                cmds.currentTime(self._time, edit=True)
+            finally:
+                if not self._modified:
+                    cmds.file(modified=False)  # looking through another camera marks the scene as changed
+
+
+class _NoUndo:
+    """Inside: what happens is no edit of the scene, and stays out of the undo queue."""
+
+    def __enter__(self):
+        cmds.undoInfo(stateWithoutFlush=False)
+        return self
+
+    def __exit__(self, *_exc):
+        cmds.undoInfo(stateWithoutFlush=True)
+        return False
+
+
 def capture(settings: CaptureSettings) -> Capture:
     """Playblasts the range into `settings.folder` as numbered pictures and
-    returns what was made. Blocks until Maya has drawn every frame (Esc
-    cancels: CaptureError). The viewport's camera, the selection and the
-    current frame are put back whatever happens."""
-    if settings.end < settings.start:
-        raise CaptureError("The last frame must not be before the first one.")
-    if settings.camera and not cmds.objExists(settings.camera):
-        raise CaptureError(f"The camera “{settings.camera}” isn’t in the scene any more.")
-    panel = viewport_panel()
-    folder = Path(settings.folder)
-    folder.mkdir(parents=True, exist_ok=True)
-    previous_camera = cmds.modelPanel(panel, query=True, camera=True)
-    selection = cmds.ls(selection=True, long=True) or []
-    current_time = cmds.currentTime(query=True)
-    modified = cmds.file(query=True, modified=True)
-    cmds.undoInfo(stateWithoutFlush=False)  # what follows is no edit of the scene: keep it out of the undo queue
-    try:
-        if settings.camera:
-            cmds.lookThru(panel, settings.camera)
-        cmds.select(clear=True)  # selection highlights and manipulators don't belong in the picture
-        written = cmds.playblast(
-            format="image", compression=settings.image_format, quality=100,
-            filename=(folder / settings.name).as_posix(), startTime=settings.start, endTime=settings.end,
-            widthHeight=(settings.width // 2 * 2, settings.height // 2 * 2), percent=100, viewer=False,
-            offScreen=True, forceOverwrite=True, framePadding=4, showOrnaments=settings.ornaments, clearCache=True,
-            editorPanelName=panel)
-    except RuntimeError as error:
-        raise CaptureError(f"Maya couldn’t playblast: {str(error).strip()}") from error
-    finally:
-        try:
-            if previous_camera:
-                cmds.lookThru(panel, previous_camera)
-            if selection:
-                cmds.select(selection, replace=True)
-            cmds.currentTime(current_time, edit=True)
-            if not modified:
-                cmds.file(modified=False)  # looking through another camera marks the scene as changed
-        finally:
-            cmds.undoInfo(stateWithoutFlush=True)
-    if not written:
-        raise CaptureError("The playblast was cancelled.")
-    suffix = "." + settings.image_format
-    frames = len([entry for entry in folder.iterdir() if entry.suffix.lower() == suffix])
-    fps = frame_rate()
-    sound, sound_frame = timeline_sound()
-    camera = settings.camera or active_camera()
-    return Capture(folder=folder, fps=fps, frames=frames, sound=sound,
-                   sound_start=(settings.start - sound_frame) / fps if sound else 0.0, camera=camera)
+    returns what was made — the whole range in one go (blocks until Maya has
+    drawn every frame). A window uses CaptureSession instead."""
+    session = CaptureSession(settings)
+    while session.step():
+        pass
+    return session.finish()

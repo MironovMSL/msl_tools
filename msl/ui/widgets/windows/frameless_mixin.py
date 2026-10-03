@@ -415,6 +415,7 @@ class FramelessWindowMixin:
             self._close_button = self.header.add_close_only_controls(self.close)
 
         root_layout.addWidget(self.header)
+        self._forget_edge_cursor_on_enter(self.header)
 
         if self._maximize_button is not None:
             self._maximize_button.installEventFilter(self)
@@ -689,7 +690,23 @@ class FramelessWindowMixin:
     # Qt event overrides
     # ------------------------------------------------------------------
 
+    def _forget_edge_cursor_on_enter(self, widget: qt.QtWidgets.QWidget) -> None:
+        """`widget` fills the inside of the window (the header, the content): when the pointer
+        comes onto it, the WINDOW's own cursor goes back to the arrow.
+
+        The pointer crosses the resize band on its way in, so the window's cursor is a resize
+        arrow by then — and stays one: over a child the window gets no more mouse moves. The
+        child shows its own cursor, so nobody notices, until a popup (a menu) opens: while a
+        popup holds the mouse the WINDOW's cursor is what is shown, and a resize arrow sat
+        on the button that opened the menu."""
+        self._edge_cursor_resetters = getattr(self, "_edge_cursor_resetters", [])
+        self._edge_cursor_resetters.append(widget)
+        widget.installEventFilter(self)
+
     def eventFilter(self, watched, event) -> bool:
+        if (event.type() == qt.QtCore.QEvent.Type.Enter and self._resize_edge is _ResizeEdge.NONE
+                and watched in getattr(self, "_edge_cursor_resetters", ())):
+            self.setCursor(qt.QtCore.Qt.CursorShape.ArrowCursor)
         if watched is self._maximize_button:
             event_type = event.type()
             if event_type == qt.QtCore.QEvent.Type.Enter:

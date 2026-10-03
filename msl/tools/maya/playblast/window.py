@@ -23,7 +23,7 @@ class PlayblastWindow(FramelessDialog):
     OBJECT_NAME = "mslPlayblastWindow"
 
     def __init__(self, parent=None):
-        super().__init__(title="MSL Playblast", width=400, height=580,
+        super().__init__(title="MSL Playblast", width=400, height=680,
                          show_minimize_button=False, show_maximize_button=False, parent=parent)
         self.setObjectName(self.OBJECT_NAME)
         self.setAttribute(qt.QtCore.Qt.WidgetAttribute.WA_DeleteOnClose, True)

@@ -119,7 +119,8 @@ class UserSetupStore:
     # --- launch --------------------------------------------------------------
 
     def launch_environment(self, environment: str, variables: dict[str, str]) -> dict[str, str]:
-        """Returns `variables` with PYTHONPATH extended for this launch:
+        """Returns `variables` with PYTHONPATH extended for this launch (and
+        MAYA_MODULE_PATH: the Maya module of msl_tools in front):
 
         1. the wrapper's folder — unless the script is blank (then Maya runs
            no userSetup of ours);
@@ -154,7 +155,22 @@ class UserSetupStore:
 
         result = dict(variables)
         result["PYTHONPATH"] = os.pathsep.join(unique)
+        # The Maya module of msl_tools (plug-ins, scripts, icons): first on MAYA_MODULE_PATH, in
+        # front of what the environment sets or the hub inherited. Maya adds its own default
+        # module folders to this variable itself. A plug-in found this way is trusted — loaded
+        # by path from anywhere else, Maya stops on its "untrusted plug-in" question.
+        modules = [str(self.maya_module_dir())]
+        modules += [entry for entry in (variables.get("MAYA_MODULE_PATH")
+                                        or os.environ.get("MAYA_MODULE_PATH", "")).split(os.pathsep)
+                    if entry.strip() and os.path.normcase(os.path.normpath(entry))
+                    != os.path.normcase(os.path.normpath(modules[0]))]
+        result["MAYA_MODULE_PATH"] = os.pathsep.join(modules)
         return result
+
+    @staticmethod
+    def maya_module_dir() -> Path:
+        """The folder of msl_tools' Maya module (it holds mslTools.mod) — of THIS install."""
+        return FileSystemManager.ROOT_DIR / "msl" / "maya_module"
 
     @staticmethod
     def package_parent_dir() -> Path:

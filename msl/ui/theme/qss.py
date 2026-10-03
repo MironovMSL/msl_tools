@@ -63,20 +63,18 @@ def make_rounded_popup(popup: qt.QtWidgets.QWidget) -> qt.QtWidgets.QWidget:
              | qt.QtCore.Qt.WindowType.NoDropShadowWindowHint)
     popup.setWindowFlags(flags)
     popup.setAttribute(qt.QtCore.Qt.WidgetAttribute.WA_TranslucentBackground)
-    popup.setStyle(_popup_base_style())
+    popup.setStyle(_popup_base_style(popup))
     return popup
 
 
-_POPUP_BASE_STYLE = None
-
-
-def _popup_base_style():
-    """One shared Fusion style for rounded popups. QWidget.setStyle() does
-    not take ownership, so the module keeps it alive."""
-    global _POPUP_BASE_STYLE
-    if _POPUP_BASE_STYLE is None:
-        _POPUP_BASE_STYLE = qt.QtWidgets.QStyleFactory.create("Fusion")
-    return _POPUP_BASE_STYLE
+def _popup_base_style(popup: qt.QtWidgets.QWidget):
+    """A Fusion style for one rounded popup, owned by that popup (QWidget.setStyle()
+    takes no ownership). Not one shared style kept by the module: inside Maya that
+    style was deleted under us — "Internal C++ object (QCommonStyle) already
+    deleted" on the next menu."""
+    style = qt.QtWidgets.QStyleFactory.create("Fusion")
+    style.setParent(popup)
+    return style
 
 
 def repolish(widget: qt.QtWidgets.QWidget) -> None:
