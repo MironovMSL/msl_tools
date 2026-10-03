@@ -26,13 +26,23 @@ SLOTS = ("topLeft", "topCenter", "topRight", "bottomLeft", "bottomCenter", "bott
 # token -> what it stands for (shown in the "insert a token" menu)
 TOKENS = {
     "scene": "the scene's name",
+    "project": "the project folder's name",
     "camera": "the camera of the viewport",
+    "focal_length": "the camera's focal length: 35 mm",
+    "resolution": "the playblast's frame size: 1920x1080",
     "counter": "the frame, padded with zeros: 0042",
     "frame": "the frame as it is: 42",
-    "focal_length": "the camera's focal length: 35 mm",
+    "timecode": "the frame as time: 00:00:01:18",
+    "range": "the playback range: 1-96",
+    "start": "the first frame of the playback range",
+    "end": "its last frame",
+    "frames": "how many frames the playback range has",
     "fps": "the scene's frames per second",
     "date": "today's date: 2026-10-03",
+    "time": "the time now: 14:05",
     "user": "your login name",
+    "note": "the note typed below: WIP, for review...",
+    "logo": "the logo picture chosen below",
 }
 DEFAULT_TEXTS = {"topLeft": "{scene}", "topCenter": "", "topRight": "{date}",
                  "bottomLeft": "{camera}  {focal_length}", "bottomCenter": "{user}", "bottomRight": "{counter}"}
@@ -52,9 +62,18 @@ class MaskSettings:
         aspect: Width / height of the frame the mask frames (0 = the whole viewport).
         text_scale / bar_scale: 1 = the usual size.
         bar_opacity: 0 = no bars (text only) … 1 = solid.
+        text_opacity: The same for the text (and the logo).
+        font: The font's name (one of fonts()).
+        letterbox: > 0 = the bars leave a picture of this width / height between them
+            (2.39 = scope), whatever bar_scale says.
         top_bar / bottom_bar: Draw that bar.
         text_color / bar_color: (r, g, b), 0..1.
         counter_padding: Digits of {counter}.
+        note / project: What {note} and {project} show.
+        logo: The image file {logo} draws ("" = none).
+        width / height: The playblast's frame size, for {resolution}.
+        warn_range: Draw the slots that show the frame in `warn_color` while the
+            current frame is outside range_start..range_end.
     """
 
     texts: dict = field(default_factory=lambda: dict(DEFAULT_TEXTS))
@@ -63,11 +82,23 @@ class MaskSettings:
     text_scale: float = 1.0
     bar_scale: float = 1.0
     bar_opacity: float = 1.0
+    text_opacity: float = 1.0
+    font: str = "Consolas"
+    letterbox: float = 0.0
     top_bar: bool = True
     bottom_bar: bool = True
     text_color: tuple = (1.0, 1.0, 1.0)
     bar_color: tuple = (0.0, 0.0, 0.0)
     counter_padding: int = 4
+    note: str = ""
+    logo: str = ""
+    project: str = ""
+    width: int = 0
+    height: int = 0
+    warn_range: bool = False
+    range_start: int = 0
+    range_end: int = 0
+    warn_color: tuple = (1.0, 0.33, 0.28)
 
 
 class _Quiet:
@@ -95,6 +126,15 @@ def _load_plugin() -> None:
             cmds.loadPlugin(str(PLUGIN), quiet=True)   # Maya asks whether to allow it
     except RuntimeError as error:
         raise MaskError(f"The shot mask’s plug-in couldn’t be loaded: {str(error).strip()}") from error
+
+
+def fonts() -> list[str]:
+    """The fonts the viewport can draw text with, by name."""
+    import maya.api.OpenMayaRender as omr
+    try:
+        return sorted(set(omr.MUIDrawManager.getFontList()), key=str.lower)
+    except Exception:
+        return ["Consolas"]
 
 
 def node() -> str:
@@ -210,8 +250,20 @@ def _apply(shape: str, settings: MaskSettings) -> None:
     cmds.setAttr(f"{shape}.textScale", float(settings.text_scale))
     cmds.setAttr(f"{shape}.barScale", float(settings.bar_scale))
     cmds.setAttr(f"{shape}.barOpacity", float(settings.bar_opacity))
+    cmds.setAttr(f"{shape}.textOpacity", float(settings.text_opacity))
+    cmds.setAttr(f"{shape}.letterbox", float(settings.letterbox))
+    cmds.setAttr(f"{shape}.fontName", settings.font or "Consolas", type="string")
     cmds.setAttr(f"{shape}.topBar", bool(settings.top_bar))
     cmds.setAttr(f"{shape}.bottomBar", bool(settings.bottom_bar))
     cmds.setAttr(f"{shape}.counterPadding", int(settings.counter_padding))
     cmds.setAttr(f"{shape}.textColor", *settings.text_color, type="double3")
     cmds.setAttr(f"{shape}.barColor", *settings.bar_color, type="double3")
+    cmds.setAttr(f"{shape}.warnColor", *settings.warn_color, type="double3")
+    cmds.setAttr(f"{shape}.note", settings.note, type="string")
+    cmds.setAttr(f"{shape}.logo", str(settings.logo).replace("\\", "/"), type="string")
+    cmds.setAttr(f"{shape}.project", settings.project, type="string")
+    cmds.setAttr(f"{shape}.frameWidth", int(settings.width))
+    cmds.setAttr(f"{shape}.frameHeight", int(settings.height))
+    cmds.setAttr(f"{shape}.warnRange", bool(settings.warn_range))
+    cmds.setAttr(f"{shape}.rangeStart", int(settings.range_start))
+    cmds.setAttr(f"{shape}.rangeEnd", int(settings.range_end))

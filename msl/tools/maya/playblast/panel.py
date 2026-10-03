@@ -15,15 +15,18 @@ from msl_tools.msl.ui.process_launcher.process_launcher import ProcessLauncher
 from msl_tools.msl.ui.theme import StylesheetBuilder
 from msl_tools.msl.ui.theme.qss import make_rounded_popup, repolish
 from msl_tools.msl.ui.ui_resources import UiResources
+from msl_tools.msl.ui.widgets.atoms.buttons.color_swatch_button import ColorSwatchButton
 from msl_tools.msl.ui.widgets.atoms.buttons.glyph_button import GlyphButton
 from msl_tools.msl.ui.widgets.atoms.buttons.icon_push_button import IconPushButton
 from msl_tools.msl.ui.widgets.atoms.checkboxes.base_checkbox import BaseCheckbox
 from msl_tools.msl.ui.widgets.atoms.comboboxes.base_combo_box import BaseComboBox
+from msl_tools.msl.ui.widgets.atoms.editors.token_line_edit import TokenLineEdit
 from msl_tools.msl.ui.widgets.atoms.icons.tinted_icon import TintedIcon
 from msl_tools.msl.ui.widgets.atoms.labels.elided_label import ElidedLabel
 from msl_tools.msl.ui.widgets.atoms.progress.base_progress_bar import BaseProgressBar
 from msl_tools.msl.ui.widgets.atoms.segmented.segmented_control import SegmentedControl
 from msl_tools.msl.ui.widgets.atoms.surfaces.stable_scroll_area import StableScrollArea
+from msl_tools.msl.ui.widgets.compositions.chip_bar import ChipBar
 from msl_tools.msl.ui.widgets.compositions.fact_tiles import FactTiles
 from msl_tools.msl.ui.workers.result_worker import ResultWorker
 
@@ -36,8 +39,39 @@ FORMAT_MP4, FORMAT_FRAMES = "MP4", "Frames"
 QUALITY = {"Best": "best", "High": "high", "Good": "good", "Small": "small"}  # the word shown -> core/media's
 MASK_TEXT = {"Small": 0.8, "Medium": 1.0, "Large": 1.3}       # the word shown -> the mask's text scale
 MASK_BARS = {"Solid": 1.0, "75 %": 0.75, "50 %": 0.5, "None": 0.0}  # ... -> how solid its bars are
+# The mask's looks that come with the tool (name -> what a click sets; the switch and the note stay).
+MASK_PRESETS = {
+    "Review": {"texts": dict(mask.DEFAULT_TEXTS), "text": "Medium", "bars": "Solid",
+               "text_color": "#ffffff", "bar_color": "#000000"},
+    "Client": {"texts": {"topLeft": "{logo}", "topCenter": "{note}", "topRight": "{date}", "bottomLeft": "{scene}",
+                         "bottomCenter": "", "bottomRight": "{timecode}"},
+               "text": "Medium", "bars": "75 %", "text_color": "#ffffff", "bar_color": "#000000"},
+    "Frames": {"texts": {"topLeft": "", "topCenter": "", "topRight": "", "bottomLeft": "{range}",
+                         "bottomCenter": "", "bottomRight": "{counter}"},
+               "text": "Small", "bars": "None", "text_color": "#ffffff", "bar_color": "#000000"},
+}
+# Our own mark: what {logo} draws until another picture is chosen.
+BRAND_LOGO = FileSystemManager.icons / "brand" / "watermark.png"
+MASK_OPACITY = {"Solid": 1.0, "75 %": 0.75, "50 %": 0.5}             # ... -> how solid its text is
+# ... -> the shape of the picture the bars leave between them (0 = the bars keep their own height)
+MASK_LETTERBOX = {"Off": 0.0, "2.39:1": 2.39, "2.35:1": 2.35, "2:1": 2.0, "1.85:1": 1.85, "16:9": 16 / 9,
+                  "4:3": 4 / 3, "1:1": 1.0}
+MASK_DIGITS = ("2", "3", "4", "5", "6")
+# every key of a mask's look with its default: a preset saved before a key existed means the default
+MASK_LOOK_DEFAULTS = {"text": "Medium", "bars": "Solid", "text_color": "#ffffff", "bar_color": "#000000",
+                      "top_bar": True, "bottom_bar": True, "font": "Consolas", "text_opacity": "Solid",
+                      "letterbox": "Off", "digits": "4"}
 MASK_PLACES = {"topLeft": "top left", "topCenter": "top centre", "topRight": "top right",
                "bottomLeft": "bottom left", "bottomCenter": "bottom centre", "bottomRight": "bottom right"}
+
+
+def _plain(value):
+    """A config node (or anything nested in one) as plain dicts and lists."""
+    if hasattr(value, "items"):
+        return {key: _plain(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_plain(item) for item in value]
+    return value
 
 
 class PlayblastPanel(qt.QtWidgets.QWidget):
@@ -63,7 +97,9 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
                 "start": 1, "end": 24, "folder": naming.DEFAULT_FOLDER, "name": naming.DEFAULT_NAME,
                 "format": FORMAT_MP4, "quality": "High", "sound": True, "overwrite": False, "open": True,
                 "ornaments": False,
-                "mask": {"shown": False, "texts": dict(mask.DEFAULT_TEXTS), "text": "Medium", "bars": "Solid"}}
+                "mask": {"shown": False, "texts": dict(mask.DEFAULT_TEXTS), "text": "Medium", "bars": "Solid",
+                         "text_color": "#ffffff", "bar_color": "#000000", "note": "", "warn": True,
+                         "top_bar": True, "bottom_bar": True, "logo": ""}}
 
     _encoding_progressed = qt.QtCore.Signal(float)
     # Running workers, kept by the CLASS and parentless: a docked panel can be closed (and deleted)
@@ -122,14 +158,15 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
         self._dash.setObjectName("playblastHint")
 
         tokens = "\n".join(f"{{{token}}} — {meaning}" for token, meaning in naming.TOKENS.items())
-        self._folder = qt.QtWidgets.QLineEdit()
+        hint = "\n\nRight click: put one in where you click."
+        self._folder = TokenLineEdit(naming.TOKENS)
         self._folder.setPlaceholderText(naming.DEFAULT_FOLDER)
-        self._folder.setToolTip("The folder the playblast goes to. It may hold:\n" + tokens)
+        self._folder.setToolTip("The folder the playblast goes to. It may hold:\n" + tokens + hint)
         self._browse = IconPushButton(icons.get_icon("browse", sub_folder="actions"), "Choose the folder…")
         self._browse.setFixedSize(24, 22)
-        self._name = qt.QtWidgets.QLineEdit()
+        self._name = TokenLineEdit(naming.TOKENS)
         self._name.setPlaceholderText(naming.DEFAULT_NAME)
-        self._name.setToolTip("The file's name, without the extension. It may hold:\n" + tokens)
+        self._name.setToolTip("The file's name, without the extension. It may hold:\n" + tokens + hint)
         self._token = qt.QtWidgets.QPushButton("{ }")
         self._token.setObjectName("playblastToken")
         self._token.setToolTip("Put a token into the name")
@@ -158,18 +195,51 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
         mask_tokens = "\n".join(f"{{{token}}} — {meaning}" for token, meaning in mask.TOKENS.items())
         self._mask_fields = {}
         for slot, place in MASK_PLACES.items():
-            field = qt.QtWidgets.QLineEdit()
+            field = TokenLineEdit(mask.TOKENS)
             field.setPlaceholderText(place)
-            field.setToolTip(f"The text at the {place} of the frame. It may hold:\n{mask_tokens}")
+            field.setToolTip(f"The text at the {place} of the frame. A | starts a new line.\n"
+                             f"It may hold:\n{mask_tokens}{hint}")
             self._mask_fields[slot] = field
         self._mask_field = self._mask_fields["topLeft"]  # the one a token goes into: touched last
         self._mask_text = BaseComboBox(list(MASK_TEXT), "Medium")
         self._mask_text.setToolTip("The size of the mask's text")
         self._mask_bars = BaseComboBox(list(MASK_BARS), "Solid")
         self._mask_bars.setToolTip("How solid the bars under the text are")
+        self._mask_text_color = ColorSwatchButton("#ffffff", "The color of the mask's text")
+        self._mask_bar_color = ColorSwatchButton("#000000", "The color of the mask's bars")
+        self._mask_font = BaseComboBox(["Consolas"], "Consolas")
+        self._mask_font.setToolTip("The font of the mask's text")
+        self._mask_font.setMinimumWidth(60)
+        self._mask_text_opacity = BaseComboBox(list(MASK_OPACITY), "Solid")
+        self._mask_text_opacity.setToolTip("How solid the text (and the logo) is")
+        self._mask_letterbox = BaseComboBox(list(MASK_LETTERBOX), "Off")
+        self._mask_letterbox.setToolTip("The bars as high as it takes to leave a picture of this shape\n"
+                                        "between them — 2.39:1 inside a 16:9 frame, for example.")
+        self._mask_digits = BaseComboBox(list(MASK_DIGITS), "4")
+        self._mask_digits.setToolTip("How many digits {counter} has: 0042")
+        self._mask_top = BaseCheckbox("Top bar")
+        self._mask_bottom = BaseCheckbox("Bottom bar")
+        self._mask_logo = qt.QtWidgets.QLineEdit()
+        self._mask_logo.setPlaceholderText("the msl mark")
+        self._mask_logo.setToolTip("The picture a slot shows where it says {logo} (PNG with transparency works best).\n"
+                                   "Empty = our own msl mark.")
+        self._mask_logo_browse = IconPushButton(UiResources().iconManager.get_icon("browse", sub_folder="actions"),
+                                                "Choose a picture…")
+        self._mask_logo_browse.setFixedSize(24, 22)
+        self._mask_logo_brand = IconPushButton(UiResources().iconManager.get_icon("brand_mark", sub_folder="actions"),
+                                               "Back to our own msl mark")
+        self._mask_logo_brand.setFixedSize(24, 22)
+        self._mask_note = qt.QtWidgets.QLineEdit()
+        self._mask_note.setPlaceholderText("what {note} shows: WIP, for review…")
+        self._mask_note.setToolTip("A few words about this playblast. A slot shows them where it says {note}.")
+        self._mask_warn = BaseCheckbox("Mark frames outside the range")
+        self._mask_warn.setToolTip("The slots that show the frame turn red while the current frame is\n"
+                                   "outside the range chosen above — a frame the playblast won't take.")
+        self._mask_presets = ChipBar(add_text="Save this mask as a preset", name_placeholder="Preset name, then Enter",
+                                     add_icon=UiResources().iconManager.get_icon("bookmark_add", sub_folder="actions"))
         self._mask_token = qt.QtWidgets.QPushButton("{ }")
         self._mask_token.setObjectName("playblastToken")
-        self._mask_token.setToolTip("Put a token into the text touched last")
+        self._mask_token.setToolTip("Put a token into the text you clicked last\n(or right click a text)")
         self._mask_token.setFixedSize(24, 22)
         self._mask_token.setFocusPolicy(qt.QtCore.Qt.FocusPolicy.NoFocus)
 
@@ -280,21 +350,61 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
         grid.setVerticalSpacing(6)
         for index, slot in enumerate(mask.SLOTS):
             grid.addWidget(self._mask_fields[slot], index // 3, index % 3)
-        look = qt.QtWidgets.QHBoxLayout()
-        look.setSpacing(4)
-        for caption, widget in (("Text", self._mask_text), ("Bars", self._mask_bars)):
+        # caption | controls, one row per thing the mask is made of
+        look = qt.QtWidgets.QGridLayout()
+        look.setContentsMargins(0, 0, 0, 0)
+        look.setHorizontalSpacing(8)
+        look.setVerticalSpacing(6)
+        look.setColumnStretch(1, 1)
+        rows = (("Text", [(self._mask_font, 3), (self._mask_text, 2), (self._mask_text_opacity, 2),
+                          (self._mask_text_color, 0)]),
+                ("Bars", [(self._mask_bars, 2), (self._mask_letterbox, 2), (self._mask_bar_color, 0)]),
+                ("Counter", [(self._mask_digits, 0), (self._mask_token, 0)]))
+        for index, (caption, widgets) in enumerate(rows):
             label = qt.QtWidgets.QLabel(caption)
             label.setObjectName("playblastCaption")
-            look.addWidget(label)
-            look.addWidget(widget, 1)
-            look.addSpacing(6)
-        look.addWidget(self._mask_token)
+            look.addWidget(label, index, 0)
+            line = qt.QtWidgets.QHBoxLayout()
+            line.setSpacing(4)
+            for widget, stretch in widgets:
+                line.addWidget(widget, stretch)
+            if caption == "Counter":
+                digits = qt.QtWidgets.QLabel("digits")
+                digits.setObjectName("playblastHint")
+                line.insertWidget(1, digits)
+                line.insertStretch(2, 1)
+            look.addLayout(line, index, 1)
+        note = qt.QtWidgets.QHBoxLayout()
+        note.setSpacing(8)
+        note_label = qt.QtWidgets.QLabel("Note")
+        note_label.setObjectName("playblastCaption")
+        note.addWidget(note_label)
+        note.addWidget(self._mask_note, 1)
+        logo = qt.QtWidgets.QHBoxLayout()
+        logo.setSpacing(4)
+        logo_label = qt.QtWidgets.QLabel("Logo")
+        logo_label.setObjectName("playblastCaption")
+        logo.addWidget(logo_label)
+        logo.addSpacing(4)
+        logo.addWidget(self._mask_logo, 1)
+        logo.addWidget(self._mask_logo_browse)
+        logo.addWidget(self._mask_logo_brand)
+        bars = qt.QtWidgets.QHBoxLayout()
+        bars.setSpacing(14)
+        bars.addWidget(self._mask_top)
+        bars.addWidget(self._mask_bottom)
+        bars.addStretch(1)
         box = qt.QtWidgets.QVBoxLayout(card)
         box.setContentsMargins(10, 8, 10, 10)
         box.setSpacing(8)
         box.addLayout(top)
+        box.addWidget(self._mask_presets)
         box.addLayout(grid)
         box.addLayout(look)
+        box.addLayout(bars)
+        box.addLayout(note)
+        box.addLayout(logo)
+        box.addWidget(self._mask_warn)
         return card
 
     def detach_title(self) -> qt.QtWidgets.QLabel:
@@ -343,6 +453,8 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
         self._quality.currentTextChanged.connect(self._on_changed)
         for box in (self._sound, self._ornaments, self._overwrite, self._open):
             box.toggled.connect(self._on_changed)
+        self._folder.token_inserted.connect(self._on_changed)
+        self._name.token_inserted.connect(self._on_changed)
         self._browse.clicked.connect(self._on_browse)
         self._token.clicked.connect(self._on_token_menu)
         self._start_button.clicked.connect(self._on_start)
@@ -352,10 +464,25 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
         self._mask_on.toggled.connect(self._on_mask_toggled)
         for field in self._mask_fields.values():
             field.textEdited.connect(self._on_mask_changed)
-            field.cursorPositionChanged.connect(self._on_mask_field_touched)
+            field.token_inserted.connect(self._on_mask_changed)
+            field.focused.connect(self._on_mask_field_touched)  # also an EMPTY field that was only clicked
         self._mask_text.currentTextChanged.connect(self._on_mask_changed)
         self._mask_bars.currentTextChanged.connect(self._on_mask_changed)
         self._mask_token.clicked.connect(self._on_mask_token_menu)
+        self._mask_text_color.color_changed.connect(self._on_mask_changed)
+        self._mask_bar_color.color_changed.connect(self._on_mask_changed)
+        self._mask_note.textEdited.connect(self._on_mask_changed)
+        self._mask_top.toggled.connect(self._on_mask_changed)
+        for combo in (self._mask_font, self._mask_text_opacity, self._mask_letterbox, self._mask_digits):
+            combo.currentTextChanged.connect(self._on_mask_changed)
+        self._mask_bottom.toggled.connect(self._on_mask_changed)
+        self._mask_logo.editingFinished.connect(self._on_mask_changed)
+        self._mask_logo_browse.clicked.connect(self._on_mask_logo_browse)
+        self._mask_logo_brand.clicked.connect(self._on_mask_logo_brand)
+        self._mask_warn.toggled.connect(self._on_mask_changed)
+        self._mask_presets.clicked.connect(self._on_mask_preset)
+        self._mask_presets.add_requested.connect(self._on_mask_preset_saved)
+        self._mask_presets.remove_requested.connect(self._on_mask_preset_removed)
 
     # ------------------------------------------------------------------ settings
 
@@ -377,12 +504,12 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
                          (self._open, "open")):
             box.set_checked_immediate(bool(get(key)))
         saved = self._settings.get("mask") or {}
-        texts = saved.get("texts") or mask.DEFAULT_TEXTS
-        for slot, field in self._mask_fields.items():
-            field.setText(str(texts.get(slot, "")))
-        self._set_combo(self._mask_text, saved.get("text", "Medium"))
-        self._set_combo(self._mask_bars, saved.get("bars", "Solid"))
+        self._apply_mask_look(saved)
+        self._mask_note.setText(str(saved.get("note", "")))
+        self._mask_logo.setText(str(saved.get("logo", "")))
+        self._mask_warn.set_checked_immediate(bool(saved.get("warn", True)))
         self._mask_on.set_checked_immediate(bool(saved.get("shown", False)))
+        self._show_mask_presets()
         self._loading = False
         self._sync_enabled()
 
@@ -431,6 +558,7 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
+        self._load_fonts()
         self.refresh()
         if not self._tools_looked:
             self._tools_looked = True
@@ -515,6 +643,8 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
         self._sync_enabled()
         self._save_settings()
         self._refresh_facts()
+        if self._mask_on.isChecked():
+            self._sync_mask()  # the frame it frames, {resolution} and the range it warns about follow
 
     def _on_size_changed(self, *_args) -> None:
         if not self._loading:
@@ -565,16 +695,111 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
     def _mask_settings(self) -> mask.MaskSettings:
         """The mask as the controls say it."""
         width, height = self._frame_size()
+        start, end = self._frames()
         return mask.MaskSettings(
             texts={slot: field.text() for slot, field in self._mask_fields.items()},
             aspect=width / height if height else 0.0,
             text_scale=MASK_TEXT.get(self._mask_text.currentText(), 1.0),
-            bar_opacity=MASK_BARS.get(self._mask_bars.currentText(), 1.0))
+            bar_opacity=MASK_BARS.get(self._mask_bars.currentText(), 1.0),
+            text_color=self._mask_text_color.rgb(), bar_color=self._mask_bar_color.rgb(),
+            font=self._mask_font.currentText(),
+            text_opacity=MASK_OPACITY.get(self._mask_text_opacity.currentText(), 1.0),
+            letterbox=MASK_LETTERBOX.get(self._mask_letterbox.currentText(), 0.0),
+            counter_padding=int(self._mask_digits.currentText() or 4),
+            top_bar=self._mask_top.isChecked(), bottom_bar=self._mask_bottom.isChecked(),
+            logo=self._mask_logo.text().strip() or str(BRAND_LOGO),
+            note=self._mask_note.text(), project=Path(capture.project_folder().rstrip("/\\")).name,
+            width=width, height=height, warn_range=self._mask_warn.isChecked(), range_start=start, range_end=end)
+
+    def _mask_look(self) -> dict:
+        """What a preset keeps: the texts, the sizes, the colors."""
+        return {"texts": {slot: field.text() for slot, field in self._mask_fields.items()},
+                "text": self._mask_text.currentText(), "bars": self._mask_bars.currentText(),
+                "text_color": self._mask_text_color.hex(), "bar_color": self._mask_bar_color.hex(),
+                "top_bar": self._mask_top.isChecked(), "bottom_bar": self._mask_bottom.isChecked(),
+                "font": self._mask_font.currentText(), "text_opacity": self._mask_text_opacity.currentText(),
+                "letterbox": self._mask_letterbox.currentText(), "digits": self._mask_digits.currentText()}
+
+    def _apply_mask_look(self, look) -> None:
+        texts = look.get("texts") or mask.DEFAULT_TEXTS
+        for slot, field in self._mask_fields.items():
+            field.setText(str(texts.get(slot, "")))
+        self._set_combo(self._mask_text, look.get("text", "Medium"))
+        self._set_combo(self._mask_bars, look.get("bars", "Solid"))
+        self._mask_text_color.set_color(str(look.get("text_color", "#ffffff")))
+        self._mask_bar_color.set_color(str(look.get("bar_color", "#000000")))
+        self._mask_top.set_checked_immediate(bool(look.get("top_bar", True)))
+        self._mask_bottom.set_checked_immediate(bool(look.get("bottom_bar", True)))
+        font = str(look.get("font", MASK_LOOK_DEFAULTS["font"]))
+        if self._mask_font.findText(font) < 0:
+            self._mask_font.addItem(font)  # the list of real fonts comes when the panel is shown
+        self._set_combo(self._mask_font, font)
+        self._set_combo(self._mask_text_opacity, look.get("text_opacity", MASK_LOOK_DEFAULTS["text_opacity"]))
+        self._set_combo(self._mask_letterbox, look.get("letterbox", MASK_LOOK_DEFAULTS["letterbox"]))
+        self._set_combo(self._mask_digits, look.get("digits", MASK_LOOK_DEFAULTS["digits"]))
+
+    # presets of the mask: the built-in ones until the user saves or removes one, then the config's
+
+    def _mask_preset_list(self) -> list:
+        """[(name, look)], in the order shown."""
+        # asked of the stored data: reading a key that isn't there gives an empty node, not an error
+        if "mask_presets" in self._config.data:
+            try:
+                return [(str(entry["name"]), _plain(entry["look"])) for entry in self._config["mask_presets"]]
+            except (KeyError, TypeError, ValueError):
+                pass
+        return [(name, dict(look)) for name, look in MASK_PRESETS.items()]
+
+    def _store_mask_presets(self, presets: list) -> None:
+        self._config["mask_presets"] = [{"name": name, "look": look} for name, look in presets]
+        self._show_mask_presets()
+
+    def _show_mask_presets(self) -> None:
+        presets = self._mask_preset_list()
+        self._mask_presets.set_chips([(name, name, "") for name, _look in presets],
+                                     removable={name for name, _look in presets})
+        current = self._mask_look()
+        self._mask_presets.set_marked([name for name, look in presets
+                                       if dict(MASK_LOOK_DEFAULTS, **look) == current])
+
+    def _on_mask_preset(self, name: str) -> None:
+        look = dict(self._mask_preset_list()).get(name)
+        if look is None:
+            return
+        self._loading = True
+        self._apply_mask_look(look)
+        self._loading = False
+        self._on_mask_changed()
+
+    def _on_mask_preset_saved(self, name: str) -> None:
+        name = name.strip()
+        if not name:
+            return
+        presets = [(old, look) for old, look in self._mask_preset_list() if old != name]
+        self._store_mask_presets(presets + [(name, self._mask_look())])
+
+    def _on_mask_preset_removed(self, name: str) -> None:
+        self._store_mask_presets([(old, look) for old, look in self._mask_preset_list() if old != name])
 
     def _save_mask(self) -> None:
-        self._settings["mask"] = {"shown": self._mask_on.isChecked(),
-                                  "texts": {slot: field.text() for slot, field in self._mask_fields.items()},
-                                  "text": self._mask_text.currentText(), "bars": self._mask_bars.currentText()}
+        self._settings["mask"] = dict(self._mask_look(), shown=self._mask_on.isChecked(),
+                                      note=self._mask_note.text(), warn=self._mask_warn.isChecked(),
+                                      logo=self._mask_logo.text().strip())
+        self._show_mask_presets()  # the one that matches what is on screen is outlined
+
+    def _load_fonts(self) -> None:
+        """The fonts Maya's viewport can draw, into the list (once; asked of Maya, so not in the constructor)."""
+        if self._mask_font.count() > 3:
+            return
+        current = self._mask_font.currentText()
+        names = mask.fonts()
+        if current and current not in names:
+            names.append(current)
+        self._loading = True
+        self._mask_font.clear()
+        self._mask_font.addItems(names)
+        self._set_combo(self._mask_font, current or "Consolas")
+        self._loading = False
 
     def _sync_mask(self) -> None:
         """Makes the viewport match the switch: a new or reopened scene has lost the mask, and the
@@ -602,6 +827,18 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
             if self._mask_on.isChecked():
                 self._sync_mask()
 
+    def _on_mask_logo_browse(self) -> None:
+        current = self._mask_logo.text().strip() or str(BRAND_LOGO)
+        file, _filter = qt.QtWidgets.QFileDialog.getOpenFileName(
+            self, "The logo", str(Path(current).parent), "Pictures (*.png *.jpg *.jpeg *.tif *.tiff *.bmp)")
+        if file:
+            self._mask_logo.setText(file)
+            self._on_mask_changed()
+
+    def _on_mask_logo_brand(self) -> None:
+        self._mask_logo.setText("")
+        self._on_mask_changed()
+
     def _on_mask_field_touched(self, *_args) -> None:
         field = self.sender()
         if field in self._mask_fields.values():
@@ -617,9 +854,7 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
         menu.exec(self._mask_token.mapToGlobal(qt.QtCore.QPoint(0, self._mask_token.height() + 2)))
 
     def _insert_mask_token(self, text: str) -> None:
-        self._mask_field.insert(text)
-        self._mask_field.setFocus()
-        self._on_mask_changed()
+        self._mask_field.insert_token(text)  # token_inserted -> _on_mask_changed
 
     def _on_token_menu(self) -> None:
         menu = make_rounded_popup(qt.QtWidgets.QMenu(self))
@@ -631,9 +866,7 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
         menu.exec(self._token.mapToGlobal(qt.QtCore.QPoint(0, self._token.height() + 2)))
 
     def _insert_token(self, text: str) -> None:
-        self._name.insert(text)
-        self._name.setFocus()
-        self._on_changed()
+        self._name.insert_token(text)  # token_inserted -> _on_changed
 
     # ------------------------------------------------------------------ ffmpeg
 

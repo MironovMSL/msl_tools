@@ -677,3 +677,9 @@ QWidget#mayaDockHost > WindowHeader {
     background-color: var(--chrome-background);
     border-bottom: 1px solid alpha(var(--border), 70%);
 }
+
+/* ColorSwatchButton: a button that shows the color it holds (the user's data); only its frame is ours. */
+ColorSwatchButton {
+    qproperty-borderColor:      var(--border);
+    qproperty-hoverBorderColor: var(--accent);
+}

@@ -886,6 +886,7 @@ New generic pieces added to `ui/widgets/` along the way:
 ```
 atoms/buttons/application_button.py          ApplicationButton (was ApplicationButtonWdg; set_badge(text): a small pill on the icon's corner; set_drop_suffixes() -> file_dropped; right click -> menu_requested)
 atoms/header/link_status_button.py        LinkStatusButton (header status dot + count: off / on / attention with a pulse; shows what it is told — set_state())
+atoms/buttons/color_swatch_button.py      ColorSwatchButton (shows the color it holds — the user's data —, a click opens the color dialog; hex() / rgb() / set_color(); color_changed(str))
 atoms/buttons/icon_push_button.py         IconPushButton (framed button with a QSS-tinted one-color icon)
 atoms/buttons/icon_tile_button.py         IconTileButton (QToolButton tile: QSS-tinted icon over a short label; icon-less tiles keep the icon row empty so a column stays aligned)
 atoms/icons/tinted_icon.py                TintedIcon (passive one-color icon tinted from QSS: qproperty-iconColor; dimmed when disabled)
@@ -893,6 +894,7 @@ atoms/buttons/glyph_button.py             GlyphButton (custom-painted small icon
 atoms/comboboxes/base_combo_box.py        BaseComboBox (was QCustomComboBox)
 atoms/charts/bar_strip.py                 BarStrip (a handful of measurements as thin bars in two tones, each with a tooltip; scaled from zero; qproperty accentColor / mutedColor)
 atoms/layouts/flow_layout.py              FlowLayout (items left to right, wrapping like words; height-for-width; hidden widgets take no room)
+atoms/editors/token_line_edit.py          TokenLineEdit (a line edit whose text may hold {tokens}: a right click lists them and the picked one goes in WHERE THE CLICK WAS; Cut / Copy / Paste stay in that menu; insert_token() for a button beside it; token_inserted(str), focused())
 atoms/editors/log_view.py                 LogView (read-only log: time-stamped entries colored by level — error / warning / info / trace — from qproperty colors; follows the tail; its QSS `color` exists only to color the placeholder — a QPlainTextEdit without one draws it near-black)
 atoms/editors/code_editor.py              CodeEditor (line numbers + gutter divider, Python highlighting from --syntax-* tokens, Tab/auto-indent)
 atoms/segmented/segmented_control.py     SegmentedControl (one-of-few picker: sunken track, raised pill that slides; Left/Right keys)
@@ -1539,8 +1541,45 @@ scratch on Maya's public API. Step 1 of 4 is built (2026-10-03):
   (`mask.last_draw_error()`). (4) `MFileIO` has no API 2.0 form (API 1.0
   is used for the scene's name). (5) a `rect2d` is drawn OVER every
   text, whatever the order or depth priority — the bars are the
-  background boxes of empty `text2d` calls. Not built of the mask: colors
-  (white on black for now), a logo, a letterbox by aspect ratio.
+  background boxes of empty `text2d` calls.
+- Mask looks (2026-10-03, after studying LabelMatic in `ref/` — commercial
+  too, a compiled plug-in: only its feature list was read): colors of the
+  text and the bars (`ColorSwatchButton`, ui/widgets/atoms/buttons — a
+  button that shows the color it holds and opens the color dialog; the
+  color is the user's data, only its frame is QSS); more tokens —
+  {project} {resolution} {timecode} {start} {end} {range} {frames} {time}
+  {note} (the Note field); a slot that shows the frame ({frame},
+  {counter}, {timecode}) turns to the warning color while the current
+  frame is outside the range chosen in the panel (`warnRange`,
+  `rangeStart` / `rangeEnd` on the node; "Mark frames outside the
+  range"); presets of the mask's look (texts, sizes, colors — not the
+  switch, not the note): `MASK_PRESETS` Review / Client / Frames until
+  the user saves or removes one, then the config's `mask_presets`; the
+  one matching what is on screen is outlined. Reading a missing key of
+  a JsonConfig gives an EMPTY NODE, not KeyError — "is it stored?" is
+  asked of `config.data`. `{logo}` in a slot draws a picture there (the
+  node's `logo`; the Logo field, empty = our own
+  assets/icons/brand/watermark.png): MTextureManager.acquireTexture +
+  a textured `rect2d` in a drawable of its own, as high as LOGO_PART of
+  a bar; text of the same slot moves aside (a centre slot shows the
+  logo alone); the texture is cached by path + mtime and released when
+  the plug-in unloads. "Top bar" / "Bottom bar" switch each bar off —
+  the texts stay. Fields that take tokens are `TokenLineEdit`s: a right
+  click puts a token in where the click was. Also on the card: the FONT
+  (`mask.fonts()` = MUIDrawManager.getFontList(), asked when the panel
+  is shown — 327 names on this machine), the text's opacity (the logo
+  follows it), the counter's digits, and a LETTERBOX (`letterbox` on
+  the node, Off / 2.39:1 / 2.35:1 / 2:1 / 1.85:1 / 16:9 / 4:3 / 1:1: the
+  bars become as high as it takes to leave a picture of that shape
+  between them, whatever their own height; the text shrinks to fit a
+  thin bar). `MASK_LOOK_DEFAULTS` holds every key of a look with its
+  default: a preset saved before a key existed means the default.
+  A `|` in a slot's text starts a new line ("{scene}|{user}"): the
+  lines are stacked in the bar's middle, as big as one-line text
+  unless they wouldn't fit the bar — then smaller.
+  From the same study, not built: attribute values in slots
+  (`{attr:ctrl.stretch}`), safe frames, a separate "Labels" tool (live attribute values
+  as a HUD / next to objects, colored by value, per namespace).
 - Progress (2026-10-03): the capture runs ONE FRAME PER TURN of the event
   loop — `capture.CaptureSession` (`step()` = `cmds.playblast(startTime=f,
   endTime=f)`, so files keep real frame numbers; `frame=[f]` numbers
