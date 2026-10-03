@@ -7,13 +7,14 @@ from pathlib import Path
 import msl_tools.msl.ui.qt_bindings as qt
 from msl_tools.msl.core.media import probe
 from msl_tools.msl.core.media.thumbnail import thumbnail
+from msl_tools.msl.core.theme import ThemeRegistry
 from msl_tools.msl.ui.process_launcher.process_launcher import ProcessLauncher
+from msl_tools.msl.ui.theme.qss import color_property, make_rounded_popup
 from msl_tools.msl.ui.ui_resources import UiResources
 from msl_tools.msl.ui.widgets.atoms.buttons.glyph_button import GlyphButton
+from msl_tools.msl.ui.widgets.atoms.icons.tinted_icon import TintedIcon
 from msl_tools.msl.ui.widgets.atoms.labels.elided_label import ElidedLabel
 from msl_tools.msl.ui.workers.result_worker import ResultWorker
-
-THUMB_SIZE = qt.QtCore.QSize(64, 36)
 
 
 def open_result(path: Path) -> None:
@@ -34,15 +35,69 @@ def when_text(moment: float) -> str:
     return f"{then.tm_mday} {time.strftime('%b', then)}"
 
 
-class _FileLabel(ElidedLabel):
-    """A result's name: a click opens it, dragging it out carries the file (into a chat, a folder)."""
+class _Picture(qt.QtWidgets.QWidget):
+    """A result's picture, 16:9 whatever its width: a click opens the result, dragging it
+    out carries the file (into a chat, a folder), a right click offers the rest. Under the
+    pointer it dims and shows a play mark."""
+
+    groundColor = color_property("_ground_color", "update")
+    markColor = color_property("_mark_color", "update")
 
     def __init__(self, path: Path, parent=None):
-        super().__init__(path.name, qt.QtCore.Qt.TextElideMode.ElideMiddle, parent)
+        super().__init__(parent)
+        fallback = ThemeRegistry.fallback()  # until QSS applies
+        self._ground_color = qt.QtGui.QColor(fallback.border)
+        self._mark_color = qt.QtGui.QColor(fallback.text_primary)
         self._path = path
+        self._pixmap = qt.QtGui.QPixmap()
         self._pressed_at = None
         self.setCursor(qt.QtCore.Qt.CursorShape.PointingHandCursor)
-        self.setToolTip(f"{path}\nClick to open, drag to take the file somewhere")
+        self.setMinimumWidth(56)
+
+    def set_picture(self, file: str) -> None:
+        pixmap = qt.QtGui.QPixmap(file)
+        if not pixmap.isNull():
+            self._pixmap = pixmap
+            self.update()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        height = max(30, int(round(self.width() * 9 / 16)))
+        if self.height() != height:
+            self.setFixedHeight(height)
+
+    def enterEvent(self, event) -> None:
+        super().enterEvent(event)
+        self.update()
+
+    def leaveEvent(self, event) -> None:
+        super().leaveEvent(event)
+        self.update()
+
+    def paintEvent(self, event) -> None:
+        painter = qt.QtGui.QPainter(self)
+        painter.setRenderHints(qt.QtGui.QPainter.RenderHint.Antialiasing
+                               | qt.QtGui.QPainter.RenderHint.SmoothPixmapTransform)
+        rect = qt.QtCore.QRectF(self.rect())
+        clip = qt.QtGui.QPainterPath()
+        clip.addRoundedRect(rect, 5, 5)
+        painter.setClipPath(clip)
+        painter.fillRect(rect, self._ground_color)
+        if not self._pixmap.isNull():
+            scaled = self._pixmap.scaled(self.size(), qt.QtCore.Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                                         qt.QtCore.Qt.TransformationMode.SmoothTransformation)
+            painter.drawPixmap(int((self.width() - scaled.width()) / 2), int((self.height() - scaled.height()) / 2),
+                               scaled)
+        if self.underMouse():
+            painter.fillRect(rect, qt.QtGui.QColor(0, 0, 0, 90))
+            side = min(rect.width(), rect.height()) * 0.3
+            centre = rect.center()
+            mark = qt.QtGui.QPolygonF([qt.QtCore.QPointF(centre.x() - side * 0.4, centre.y() - side * 0.5),
+                                       qt.QtCore.QPointF(centre.x() - side * 0.4, centre.y() + side * 0.5),
+                                       qt.QtCore.QPointF(centre.x() + side * 0.55, centre.y())])
+            painter.setPen(qt.QtCore.Qt.PenStyle.NoPen)
+            painter.setBrush(self._mark_color)
+            painter.drawPolygon(mark)
 
     def mousePressEvent(self, event) -> None:
         if event.button() == qt.QtCore.Qt.MouseButton.LeftButton:
@@ -51,8 +106,7 @@ class _FileLabel(ElidedLabel):
     def mouseMoveEvent(self, event) -> None:
         if self._pressed_at is None or not self._path.exists():
             return
-        moved = (event.position().toPoint() - self._pressed_at).manhattanLength()
-        if moved < qt.QtWidgets.QApplication.startDragDistance():
+        if (event.position().toPoint() - self._pressed_at).manhattanLength() < qt.QtWidgets.QApplication.startDragDistance():
             return
         self._pressed_at = None
         data = qt.QtCore.QMimeData()
@@ -66,68 +120,85 @@ class _FileLabel(ElidedLabel):
             self._pressed_at = None
             open_result(self._path)
 
+    def contextMenuEvent(self, event) -> None:
+        path = self._path
+        menu = make_rounded_popup(qt.QtWidgets.QMenu(self))
+        menu.addAction("Open").triggered.connect(lambda: open_result(path))
+        menu.addAction("Show in folder").triggered.connect(lambda: ProcessLauncher.open_file_explorer(path))
+        menu.addAction("Copy path").triggered.connect(lambda: qt.QtWidgets.QApplication.clipboard().setText(str(path)))
+        menu.exec(event.globalPos())
 
-class _RecentRow(qt.QtWidgets.QWidget):
-    """One finished playblast: its picture, name, size and time, open / show in folder."""
+
+class _FolderLink(ElidedLabel):
+    """A result's name: a click shows the file in its folder."""
+
+    def __init__(self, path: Path, parent=None):
+        super().__init__(path.name, qt.QtCore.Qt.TextElideMode.ElideMiddle, parent)
+        self._path = path
+        self.setCursor(qt.QtCore.Qt.CursorShape.PointingHandCursor)
+
+    def mouseReleaseEvent(self, event) -> None:
+        if event.button() == qt.QtCore.Qt.MouseButton.LeftButton and self.rect().contains(event.position().toPoint()):
+            ProcessLauncher.open_file_explorer(self._path)
+
+
+class _RecentTile(qt.QtWidgets.QWidget):
+    """One finished playblast: its picture (a click opens it) over its name (a click shows it
+    in its folder) and a line of facts ending in a folder button that does the same."""
 
     def __init__(self, entry: dict, parent=None):
         super().__init__(parent)
         path = Path(entry["path"])
-        icons = UiResources().iconManager
-        self._thumb = qt.QtWidgets.QLabel()
-        self._thumb.setObjectName("playblastThumb")
-        self._thumb.setFixedSize(THUMB_SIZE)
-        self._thumb.setAlignment(qt.QtCore.Qt.AlignmentFlag.AlignCenter)
-        name = _FileLabel(path)
+        self.picture = _Picture(path)
+        name = _FolderLink(path)
         name.setObjectName("playblastRecentName")
         facts = []
         try:
-            facts.append(f"{entry.get('frames', 0)} frames" if path.is_dir() else size_text(path.stat().st_size))
+            facts.append(f"{entry.get('frames', 0)} fr" if path.is_dir() else size_text(path.stat().st_size))
         except OSError:
             pass
-        if entry.get("camera"):
-            facts.append(str(entry["camera"]))
         facts.append(when_text(float(entry.get("time", 0.0))))
-        note = qt.QtWidgets.QLabel(" · ".join(facts))
+        note = ElidedLabel(" · ".join(facts), qt.QtCore.Qt.TextElideMode.ElideRight)
         note.setObjectName("playblastHint")
-        play = GlyphButton("▶", "Open it")
-        play.set_icon(icons.get_icon("play", sub_folder="actions"))
-        play.clicked.connect(lambda: open_result(path))
-        show = GlyphButton("…", "Show it in its folder")
-        show.set_icon(icons.get_icon("browse", sub_folder="actions"))
-        show.clicked.connect(lambda: ProcessLauncher.open_file_explorer(path))
-        for button in (play, show):
-            button.setObjectName("playblastAction")
-        text = qt.QtWidgets.QVBoxLayout()
-        text.setContentsMargins(0, 0, 0, 0)
-        text.setSpacing(1)
-        text.addWidget(name)
-        text.addWidget(note)
-        row = qt.QtWidgets.QHBoxLayout(self)
-        row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(8)
-        row.addWidget(self._thumb)
-        row.addLayout(text, 1)
-        row.addWidget(play)
-        row.addWidget(show)
-
-    def set_picture(self, file: str) -> None:
-        pixmap = qt.QtGui.QPixmap(file)
-        if not pixmap.isNull():
-            self._thumb.setPixmap(pixmap.scaled(THUMB_SIZE, qt.QtCore.Qt.AspectRatioMode.KeepAspectRatioByExpanding,
-                                                qt.QtCore.Qt.TransformationMode.SmoothTransformation))
+        about = "\n".join(part for part in (str(path), str(entry.get("camera", "")), str(entry.get("note", "")))
+                          if part)
+        self.picture.setToolTip(about + "\nClick to open, drag to take the file somewhere, right click for more")
+        name.setToolTip(about + "\nClick to show it in its folder")
+        note.setToolTip(about)
+        folder = GlyphButton("…", "Show it in its folder", size=qt.QtCore.QSize(18, 16))
+        folder.setObjectName("playblastAction")
+        folder.set_icon(UiResources().iconManager.get_icon("browse", sub_folder="actions"))
+        folder.clicked.connect(lambda: ProcessLauncher.open_file_explorer(path))
+        line = qt.QtWidgets.QHBoxLayout()
+        line.setContentsMargins(0, 0, 0, 0)
+        line.setSpacing(2)
+        line.addWidget(note, 1)
+        line.addWidget(folder)
+        box = qt.QtWidgets.QVBoxLayout(self)
+        box.setContentsMargins(0, 0, 0, 0)
+        box.setSpacing(2)
+        box.addWidget(self.picture)
+        box.addWidget(name)
+        box.addLayout(line)
 
 
 class RecentCard(qt.QtWidgets.QFrame):
-    """The last playblasts of the scene, newest first — a card that isn't there while
-    there are none.
+    """The last playblasts of the scene as a row of tiles, newest first — a card
+    that isn't there while there are none.
 
-        card.show_results(entries, tools)   # entries: dicts with path, frames, camera, time
+        card.show_results(entries, tools, total=9)   # entries: dicts with path, frames, camera, time
+        card.clear_requested.connect(...)            # "Clear" in the heading
 
-    Pictures are made on workers (core/media thumbnail; a folder of frames shows its
-    first frame) and cached in %TEMP%/msl_tools/playblast/thumbs. Looks: playblast.qss.
+    The heading counts ALL of the scene's results (`total`), the row shows the
+    last few. Pictures are made on workers (core/media thumbnail; a folder of
+    frames shows its first frame) and cached in %TEMP%/msl_tools/playblast/thumbs.
+    Looks: playblast.qss.
+
+    Signals:
+        clear_requested() — forget this scene's results (the files stay).
     """
 
+    clear_requested = qt.QtCore.Signal()
     _picture_ready = qt.QtCore.Signal(str, str)
     # kept by the CLASS, parentless: the card can be deleted while a worker runs (see PlayblastPanel)
     _workers: set = set()
@@ -136,37 +207,54 @@ class RecentCard(qt.QtWidgets.QFrame):
         super().__init__(parent)
         self.setObjectName("playblastCard")
         self._shown: list = []
-        self._rows: dict = {}
+        self._tiles: dict = {}
+        icon = TintedIcon(UiResources().iconManager.get_icon("image_stack", sub_folder="actions"), 14)
+        icon.setObjectName("playblastCardIcon")
         self._heading = qt.QtWidgets.QLabel("RECENT")
         self._heading.setObjectName("playblastSection")
-        self._list = qt.QtWidgets.QVBoxLayout()
-        self._list.setContentsMargins(0, 0, 0, 0)
-        self._list.setSpacing(8)
+        clear = qt.QtWidgets.QPushButton("Clear")
+        clear.setObjectName("playblastLink")
+        clear.setFlat(True)
+        clear.setCursor(qt.QtCore.Qt.CursorShape.PointingHandCursor)
+        clear.setToolTip("Forget this scene's playblasts here (the files stay where they are)")
+        clear.clicked.connect(self.clear_requested)
+        top = qt.QtWidgets.QHBoxLayout()
+        top.setSpacing(6)
+        top.addWidget(icon)
+        top.addWidget(self._heading)
+        top.addStretch(1)
+        top.addWidget(clear)
+        self._row = qt.QtWidgets.QHBoxLayout()
+        self._row.setContentsMargins(0, 0, 0, 0)
+        self._row.setSpacing(8)
         box = qt.QtWidgets.QVBoxLayout(self)
         box.setContentsMargins(10, 8, 10, 10)
         box.setSpacing(8)
-        box.addWidget(self._heading)
-        box.addLayout(self._list)
+        box.addLayout(top)
+        box.addLayout(self._row)
         self._picture_ready.connect(self._on_picture)
         self.hide()
 
-    def show_results(self, entries: list, tools) -> None:
-        key = [(entry["path"], entry.get("time")) for entry in entries] + [tools is not None]
+    def show_results(self, entries: list, tools, total: int = 0, slots: int = 4) -> None:
+        key = [(entry["path"], entry.get("time")) for entry in entries] + [tools is not None, total]
         if key == self._shown:
             return
         self._shown = key
-        while self._list.count():
-            item = self._list.takeAt(0)
+        while self._row.count():
+            item = self._row.takeAt(0)
             if item.widget() is not None:
                 item.widget().hide()
                 item.widget().deleteLater()
-        self._rows = {}
+        self._tiles = {}
         for entry in entries:
-            row = _RecentRow(entry)
-            self._rows[entry["path"]] = row
-            self._list.addWidget(row)
+            tile = _RecentTile(entry)
+            self._tiles[entry["path"]] = tile
+            self._row.addWidget(tile, 1)
             if tools is not None:
                 self._make_picture(tools, entry["path"])
+        for _ in range(max(0, slots - len(entries))):  # fewer than a full row: the tiles keep their size
+            self._row.addStretch(1)
+        self._heading.setText(f"RECENT · {max(total, len(entries))}" if entries else "RECENT")
         self.setVisible(bool(entries))
 
     def _make_picture(self, tools, path: str) -> None:
@@ -184,9 +272,9 @@ class RecentCard(qt.QtWidgets.QFrame):
             pass  # the card is gone
 
     def _on_picture(self, path: str, file: str) -> None:
-        row = self._rows.get(path)
-        if file and row is not None and qt.shiboken.isValid(row):
-            row.set_picture(file)
+        tile = self._tiles.get(path)
+        if file and tile is not None and qt.shiboken.isValid(tile):
+            tile.picture.set_picture(file)
 
     @staticmethod
     def _thumbnail(tools, path: Path) -> str:
@@ -203,7 +291,7 @@ class RecentCard(qt.QtWidgets.QFrame):
             folder.mkdir(parents=True, exist_ok=True)
             target = folder / (hashlib.md5(stamp).hexdigest() + ".jpg")
             if not target.is_file():
-                thumbnail(tools, probe(tools, source), target, 128)
+                thumbnail(tools, probe(tools, source), target, 240)
             return str(target) if target.is_file() else ""
         except Exception:
             return ""

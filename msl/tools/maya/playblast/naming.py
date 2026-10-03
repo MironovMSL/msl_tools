@@ -13,17 +13,33 @@ TOKENS = {
     "camera": "the camera the playblast is seen through",
     "timestamp": "the date and time: 20261003_154210",
     "date": "the date: 2026-10-03",
+    "version": "the next version of this name: v001, v002…",
+    "work": "a folder for working versions next to the scene: <scene's folder>/playblast/work",
+    "work+": "the same — plus a copy without a version, always the latest, one folder up",
 }
 DEFAULT_FOLDER = "{project}/movies"
 DEFAULT_NAME = "{scene}_{camera}"
-_TOKEN = re.compile(r"\{([a-z_]+)\}")
+_TOKEN = re.compile(r"\{([a-z_]+\+?)\}")
 _FORBIDDEN = re.compile(r'[<>:"/\\|?*]')
 
 
-def token_values(project: str, scene: str, camera: str, now: float | None = None) -> dict:
-    """The value of every token for one playblast."""
+WORK_TOKEN, WORK_LATEST_TOKEN = "{work}", "{work+}"
+
+
+def work_folder(project: str, scene_folder: str) -> str:
+    """Where working versions of a scene's playblasts go: `playblast/work` next to the scene
+    file — for a scene never saved, under the project's `scenes`."""
+    base = str(scene_folder).rstrip("/\\") or str(project).rstrip("/\\") + "/scenes"
+    return base + "/playblast/work"
+
+
+def token_values(project: str, scene: str, camera: str, now: float | None = None,
+                 scene_folder: str = "") -> dict:
+    """The value of every token for one playblast. `scene_folder`: where the scene file is
+    ("" = never saved)."""
     moment = time.localtime(now)
-    return {"project": str(project).rstrip("/\\"), "scene": scene or "untitled",
+    work = work_folder(project, scene_folder)
+    return {"project": str(project).rstrip("/\\"), "scene": scene or "untitled", "work": work, "work+": work,
             "camera": camera.split("|")[-1].replace(":", "_") or "camera",
             "timestamp": time.strftime("%Y%m%d_%H%M%S", moment), "date": time.strftime("%Y-%m-%d", moment)}
 
@@ -41,6 +57,36 @@ def output_path(folder: str, name: str, values: dict, suffix: str) -> Path:
     if suffix and Path(file_name).suffix.lower() in (".mp4", ".mov", ".png", ".jpg"):
         file_name = Path(file_name).stem
     return Path(expand(folder.strip() or DEFAULT_FOLDER, values)) / (file_name + suffix)
+
+
+VERSION_TOKEN = "{version}"
+
+
+def version_for(folder: str, name: str, values: dict, suffix: str, reuse: bool = False) -> str:
+    """What {version} stands for: "v001" for the first playblast of this name, then the number
+    after the highest one found in the folder ("v007" -> "v008"). `reuse`: the highest one
+    itself (a playblast that replaces the last version instead of adding one)."""
+    mark = "\uE000"
+    target = output_path(folder, name, dict(values, version=mark), suffix)
+    if mark not in target.name:
+        return "v001"  # {version} only counts in the NAME
+    before, after = target.name.split(mark, 1)
+    pattern = re.compile(re.escape(before) + r"v(\d+)" + re.escape(after.replace(mark, "")) + "$", re.IGNORECASE)
+    highest = 0
+    try:
+        for entry in target.parent.iterdir():
+            match = pattern.match(entry.name)
+            if match:
+                highest = max(highest, int(match.group(1)))
+    except (OSError, ValueError):
+        pass
+    number = max(1, highest) if reuse else highest + 1
+    return f"v{number:03d}"
+
+
+def without_version(name: str) -> str:
+    """A name template with its {version} (and the separator before it) taken out."""
+    return re.sub(r"[ _.\-]*\{version\}", "", name).strip(" _.-")
 
 
 def free_path(path: Path) -> Path:

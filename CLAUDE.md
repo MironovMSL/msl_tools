@@ -1599,6 +1599,65 @@ scratch on Maya's public API. Step 1 of 4 is built (2026-10-03):
   `allObjects=False` (measured). "Viewport HUD" stays its own check
   box (showOrnaments). The tool's `{ }` token buttons are gone: a right
   click in the field does it.
+- The panel's look (2026-10-03, a round of the user's picks): every card
+  has an icon in its heading; PICTURE's rows are captioned by icons
+  (`camera`, `eye`, `frame_fit`, `film` — the word is the tooltip);
+  yes / no choices are pills with icons (`_Toggle`, an IconPushButton
+  whose `on` property drives its QSS: Sound, Viewport HUD, Overwrite,
+  Open when done; icon-only for Top bar / Bottom bar). The SHOT MASK
+  card FOLDS on a click on its heading (`mask.open`, folded by
+  default: one line — preset · "6 of 6 slots" · font — and the
+  switch). Its six texts are no six fields any more: `MaskPreview`
+  (mask_preview.py) sketches the frame with the bars and the slots
+  showing their texts with the tokens filled in
+  (`mask.token_values()`), the logo, the colors, the switched-off bar,
+  the letterbox; a click picks a slot and ONE TokenLineEdit under it
+  writes it (`_mask_texts`, `_select_mask_slot`, `_set_mask_text`). It
+  is a sketch, not to scale. RECENT is a row of tiles (picture over
+  name: click = open, drag = the file, right click = more), its heading
+  counts the scene's results and has "Clear" (forgets them here, the
+  files stay). The status line only says "Done · 112 KB · 5.6 s" —
+  the result is the first tile. The start button says what it will
+  make ("Playblast · 48 frames · 1920×1080"). The facts on top open
+  the setting they show (`FactTiles.set_clickable`: camera, frames,
+  long). New icons: actions/camera, bar_top, bar_bottom, hud, clock.
+- A batch of everyday things (2026-10-03): `{version}` in the NAME
+  (`naming.version_for`: v001, then one past the highest found in the
+  folder; with Overwrite the highest itself); the range "Selected" (the
+  frames highlighted on the timeline, `timeControl rangeArray` — its
+  end is exclusive; nothing highlighted = the playback range); pills
+  "Smooth edges" / "Occlusion" (hardwareRenderingGlobals
+  multiSampleEnable + lineAAEnable / ssaoEnable set for the capture and
+  put back) and "Copy file" (the result on the clipboard as a FILE +
+  its path as text); the Note is kept with a result (a RECENT tile's
+  tooltip); `QApplication.alert` when it is done. A RECENT tile: the
+  picture opens the result, the NAME and a small folder button show it
+  in its folder.
+  The yes / no choices are ICON-ONLY buttons at the end of their card's
+  heading (`_card(extras=)`; the word is the tooltip's first line) —
+  the user asked for the room the pills took. Folder tokens `{work}` =
+  `<scene's folder>/playblast/work` (a scene never saved: under the
+  project's `scenes`) and `{work+}` = the same folder with VERSIONS
+  (`_v###` is added to the name if it has no {version}) plus a copy
+  without the version, always the latest, one folder up
+  (`_latest_path`, written after the result; a folder of frames is
+  copied whole). The path line reads "…_v003.mp4 + name.mp4".
+  `core/media/thumbnail.thumbnail` seeks to the middle of the FRAMES
+  (not of the file: five frames under a second of sound gave no
+  picture) and falls back to the start.
+  Hotkeys: `tools/maya/hotkeys.py` registers Maya runTimeCommands at
+  bootstrap (`startup._register_hotkey_commands`, never raises) —
+  MSLPlayblast, MSLPlayblastRepeat (`playblast.repeat_last()`: opens
+  the window if closed, then `panel.start()`, which waits for ffmpeg to
+  be found first), MSLShotMaskToggle (`playblast.toggle_mask()`). They
+  show up in the Hotkey Editor under Custom Scripts > MSL Tools; Maya
+  keeps runtime commands in the user's preferences, so register()
+  updates one that exists instead of adding it twice.
+  Still on the list given to the user: several cameras in one go,
+  presets of the whole playblast, compare with the previous one, a
+  light copy for a messenger, the result into Media's jobs, safe
+  frames, attribute values in the mask, a plain background, overscan,
+  an estimate, a frame preview, MOV / H.265 / the graphics card.
 - Progress (2026-10-03): the capture runs ONE FRAME PER TURN of the event
   loop — `capture.CaptureSession` (`step()` = `cmds.playblast(startTime=f,
   endTime=f)`, so files keep real frame numbers; `frame=[f]` numbers
@@ -1662,10 +1721,9 @@ path from anywhere else, Maya asks (and again after every change of
 the file). A test folder under %TEMP% is useless for this: its 8.3
 short name (`S_MIRO~1`) made Maya report the plug-in as "not found on
 MAYA_PLUG_IN_PATH".
-Planned, not built: hotkey actions as functions of the package
-registered as Maya runTimeCommands at startup (they show up in the
-Hotkey Editor by name); `scripts/` is for MEL and the few things Maya
-looks up by name.
+Hotkey actions are functions of the package registered as Maya
+runTimeCommands at startup (`tools/maya/hotkeys.py`, see the Playblast
+tool); `scripts/` is for MEL and the few things Maya looks up by name.
 
 ## Install (the hub is where everything starts)
 

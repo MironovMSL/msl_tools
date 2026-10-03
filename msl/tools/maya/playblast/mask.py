@@ -128,6 +128,38 @@ def _load_plugin() -> None:
         raise MaskError(f"The shot mask’s plug-in couldn’t be loaded: {str(error).strip()}") from error
 
 
+def token_values(camera: str, settings: MaskSettings) -> dict:
+    """token -> what it reads right now, as the plug-in would fill it in (for a sketch of the
+    mask outside the viewport). `camera`: the camera it is seen through."""
+    import getpass
+    import time
+    from maya import mel
+    frame = int(round(cmds.currentTime(query=True)))
+    fps = float(mel.eval("currentTimeUnitToFPS"))
+    start = int(cmds.playbackOptions(query=True, minTime=True))
+    end = int(cmds.playbackOptions(query=True, maxTime=True))
+    rate = max(1, int(round(fps)))
+    seconds, part = divmod(max(0, frame), rate)
+    focal = ""
+    try:
+        if camera and cmds.objExists(camera):
+            focal = "%.0f mm" % cmds.camera(camera, query=True, focalLength=True)
+    except RuntimeError:
+        pass
+    try:
+        user = getpass.getuser()
+    except Exception:
+        user = ""
+    return {"scene": Path(cmds.file(query=True, sceneName=True) or "").stem or "untitled",
+            "project": settings.project, "camera": camera.split("|")[-1], "focal_length": focal,
+            "resolution": f"{settings.width}x{settings.height}" if settings.width and settings.height else "",
+            "frame": str(frame), "counter": ("-" if frame < 0 else "") + str(abs(frame)).zfill(settings.counter_padding),
+            "timecode": "%02d:%02d:%02d:%02d" % (seconds // 3600, seconds // 60 % 60, seconds % 60, part),
+            "start": str(start), "end": str(end), "range": f"{start}-{end}", "frames": str(end - start + 1),
+            "fps": f"{fps:g}", "date": time.strftime("%Y-%m-%d"), "time": time.strftime("%H:%M"),
+            "user": user, "note": settings.note}
+
+
 def fonts() -> list[str]:
     """The fonts the viewport can draw text with, by name."""
     import maya.api.OpenMayaRender as omr

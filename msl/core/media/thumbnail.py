@@ -16,16 +16,31 @@ def thumbnail(tools: FfmpegTools, info: MediaInfo, target: str | Path, width: in
     if info.kind == AUDIO:
         return None
     target = Path(target)
-    arguments = [tools.ffmpeg, "-hide_banner", "-nostdin", "-v", "error", "-y"]
+    seeks = [0.0]
     if info.kind == VIDEO and info.duration > 0:
-        arguments += ["-ss", f"{info.duration / 2:.3f}"]  # before -i: a fast seek, exact enough for a thumbnail
-    arguments += ["-i", info.path, "-frames:v", "1", "-vf", f"scale={int(width)}:-2", "-q:v", "4", target]
+        # The PICTURE can be shorter than the file (a few frames under a second of sound): the
+        # middle of the file was then past the last frame, and no thumbnail came out. So: the
+        # middle of the frames when their count is known — and the start if even that fails.
+        length = info.duration
+        if info.frames and info.fps:
+            length = min(length, info.frames / info.fps)
+        seeks = [length / 2, 0.0]
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
-        answer = run_quiet(arguments, timeout=30.0)
-    except (OSError, subprocess.SubprocessError):
+    except OSError:
         return None
-    return target if answer.returncode == 0 and target.is_file() else None
+    for seek in seeks:
+        arguments = [tools.ffmpeg, "-hide_banner", "-nostdin", "-v", "error", "-y"]
+        if seek > 0:
+            arguments += ["-ss", f"{seek:.3f}"]  # before -i: a fast seek, exact enough for a thumbnail
+        arguments += ["-i", info.path, "-frames:v", "1", "-vf", f"scale={int(width)}:-2", "-q:v", "4", target]
+        try:
+            answer = run_quiet(arguments, timeout=30.0)
+        except (OSError, subprocess.SubprocessError):
+            return None
+        if answer.returncode == 0 and target.is_file() and target.stat().st_size > 0:
+            return target
+    return None
 
 
 def frame_at(tools: FfmpegTools, info: MediaInfo, seconds: float, target: str | Path, width: int = 160) -> Path | None:

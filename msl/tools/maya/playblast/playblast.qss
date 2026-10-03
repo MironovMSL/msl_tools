@@ -53,12 +53,62 @@ QLabel#visibilityGroup {
 QLabel#visibilityCaption {
     color: var(--text-secondary);
 }
-PlayblastPanel QLabel#playblastThumb {
-    background-color: alpha(var(--text-primary), 6%);
-    border-radius: 4px;
+/* A card's own icon, and the icons that stand for a row's caption. */
+PlayblastPanel TintedIcon#playblastCardIcon {
+    qproperty-iconColor: var(--accent);
+}
+PlayblastPanel TintedIcon#playblastRowIcon {
+    qproperty-iconColor: var(--text-secondary);
+}
+/* A yes / no choice as a pill (_Toggle); `on` is set by the widget: qproperty-* is only
+   applied from rules without pseudo-states, so not :checked. */
+PlayblastPanel IconPushButton#playblastToggle {
+    qproperty-iconColor: var(--text-secondary);
+    color: var(--text-secondary);
+    background: alpha(var(--text-primary), 5%);
+    border: 1px solid alpha(var(--border), 70%);
+    border-radius: 11px;
+    padding: 2px 10px 2px 8px;
+    min-height: 18px;
+}
+PlayblastPanel IconPushButton#playblastToggle:hover {
+    border: 1px solid alpha(var(--accent), 60%);
+}
+PlayblastPanel IconPushButton#playblastToggle[on="true"] {
+    qproperty-iconColor: var(--accent);
+    color: var(--text-primary);
+    background: alpha(var(--accent), 18%);
+    border: 1px solid alpha(var(--accent), 65%);
+}
+PlayblastPanel IconPushButton#playblastToggle[bare="true"] {
+    padding: 0px;
+    border-radius: 6px;
+    min-height: 0px;
+}
+/* The sketch of the mask: only its frame and marks are ours, the mask's colors are the user's. */
+PlayblastPanel MaskPreview {
+    qproperty-frameColor:  alpha(var(--text-primary), 8%);
+    qproperty-borderColor: var(--border);
+    qproperty-accentColor: var(--accent);
+    qproperty-mutedColor:  var(--text-secondary);
+}
+/* RECENT: a result's picture, and the quiet "Clear" link. */
+PlayblastPanel _Picture {
+    qproperty-groundColor: alpha(var(--text-primary), 8%);
+    qproperty-markColor:   var(--on-accent);
+}
+PlayblastPanel QPushButton#playblastLink {
+    color: var(--text-secondary);
+    font-size: 11px;
+}
+PlayblastPanel QPushButton#playblastLink:hover {
+    color: var(--accent);
 }
 PlayblastPanel QLabel#playblastRecentName {
     color: var(--text-primary);
+}
+PlayblastPanel QLabel#playblastRecentName:hover {
+    color: var(--accent);
 }
 PlayblastPanel QLabel#playblastStatus               { color: var(--text-secondary); }
 PlayblastPanel QLabel#playblastStatus[state="done"]  { color: var(--text-primary); }

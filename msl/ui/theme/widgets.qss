@@ -654,6 +654,9 @@ QFrame#factTile {
     border: 1px solid alpha(var(--border), 60%);
     border-radius: 6px;
 }
+QFrame#factTile[clickable="true"]:hover {
+    border: 1px solid alpha(var(--accent), 70%);
+}
 QLabel#factTileValue {
     color: var(--text-primary);
     font-size: 12px;

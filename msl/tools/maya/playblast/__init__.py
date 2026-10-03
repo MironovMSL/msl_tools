@@ -23,6 +23,26 @@ def launcher_entry_point():
     return PlayblastWindow.open()
 
 
+def repeat_last():
+    """Playblasts again with the settings used last — for a hotkey (tools/maya/hotkeys.py). The
+    window is opened if it is closed: it is where the progress shows and where Cancel is."""
+    window = launcher_entry_point()
+    window.panel.start()
+    return window
+
+
+def toggle_mask() -> bool:
+    """Shows the shot mask if it is hidden and hides it if it is shown — for a hotkey. With the
+    window closed the mask of the saved settings is used. Returns True if it is shown now."""
+    from msl_tools.msl.tools.maya.playblast.window import PlayblastWindow
+    window = PlayblastWindow.find()
+    if window is None:
+        window = launcher_entry_point()
+    window.panel.toggle_mask()
+    from msl_tools.msl.tools.maya.playblast import mask
+    return mask.is_shown()
+
+
 def _panel():
     from msl_tools.msl.tools.maya.playblast.panel import PlayblastPanel
     return PlayblastPanel()

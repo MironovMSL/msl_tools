@@ -17,6 +17,7 @@ from maya import cmds, mel
 ACTIVE_VIEW = ""   # CaptureSettings.camera: whatever the viewport looks through now
 RESOLUTIONS = {"HD 1080": (1920, 1080), "HD 720": (1280, 720), "HD 540": (960, 540)}
 RANGE_PLAYBACK, RANGE_ANIMATION, RANGE_RENDER = "Playback", "Animation", "Render"
+RANGE_SELECTED = "Selected"   # the frames highlighted on the timeline (none: the playback range)
 
 # What a viewport can show or hide, by kind: (group, [(modelEditor flag, what the user reads)]).
 # Every flag was checked against Maya 2025 (queried and set on a model panel).
@@ -69,6 +70,8 @@ class CaptureSettings:
         ornaments: Keep the viewport's own overlays (HUD, axis) in the picture.
         visibility: The kinds of objects shown (flags of VISIBILITY), everything else
             hidden for the capture; None = as the viewport is.
+        smooth: Anti-aliasing on for the capture (edges without stairs).
+        occlusion: Ambient occlusion on for the capture (soft contact shadows).
     """
 
     folder: Path
@@ -81,6 +84,8 @@ class CaptureSettings:
     image_format: str = "png"
     ornaments: bool = False
     visibility: tuple | None = None
+    smooth: bool = False
+    occlusion: bool = False
 
 
 @dataclass
@@ -113,6 +118,12 @@ def frame_rate() -> float:
 def scene_name() -> str:
     """The scene's name without folder and extension ("" for a scene never saved)."""
     return Path(cmds.file(query=True, sceneName=True) or "").stem
+
+
+def scene_folder() -> str:
+    """The folder of the scene file ("" for a scene never saved)."""
+    path = cmds.file(query=True, sceneName=True) or ""
+    return str(Path(path).parent.as_posix()) if path else ""
 
 
 def project_folder() -> str:
@@ -156,6 +167,15 @@ def active_camera() -> str:
 
 def frame_range(kind: str) -> tuple[int, int]:
     """The frames of a named range: the playback range, the whole animation range, or the render settings'."""
+    if kind == RANGE_SELECTED:
+        try:
+            slider = mel.eval("$msl_playback_slider = $gPlayBackSlider")
+            if cmds.timeControl(slider, query=True, rangeVisible=True):
+                first, after = cmds.timeControl(slider, query=True, rangeArray=True)
+                return int(first), max(int(first), int(after) - 1)  # the end of a selection is exclusive
+        except RuntimeError:
+            pass
+        kind = RANGE_PLAYBACK
     if kind == RANGE_ANIMATION:
         start, end = (cmds.playbackOptions(query=True, animationStartTime=True),
                       cmds.playbackOptions(query=True, animationEndTime=True))
@@ -215,8 +235,23 @@ class CaptureSession:
         self._time = cmds.currentTime(query=True)
         self._modified = cmds.file(query=True, modified=True)
         self._shown = visibility_state(self._panel) if settings.visibility is not None else None
+        # Viewport 2.0's own switches (one node for every viewport): set for the capture, put back after
+        wanted = {}
+        if settings.smooth:
+            wanted.update({"multiSampleEnable": True, "lineAAEnable": True})
+        if settings.occlusion:
+            wanted["ssaoEnable"] = True
+        self._render = {}
+        for attribute, value in wanted.items():
+            plug = f"hardwareRenderingGlobals.{attribute}"
+            try:
+                self._render[plug] = cmds.getAttr(plug)
+            except (RuntimeError, ValueError):
+                continue
         self._open = True
         with _NoUndo():
+            for plug in self._render:
+                cmds.setAttr(plug, True)
             if settings.visibility is not None:
                 wanted = set(settings.visibility)
                 cmds.modelEditor(self._panel, edit=True, **{flag: flag in wanted for flag in VISIBILITY})
@@ -275,6 +310,8 @@ class CaptureSession:
                 cmds.currentTime(self._time, edit=True)
                 if self._shown is not None:
                     cmds.modelEditor(self._panel, edit=True, **self._shown)
+                for plug, value in self._render.items():
+                    cmds.setAttr(plug, value)
             finally:
                 if not self._modified:
                     cmds.file(modified=False)  # looking through another camera marks the scene as changed

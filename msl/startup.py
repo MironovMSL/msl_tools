@@ -28,10 +28,21 @@ def bootstrap() -> bool:
         if not MayaEnvironment.is_running():
             logger.warning("Unable to bootstrap. Maya is not running in this process.")
             return False
+        _register_hotkey_commands()
         return rebuild_menu()
     except Exception as e:
         logger.warning(f'Unable to bootstrap. Issue: "{e}".', exc_info=True)
         return False
+
+
+def _register_hotkey_commands() -> None:
+    """The tools' actions as named commands of the Hotkey Editor (tools/maya/hotkeys.py). Never raises:
+    a Maya without them still gets its menu."""
+    try:
+        from msl_tools.msl.tools.maya import hotkeys
+        hotkeys.register()
+    except Exception as e:
+        logger.warning(f'Unable to register the hotkey commands. Issue: "{e}".')
 
 
 def rebuild_menu() -> bool:

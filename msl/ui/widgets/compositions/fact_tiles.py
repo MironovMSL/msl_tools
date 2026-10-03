@@ -5,8 +5,11 @@ import msl_tools.msl.ui.qt_bindings as qt
 class FactTiles(qt.QtWidgets.QWidget):
     """A row of small tiles, each a VALUE over what it is — "1920×1080 / frame
     size", "≈ 68 KB / result". A way of showing DATA: what a source is,
-    what a result is expected to be, what a scene holds. Tiles are read, never
-    clicked — which is what tells them apart from the controls around them.
+    what a result is expected to be, what a scene holds. Tiles are read, not
+    clicked — which is what tells them apart from the controls around them;
+    an owner may still make some of them a way IN to the setting they show
+    (`set_clickable({"camera"})`: a pointing hand, an accent frame under the
+    pointer, `clicked(caption)`).
 
         tiles = FactTiles()
         tiles.set_pairs([("1920×1080", "frame size"), ("30", "fps")])
@@ -17,14 +20,33 @@ class FactTiles(qt.QtWidgets.QWidget):
     Looks: widgets.qss (QFrame#factTile, QLabel#factTileValue / #factTileCaption).
     """
 
+    clicked = qt.QtCore.Signal(str)
+
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._clickable: set = set()
         self.setSizePolicy(qt.QtWidgets.QSizePolicy.Policy.Ignored, qt.QtWidgets.QSizePolicy.Policy.Fixed)
         self._row = qt.QtWidgets.QWidget(self)
         self._layout = qt.QtWidgets.QHBoxLayout(self._row)
         self._layout.setContentsMargins(0, 1, 0, 1)
         self._layout.setSpacing(5)
         self._pairs: list = []
+
+    def set_clickable(self, captions) -> None:
+        """The tiles with these captions answer a click with clicked(caption)."""
+        self._clickable = set(captions)
+        pairs, self._pairs = self._pairs, []
+        self.set_pairs(pairs)
+
+    def mousePressEvent(self, event) -> None:
+        widget = self._row.childAt(self._row.mapFrom(self, event.position().toPoint()))
+        while widget is not None and widget is not self._row:
+            caption = widget.property("caption")
+            if caption in self._clickable and event.button() == qt.QtCore.Qt.MouseButton.LeftButton:
+                self.clicked.emit(str(caption))
+                return
+            widget = widget.parentWidget()
+        super().mousePressEvent(event)
 
     def pairs(self) -> list:
         return list(self._pairs)
@@ -43,6 +65,10 @@ class FactTiles(qt.QtWidgets.QWidget):
         for value, caption in pairs:
             tile = qt.QtWidgets.QFrame(self._row)
             tile.setObjectName("factTile")
+            tile.setProperty("caption", caption)
+            if caption in self._clickable:
+                tile.setProperty("clickable", True)
+                tile.setCursor(qt.QtCore.Qt.CursorShape.PointingHandCursor)
             value_label = qt.QtWidgets.QLabel(value, tile)
             value_label.setObjectName("factTileValue")
             caption_label = qt.QtWidgets.QLabel(caption, tile)

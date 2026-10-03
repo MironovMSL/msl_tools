@@ -10,14 +10,13 @@ from msl_tools.msl.core.fs.manager import FileSystemManager
 from msl_tools.msl.core.media import FfmpegLocator, MediaError, find_sequences, run_job, sequence_to_video
 from msl_tools.msl.core.resources import Resources
 from msl_tools.msl.tools.maya.playblast import capture, mask, naming
+from msl_tools.msl.tools.maya.playblast.mask_preview import MaskPreview
 from msl_tools.msl.tools.maya.playblast.recent import RecentCard, open_result, size_text
 from msl_tools.msl.tools.maya.playblast.visibility_dialog import VisibilityDialog
-from msl_tools.msl.ui.process_launcher.process_launcher import ProcessLauncher
 from msl_tools.msl.ui.theme import StylesheetBuilder
 from msl_tools.msl.ui.theme.qss import repolish
 from msl_tools.msl.ui.ui_resources import UiResources
 from msl_tools.msl.ui.widgets.atoms.buttons.color_swatch_button import ColorSwatchButton
-from msl_tools.msl.ui.widgets.atoms.buttons.glyph_button import GlyphButton
 from msl_tools.msl.ui.widgets.atoms.buttons.icon_push_button import IconPushButton
 from msl_tools.msl.ui.widgets.atoms.checkboxes.base_checkbox import BaseCheckbox
 from msl_tools.msl.ui.widgets.atoms.comboboxes.base_combo_box import BaseComboBox
@@ -76,6 +75,36 @@ def _plain(value):
     return value
 
 
+class _Toggle(IconPushButton):
+    """A yes / no choice as a small icon button (playblast.qss: #playblastToggle, switched on =
+    the accent; the icon's color follows through the dynamic property `on`). It carries no
+    words: `title` is the first line of its tooltip, `tooltip` the rest."""
+
+    def __init__(self, title: str, icon: str, tooltip: str, parent=None):
+        text = ""
+        tooltip = f"{title}\n{tooltip}" if title else tooltip
+        super().__init__(UiResources().iconManager.get_icon(icon, sub_folder="actions"), tooltip, parent=parent)
+        self.setObjectName("playblastToggle")
+        self.setCheckable(True)
+        self.setFocusPolicy(qt.QtCore.Qt.FocusPolicy.NoFocus)
+        self.setCursor(qt.QtCore.Qt.CursorShape.PointingHandCursor)
+        if text:
+            self.setText(text)
+        else:
+            self.setFixedSize(28, 22)
+            self.setProperty("bare", True)
+        self.toggled.connect(self._follow)
+
+    def _follow(self, *_args) -> None:
+        if bool(self.property("on")) != self.isChecked():
+            self.setProperty("on", self.isChecked())
+            repolish(self)
+
+    def set_checked_immediate(self, checked: bool) -> None:
+        self.setChecked(bool(checked))
+        self._follow()
+
+
 class PlayblastPanel(qt.QtWidgets.QWidget):
     """The playblast tool's panel inside Maya (shown in a PlayblastWindow; it
     can also sit in a Maya panel through MayaDock).
@@ -98,10 +127,11 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
     DEFAULTS = {"camera": "", "size": "HD 1080", "width": 1920, "height": 1080, "range": capture.RANGE_PLAYBACK,
                 "start": 1, "end": 24, "folder": naming.DEFAULT_FOLDER, "name": naming.DEFAULT_NAME,
                 "format": FORMAT_MP4, "quality": "High", "sound": True, "overwrite": False, "open": True,
+                "copy": False, "smooth": False, "occlusion": False,
                 "ornaments": False, "show": SHOW_VIEWPORT, "show_custom": list(capture.VISIBILITY_PRESETS["Geometry"]),
                 "mask": {"shown": False, "texts": dict(mask.DEFAULT_TEXTS), "text": "Medium", "bars": "Solid",
                          "text_color": "#ffffff", "bar_color": "#000000", "note": "", "warn": True,
-                         "top_bar": True, "bottom_bar": True, "logo": ""}}
+                         "top_bar": True, "bottom_bar": True, "logo": "", "open": False}}
 
     _encoding_progressed = qt.QtCore.Signal(float)
     # Running workers, kept by the CLASS and parentless: a docked panel can be closed (and deleted)
@@ -122,6 +152,9 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
         self._capture_job: tuple | None = None   # (settings, target, video) of the capture about to start
         self._capture_started = 0.0
         self._session = None                     # the CaptureSession while Maya draws the frames
+        self._tools_known = False                # ffmpeg was looked for (found or not)
+        self._latest_path_at_start = None        # {work+}: where the copy without a version goes
+        self._start_when_ready = False           # start() came before that
         self._cancelled = False
         self._step_timer = qt.QtCore.QTimer(self)
         self._step_timer.setInterval(0)
@@ -143,6 +176,8 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
         self._ffmpeg_note = qt.QtWidgets.QLabel()
         self._ffmpeg_note.setObjectName("playblastHint")
         self._facts = FactTiles()
+        self._facts.set_clickable({"camera", "frames", "long"})
+        self._start_text = "Playblast"
 
         self._camera = BaseComboBox([ACTIVE_VIEW], ACTIVE_VIEW)
         self._camera.setToolTip("The camera the playblast is seen through.\n"
@@ -156,9 +191,15 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
         self._times = qt.QtWidgets.QLabel("×")
         self._times.setObjectName("playblastHint")
         self._range = BaseComboBox([capture.RANGE_PLAYBACK, capture.RANGE_ANIMATION, capture.RANGE_RENDER,
-                                    RANGE_CUSTOM], capture.RANGE_PLAYBACK)
+                                    capture.RANGE_SELECTED, RANGE_CUSTOM], capture.RANGE_PLAYBACK)
         self._range.setToolTip("Playback: the range slider's frames.\nAnimation: the whole timeline.\n"
-                               "Render: the frames of the render settings.")
+                               "Render: the frames of the render settings.\n"
+                               "Selected: the frames highlighted on the timeline (Shift + drag there).")
+        self._smooth = _Toggle("Smooth edges", "smooth",
+                               "Anti-aliasing switched on for the playblast (the viewport gets its own back).")
+        self._occlusion = _Toggle("Occlusion", "shade",
+                                  "Ambient occlusion switched on for the playblast — soft contact shadows\n"
+                                  "(the viewport gets its own back).")
         self._start, self._end = self._number_field(6, signed=True), self._number_field(6, signed=True)
         self._dash = qt.QtWidgets.QLabel("–")
         self._dash.setObjectName("playblastHint")
@@ -179,28 +220,35 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
         self._format = SegmentedControl([FORMAT_MP4, FORMAT_FRAMES], FORMAT_MP4)
         self._format.setToolTip("MP4: a video, with the timeline's sound.\nFrames: PNG pictures in a folder.")
         self._quality = BaseComboBox(list(QUALITY), "High")
-        self._sound = BaseCheckbox("Sound")
-        self._sound.setToolTip("The sound shown on the timeline goes under the video.")
-        self._ornaments = BaseCheckbox("Viewport HUD")
-        self._ornaments.setToolTip("Keep the viewport's own overlays (heads-up display, axis) in the picture.")
-        self._overwrite = BaseCheckbox("Overwrite")
-        self._overwrite.setToolTip("On: a playblast of the same name is replaced.\n"
-                                   "Off: the new one gets a number — name_2, name_3…")
-        self._open = BaseCheckbox("Open when done")
-        self._open.setToolTip("The finished playblast opens in the system's player.")
+        self._sound = _Toggle("Sound", "volume", "The sound shown on the timeline goes under the video.")
+        self._ornaments = _Toggle("Viewport HUD", "hud",
+                                  "Keep the viewport's own overlays (heads-up display, axis) in the picture.")
+        self._overwrite = _Toggle("Overwrite", "save", "On: a playblast of the same name is replaced.\n"
+                                                       "Off: the new one gets a number — name_2, name_3…")
+        self._open = _Toggle("Open when done", "play", "The finished playblast opens in the system's player.")
+        self._copy = _Toggle("Copy file", "copy", "The finished playblast is put on the clipboard as a FILE:\n"
+                                                  "Ctrl+V pastes it into a chat or a folder.")
 
-        self._mask_on = BaseCheckbox("Show in the viewport")
+        self._mask_on = BaseCheckbox("In the viewport")
         self._mask_on.setToolTip("Bars and text over the viewport while you animate — and so in the playblast.\n"
                                  "It is no part of the scene: a saved scene never holds it.\n"
                                  "The first time, Maya asks whether to allow our plug-in that draws it.")
         mask_tokens = "\n".join(f"{{{token}}} — {meaning}" for token, meaning in mask.TOKENS.items())
-        self._mask_fields = {}
-        for slot, place in MASK_PLACES.items():
-            field = TokenLineEdit(mask.TOKENS)
-            field.setPlaceholderText(place)
-            field.setToolTip(f"The text at the {place} of the frame. A | starts a new line.\n"
-                             f"It may hold:\n{mask_tokens}{hint}")
-            self._mask_fields[slot] = field
+        # the six texts: a sketch of the frame to pick a slot in, one field to write the picked one
+        self._mask_texts = dict(mask.DEFAULT_TEXTS)
+        self._mask_slot = "topLeft"
+        self._mask_preview = MaskPreview()
+        self._mask_preview.setToolTip("The mask, roughly as it will look. Click a slot to write its text below.")
+        self._mask_slot_label = qt.QtWidgets.QLabel(MASK_PLACES["topLeft"])
+        self._mask_slot_label.setObjectName("playblastCaption")
+        self._mask_slot_label.setFixedWidth(84)
+        self._mask_edit = TokenLineEdit(mask.TOKENS)
+        self._mask_edit.setPlaceholderText("nothing here — right click for the tokens")
+        self._mask_edit.setToolTip(f"The text of the picked slot. A | starts a new line.\n"
+                                   f"It may hold:\n{mask_tokens}{hint}")
+        self._mask_chevron = TintedIcon(icons.get_icon("chevron_right", sub_folder="actions"), 10)
+        self._mask_summary = ElidedLabel("", qt.QtCore.Qt.TextElideMode.ElideRight)
+        self._mask_summary.setObjectName("playblastHint")
         self._mask_text = BaseComboBox(list(MASK_TEXT), "Medium")
         self._mask_text.setToolTip("The size of the mask's text")
         self._mask_bars = BaseComboBox(list(MASK_BARS), "Solid")
@@ -217,8 +265,8 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
                                         "between them — 2.39:1 inside a 16:9 frame, for example.")
         self._mask_digits = BaseComboBox(list(MASK_DIGITS), "4")
         self._mask_digits.setToolTip("How many digits {counter} has: 0042")
-        self._mask_top = BaseCheckbox("Top bar")
-        self._mask_bottom = BaseCheckbox("Bottom bar")
+        self._mask_top = _Toggle("", "bar_top", "The bar along the top (its texts stay without it)")
+        self._mask_bottom = _Toggle("", "bar_bottom", "The bar along the bottom (its texts stay without it)")
         self._mask_logo = qt.QtWidgets.QLineEdit()
         self._mask_logo.setPlaceholderText("the msl mark")
         self._mask_logo.setToolTip("The picture a slot shows where it says {logo} (PNG with transparency works best).\n"
@@ -244,13 +292,6 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
         self._progress = BaseProgressBar()
         self._progress.setFixedHeight(4)
         self._progress.hide()
-        self._play = GlyphButton("▶", "Open the playblast")
-        self._play.set_icon(icons.get_icon("play", sub_folder="actions"))
-        self._show = GlyphButton("…", "Show it in its folder")
-        self._show.set_icon(icons.get_icon("browse", sub_folder="actions"))
-        for button in (self._play, self._show):
-            button.setObjectName("playblastAction")
-            button.hide()
         self._start_button = IconPushButton(icons.get_icon("clapper", sub_folder="actions"))
         self._start_button.setText("Playblast")
         self._start_button.setObjectName("playblastStart")
@@ -275,26 +316,19 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
         header.addStretch(1)
         header.addWidget(self._ffmpeg_note)
 
-        picture = self._card("PICTURE", [
-            ("Camera", [self._camera]),
-            ("Show", [self._visible, self._visible_edit]),
-            ("Size", [self._size, self._width, self._times, self._height]),
-            ("Frames", [self._range, self._start, self._dash, self._end]),
+        picture = self._card("PICTURE", "film", extras=[self._smooth, self._occlusion], rows=[
+            (("camera", "Camera"), [self._camera]),
+            (("eye", "What it shows"), [self._visible, self._visible_edit]),
+            (("frame_fit", "Size"), [self._size, self._width, self._times, self._height]),
+            (("film", "Frames"), [self._range, self._start, self._dash, self._end]),
         ])
-        output = self._card("RESULT", [
+        output = self._card("RESULT", "save", extras=[self._sound, self._ornaments, self._overwrite, self._open,
+                                                      self._copy], rows=[
             ("Folder", [self._folder, self._browse]),
             ("Name", [self._name]),
             ("", [self._path]),
             ("Format", [self._format, self._quality]),
         ])
-        checks = qt.QtWidgets.QGridLayout()
-        checks.setContentsMargins(0, 2, 0, 0)
-        checks.setHorizontalSpacing(14)
-        checks.setVerticalSpacing(6)
-        for index, box in enumerate((self._sound, self._ornaments, self._overwrite, self._open)):
-            checks.addWidget(box, index // 2, index % 2)
-        checks.setColumnStretch(2, 1)
-        output.layout().addLayout(checks)
 
         body = qt.QtWidgets.QWidget()
         column = qt.QtWidgets.QVBoxLayout(body)
@@ -312,15 +346,10 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
         scroll.setObjectName("playblastScroll")
         scroll.setWidget(body)
 
-        result = qt.QtWidgets.QHBoxLayout()
-        result.setSpacing(4)
-        result.addWidget(self._status, 1)
-        result.addWidget(self._play)
-        result.addWidget(self._show)
         foot = qt.QtWidgets.QVBoxLayout()
         foot.setContentsMargins(10, 0, 10, 10)
         foot.setSpacing(6)
-        foot.addLayout(result)
+        foot.addWidget(self._status)
         foot.addWidget(self._progress)
         foot.addWidget(self._start_button)
 
@@ -331,21 +360,31 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
         layout.addLayout(foot)
 
     def _mask_card(self) -> qt.QtWidgets.QFrame:
-        """The shot mask's card: the switch in its heading, the six texts laid out as on the frame."""
+        """The shot mask's card. Its heading folds it: the mask is set up once and then left alone,
+        so folded (one line saying what it is) is how it usually sits."""
         card = qt.QtWidgets.QFrame()
         card.setObjectName("playblastCard")
+        icon = TintedIcon(UiResources().iconManager.get_icon("text_frame", sub_folder="actions"), 14)
+        icon.setObjectName("playblastCardIcon")
         heading = qt.QtWidgets.QLabel("SHOT MASK")
         heading.setObjectName("playblastSection")
-        top = qt.QtWidgets.QHBoxLayout()
+        self._mask_header = qt.QtWidgets.QWidget()
+        self._mask_header.setCursor(qt.QtCore.Qt.CursorShape.PointingHandCursor)
+        self._mask_header.setToolTip("Click to show or hide the mask's settings")
+        self._mask_header.installEventFilter(self)
+        top = qt.QtWidgets.QHBoxLayout(self._mask_header)
+        top.setContentsMargins(0, 0, 0, 0)
+        top.setSpacing(6)
+        top.addWidget(self._mask_chevron)
+        top.addWidget(icon)
         top.addWidget(heading)
-        top.addStretch(1)
+        top.addWidget(self._mask_summary, 1)
         top.addWidget(self._mask_on)
-        grid = qt.QtWidgets.QGridLayout()
-        grid.setContentsMargins(0, 0, 0, 0)
-        grid.setHorizontalSpacing(4)
-        grid.setVerticalSpacing(6)
-        for index, slot in enumerate(mask.SLOTS):
-            grid.addWidget(self._mask_fields[slot], index // 3, index % 3)
+
+        editor = qt.QtWidgets.QHBoxLayout()
+        editor.setSpacing(8)
+        editor.addWidget(self._mask_slot_label)
+        editor.addWidget(self._mask_edit, 1)
         # caption | controls, one row per thing the mask is made of
         look = qt.QtWidgets.QGridLayout()
         look.setContentsMargins(0, 0, 0, 0)
@@ -354,8 +393,11 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
         look.setColumnStretch(1, 1)
         rows = (("Text", [(self._mask_font, 3), (self._mask_text, 2), (self._mask_text_opacity, 2),
                           (self._mask_text_color, 0)]),
-                ("Bars", [(self._mask_bars, 2), (self._mask_letterbox, 2), (self._mask_bar_color, 0)]),
-                ("Counter", [(self._mask_digits, 0)]))
+                ("Bars", [(self._mask_bars, 2), (self._mask_letterbox, 2), (self._mask_top, 0), (self._mask_bottom, 0),
+                          (self._mask_bar_color, 0)]),
+                ("Counter", [(self._mask_digits, 0)]),
+                ("Note", [(self._mask_note, 1)]),
+                ("Logo", [(self._mask_logo, 1), (self._mask_logo_browse, 0), (self._mask_logo_brand, 0)]))
         for index, (caption, widgets) in enumerate(rows):
             label = qt.QtWidgets.QLabel(caption)
             label.setObjectName("playblastCaption")
@@ -367,41 +409,44 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
             if caption == "Counter":
                 digits = qt.QtWidgets.QLabel("digits")
                 digits.setObjectName("playblastHint")
-                line.insertWidget(1, digits)
-                line.insertStretch(2, 1)
+                line.addWidget(digits)
+                line.addStretch(1)
             look.addLayout(line, index, 1)
-        note = qt.QtWidgets.QHBoxLayout()
-        note.setSpacing(8)
-        note_label = qt.QtWidgets.QLabel("Note")
-        note_label.setObjectName("playblastCaption")
-        note.addWidget(note_label)
-        note.addWidget(self._mask_note, 1)
-        logo = qt.QtWidgets.QHBoxLayout()
-        logo.setSpacing(4)
-        logo_label = qt.QtWidgets.QLabel("Logo")
-        logo_label.setObjectName("playblastCaption")
-        logo.addWidget(logo_label)
-        logo.addSpacing(4)
-        logo.addWidget(self._mask_logo, 1)
-        logo.addWidget(self._mask_logo_browse)
-        logo.addWidget(self._mask_logo_brand)
-        bars = qt.QtWidgets.QHBoxLayout()
-        bars.setSpacing(14)
-        bars.addWidget(self._mask_top)
-        bars.addWidget(self._mask_bottom)
-        bars.addStretch(1)
+
+        self._mask_body = qt.QtWidgets.QWidget()
+        inner = qt.QtWidgets.QVBoxLayout(self._mask_body)
+        inner.setContentsMargins(0, 0, 0, 0)
+        inner.setSpacing(8)
+        inner.addWidget(self._mask_presets)
+        inner.addWidget(self._mask_preview)
+        inner.addLayout(editor)
+        inner.addLayout(look)
+        inner.addWidget(self._mask_warn)
         box = qt.QtWidgets.QVBoxLayout(card)
         box.setContentsMargins(10, 8, 10, 10)
         box.setSpacing(8)
-        box.addLayout(top)
-        box.addWidget(self._mask_presets)
-        box.addLayout(grid)
-        box.addLayout(look)
-        box.addLayout(bars)
-        box.addLayout(note)
-        box.addLayout(logo)
-        box.addWidget(self._mask_warn)
+        box.addWidget(self._mask_header)
+        box.addWidget(self._mask_body)
         return card
+
+    def eventFilter(self, watched, event) -> bool:
+        if (watched is getattr(self, "_mask_header", None)
+                and event.type() == qt.QtCore.QEvent.Type.MouseButtonRelease
+                and event.button() == qt.QtCore.Qt.MouseButton.LeftButton):
+            self._set_mask_open(not self._mask_body.isVisibleTo(self._mask_body.parentWidget()))
+            return True
+        return super().eventFilter(watched, event)
+
+    def _set_mask_open(self, opened: bool, save: bool = True) -> None:
+        icons = UiResources().iconManager
+        self._mask_body.setVisible(opened)
+        self._mask_chevron.set_icon(icons.get_icon("chevron_down" if opened else "chevron_right", sub_folder="actions"))
+        # folded, the heading says what the mask is; open, the line stays (empty) so the switch keeps its place
+        self._mask_summary.setText("" if opened else getattr(self, "_mask_summary_text", ""))
+        if save:
+            saved = dict(_plain(self._settings.get("mask") or {}))
+            saved["open"] = opened
+            self._settings["mask"] = saved
 
     def detach_title(self) -> qt.QtWidgets.QLabel:
         """For a window whose own header names the tool: the panel's title row goes away, and
@@ -411,19 +456,38 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
         return self._ffmpeg_note
 
     @staticmethod
-    def _card(title: str, rows: list) -> qt.QtWidgets.QFrame:
-        """A card: a small heading over caption / controls rows."""
+    def _card(title: str, icon: str, rows: list, extras=()) -> qt.QtWidgets.QFrame:
+        """A card: an icon and a small heading over caption / controls rows. A caption is a word,
+        or (icon, what it is) — then the icon stands for the word, which is its tooltip.
+        `extras`: small widgets at the end of the heading (the card's yes / no choices)."""
+        icons = UiResources().iconManager
         card = qt.QtWidgets.QFrame()
         card.setObjectName("playblastCard")
+        mark = TintedIcon(icons.get_icon(icon, sub_folder="actions"), 14)
+        mark.setObjectName("playblastCardIcon")
         heading = qt.QtWidgets.QLabel(title)
         heading.setObjectName("playblastSection")
+        top = qt.QtWidgets.QHBoxLayout()
+        top.setSpacing(6)
+        top.addWidget(mark)
+        top.addWidget(heading)
+        top.addStretch(1)
+        top.setSpacing(4)
+        top.insertSpacing(1, 2)
+        for extra in extras:
+            top.addWidget(extra)
         form = qt.QtWidgets.QGridLayout()
         form.setContentsMargins(0, 0, 0, 0)
         form.setHorizontalSpacing(8)
         form.setVerticalSpacing(6)
         form.setColumnStretch(1, 1)
         for index, (caption, widgets) in enumerate(rows):
-            if caption:
+            if isinstance(caption, tuple):
+                label = TintedIcon(icons.get_icon(caption[0], sub_folder="actions"), 14)
+                label.setObjectName("playblastRowIcon")
+                label.setToolTip(caption[1])
+                form.addWidget(label, index, 0)
+            elif caption:
                 label = qt.QtWidgets.QLabel(caption)
                 label.setObjectName("playblastCaption")
                 form.addWidget(label, index, 0)
@@ -435,7 +499,7 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
         box = qt.QtWidgets.QVBoxLayout(card)
         box.setContentsMargins(10, 8, 10, 10)
         box.setSpacing(8)
-        box.addWidget(heading)
+        box.addLayout(top)
         box.addLayout(form)
         return card
 
@@ -449,19 +513,20 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
             field.textEdited.connect(self._on_changed)
         self._format.current_changed.connect(self._on_changed)
         self._quality.currentTextChanged.connect(self._on_changed)
-        for box in (self._sound, self._ornaments, self._overwrite, self._open):
+        for box in (self._sound, self._ornaments, self._overwrite, self._open, self._copy, self._smooth,
+                    self._occlusion):
             box.toggled.connect(self._on_changed)
         self._folder.token_inserted.connect(self._on_changed)
         self._name.token_inserted.connect(self._on_changed)
         self._browse.clicked.connect(self._on_browse)
         self._start_button.clicked.connect(self._on_start)
-        self._play.clicked.connect(lambda: self._result and open_result(self._result))
-        self._show.clicked.connect(lambda: self._result and ProcessLauncher.open_file_explorer(self._result))
+        self._facts.clicked.connect(self._on_fact_clicked)
+        self._recent.clear_requested.connect(self._on_recent_clear)
         self._encoding_progressed.connect(self._on_encoding_progress)
         self._mask_on.toggled.connect(self._on_mask_toggled)
-        for field in self._mask_fields.values():
-            field.textEdited.connect(self._on_mask_changed)
-            field.token_inserted.connect(self._on_mask_changed)
+        self._mask_preview.slot_picked.connect(self._select_mask_slot)
+        self._mask_edit.textEdited.connect(self._on_mask_edit)
+        self._mask_edit.token_inserted.connect(self._on_mask_edit)
         self._mask_text.currentTextChanged.connect(self._on_mask_changed)
         self._mask_bars.currentTextChanged.connect(self._on_mask_changed)
         self._mask_text_color.color_changed.connect(self._on_mask_changed)
@@ -497,7 +562,8 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
         self._format.set_current(get("format") if get("format") in self._format.options() else FORMAT_MP4, animate=False)
         self._set_combo(self._quality, get("quality"))
         for box, key in ((self._sound, "sound"), (self._ornaments, "ornaments"), (self._overwrite, "overwrite"),
-                         (self._open, "open")):
+                         (self._open, "open"), (self._copy, "copy"), (self._smooth, "smooth"),
+                         (self._occlusion, "occlusion")):
             box.set_checked_immediate(bool(get(key)))
         saved = self._settings.get("mask") or {}
         self._apply_mask_look(saved)
@@ -506,6 +572,7 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
         self._mask_warn.set_checked_immediate(bool(saved.get("warn", True)))
         self._mask_on.set_checked_immediate(bool(saved.get("shown", False)))
         self._show_mask_presets()
+        self._set_mask_open(bool(saved.get("open", False)), save=False)
         self._loading = False
         self._sync_enabled()
 
@@ -523,7 +590,8 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
                   "quality": self._quality.currentText(), "sound": self._sound.isChecked(),
                   "ornaments": self._ornaments.isChecked(), "overwrite": self._overwrite.isChecked(),
                   "show": self._visible.currentText(),
-                  "open": self._open.isChecked()}
+                  "open": self._open.isChecked(), "copy": self._copy.isChecked(),
+                  "smooth": self._smooth.isChecked(), "occlusion": self._occlusion.isChecked()}
         if self._size.currentText() == SIZE_CUSTOM:
             values["width"], values["height"] = self._frame_size()
         if self._range.currentText() == RANGE_CUSTOM:
@@ -588,6 +656,7 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
         self._loading = False
         self._refresh_facts()
         self._sync_mask()
+        self._refresh_mask_preview()
         self._refresh_recent()
 
     def _refresh_facts(self) -> None:
@@ -601,9 +670,15 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
         if sound:
             pairs.append((Path(sound).name, "sound"))
         self._facts.set_pairs(pairs)
+        width, height = self._frame_size()
+        self._start_text = f"Playblast  ·  {frames} frames  ·  {width}×{height}"
+        if not self._busy:
+            self._start_button.setText(self._start_text)
         path = self._output_path()
-        self._path.setText(str(path))
-        self._path.setToolTip(str(path))
+        latest = self._latest_path()
+        self._path.setText(str(path) if latest is None else f"{path}   + {latest.name}")
+        self._path.setToolTip(str(path) if latest is None else
+                              f"{path}\n\nand, always the latest, without a version:\n{latest}")
 
     @staticmethod
     def _seconds_text(seconds: float) -> str:
@@ -626,11 +701,41 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
         except ValueError:
             return fallback
 
+    def _token_values(self) -> dict:
+        return naming.token_values(capture.project_folder(), capture.scene_name(), self._camera_name(),
+                                   scene_folder=capture.scene_folder())
+
+    def _keeps_latest(self) -> bool:
+        """The folder says {work+}: versions in the work folder, and one copy without a version —
+        always the latest — one folder up."""
+        return naming.WORK_LATEST_TOKEN in self._folder.text()
+
+    def _name_template(self) -> str:
+        """The name as written — with {work+} a version is part of it even if nobody wrote one."""
+        name = self._name.text().strip() or naming.DEFAULT_NAME
+        if self._keeps_latest() and naming.VERSION_TOKEN not in name:
+            name += "_" + naming.VERSION_TOKEN
+        return name
+
     def _output_path(self) -> Path:
         """Where the playblast would go with what is on screen: the video's file, or the frames' folder."""
-        values = naming.token_values(capture.project_folder(), capture.scene_name(), self._camera_name())
+        values = self._token_values()
         suffix = ".mp4" if self._format.current() == FORMAT_MP4 else ""
-        return naming.output_path(self._folder.text(), self._name.text(), values, suffix)
+        name = self._name_template()
+        if naming.VERSION_TOKEN in name:
+            # the next version — or, replacing, the last one
+            values["version"] = naming.version_for(self._folder.text(), name, values, suffix,
+                                                   reuse=self._overwrite.isChecked())
+        return naming.output_path(self._folder.text(), name, values, suffix)
+
+    def _latest_path(self) -> Path | None:
+        """With {work+}: where the copy without a version goes (None without it)."""
+        if not self._keeps_latest():
+            return None
+        values = self._token_values()
+        suffix = ".mp4" if self._format.current() == FORMAT_MP4 else ""
+        folder = str(Path(values["work"]).parent)
+        return naming.output_path(folder, naming.without_version(self._name_template()), values, suffix)
 
     # ------------------------------------------------------------------ what the user does
 
@@ -721,7 +826,7 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
         self._on_changed()
 
     def _on_browse(self) -> None:
-        values = naming.token_values(capture.project_folder(), capture.scene_name(), self._camera_name())
+        values = self._token_values()
         current = naming.expand(self._folder.text().strip() or naming.DEFAULT_FOLDER, values)
         folder = qt.QtWidgets.QFileDialog.getExistingDirectory(self, "Where playblasts go", current)
         if folder:
@@ -744,7 +849,7 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
 
     def _remember(self, result: Path, frames: int, camera: str) -> None:
         entry = {"path": str(result), "scene": capture.scene_name() or "untitled", "camera": camera,
-                 "frames": int(frames), "time": time.time()}
+                 "frames": int(frames), "time": time.time(), "note": self._mask_note.text().strip()}
         kept = [old for old in self._history() if old.get("path") != entry["path"]]
         self._config["history"] = (kept + [entry])[-self.HISTORY_KEPT:]
 
@@ -753,7 +858,20 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
         scene = capture.scene_name() or "untitled"
         mine = [entry for entry in self._history()
                 if entry.get("scene") == scene and entry.get("path") and Path(entry["path"]).exists()]
-        self._recent.show_results(mine[-self.RECENT_SHOWN:][::-1], self._tools)
+        self._recent.show_results(mine[-self.RECENT_SHOWN:][::-1], self._tools, total=len(mine),
+                                  slots=self.RECENT_SHOWN)
+
+    def _on_recent_clear(self) -> None:
+        """Forgets this scene's results (the files stay)."""
+        scene = capture.scene_name() or "untitled"
+        self._config["history"] = [entry for entry in self._history() if entry.get("scene") != scene]
+        self._refresh_recent()
+
+    def _on_fact_clicked(self, caption: str) -> None:
+        """A fact on top is a way in to the setting it shows."""
+        combo = self._camera if caption == "camera" else self._range
+        combo.setFocus()
+        combo.showPopup()
 
     # ------------------------------------------------------------------ the shot mask
 
@@ -762,7 +880,7 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
         width, height = self._frame_size()
         start, end = self._frames()
         return mask.MaskSettings(
-            texts={slot: field.text() for slot, field in self._mask_fields.items()},
+            texts=dict(self._mask_texts),
             aspect=width / height if height else 0.0,
             text_scale=MASK_TEXT.get(self._mask_text.currentText(), 1.0),
             bar_opacity=MASK_BARS.get(self._mask_bars.currentText(), 1.0),
@@ -778,7 +896,7 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
 
     def _mask_look(self) -> dict:
         """What a preset keeps: the texts, the sizes, the colors."""
-        return {"texts": {slot: field.text() for slot, field in self._mask_fields.items()},
+        return {"texts": dict(self._mask_texts),
                 "text": self._mask_text.currentText(), "bars": self._mask_bars.currentText(),
                 "text_color": self._mask_text_color.hex(), "bar_color": self._mask_bar_color.hex(),
                 "top_bar": self._mask_top.isChecked(), "bottom_bar": self._mask_bottom.isChecked(),
@@ -787,8 +905,8 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
 
     def _apply_mask_look(self, look) -> None:
         texts = look.get("texts") or mask.DEFAULT_TEXTS
-        for slot, field in self._mask_fields.items():
-            field.setText(str(texts.get(slot, "")))
+        self._mask_texts = {slot: str(texts.get(slot, "")) for slot in mask.SLOTS}
+        self._mask_edit.setText(self._mask_texts[self._mask_slot])
         self._set_combo(self._mask_text, look.get("text", "Medium"))
         self._set_combo(self._mask_bars, look.get("bars", "Solid"))
         self._mask_text_color.set_color(str(look.get("text_color", "#ffffff")))
@@ -849,8 +967,52 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
     def _save_mask(self) -> None:
         self._settings["mask"] = dict(self._mask_look(), shown=self._mask_on.isChecked(),
                                       note=self._mask_note.text(), warn=self._mask_warn.isChecked(),
-                                      logo=self._mask_logo.text().strip())
+                                      logo=self._mask_logo.text().strip(),
+                                      open=self._mask_body.isVisibleTo(self._mask_body.parentWidget()))
         self._show_mask_presets()  # the one that matches what is on screen is outlined
+        self._refresh_mask_preview()
+
+    # the six texts: picked in the sketch, written in the one field
+
+    def _select_mask_slot(self, slot: str) -> None:
+        if slot not in self._mask_texts:
+            return
+        self._mask_slot = slot
+        self._mask_slot_label.setText(MASK_PLACES[slot])
+        self._mask_edit.setText(self._mask_texts[slot])
+        self._mask_preview.set_current(slot)
+        self._mask_edit.setFocus()
+
+    def _on_mask_edit(self, *_args) -> None:
+        self._mask_texts[self._mask_slot] = self._mask_edit.text()
+        self._on_mask_changed()
+
+    def _set_mask_text(self, slot: str, text: str) -> None:
+        """Writes a slot's text (as if typed)."""
+        self._mask_texts[slot] = text
+        if slot == self._mask_slot:
+            self._mask_edit.setText(text)
+        self._on_mask_changed()
+
+    def _refresh_mask_preview(self) -> None:
+        """The sketch and the folded card's one line, from what the controls say now."""
+        settings = self._mask_settings()
+        try:
+            values = mask.token_values(self._camera_name(), settings)
+        except Exception:
+            values = {}
+        self._mask_preview.set_look(
+            texts=dict(self._mask_texts), values=values, text_color=self._mask_text_color.hex(),
+            bar_color=self._mask_bar_color.hex(), bar_opacity=settings.bar_opacity,
+            text_opacity=settings.text_opacity, top_bar=settings.top_bar, bottom_bar=settings.bottom_bar,
+            font=settings.font, aspect=settings.aspect or 16 / 9, letterbox=settings.letterbox, logo=settings.logo)
+        filled = sum(1 for text in self._mask_texts.values() if text.strip())
+        current = self._mask_look()
+        preset = next((name for name, look in self._mask_preset_list()
+                       if dict(MASK_LOOK_DEFAULTS, **look) == current), "")
+        self._mask_summary_text = " · ".join(part for part in (preset, f"{filled} of 6 slots", settings.font) if part)
+        folded = not self._mask_body.isVisibleTo(self._mask_body.parentWidget())
+        self._mask_summary.setText(self._mask_summary_text if folded else "")
 
     def _load_fonts(self) -> None:
         """The fonts Maya's viewport can draw, into the list (once; asked of Maya, so not in the constructor)."""
@@ -929,6 +1091,10 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
 
     def _on_ffmpeg(self, tools) -> None:
         self._tools = tools
+        self._tools_known = True
+        if self._start_when_ready:
+            self._start_when_ready = False
+            qt.QtCore.QTimer.singleShot(0, self._on_start)
         self._refresh_recent()  # pictures need ffmpeg
         if tools is not None:
             self._ffmpeg_note.setText(f"ffmpeg {tools.short_version}")
@@ -946,6 +1112,18 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
 
     # ------------------------------------------------------------------ the playblast
 
+    def start(self) -> None:
+        """Starts a playblast with what the controls say (what the button does) — also right after
+        the panel was made: it waits for ffmpeg to be found first."""
+        if self._tools is None and not self._tools_known:
+            self._start_when_ready = True
+            return
+        self._on_start()
+
+    def toggle_mask(self) -> None:
+        """Shows the shot mask if it is hidden, hides it if it is shown."""
+        self._mask_on.setChecked(not self._mask_on.isChecked())
+
     def _on_start(self) -> None:
         if self._busy:
             if self._session is not None:
@@ -961,6 +1139,7 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
         width, height = self._frame_size()
         start, end = self._frames()
         target = self._output_path()
+        self._latest_path_at_start = self._latest_path()  # as the controls say NOW, not when it is done
         if not self._overwrite.isChecked():
             target = naming.free_path(target)
         chosen = self._camera.currentText()
@@ -972,7 +1151,8 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
         settings = capture.CaptureSettings(
             folder=frames_folder, name=frames_name, start=start, end=end, width=width, height=height,
             camera=capture.ACTIVE_VIEW if chosen == ACTIVE_VIEW else chosen, ornaments=self._ornaments.isChecked(),
-            visibility=self._shown_kinds())
+            visibility=self._shown_kinds(), smooth=self._smooth.isChecked(),
+            occlusion=self._occlusion.isChecked())
         self._set_busy(True)
         self._say("Maya is drawing the frames…")
         # a moment later, so the line above is on screen before Maya takes over (and never
@@ -1094,26 +1274,42 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
         self._progress.hide()
         self._set_busy(False)
         self._result = result
-        for button in (self._play, self._show):
-            button.setVisible(result is not None)
         if result is None:
             self._logger.warning(f"Playblast failed: {error}")
             self._say(error or "The playblast failed.", "error")
             return
         if not note:
             note = size_text(result.stat().st_size) if result.is_file() else ""
-        self._say(" · ".join(part for part in (result.name, note, f"{seconds:.1f} s") if part), "done")
+        # the result itself is the first tile of RECENT: the line only says it is done
+        self._say(" · ".join(part for part in ("Done", note, f"{seconds:.1f} s") if part), "done")
         self._status.setToolTip(str(result))
+        latest = self._latest_path_at_start
+        if latest is not None:
+            try:
+                if result.is_dir():
+                    shutil.rmtree(latest, ignore_errors=True)
+                    shutil.copytree(result, latest)
+                else:
+                    latest.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(result, latest)
+            except OSError as error:
+                self._say(f"Done — but the latest copy couldn’t be written: {error}", "error")
         self._remember(result, frames, camera)
         self._refresh_facts()
         self._refresh_recent()
+        if self._copy.isChecked():
+            data = qt.QtCore.QMimeData()  # the FILE, as a file manager copies it — and its path as text
+            data.setUrls([qt.QtCore.QUrl.fromLocalFile(str(result))])
+            data.setText(str(result))
+            qt.QtWidgets.QApplication.clipboard().setMimeData(data)
+        qt.QtWidgets.QApplication.alert(self.window())  # the taskbar says so if Maya isn't in front
         if self._open.isChecked():
             open_result(result)
 
     def _set_busy(self, busy: bool) -> None:
         self._busy = busy
         self._start_button.setEnabled(not busy)
-        self._start_button.setText("Working…" if busy else "Playblast")
+        self._start_button.setText("Working…" if busy else self._start_text)
 
     def _say(self, text: str, state: str = "") -> None:
         self._status.setText(text)

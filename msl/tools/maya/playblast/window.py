@@ -39,6 +39,13 @@ class PlayblastWindow(FramelessDialog):
         self.finished.connect(self._remember_geometry)
 
     @classmethod
+    def find(cls) -> "PlayblastWindow | None":
+        """The window that is open now (None if there is none)."""
+        main = MayaWindowQuery.get_maya_main_window()
+        window = main.findChild(qt.QtWidgets.QWidget, cls.OBJECT_NAME) if main is not None else None
+        return window if isinstance(window, cls) and window.isVisible() else None
+
+    @classmethod
     def open(cls) -> "PlayblastWindow":
         """Shows the window (the one that is open already, if there is one) and returns it."""
         main = MayaWindowQuery.get_maya_main_window()
