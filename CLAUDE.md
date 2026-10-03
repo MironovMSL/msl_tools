@@ -56,7 +56,8 @@ msl_tools/                 (repo root)
                 media/            Media: video and image sequences through ffmpeg (see "Media tool")
                 installer/        InstallerView — the setup window (not a hub tool, not in the registry)
                 stub_a/, stub_b/  placeholder tools used to test hub navigation
-            maya/               existing Maya-side tools (the MSL menu, etc.)
+            maya/               Maya-side tools (the MSL menu, hub_link, launch_report)
+                playblast/        Playblast: a dockable panel inside Maya 2025+ (see "Playblast tool")
 ```
 
 ## Hard conventions (violate these and it won't match the rest of the codebase)
@@ -903,6 +904,7 @@ compositions/copyable_line_edit.py        CopyableLineEdit (copy button appears 
 atoms/icons/motion_icons.py               motion icons: icons drawn by code at a phase t (0..1) — scissors snip, the loop turns, the clapper claps; at rest identical to the SVG of the same name (same path data, via a small M L H V C Z path reader); paint_motion_icon(name, painter, rect, color, t), MOTION_ICONS
 atoms/buttons/motion_icon_button.py       MotionIconButton (a QPushButton whose motion icon plays once under the pointer and on play(); frame from QSS, icon in qproperty iconColor)
 compositions/action_strip.py              ActionStrip (a strip of icon-only buttons of which one is picked — what a tool can DO, as opposed to settings; set_items([(key, title, description, icon, group)]), current() / set_current(key, animate=), clicked(str); wraps. The strip PAINTS: the accent pill under the picked button — it slides to a new one —, a hairline where the group changes, and the hovered button's name + description in the free room after the buttons, at once, so the icons get learned)
+compositions/fact_tiles.py                FactTiles (a row of small tiles, each a VALUE over what it is — data that is read, not clicked; set_pairs([(value, caption)]); clipped in a narrow window, never widens it; QFrame#factTile in widgets.qss. Media's source facts and estimate, the Playblast panel's scene)
 compositions/drop_area.py                 DropArea (where files are dropped: a painted dashed frame, an icon + a line saying what to drop, a quiet second line, a pill of round icon buttons — add_button(); set_dragging() lights it up, set_busy() shows "Reading…"; it only shows the target, the owner takes the drop)
 compositions/chip_bar.py                  ChipBar (pills that wrap: a checkable picker, or a shelf of saved things with an in-place "+ …" name field and "Remove")
 compositions/range_strip.py               RangeStrip (pictures side by side with a range picked by two handles; range_changed / range_released; Left / Right move the handle touched last by set_step())
@@ -1206,7 +1208,7 @@ frames · For editing · Adjust · Join (2+ videos) · Compare (exactly 2).
   -> the page opens the loaded paths + the new ones). The estimate is shown as
   tiles too, at the START of the start row — "≈ 68 KB / result", "−65 % /
   smaller" (for the panels that compare sizes), "≈ 2 s / to make": the
-  same `FactTiles` (fact_tiles.py) as the source's facts, because tiles
+  same `FactTiles` (ui/widgets/compositions/) as the source's facts, because tiles
   are how this page shows DATA; a pill there read as one more control
   (the user's words: "these numbers look like a setting"). The jobs card's header counts ("JOBS · 4", while running
   "JOBS · 1 of 3 done" — `JobQueue.batch_counts()`), and a click on it
@@ -1398,6 +1400,134 @@ open / the row menu. NOT tried in the real GUI: dragging a result out
 and a drop from the real file manager, pasting a copied file into a
 chat, the native file dialogs, dragging the RangeStrip's handles with a
 real mouse.
+
+## Playblast tool (inside Maya)
+
+`msl/tools/maya/playblast/` — the first tool of ours with a window INSIDE
+Maya (MSL menu > Playblast). Maya 2025+ only (PySide6, through the shim);
+older Mayas aren't supported. Inspired by the feature list of Zurbrigg's
+Advanced Playblast (in `ref/`, commercial: its EULA forbids copying, and
+this repo is public) — NO code of it is used, everything is written from
+scratch on Maya's public API. Step 1 of 4 is built (2026-10-03):
+
+- `window.py` `PlayblastWindow(FramelessDialog)` — what the menu opens
+  (`launcher_entry_point` -> `PlayblastWindow.open()`): our own frameless
+  window (theme toggle + close, no minimize / maximize), a child of
+  Maya's main window, holding a PlayblastPanel. The user tried the
+  dockable form first (below) and chose this (2026-10-03): the real
+  thing — shadow, rounded corners, the hub's header — and no docking.
+  One at a time (`open()` raises the visible one; a window closed a
+  moment ago or left by "Reload Code" is never handed out again — it
+  is found by object name among Maya's children, so its name is
+  cleared first); WA_DeleteOnClose; Esc does NOT close it (Esc cancels
+  a playblast); its place is kept in the config (`window`). It imports
+  panel.py first, so playblast.qss is registered before the window
+  builds its stylesheet.
+- KEPT FOR LATER, not on the menu: the dockable form —
+  `playblast.open_docked()` and
+  `ui/windows/maya_dock.py` `MayaDock.show(name, label, factory,
+  restore_script)` — a tool as a Maya PANEL (`cmds.workspaceControl`): it
+  floats as its own window, docks among Maya's panels, tears off again.
+  `DockHost` wraps the tool's widget and carries OUR stylesheet (set on
+  that widget only — Maya's QApplication / main window are never styled;
+  checked: their stylesheets stay empty) and follows `theme_changed`.
+  `restore_script` is the panel's `uiScript` (Maya runs it to fill the
+  panel when it rebuilds its layout) and should call `MayaDock.fill()`.
+  A layout saved while the tool was a panel still names it at the next
+  start: `playblast.restore()` fills it only if `MayaDock.wanted(name)`
+  (opened through show() in this session), else deletes the left-over.
+  While the panel FLOATS alone in its window, DockHost makes that window
+  look like our own frameless ones. The window stays MAYA'S
+  (TworkspaceDockingPanel) — it can't be a FramelessDialog: Maya docks
+  only its own panel windows — so everything is done from inside it:
+  the native frame is taken off (FramelessWindowHint); OUR `WindowHeader`
+  is shown (`host.header`, the hub's header class: brand icon, title,
+  subtitle, extra widgets, a SunMoonToggle that switches the shared
+  theme, x — options `icon=`, `subtitle=`, `show_theme_toggle=` through
+  `MayaDock.show()` / `fill()`, the header itself through
+  `MayaDock.host(name).header`); the corners are rounded by Windows 11
+  (`DwmSetWindowAttribute` 33 = round, 34 = hairline color from the
+  theme's border; Windows 10: square with a QSS hairline, `[rounded=
+  "false"]`) — translucency, how our own windows round, isn't possible
+  on a window whose containers Maya paints; invisible `_EdgeGrip` strips
+  along the left / right / bottom edges resize it (WM_SYSCOMMAND SC_SIZE).
+  A press on the header = `start_system_move()`: the system moves the
+  window, and Maya still takes that for a drag of the panel, so it DOCKS
+  as with the native title bar (dragged by hand by the user, Maya 2025;
+  a synthetic mouse drag docks nothing, not even by Maya's own title bar
+  — don't try to automate it; a synthetic drag does MOVE and RESIZE).
+  Docked, or sharing a floating window with other tabs: the header is
+  hidden, the frame is Maya's. Maya rebuilds the floating window (native
+  frame again) on every tear-off and tells nobody, so `_sync()` looks
+  every 250 ms while the panel is on screen — and never rebuilds the
+  window while a mouse button is down.
+  PySide hands back wrappers of objects Maya already deleted
+  ("Internal C++ object already deleted" — seen in the user's Maya, never
+  in the test runs): from `window.findChildren()` (so "alone" is read
+  from the widgets ABOVE the host, and `_sync` swallows RuntimeError
+  until the next tick) and from `windowHandle()` after the window was
+  rebuilt (so moving falls back to the same WM_SYSCOMMAND Qt sends).
+  Looks: `QWidget#mayaDockHost` in widgets.qss.
+  `_filled()` checks the host sits in THIS control: a closed panel's
+  widget outlives it for a moment and must not be taken for the content
+  of a new one (it was: close + open in one go gave an empty panel).
+- `naming.py` (no Qt, no Maya): folder + name with tokens {project}
+  {scene} {camera} {timestamp} {date}; defaults `{project}/movies`,
+  `{scene}_{camera}`; `free_path()` -> `name_2`, `name_3` when not
+  overwriting.
+- `capture.py` (maya.cmds, no Qt): cameras (the user's first), ranges
+  (Playback / Animation / Render), sizes, the timeline's sound (file +
+  the frame it starts at), and `capture(CaptureSettings) -> Capture`:
+  `cmds.playblast(format="image", compression="png", offScreen=True,
+  editorPanelName=...)` into a folder. It looks through the chosen camera
+  and clears the selection for the shot, then puts back the panel's
+  camera, the selection, the current frame and the scene's "modified"
+  mark (lookThru sets it), all outside the undo queue
+  (`undoInfo(stateWithoutFlush=False)`).
+- `panel.py` `PlayblastPanel` (registers `playblast.qss`): FactTiles of
+  the scene, a PICTURE card (Camera, Size, Frames — the number fields
+  only SHOW what a named choice gives, and are editable on "Custom"), a
+  RESULT card (Folder + browse — a folder inside the project is written
+  as `{project}/…` —, Name + a `{ }` token menu, the resolved path,
+  Format MP4 / Frames, Quality, Sound / Viewport HUD / Overwrite / Open
+  when done), then status + progress + the start button. MP4: Maya writes
+  PNG frames to `%TEMP%/msl_tools/playblast/<stamp>` (removed after),
+  `sequence_to_video(..., audio=, audio_start=)` + `run_job` on a
+  ResultWorker make the video; Frames: `<folder>/<name>/<name>.####.png`.
+  The scene is read in showEvent / enterEvent, never in the constructor.
+  Settings: `configs/maya/playblast/config.json` (`settings`). ffmpeg is
+  the hub's: the path from Media's config (read from the file, never
+  written), the managed copy, PATH — found on a worker when the panel
+  first shows (the FIRST ffmpeg start from inside Maya takes ~4 s, later
+  ones ~0.9 s; measured — environment, priority, threads make no
+  difference).
+- Traps met: workers are kept by the CLASS and are parentless — a docked
+  panel can be closed (deleted) any moment, and a QThread destroyed while
+  running takes Maya down; their signals go to bound methods (auto-
+  disconnected), never to lambdas holding `self`. No `processEvents()`
+  before the capture (it ran other pending work in the middle of the
+  click) — the capture starts from a 60 ms single-shot timer so the
+  status line paints first; `QTimer.singleShot(ms, context, callable)`
+  did NOT fire in Maya 2025's PySide6 — use the two-argument form with a
+  bound method. PNG frames from a playblast are RGBA (look white in a
+  viewer); the mp4 has the viewport's own background.
+- `core/media/recipes.py:sequence_to_video(audio_start=)`: the second of
+  the sound at which the first frame lies (`-ss` on the sound input);
+  negative = the sound starts later (`adelay`). Measured: sound at frame
+  13, range from 1, 24 fps -> 0.5 s of silence first.
+- Verified in real windowed Maya 2025 (a copy of the preferences, a temp
+  project): the menu entry, the window (a second open returns the same
+  one; Esc keeps it; moved, closed, reopened at the same place with the
+  saved settings), MP4 from a shot camera with sound (1280x720, 72 frames:
+  ~4.5 s in all), a second one without Overwrite -> `_2`, Frames with a
+  custom range; the docked form: dock under the Channel Box, tear off,
+  close, reopen, restored by Maya at the next start (2025 + 2026); camera / selection / frame / undo
+  name / modified mark unchanged. NOT tried: Esc during the capture, the
+  player opening by itself (switched off in the tests).
+- Next steps (not built): 2. the shot mask visible in the VIEWPORT while
+  animating (our own overlay) + its settings; 3. presets, viewport
+  visibility with restore; 4. batch cameras, versions, the result into
+  the hub's Media jobs.
 
 ## Install (the hub is where everything starts)
 

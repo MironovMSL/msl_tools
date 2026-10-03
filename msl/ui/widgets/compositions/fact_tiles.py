@@ -1,11 +1,11 @@
-# tools/desktop/media/fact_tiles.py
+# ui/widgets/compositions/fact_tiles.py
 import msl_tools.msl.ui.qt_bindings as qt
 
 
 class FactTiles(qt.QtWidgets.QWidget):
     """A row of small tiles, each a VALUE over what it is — "1920×1080 / frame
-    size", "≈ 68 KB / result". The Media tool's way of showing DATA: what a
-    source is, what a result is expected to be. Tiles are read, never
+    size", "≈ 68 KB / result". A way of showing DATA: what a source is,
+    what a result is expected to be, what a scene holds. Tiles are read, never
     clicked — which is what tells them apart from the controls around them.
 
         tiles = FactTiles()
@@ -14,7 +14,7 @@ class FactTiles(qt.QtWidgets.QWidget):
     The row keeps its natural size inside this widget, which CLIPS it when
     there is less room (the last tiles go first): it never widens a window,
     and a layout as wide as the widget would squeeze or overlap the tiles.
-    Looks: media.qss (QFrame#mediaFact, QLabel#mediaFactValue / #mediaFactCaption).
+    Looks: widgets.qss (QFrame#factTile, QLabel#factTileValue / #factTileCaption).
     """
 
     def __init__(self, parent=None):
@@ -42,11 +42,11 @@ class FactTiles(qt.QtWidgets.QWidget):
                 item.widget().deleteLater()
         for value, caption in pairs:
             tile = qt.QtWidgets.QFrame(self._row)
-            tile.setObjectName("mediaFact")
+            tile.setObjectName("factTile")
             value_label = qt.QtWidgets.QLabel(value, tile)
-            value_label.setObjectName("mediaFactValue")
+            value_label.setObjectName("factTileValue")
             caption_label = qt.QtWidgets.QLabel(caption, tile)
-            caption_label.setObjectName("mediaFactCaption")
+            caption_label.setObjectName("factTileCaption")
             box = qt.QtWidgets.QVBoxLayout(tile)
             box.setContentsMargins(8, 2, 8, 3)
             box.setSpacing(0)

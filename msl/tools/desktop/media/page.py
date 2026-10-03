@@ -10,7 +10,6 @@ from msl_tools.msl.core.environment.taskbar import TaskbarProgress
 from msl_tools.msl.core.media import Estimate, MediaError, estimate, preview
 from msl_tools.msl.core.media.run import clean_up
 from msl_tools.msl.core.resources import Resources
-from msl_tools.msl.tools.desktop.media.fact_tiles import FactTiles
 from msl_tools.msl.tools.desktop.media.ffmpeg_bar import FfmpegBar, link_button
 from msl_tools.msl.tools.desktop.media.history import ResultHistory
 from msl_tools.msl.tools.desktop.media.job_queue import DONE, FAILED, JobList, JobQueue
@@ -30,6 +29,7 @@ from msl_tools.msl.ui.widgets.atoms.icons.tinted_icon import TintedIcon
 from msl_tools.msl.ui.widgets.atoms.labels import ElidedLabel
 from msl_tools.msl.ui.widgets.compositions.action_strip import ActionStrip
 from msl_tools.msl.ui.widgets.compositions.chip_bar import ChipBar
+from msl_tools.msl.ui.widgets.compositions.fact_tiles import FactTiles
 from msl_tools.msl.ui.widgets.windows.confirm_dialog import ConfirmDialog
 from msl_tools.msl.ui.widgets.windows.text_dialog import TextDialog
 from msl_tools.msl.ui.workers.result_worker import ResultWorker

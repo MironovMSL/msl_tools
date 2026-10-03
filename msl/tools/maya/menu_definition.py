@@ -26,6 +26,8 @@ class MslMenuDefinition:
             menu_id=cls.MENU_ID,
             label=cls.MENU_LABEL,
             items=(
+                MenuAction("Playblast", cls._tool("playblast"), tooltip="What the viewport shows as a video or frames: camera, size, frame range, name. Maya 2025 and newer."),
+                MenuDivider(),
                 SubMenu("Dev", icon=cls._icon("dev"), items=(
                     MenuAction("Print Hello", cls._dev_action("print_hello"), tooltip="Prints a test message."),
                     MenuAction("Print Environment", cls._dev_action("print_environment"), tooltip="Prints Maya version, state and package location."),

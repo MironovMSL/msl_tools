@@ -3,7 +3,6 @@ from pathlib import Path
 
 import msl_tools.msl.ui.qt_bindings as qt
 from msl_tools.msl.core.theme import ThemeRegistry
-from msl_tools.msl.tools.desktop.media.fact_tiles import FactTiles
 from msl_tools.msl.tools.desktop.media.source import MediaSource, summary
 from msl_tools.msl.ui.theme.qss import color_property, repolish
 from msl_tools.msl.ui.ui_resources import UiResources
@@ -11,6 +10,7 @@ from msl_tools.msl.ui.widgets.atoms.buttons.glyph_button import GlyphButton
 from msl_tools.msl.ui.widgets.atoms.comboboxes.base_combo_box import BaseComboBox
 from msl_tools.msl.ui.widgets.compositions.chip_bar import ChipBar
 from msl_tools.msl.ui.widgets.compositions.drop_area import DropArea
+from msl_tools.msl.ui.widgets.compositions.fact_tiles import FactTiles
 
 
 VIDEO_PATTERNS = ("Video and pictures (*.mp4 *.mov *.avi *.mkv *.webm *.mxf *.m4v *.wmv *.png *.jpg *.jpeg *.tif *.tiff "

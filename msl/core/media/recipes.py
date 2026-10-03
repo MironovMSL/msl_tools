@@ -156,8 +156,11 @@ class Overlays:
 def sequence_to_video(sequence: ImageSequence, output: str | Path, fps: float = 24.0, quality: str = "good",
                       speed: str = "balanced", audio: str | Path | None = None, gaps: str = GAPS_ERROR,
                       work_dir: str | Path | None = None, overlays: Overlays | None = None,
-                      frame_size: tuple = (0, 0), video_format: str = "mp4") -> Job:
+                      frame_size: tuple = (0, 0), video_format: str = "mp4", audio_start: float = 0.0) -> Job:
     """The frames of `sequence` as a video at `fps`, with `audio` under it if given.
+    `audio_start`: the second of the sound at which the first frame lies
+    (a playblast that starts in the middle of the timeline's sound);
+    negative = the sound begins that much after the first frame.
 
     `gaps`: GAPS_ERROR refuses a sequence with missing frames (MediaError
     names them); GAPS_HOLD shows the frame before a gap for as long as the
@@ -183,7 +186,8 @@ def sequence_to_video(sequence: ImageSequence, output: str | Path, fps: float = 
     frames = sequence.last - sequence.first + 1
     if overlays is not None:
         overlays.first_frame = sequence.first
-    inputs = [source] + ([["-i", str(audio)]] if audio else [])
+    skip = ["-ss", _number(audio_start)] if audio_start > 0 else []
+    inputs = [source] + ([[*skip, "-i", str(audio)]] if audio else [])
     picture, more = _picture(inputs, filters, overlays, frame_size, work_dir)
     temporary += more
     video_codec, sound_codec, _suffix = FORMATS.get(video_format, FORMATS["mp4"])
@@ -193,7 +197,8 @@ def sequence_to_video(sequence: ImageSequence, output: str | Path, fps: float = 
     if audio:
         # shorter sound is padded with silence, longer is cut at the last frame
         tail += ["-map", "1:a"] if "-map" in picture else []
-        tail += [*sound_codec, "-af", "apad", "-shortest"]
+        late = f"adelay={int(round(-audio_start * 1000))}:all=1," if audio_start < 0 else ""
+        tail += [*sound_codec, "-af", late + "apad", "-shortest"]
     tail += ["-movflags", "+faststart"]
     arguments = _flat(inputs) + picture + tail + [str(output)]
     sample = _flat([sample_source] + inputs[1:]) + picture + tail + ["-t", _number(SAMPLE_SECONDS)]

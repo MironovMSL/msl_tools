@@ -647,3 +647,33 @@ CodeEditor {
 CodeEditor:focus {
     border: 1px solid var(--accent);
 }
+
+/* FactTiles: data, a small tile each - the value over what it is. */
+QFrame#factTile {
+    background-color: alpha(var(--text-primary), 5%);
+    border: 1px solid alpha(var(--border), 60%);
+    border-radius: 6px;
+}
+QLabel#factTileValue {
+    color: var(--text-primary);
+    font-size: 12px;
+    font-weight: 600;
+}
+QLabel#factTileCaption {
+    color: var(--text-secondary);
+    font-size: 10px;
+}
+
+/* DockHost (ui/windows/maya_dock.py): what sits around a tool of ours in a Maya panel -
+   our ground instead of Maya's grey; floating, our header and a hairline around the window. */
+QWidget#mayaDockHost {
+    background-color: var(--surface);
+}
+/* floating where the system rounds no corners (Windows 10): a hairline of our own */
+QWidget#mayaDockHost[floating="true"][rounded="false"] {
+    border: 1px solid var(--border);
+}
+QWidget#mayaDockHost > WindowHeader {
+    background-color: var(--chrome-background);
+    border-bottom: 1px solid alpha(var(--border), 70%);
+}
