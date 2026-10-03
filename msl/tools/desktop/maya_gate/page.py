@@ -1,5 +1,6 @@
 # tools/desktop/maya_gate/page.py
 import os
+import threading
 
 import msl_tools.msl.ui.qt_bindings as qt
 from msl_tools.msl.core.resources import Resources
@@ -19,6 +20,7 @@ from msl_tools.msl.tools.desktop.maya_gate.variable_group import CollapsibleVari
 from msl_tools.msl.tools.desktop.maya_gate.variable_adder import EnvVariableAdder
 from msl_tools.msl.tools.desktop.maya_gate.user_setup import UserSetupStore
 from msl_tools.msl.tools.desktop.maya_gate.user_setup_tab import UserSetupTab
+from msl_tools.msl.tools.desktop.maya_gate import launch_check
 from msl_tools.msl.tools.desktop.maya_gate.boost import BoostStore, LaunchLog
 from msl_tools.msl.tools.desktop.maya_gate.boost_tab import BoostTab
 from msl_tools.msl.tools.desktop.maya_gate.session_history import SessionHistory
@@ -50,6 +52,7 @@ def _default_value_for(name: str) -> str:
 
 
 class MayaGatePage(qt.QtWidgets.QWidget):
+    _problems_found = qt.QtCore.Signal(int, list)   # (which check, its lines): from the checking thread
     """Maya Gate's tool page, fully assembled: pick a Maya version and a
     named environment, edit what that environment brings along in the tabs
     below, then click a version icon to launch it.
@@ -155,6 +158,19 @@ class MayaGatePage(qt.QtWidgets.QWidget):
             current_environment=self._environment,
         )
 
+        # What is wrong with the environment before a launch (launch_check.py): a quiet link under
+        # the versions, there only while there is something to say; a click lists it.
+        self._problems_link = qt.QtWidgets.QPushButton()
+        self._problems_link.setObjectName("gateProblems")
+        self._problems_link.setFlat(True)
+        self._problems_link.setCursor(qt.QtCore.Qt.CursorShape.PointingHandCursor)
+        self._problems_link.hide()
+        self._problems: list[str] = []
+        self._problems_check = 0
+        self._problems_timer = qt.QtCore.QTimer(self)
+        self._problems_timer.setInterval(self.CHECK_EVERY_MS)
+        self._problems_timer.timeout.connect(self._check_environment)
+
         self._tabs = BaseTabWidget()  # sliding accent indicator
         # Line the tab bar up with the variable groups' frames (after their gutter).
         self._tabs.setStyleSheet(
@@ -219,6 +235,11 @@ class MayaGatePage(qt.QtWidgets.QWidget):
         layout.setSpacing(5)
         layout.addWidget(self._indented(self._toolbar))  # environment lines up with the row below
         layout.addWidget(self._indented(self._version_row))
+        problems = qt.QtWidgets.QHBoxLayout()
+        problems.setContentsMargins(CollapsibleVariableGroup.SELECTION_GUTTER, 0, 0, 0)
+        problems.addWidget(self._problems_link)
+        problems.addStretch(1)
+        layout.addLayout(problems)
         layout.addWidget(self._tabs, 1)
 
     def _build_connections(self) -> None:
@@ -227,6 +248,8 @@ class MayaGatePage(qt.QtWidgets.QWidget):
         self._toolbar.environment_changed.connect(self._on_environment_changed)
         self._tabs.currentChanged.connect(lambda index: self._save_ui("tab", self.TAB_KEYS[index]))
         self._version_row.clicked.connect(self._launch)
+        self._problems_found.connect(self._on_problems_found)
+        self._problems_link.clicked.connect(self._show_problems)
         self._version_row.scene_dropped.connect(self._open_scene)  # from the file manager or a session row
         self._version_row.menu_requested.connect(self._on_version_menu)
 
@@ -304,6 +327,58 @@ class MayaGatePage(qt.QtWidgets.QWidget):
         self._custom_group.set_section(environment)
         self._user_setup_tab.set_environment(environment)
         self._boost_tab.set_environment(environment)
+        self._check_environment()
+
+    # --- the environment, checked before a launch ----------------------------------
+
+    CHECK_EVERY_MS = 4000   # while the page is on screen: variables and the script are edited right here
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._check_environment()
+        self._problems_timer.start()
+
+    def hideEvent(self, event) -> None:
+        super().hideEvent(event)
+        self._problems_timer.stop()
+
+    def _check_environment(self) -> None:
+        """Looks the current environment over on a thread (it reads the disk: a folder on a slow
+        drive must not stall the window); the answer comes back as _problems_found."""
+        self._problems_check += 1
+        number, environment = self._problems_check, self._environment
+        variables = self._launch_variables(environment)
+        script = self._user_setup_store.read(environment)
+        boost = self._boost_settings(environment)
+        blocked = BoostStore.blocked_reason(variables)
+        emit = self._problems_found.emit
+
+        def run() -> None:
+            try:
+                lines = launch_check.check(variables, script, boost["enabled"], blocked)
+            except Exception:
+                lines = []
+            try:
+                emit(number, lines)
+            except RuntimeError:
+                pass  # the page is gone
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def _on_problems_found(self, number: int, lines: list) -> None:
+        if number != self._problems_check:
+            return  # an older check: the environment changed meanwhile
+        self._problems = list(lines)
+        count = len(lines)
+        name = self._environment.strip("<>")
+        self._problems_link.setText(f"⚠  {name}: {count} thing{'s' if count != 1 else ''} to check before a launch")
+        self._problems_link.setToolTip(chr(10).join(lines[:8]) + (chr(10) + "…" if count > 8 else ""))
+        self._problems_link.setVisible(bool(lines))
+
+    def _show_problems(self) -> None:
+        if self._problems:
+            TextDialog.show_for(self.window(), f"{self._environment.strip('<>')}: before a launch",
+                                chr(10).join(self._problems))
 
     def _update_sessions_tab_title(self) -> None:
         """"Sessions" / "Sessions · 2": the count is seen from any tab."""

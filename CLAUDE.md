@@ -700,6 +700,15 @@ What changed vs. the original (all deliberate, not oversights):
       Maya again with the scene. A session still waiting as an "ended
       unexpectedly" line isn't listed twice. The history file is first read
       when the tab is shown.
+    - Reopen is a NEW session (another process, its own log), shown as
+      the continuation of the one it came from: `_on_reopen_record`
+      remembers (version, environment, scene) -> the record's key;
+      `_link_reopened` (in refresh) ties the Maya that connects after
+      the click with that scene to the record (`_continues`: pid ->
+      key; waits REOPEN_WAIT_S). The history row then reads "· reopened,
+      running" and has no Reopen button; the running row's menu gets
+      "Log of the previous session". The tie lasts while that Maya runs
+      and isn't stored.
     - A live row has ONE "more" button (GlyphButton, `actions/more`; a
       right click on the row opens the same menu — `_on_row_menu`): Launch
       report, Reload code, Load plug-ins… (boosted sessions), Close Maya…,
@@ -817,6 +826,18 @@ What changed vs. the original (all deliberate, not oversights):
   request refused, Maya's own auto-load list intact after loading a plug-in
   this way. All four planned steps of the link are built.
   Long work in Maya must answer later by `id`, never block the socket.
+- Before a launch (2026-10-04): `launch_check.py` (Qt-free)
+  `check(variables, script, boost_enabled, boost_blocked)` -> one line
+  per thing worth a look: a folder / file a variable names that isn't
+  there (by the variable's kind; an unknown variable only if its value
+  looks like a path; `%VAR%` / `$VAR` values are skipped), a syntax
+  error in the environment's userSetup, boost switched on but blocked.
+  The page runs it on a daemon thread (it reads the disk) on show, on
+  an environment switch and every CHECK_EVERY_MS while on screen;
+  `QPushButton#gateProblems` under the version tiles ("⚠ Dev: 2 things
+  to check before a launch") is there only while there is something,
+  its tooltip lists them, a click opens them in a TextDialog. It never
+  stops a launch.
 - Every launch tells Maya what it is: `MSL_GATE_ENVIRONMENT` (the
   environment) and `MSL_GATE_VARIABLES` (names of the variables this launch
   set). The MSL menu's Dev > "Print Launch Report"
@@ -1658,6 +1679,33 @@ scratch on Maya's public API. Step 1 of 4 is built (2026-10-03):
   light copy for a messenger, the result into Media's jobs, safe
   frames, attribute values in the mask, a plain background, overscan,
   an estimate, a frame preview, MOV / H.265 / the graphics card.
+- Flow, cameras, presets (2026-10-04): a playblast is a RUN — the
+  cameras to shoot (`_queue`: the ticked ones, `settings.cameras`, two
+  or more; else the one of the list) taken one after another
+  (`_next_capture`); each capture's `_run` dict holds everything its
+  end needs as the controls said at its START (target, latest copy,
+  copy / open, sound, quality). The VIDEO is made in the background:
+  after the frames are drawn the panel is free at once (`_free`), for
+  the next camera or the next playblast; `_encode` never raises and
+  hands the run back (`error` set if it failed); `_done(run)` remembers,
+  copies, opens. `_encodes` counts the videos being made, `_taken` the
+  results on their way (a name isn't offered twice). With several
+  cameras `_{camera}` is added to a name that lacks it. A test must
+  wait for `_busy or _encodes`.
+  Presets of the WHOLE playblast: a ChipBar under the facts — Review /
+  Client / Quick (`PRESETS`), the user's in config `presets`; a preset
+  holds `PRESET_KEYS` + the mask's look and switch, never the camera or
+  custom frames; it sets only what it names (`_preset_matches` marks
+  the one that fits). (`_mark_presets` — `_show_presets` is the
+  visibility presets' dict: two name clashes in this file already,
+  check a new name with grep.)
+  Every card FOLDS (`_Card`: heading + body, `set_summary` for the
+  folded line; `settings.folded`). The facts do things: scene = show
+  the scene file in its folder, fps = a menu of frame rates
+  (`capture.set_frame_rate`: `currentUnit(updateAnimation=False)` — the
+  keys stay on their frame numbers), camera / frames = open that list.
+  A folded card needs one more turn of the event loop to shrink: a
+  screenshot taken at once still shows it tall.
 - Progress (2026-10-03): the capture runs ONE FRAME PER TURN of the event
   loop — `capture.CaptureSession` (`step()` = `cmds.playblast(startTime=f,
   endTime=f)`, so files keep real frame numbers; `frame=[f]` numbers

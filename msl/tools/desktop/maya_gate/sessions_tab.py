@@ -449,7 +449,7 @@ class _HistoryRow(qt.QtWidgets.QWidget):
     reopen_requested = qt.QtCore.Signal(object)   # the record
     autosave_requested = qt.QtCore.Signal(object)
 
-    def __init__(self, record: SessionRecord, can_reopen: bool = False, parent=None):
+    def __init__(self, record: SessionRecord, can_reopen: bool = False, reopened: bool = False, parent=None):
         super().__init__(parent)
         self.record = record
         self.setObjectName("sessionRow")
@@ -468,9 +468,12 @@ class _HistoryRow(qt.QtWidgets.QWidget):
         self.scene_label = _SceneLabel()
         self.scene_label.set_scene(record.scene, record.modified)
         self.scene_label.setProperty("past", True)
-        self.outcome_label = qt.QtWidgets.QLabel(record.outcome_text())
+        self.outcome_label = qt.QtWidgets.QLabel(record.outcome_text() + ("  ·  reopened, running" if reopened else ""))
         self.outcome_label.setObjectName("sessionOutcome")
         self.outcome_label.setProperty("state", "" if record.clean else "error")
+        if reopened:
+            can_reopen = False  # the Maya that continues it is running: not a second one by a stray click
+            self.outcome_label.setToolTip("This scene was reopened from here and that Maya is running now.")
         self.time_label = qt.QtWidgets.QLabel(f"{record.ended_text()}  ·  {record.duration_text()}")
         self.time_label.setObjectName("sessionTime")
 
@@ -650,6 +653,10 @@ class SessionsTab(qt.QtWidgets.QWidget):
         self._forced: set[int] = set()            # pids force closed from here (their end isn't a crash)
         self._history_rows: list[_HistoryRow] = []
         self._history_key = None                  # what the history rows on screen were built from
+        # "Reopen": the new Maya is another session (another process, its own log) — but it is
+        # shown as the continuation of the one it was reopened from.
+        self._reopen_pending: dict = {}           # (version, environment, scene) -> (record key, when asked)
+        self._continues: dict[int, tuple] = {}    # pid of a running Maya -> key of the record it continues
         self._seen = False                        # the history file is first read when the tab is shown
         self._names: dict[int, str] = {}          # pid -> "Maya 2025 · Dev" (for a closed Maya's log title)
         self._rows: dict[int, _SessionRow] = {}
@@ -860,6 +867,7 @@ class SessionsTab(qt.QtWidgets.QWidget):
     def refresh(self) -> None:
         """Brings the rows in line with the server's sessions."""
         sessions = {session.session_id: session for session in self._server.sessions()}
+        self._link_reopened(sessions.values())
         for session_id in [key for key in self._rows if key not in sessions]:
             row = self._rows.pop(session_id)
             row.hide()
@@ -1127,7 +1135,8 @@ class SessionsTab(qt.QtWidgets.QWidget):
         self._history_caption.setVisible(bool(records))
         self._history_toggle.setText(("▾" if opened else "▸") + f"  Recent sessions · {len(records)}")
         self._clear_history_button.setVisible(opened)
-        key = ([record.key for record in records], opened)
+        continued = set(self._continues.values())
+        key = ([record.key for record in records], opened, sorted(continued))
         if key == self._history_key:
             return
         self._history_key = key
@@ -1137,10 +1146,10 @@ class SessionsTab(qt.QtWidgets.QWidget):
         self._history_rows = []
         first = self._list_layout.indexOf(self._history_caption) + 1
         for offset, record in enumerate(records if opened else []):
-            row = _HistoryRow(record, self._launch is not None)
+            row = _HistoryRow(record, self._launch is not None, reopened=record.key in continued)
             row.selected.connect(self._select_history)
             row.file_requested.connect(self._on_show_history_file)
-            row.reopen_requested.connect(lambda r: self._start(r.version, r.environment, r.scene))
+            row.reopen_requested.connect(self._on_reopen_record)
             row.autosave_requested.connect(lambda r: self._open_autosave(r.version, r.environment, r.autosave))
             row.scene_label.reveal_failed.connect(self._on_reveal_failed)
             self._history_rows.append(row)
@@ -1191,6 +1200,42 @@ class SessionsTab(qt.QtWidgets.QWidget):
         else:
             self._say(f"Starting Maya {version}" + (f" with {os.path.basename(scene)}" if scene else "") + "…")
 
+    REOPEN_WAIT_S = 300   # how long a "Reopen" waits for its Maya to show up
+
+    @staticmethod
+    def _scene_key(version: str, environment: str, scene: str) -> tuple:
+        return (str(version), str(environment), os.path.normcase(os.path.normpath(scene)) if scene else "")
+
+    def _on_reopen_record(self, record) -> None:
+        """"Reopen" on a finished session: starts that Maya again and remembers what it continues."""
+        self._reopen_pending[self._scene_key(record.version, record.environment, record.scene)] = (record.key, time.time())
+        self._start(record.version, record.environment, record.scene)
+
+    def _link_reopened(self, sessions) -> None:
+        """Ties running Mayas to the records they were reopened from (same version, environment and
+        scene, connected after the click), and forgets the ties of Mayas that are gone."""
+        now = time.time()
+        self._reopen_pending = {key: value for key, value in self._reopen_pending.items()
+                                if now - value[1] < self.REOPEN_WAIT_S}
+        alive = set()
+        for session in sessions:
+            alive.add(session.pid)
+            if session.pid in self._continues:
+                continue
+            key = self._scene_key(session.version, session.environment, session.scene)
+            pending = self._reopen_pending.get(key)
+            if pending is not None and session.connected_at >= pending[1] - 1:
+                self._continues[session.pid] = pending[0]
+                del self._reopen_pending[key]
+        self._continues = {pid: key for pid, key in self._continues.items() if pid in alive}
+
+    def _previous_record(self, pid: int):
+        """The record of the session the running Maya `pid` continues (None if it continues none)."""
+        key = self._continues.get(pid)
+        if key is None or self._history is None:
+            return None
+        return next((record for record in self._history.records() if record.key == key), None)
+
     def _open_autosave(self, version: str, environment: str, autosave: str) -> None:
         """Starts Maya with an autosave file as its scene."""
         if not os.path.isfile(autosave):
@@ -1202,6 +1247,8 @@ class SessionsTab(qt.QtWidgets.QWidget):
         info = self._ended.get(pid)
         if info is not None:
             session = info["session"]
+            self._reopen_pending[self._scene_key(session.version, session.environment, session.scene)] = (
+                (pid, info["when"]), time.time())
             self._start(session.version, session.environment, session.scene)
 
     def _menu_icon(self, name: str, sub_folder: str = "actions", danger: bool = False) -> qt.QtGui.QIcon:
@@ -1229,6 +1276,11 @@ class SessionsTab(qt.QtWidgets.QWidget):
             action.setEnabled(enabled)
             action.triggered.connect(lambda _checked=False: handler())
 
+        previous = self._previous_record(session.pid)
+        if previous is not None:
+            add("Log of the previous session", ("report", "actions"),
+                f"This Maya was reopened from the session that ended {previous.ended_text()} "
+                f"({previous.outcome_text()}): show what that one reported", lambda: self._select_history(previous.key))
         add("Launch report", ("report", "actions"), "How this Maya was started: environment, preferences, "
             "variables, userSetup files, plug-ins", lambda: self._on_report(session_id), enabled=reachable)
         add("Reload code", ("code", "actions"), "Re-read msl_tools from disk in this Maya and rebuild the MSL menu"

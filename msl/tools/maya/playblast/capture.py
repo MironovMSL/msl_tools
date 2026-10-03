@@ -120,6 +120,22 @@ def scene_name() -> str:
     return Path(cmds.file(query=True, sceneName=True) or "").stem
 
 
+# what the user reads -> Maya's name of that time unit
+FRAME_RATES = {"23.976": "23.976fps", "24": "film", "25": "pal", "29.97": "29.97fps", "30": "ntsc", "48": "show",
+               "50": "palf", "59.94": "59.94fps", "60": "ntscf"}
+
+
+def set_frame_rate(label: str) -> None:
+    """Sets the scene's frame rate (a key of FRAME_RATES). The keys stay on their FRAME NUMBERS:
+    the animation gets faster or slower, nothing is moved on the timeline."""
+    cmds.currentUnit(time=FRAME_RATES[label], updateAnimation=False)
+
+
+def scene_path() -> str:
+    """The scene file ("" for a scene never saved)."""
+    return cmds.file(query=True, sceneName=True) or ""
+
+
 def scene_folder() -> str:
     """The folder of the scene file ("" for a scene never saved)."""
     path = cmds.file(query=True, sceneName=True) or ""

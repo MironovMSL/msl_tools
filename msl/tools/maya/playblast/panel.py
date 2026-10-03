@@ -14,7 +14,8 @@ from msl_tools.msl.tools.maya.playblast.mask_preview import MaskPreview
 from msl_tools.msl.tools.maya.playblast.recent import RecentCard, open_result, size_text
 from msl_tools.msl.tools.maya.playblast.visibility_dialog import VisibilityDialog
 from msl_tools.msl.ui.theme import StylesheetBuilder
-from msl_tools.msl.ui.theme.qss import repolish
+from msl_tools.msl.ui.theme.qss import make_rounded_popup, repolish
+from msl_tools.msl.ui.process_launcher.process_launcher import ProcessLauncher
 from msl_tools.msl.ui.ui_resources import UiResources
 from msl_tools.msl.ui.widgets.atoms.buttons.color_swatch_button import ColorSwatchButton
 from msl_tools.msl.ui.widgets.atoms.buttons.icon_push_button import IconPushButton
@@ -62,6 +63,20 @@ MASK_DIGITS = ("2", "3", "4", "5", "6")
 MASK_LOOK_DEFAULTS = {"text": "Medium", "bars": "Solid", "text_color": "#ffffff", "bar_color": "#000000",
                       "top_bar": True, "bottom_bar": True, "font": "Consolas", "text_opacity": "Solid",
                       "letterbox": "Off", "digits": "4"}
+# A preset of the WHOLE playblast keeps these settings (not the camera, not custom frames: those
+# belong to the scene) and, under "mask", the mask's look and whether it is shown.
+PRESET_KEYS = ("size", "width", "height", "range", "show", "format", "quality", "sound", "ornaments", "smooth",
+               "occlusion", "overwrite", "open", "copy", "folder", "name")
+# The ones that come with the tool (name -> what a click sets; a key left out stays as it is).
+PRESETS = {
+    "Review": {"size": "HD 1080", "range": "Playback", "show": "As in the viewport", "format": "MP4",
+               "quality": "High", "smooth": False, "occlusion": False,
+               "mask": dict(MASK_PRESETS["Review"], shown=True)},
+    "Client": {"size": "HD 1080", "range": "Playback", "show": "Geometry", "format": "MP4", "quality": "Best",
+               "smooth": True, "occlusion": True, "mask": dict(MASK_PRESETS["Client"], shown=True)},
+    "Quick": {"size": "HD 540", "range": "Playback", "show": "As in the viewport", "format": "MP4",
+              "quality": "Small", "smooth": False, "occlusion": False, "mask": {"shown": False}},
+}
 MASK_PLACES = {"topLeft": "top left", "topCenter": "top centre", "topRight": "top right",
                "bottomLeft": "bottom left", "bottomCenter": "bottom centre", "bottomRight": "bottom right"}
 
@@ -105,6 +120,77 @@ class _Toggle(IconPushButton):
         self._follow()
 
 
+class _Card(qt.QtWidgets.QFrame):
+    """A card of the panel: a heading (chevron, icon, title, small widgets at its end) over a body
+    that a click on the heading folds away. Folded, the heading says in a few words what is set
+    under it (`set_summary`).
+
+    Signals:
+        toggled(bool) — the heading was clicked; True = open now.
+    """
+
+    toggled = qt.QtCore.Signal(bool)
+
+    def __init__(self, title: str, icon: str, extras=(), parent=None):
+        super().__init__(parent)
+        self.setObjectName("playblastCard")
+        icons = UiResources().iconManager
+        self._chevrons = {True: icons.get_icon("chevron_down", sub_folder="actions"),
+                          False: icons.get_icon("chevron_right", sub_folder="actions")}
+        self._chevron = TintedIcon(self._chevrons[True], 10)
+        mark = TintedIcon(icons.get_icon(icon, sub_folder="actions"), 14)
+        mark.setObjectName("playblastCardIcon")
+        heading = qt.QtWidgets.QLabel(title)
+        heading.setObjectName("playblastSection")
+        self._summary = ElidedLabel("", qt.QtCore.Qt.TextElideMode.ElideRight)
+        self._summary.setObjectName("playblastHint")
+        self._summary_text = ""
+        self._header = qt.QtWidgets.QWidget()
+        self._header.setCursor(qt.QtCore.Qt.CursorShape.PointingHandCursor)
+        self._header.setToolTip("Click to show or hide these settings")
+        self._header.installEventFilter(self)
+        top = qt.QtWidgets.QHBoxLayout(self._header)
+        top.setContentsMargins(0, 0, 0, 0)
+        top.setSpacing(6)
+        top.addWidget(self._chevron)
+        top.addWidget(mark)
+        top.addWidget(heading)
+        top.addWidget(self._summary, 1)
+        for extra in extras:
+            top.addWidget(extra)
+        self.body = qt.QtWidgets.QWidget()
+        self.body_layout = qt.QtWidgets.QVBoxLayout(self.body)
+        self.body_layout.setContentsMargins(0, 0, 0, 0)
+        self.body_layout.setSpacing(8)
+        box = qt.QtWidgets.QVBoxLayout(self)
+        box.setContentsMargins(10, 8, 10, 10)
+        box.setSpacing(8)
+        box.addWidget(self._header)
+        box.addWidget(self.body)
+        self._open = True
+
+    def is_open(self) -> bool:
+        return self._open
+
+    def set_open(self, opened: bool) -> None:
+        self._open = bool(opened)
+        self.body.setVisible(self._open)
+        self._chevron.set_icon(self._chevrons[self._open])
+        self._summary.setText("" if self._open else self._summary_text)
+
+    def set_summary(self, text: str) -> None:
+        self._summary_text = text
+        self._summary.setText("" if self._open else text)
+
+    def eventFilter(self, watched, event) -> bool:
+        if (watched is self._header and event.type() == qt.QtCore.QEvent.Type.MouseButtonRelease
+                and event.button() == qt.QtCore.Qt.MouseButton.LeftButton):
+            self.set_open(not self._open)
+            self.toggled.emit(self._open)
+            return True
+        return super().eventFilter(watched, event)
+
+
 class PlayblastPanel(qt.QtWidgets.QWidget):
     """The playblast tool's panel inside Maya (shown in a PlayblastWindow; it
     can also sit in a Maya panel through MayaDock).
@@ -127,7 +213,8 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
     DEFAULTS = {"camera": "", "size": "HD 1080", "width": 1920, "height": 1080, "range": capture.RANGE_PLAYBACK,
                 "start": 1, "end": 24, "folder": naming.DEFAULT_FOLDER, "name": naming.DEFAULT_NAME,
                 "format": FORMAT_MP4, "quality": "High", "sound": True, "overwrite": False, "open": True,
-                "copy": False, "smooth": False, "occlusion": False,
+                "copy": False, "smooth": False, "occlusion": False, "cameras": [],
+                "folded": {"picture": False, "result": False},
                 "ornaments": False, "show": SHOW_VIEWPORT, "show_custom": list(capture.VISIBILITY_PRESETS["Geometry"]),
                 "mask": {"shown": False, "texts": dict(mask.DEFAULT_TEXTS), "text": "Medium", "bars": "Solid",
                          "text_color": "#ffffff", "bar_color": "#000000", "note": "", "warn": True,
@@ -148,12 +235,14 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
         self._tools_looked = False
         self._busy = False
         self._result: Path | None = None
-        self._pending: tuple | None = None   # (target, when it started) of the video being made
-        self._capture_job: tuple | None = None   # (settings, target, video) of the capture about to start
-        self._capture_started = 0.0
         self._session = None                     # the CaptureSession while Maya draws the frames
         self._tools_known = False                # ffmpeg was looked for (found or not)
-        self._latest_path_at_start = None        # {work+}: where the copy without a version goes
+        self._queue: list = []                   # the cameras still to shoot in this run
+        self._run: dict | None = None            # the capture going on now
+        self._capture_camera = None              # its camera ("" = the active view), for the tokens
+        self._encodes = 0                        # videos being made in the background
+        self._taken: set = set()                 # results on their way: not offered to the next one
+        self._run_number = 0
         self._start_when_ready = False           # start() came before that
         self._cancelled = False
         self._step_timer = qt.QtCore.QTimer(self)
@@ -175,13 +264,21 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
         self._title.setObjectName("playblastTitle")
         self._ffmpeg_note = qt.QtWidgets.QLabel()
         self._ffmpeg_note.setObjectName("playblastHint")
+        self._presets = ChipBar(add_text="Save all of these settings as a preset",
+                                name_placeholder="Preset name, then Enter",
+                                add_icon=icons.get_icon("bookmark_add", sub_folder="actions"))
+        self._presets.setToolTip("Presets of the whole playblast: size, what it shows, the result, the mask.\n"
+                                 "Right click one of your own to remove it.")
         self._facts = FactTiles()
-        self._facts.set_clickable({"camera", "frames", "long"})
+        self._facts.set_clickable({"camera", "frames", "long", "scene", "fps"})
         self._start_text = "Playblast"
 
         self._camera = BaseComboBox([ACTIVE_VIEW], ACTIVE_VIEW)
         self._camera.setToolTip("The camera the playblast is seen through.\n"
                                 "The viewport gets its own camera back afterwards.")
+        self._cameras_button = IconPushButton(icons.get_icon("select_all", sub_folder="actions"),
+                                              "Several cameras in one go: a playblast of each…")
+        self._cameras_button.setFixedSize(24, 22)
         self._visible = BaseComboBox([SHOW_VIEWPORT], SHOW_VIEWPORT)
         self._visible_edit = IconPushButton(icons.get_icon("edit", sub_folder="actions"),
                                          "Choose what the playblast shows, and save it as a preset…")
@@ -316,13 +413,13 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
         header.addStretch(1)
         header.addWidget(self._ffmpeg_note)
 
-        picture = self._card("PICTURE", "film", extras=[self._smooth, self._occlusion], rows=[
-            (("camera", "Camera"), [self._camera]),
+        picture = self._picture_card = self._card("PICTURE", "film", extras=[self._smooth, self._occlusion], rows=[
+            (("camera", "Camera"), [self._camera, self._cameras_button]),
             (("eye", "What it shows"), [self._visible, self._visible_edit]),
             (("frame_fit", "Size"), [self._size, self._width, self._times, self._height]),
             (("film", "Frames"), [self._range, self._start, self._dash, self._end]),
         ])
-        output = self._card("RESULT", "save", extras=[self._sound, self._ornaments, self._overwrite, self._open,
+        output = self._result_card = self._card("RESULT", "save", extras=[self._sound, self._ornaments, self._overwrite, self._open,
                                                       self._copy], rows=[
             ("Folder", [self._folder, self._browse]),
             ("Name", [self._name]),
@@ -336,6 +433,7 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
         column.setSpacing(8)
         column.addWidget(self._title_row)
         column.addWidget(self._facts)
+        column.addWidget(self._presets)
         column.addWidget(picture)
         column.addWidget(output)
         column.addWidget(self._mask_card())
@@ -456,26 +554,12 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
         return self._ffmpeg_note
 
     @staticmethod
-    def _card(title: str, icon: str, rows: list, extras=()) -> qt.QtWidgets.QFrame:
-        """A card: an icon and a small heading over caption / controls rows. A caption is a word,
-        or (icon, what it is) — then the icon stands for the word, which is its tooltip.
-        `extras`: small widgets at the end of the heading (the card's yes / no choices)."""
+    def _card(title: str, icon: str, rows: list, extras=()) -> _Card:
+        """A card that folds: caption / controls rows under its heading. A caption is a word, or
+        (icon, what it is) — then the icon stands for the word, which is its tooltip. `extras`: small
+        widgets at the end of the heading (the card's yes / no choices)."""
         icons = UiResources().iconManager
-        card = qt.QtWidgets.QFrame()
-        card.setObjectName("playblastCard")
-        mark = TintedIcon(icons.get_icon(icon, sub_folder="actions"), 14)
-        mark.setObjectName("playblastCardIcon")
-        heading = qt.QtWidgets.QLabel(title)
-        heading.setObjectName("playblastSection")
-        top = qt.QtWidgets.QHBoxLayout()
-        top.setSpacing(6)
-        top.addWidget(mark)
-        top.addWidget(heading)
-        top.addStretch(1)
-        top.setSpacing(4)
-        top.insertSpacing(1, 2)
-        for extra in extras:
-            top.addWidget(extra)
+        card = _Card(title, icon, extras)
         form = qt.QtWidgets.QGridLayout()
         form.setContentsMargins(0, 0, 0, 0)
         form.setHorizontalSpacing(8)
@@ -496,11 +580,7 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
             for position, widget in enumerate(widgets):
                 line.addWidget(widget, 1 if position == 0 else 0)
             form.addLayout(line, index, 1)
-        box = qt.QtWidgets.QVBoxLayout(card)
-        box.setContentsMargins(10, 8, 10, 10)
-        box.setSpacing(8)
-        box.addLayout(top)
-        box.addLayout(form)
+        card.body_layout.addLayout(form)
         return card
 
     def _connect(self) -> None:
@@ -521,6 +601,12 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
         self._browse.clicked.connect(self._on_browse)
         self._start_button.clicked.connect(self._on_start)
         self._facts.clicked.connect(self._on_fact_clicked)
+        self._presets.clicked.connect(self._on_preset)
+        self._presets.add_requested.connect(self._on_preset_saved)
+        self._presets.remove_requested.connect(self._on_preset_removed)
+        self._cameras_button.clicked.connect(self._on_cameras_menu)
+        self._picture_card.toggled.connect(self._on_card_folded)
+        self._result_card.toggled.connect(self._on_card_folded)
         self._recent.clear_requested.connect(self._on_recent_clear)
         self._encoding_progressed.connect(self._on_encoding_progress)
         self._mask_on.toggled.connect(self._on_mask_toggled)
@@ -551,6 +637,9 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
         self._loading = True
         get = lambda key: self._settings.get(key, self.DEFAULTS[key])
         self._fill_show(get("show"))
+        folded = _plain(get("folded")) or {}
+        self._picture_card.set_open(not folded.get("picture", False))
+        self._result_card.set_open(not folded.get("result", False))
         self._set_combo(self._size, get("size"))
         self._set_combo(self._range, get("range"))
         self._width.setText(str(get("width")))
@@ -657,6 +746,7 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
         self._refresh_facts()
         self._sync_mask()
         self._refresh_mask_preview()
+        self._mark_presets()
         self._refresh_recent()
 
     def _refresh_facts(self) -> None:
@@ -667,11 +757,29 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
         pairs = [(capture.scene_name() or "untitled", "scene"), (f"{fps:g}", "fps"),
                  (f"{frames}", "frames"), (self._seconds_text(frames / fps if fps else 0.0), "long"),
                  (self._camera_name(), "camera")]
+        several = self._several_cameras()
+        if several:
+            pairs[-1] = (f"{len(several)} cameras", "camera")
+        self._camera.setEnabled(not several)
+        self._camera.setToolTip(("A playblast of each of: " + ", ".join(several) + ".\nThe button beside changes that.")
+                                if several else
+                                "The camera the playblast is seen through.\n"
+                                "The viewport gets its own camera back afterwards.")
+        self._cameras_button.setProperty("primary", bool(several))
+        repolish(self._cameras_button)
         if sound:
             pairs.append((Path(sound).name, "sound"))
         self._facts.set_pairs(pairs)
         width, height = self._frame_size()
-        self._start_text = f"Playblast  ·  {frames} frames  ·  {width}×{height}"
+        self._start_text = (f"Playblast  ·  {frames} frames  ·  {width}×{height}"
+                            + (f"  ·  {len(several)} cameras" if several else ""))
+        size_name = self._size.currentText()
+        self._picture_card.set_summary("  ·  ".join(
+            [f"{len(several)} cameras" if several else self._camera_name(), self._visible.currentText(),
+             size_name if size_name != SIZE_CUSTOM else f"{width}×{height}",
+             f"{start}–{end}"]))
+        self._result_card.set_summary("  ·  ".join(
+            [self._folder.text().strip() or naming.DEFAULT_FOLDER, self._name_template(), self._format.current()]))
         if not self._busy:
             self._start_button.setText(self._start_text)
         path = self._output_path()
@@ -685,8 +793,44 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
         return f"{int(seconds // 60)}:{seconds % 60:04.1f}"
 
     def _camera_name(self) -> str:
+        """The camera a playblast is (or would be) seen through — while one is being taken, that one's."""
+        chosen = self._capture_camera if self._capture_camera is not None else self._one_camera()
+        return chosen or capture.active_camera() or "camera"
+
+    def _one_camera(self) -> str:
+        """The camera the list says ("" = the active view)."""
         chosen = self._camera.currentText()
-        return (capture.active_camera() or "camera") if chosen == ACTIVE_VIEW else chosen
+        return "" if chosen == ACTIVE_VIEW or chosen not in capture.cameras() else chosen
+
+    def _several_cameras(self) -> list:
+        """The cameras ticked for "several in one go" that are still in the scene (fewer than two: none)."""
+        existing = capture.cameras()
+        ticked = [name for name in _plain(self._settings.get("cameras") or []) if name in existing]
+        return ticked if len(ticked) >= 2 else []
+
+    def _on_cameras_menu(self) -> None:
+        menu = make_rounded_popup(qt.QtWidgets.QMenu(self))
+        ticked = set(_plain(self._settings.get("cameras") or []))
+        for name in capture.cameras():
+            action = menu.addAction(name)
+            action.setCheckable(True)
+            action.setChecked(name in ticked)
+            action.toggled.connect(lambda checked, camera=name: self._tick_camera(camera, checked))
+        menu.addSeparator()
+        menu.addAction("One camera only").triggered.connect(lambda: self._set_cameras([]))
+        menu.exec(self._cameras_button.mapToGlobal(qt.QtCore.QPoint(0, self._cameras_button.height() + 2)))
+
+    def _tick_camera(self, camera: str, checked: bool) -> None:
+        ticked = [name for name in _plain(self._settings.get("cameras") or []) if name != camera]
+        self._set_cameras(ticked + [camera] if checked else ticked)
+
+    def _set_cameras(self, cameras: list) -> None:
+        self._settings["cameras"] = list(cameras)
+        self.refresh()
+
+    def _on_card_folded(self, *_args) -> None:
+        self._settings["folded"] = {"picture": not self._picture_card.is_open(),
+                                    "result": not self._result_card.is_open()}
 
     def _frame_size(self) -> tuple[int, int]:
         return self._number(self._width, 1920), self._number(self._height, 1080)
@@ -713,6 +857,8 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
     def _name_template(self) -> str:
         """The name as written — with {work+} a version is part of it even if nobody wrote one."""
         name = self._name.text().strip() or naming.DEFAULT_NAME
+        if self._several_cameras() and "{camera}" not in name:
+            name += "_{camera}"  # one file per camera: the camera is part of the name, written or not
         if self._keeps_latest() and naming.VERSION_TOKEN not in name:
             name += "_" + naming.VERSION_TOKEN
         return name
@@ -746,6 +892,7 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
         self._save_settings()
         self._refresh_facts()
         self._describe_show()
+        self._mark_presets()
         if self._mask_on.isChecked():
             self._sync_mask()  # the frame it frames, {resolution} and the range it warns about follow
 
@@ -836,6 +983,72 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
             self._folder.setText(folder)
             self._on_changed()
 
+    # ------------------------------------------------------------------ presets of the whole playblast
+
+    def _preset_list(self) -> list:
+        """[(name, values)], in the order shown: the built-in ones until the user saves or removes one."""
+        if "presets" in self._config.data:
+            try:
+                return [(str(entry["name"]), _plain(entry["values"])) for entry in self._config["presets"]]
+            except (KeyError, TypeError, ValueError):
+                pass
+        return [(name, dict(values)) for name, values in PRESETS.items()]
+
+    def _preset_now(self) -> dict:
+        """What a preset saved now would hold."""
+        values = {key: _plain(self._settings.get(key, self.DEFAULTS[key])) for key in PRESET_KEYS}
+        values["mask"] = dict(self._mask_look(), shown=self._mask_on.isChecked())
+        return values
+
+    @staticmethod
+    def _preset_matches(values: dict, now: dict) -> bool:
+        """Everything the preset sets is what is set now (what it leaves out doesn't count)."""
+        for key, value in values.items():
+            if key == "mask":
+                look = now["mask"]
+                if any(dict(MASK_LOOK_DEFAULTS, **look).get(name) != item for name, item in value.items()):
+                    return False
+            elif now.get(key) != value:
+                return False
+        return True
+
+    def _mark_presets(self) -> None:
+        presets = self._preset_list()
+        self._presets.set_chips([(name, name, "") for name, _values in presets],
+                                removable={name for name, _values in presets})
+        now = self._preset_now()
+        self._presets.set_marked([name for name, values in presets if self._preset_matches(values, now)])
+
+    def _on_preset(self, name: str) -> None:
+        values = dict(self._preset_list()).get(name)
+        if values is None or self._busy:
+            return
+        for key, value in values.items():
+            if key == "mask":
+                saved = dict(_plain(self._settings.get("mask") or {}))
+                saved.update(value)
+                self._settings["mask"] = saved
+            else:
+                self._settings[key] = value
+        self._apply_settings()
+        self.refresh()
+        self._save_mask()
+
+    def _on_preset_saved(self, name: str) -> None:
+        name = name.strip()
+        if not name:
+            return
+        self._save_settings()
+        presets = [(old, values) for old, values in self._preset_list() if old != name]
+        self._config["presets"] = [{"name": old, "values": values}
+                                   for old, values in presets + [(name, self._preset_now())]]
+        self._mark_presets()
+
+    def _on_preset_removed(self, name: str) -> None:
+        self._config["presets"] = [{"name": old, "values": values}
+                                   for old, values in self._preset_list() if old != name]
+        self._mark_presets()
+
     # ------------------------------------------------------------------ what was made before
 
     HISTORY_KEPT = 40   # results remembered, all scenes together
@@ -869,9 +1082,45 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
 
     def _on_fact_clicked(self, caption: str) -> None:
         """A fact on top is a way in to the setting it shows."""
+        if caption == "scene":
+            scene = capture.scene_path()
+            if scene:
+                ProcessLauncher.open_file_explorer(scene)  # the scene file, shown in its folder
+            else:
+                self._say("The scene isn’t saved yet — there is no folder to show.")
+            return
+        if caption == "fps":
+            self._on_fps_menu()
+            return
+        if caption == "camera" and self._several_cameras():
+            self._on_cameras_menu()
+            return
+        card = self._picture_card
+        if not card.is_open():
+            card.set_open(True)
+            self._on_card_folded()
         combo = self._camera if caption == "camera" else self._range
         combo.setFocus()
         combo.showPopup()
+
+    def _on_fps_menu(self) -> None:
+        """The scene's frame rate, picked from the usual ones."""
+        menu = make_rounded_popup(qt.QtWidgets.QMenu(self))
+        current = f"{capture.frame_rate():g}"
+        for label in capture.FRAME_RATES:
+            action = menu.addAction(f"{label} fps")
+            action.setCheckable(True)
+            action.setChecked(f"{float(label):g}" == current)
+            action.triggered.connect(lambda _checked=False, rate=label: self._set_fps(rate))
+        menu.exec(qt.QtGui.QCursor.pos())
+
+    def _set_fps(self, label: str) -> None:
+        try:
+            capture.set_frame_rate(label)
+        except RuntimeError as error:
+            self._say(f"Maya didn’t take {label} fps: {str(error).strip()}", "error")
+            return
+        self.refresh()
 
     # ------------------------------------------------------------------ the shot mask
 
@@ -971,6 +1220,7 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
                                       open=self._mask_body.isVisibleTo(self._mask_body.parentWidget()))
         self._show_mask_presets()  # the one that matches what is on screen is outlined
         self._refresh_mask_preview()
+        self._mark_presets()
 
     # the six texts: picked in the sketch, written in the one field
 
@@ -1131,39 +1381,55 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
             return
         self.refresh()
         self._save_settings()
-        video = self._format.current() == FORMAT_MP4
-        if video and self._tools is None:
+        if self._format.current() == FORMAT_MP4 and self._tools is None:
             self._say("ffmpeg wasn’t found — open Media in the MSL Tools hub to download it, "
                       "or choose “Frames”.", "error")
             return
+        self._queue = list(self._several_cameras()) or [self._one_camera()]
+        self._next_capture()
+
+    def _next_capture(self) -> None:
+        """Starts the capture of the next camera of this run."""
+        camera = self._queue.pop(0)
+        self._capture_camera = camera
+        video = self._format.current() == FORMAT_MP4
         width, height = self._frame_size()
         start, end = self._frames()
         target = self._output_path()
-        self._latest_path_at_start = self._latest_path()  # as the controls say NOW, not when it is done
+        latest = self._latest_path()
         if not self._overwrite.isChecked():
             target = naming.free_path(target)
-        chosen = self._camera.currentText()
+        while target in self._taken:  # a result still being made has no file yet: its name is taken all the same
+            target = target.with_name(f"{target.stem}_next{target.suffix}")
+        self._taken.add(target)
+        self._run_number += 1
         if video:
-            frames_folder = Path(tempfile.gettempdir()) / "msl_tools" / "playblast" / time.strftime("%Y%m%d_%H%M%S")
+            frames_folder = (Path(tempfile.gettempdir()) / "msl_tools" / "playblast"
+                             / f"{time.strftime('%Y%m%d_%H%M%S')}_{self._run_number}")
             frames_name = "frame"
         else:
             frames_folder, frames_name = target, target.name
         settings = capture.CaptureSettings(
             folder=frames_folder, name=frames_name, start=start, end=end, width=width, height=height,
-            camera=capture.ACTIVE_VIEW if chosen == ACTIVE_VIEW else chosen, ornaments=self._ornaments.isChecked(),
-            visibility=self._shown_kinds(), smooth=self._smooth.isChecked(),
-            occlusion=self._occlusion.isChecked())
+            camera=camera or capture.ACTIVE_VIEW, ornaments=self._ornaments.isChecked(),
+            visibility=self._shown_kinds(), smooth=self._smooth.isChecked(), occlusion=self._occlusion.isChecked())
+        # everything the end of this playblast needs, as the controls say NOW: by the time its video is
+        # made the user may have changed them, or started the next one
+        self._run = {"settings": settings, "target": target, "video": video, "latest": latest,
+                     "copy": self._copy.isChecked(), "open": self._open.isChecked(),
+                     "sound": self._sound.isChecked(), "quality": QUALITY.get(self._quality.currentText(), "high"),
+                     "started": time.time(), "left": len(self._queue)}
         self._set_busy(True)
         self._say("Maya is drawing the frames…")
         # a moment later, so the line above is on screen before Maya takes over (and never
         # processEvents() here: it would run whatever else is waiting in the middle of a click)
-        self._capture_job = (settings, target, video)
         qt.QtCore.QTimer.singleShot(60, self._capture)
 
     def _capture(self) -> None:
         """Maya draws the frames, one per turn of the event loop — the bar moves and Cancel works —,
         then the video is made on a worker."""
-        settings, target, video = self._capture_job
+        run = self._run
+        settings, target, video = run["settings"], run["target"], run["video"]
         try:
             target.parent.mkdir(parents=True, exist_ok=True)
             if not video and target.is_dir() and self._overwrite.isChecked():
@@ -1174,7 +1440,6 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
             self._capture_failed(str(error))
             return
         self._cancelled = False
-        self._capture_started = time.time()
         self._progress.set_progress(0)
         self._progress.show()
         self._start_button.setText("Cancel")
@@ -1199,7 +1464,8 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
             self._capture_failed(str(error))
             return
         self._progress.set_progress(int(session.done * 100 / session.total))
-        self._say(f"Frame {session.done} of {session.total}…")
+        camera = f"{self._camera_name()}: " if self._run["left"] or self._several_cameras() else ""
+        self._say(f"{camera}frame {session.done} of {session.total}…")
         if more:
             return
         self._step_timer.stop()
@@ -1207,31 +1473,51 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
         self._after_capture(session.finish())
 
     def _capture_failed(self, message: str) -> None:
-        settings, _target, video = self._capture_job
+        """The capture going on gave up (an error, Cancel): the rest of this run is dropped too."""
+        run = self._run
         self._session = None
-        if video:
-            shutil.rmtree(settings.folder, ignore_errors=True)
-        self._finish(None, message)
+        self._queue = []
+        if run["video"]:
+            shutil.rmtree(run["settings"].folder, ignore_errors=True)
+        self._free()
+        self._done(dict(run, error=message))
+
+    def _free(self) -> None:
+        """No capture is going on any more: the button is the start button again."""
+        self._capture_camera = None
+        self._run = None
+        self._set_busy(False)
+        if not self._encodes:
+            self._progress.hide()
 
     def _after_capture(self, shot) -> None:
-        _settings, target, video = self._capture_job
-        started = self._capture_started
-        self._set_busy(True)  # no Cancel any more: the button waits
-        if not video:
-            self._finish(target, "", f"{shot.frames} frames", time.time() - started, frames=shot.frames,
-                         camera=shot.camera)
+        """The frames are there. A video is made on a worker — in the BACKGROUND: the panel is free
+        at once, for the next camera of this run or for whatever the user does next."""
+        run = dict(self._run, frames=shot.frames, camera=shot.camera, error="")
+        if run["video"]:
+            sound = shot.sound if run["sound"] and shot.sound and Path(shot.sound).is_file() else None
+            tools, report = self._tools, self._report_progress
+            self._encodes += 1
+            worker = ResultWorker(lambda: self._encode(tools, shot, run, sound, report))
+            worker.done.connect(self._on_encoded)
+            worker.failed.connect(self._on_encode_broke)
+            self._keep(worker)
+            worker.start()
+        if self._queue:
+            if not run["video"]:
+                self._done(run)
+            self._next_capture()
             return
-        self._say("Making the video…")
-        self._progress.set_progress(0)
-        sound = shot.sound if self._sound.isChecked() and shot.sound and Path(shot.sound).is_file() else None
-        quality = QUALITY.get(self._quality.currentText(), "high")
-        tools, report = self._tools, self._report_progress
-        self._pending = (target, started, shot.frames, shot.camera)
-        worker = ResultWorker(lambda: self._encode(tools, shot, target, quality, sound, report))
-        worker.done.connect(self._on_encoded)
-        worker.failed.connect(self._on_encode_failed)
-        self._keep(worker)
-        worker.start()
+        self._free()
+        if run["video"]:
+            self._progress.set_progress(0)
+            self._progress.show()
+            self._say(self._encoding_text())
+        else:
+            self._done(run)
+
+    def _encoding_text(self) -> str:
+        return "Making the video…" if self._encodes == 1 else f"Making {self._encodes} videos…"
 
     def hideEvent(self, event) -> None:
         super().hideEvent(event)
@@ -1246,44 +1532,56 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
         except RuntimeError:
             pass  # the panel was closed meanwhile; the video is finished all the same
 
-    def _on_encoded(self, _result) -> None:
-        target, started, frames, camera = self._pending
-        self._finish(target, "", "", time.time() - started, frames=frames, camera=camera)
-
-    def _on_encode_failed(self, error) -> None:
-        self._finish(None, str(error))
-
     @staticmethod
-    def _encode(tools, shot, target: Path, quality: str, sound, report) -> None:
-        """On a worker: the frames in `shot.folder` -> the video `target`; the frames are removed either way."""
+    def _encode(tools, shot, run: dict, sound, report) -> dict:
+        """On a worker: the frames in `shot.folder` -> the video `run["target"]`; the frames are removed
+        either way. Returns `run` — with `error` set if it failed (never raises: the run it belongs to
+        has to come back with the answer)."""
         try:
             sequences = find_sequences(shot.folder)
             if not sequences:
                 raise MediaError("Maya wrote no frames.")
-            job = sequence_to_video(sequences[0], target, fps=shot.fps, quality=quality, speed="fast", audio=sound,
-                                    audio_start=shot.sound_start)
+            job = sequence_to_video(sequences[0], run["target"], fps=shot.fps, quality=run["quality"], speed="fast",
+                                    audio=sound, audio_start=shot.sound_start)
             run_job(tools, job, on_progress=report)
+        except Exception as error:
+            run = dict(run, error=str(error) or "The video couldn’t be made.")
         finally:
             shutil.rmtree(shot.folder, ignore_errors=True)
+        return run
+
+    def _on_encoded(self, run) -> None:
+        self._encodes = max(0, self._encodes - 1)
+        self._done(run)
+
+    def _on_encode_broke(self, error) -> None:
+        self._encodes = max(0, self._encodes - 1)  # _encode never raises; this is the worker itself failing
+        if not self._busy:
+            self._progress.setVisible(bool(self._encodes))
+            self._say(str(error) or "The video couldn’t be made.", "error")
 
     def _on_encoding_progress(self, fraction: float) -> None:
-        self._progress.set_progress(int(fraction * 100))
+        if not self._busy:  # while Maya draws frames the bar is the capture's
+            self._progress.set_progress(int(fraction * 100))
 
-    def _finish(self, result: Path | None, error: str, note: str = "", seconds: float = 0.0, frames: int = 0,
-                camera: str = "") -> None:
-        self._progress.hide()
-        self._set_busy(False)
-        self._result = result
-        if result is None:
-            self._logger.warning(f"Playblast failed: {error}")
-            self._say(error or "The playblast failed.", "error")
+    def _done(self, run: dict) -> None:
+        """One playblast is over: its result is remembered, copied, opened — or its error said."""
+        self._taken.discard(run["target"])
+        capturing = self._busy
+        if not capturing and not self._encodes:
+            self._progress.hide()
+        if run.get("error"):
+            self._result = None
+            self._logger.warning(f"Playblast failed: {run['error']}")
+            if not capturing:
+                self._say(run["error"], "error")
             return
-        if not note:
-            note = size_text(result.stat().st_size) if result.is_file() else ""
-        # the result itself is the first tile of RECENT: the line only says it is done
-        self._say(" · ".join(part for part in ("Done", note, f"{seconds:.1f} s") if part), "done")
-        self._status.setToolTip(str(result))
-        latest = self._latest_path_at_start
+        result = self._result = run["target"]
+        note = size_text(result.stat().st_size) if result.is_file() else f"{run.get('frames', 0)} frames"
+        message, state = " · ".join(("Done", note, f"{time.time() - run['started']:.1f} s")), "done"
+        if self._encodes:
+            message += f" · {self._encoding_text()[:-1].lower()}"
+        latest = run.get("latest")
         if latest is not None:
             try:
                 if result.is_dir():
@@ -1293,17 +1591,22 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
                     latest.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(result, latest)
             except OSError as error:
-                self._say(f"Done — but the latest copy couldn’t be written: {error}", "error")
-        self._remember(result, frames, camera)
-        self._refresh_facts()
+                message, state = f"Done — but the latest copy couldn’t be written: {error}", "error"
+        if not capturing:  # the line belongs to the capture while one is going on
+            self._say(message, state)
+            self._status.setToolTip(str(result))
+        self._remember(result, run.get("frames", 0), run.get("camera", ""))
+        if not capturing:
+            self._refresh_facts()
         self._refresh_recent()
-        if self._copy.isChecked():
+        if run["copy"]:
             data = qt.QtCore.QMimeData()  # the FILE, as a file manager copies it — and its path as text
             data.setUrls([qt.QtCore.QUrl.fromLocalFile(str(result))])
             data.setText(str(result))
             qt.QtWidgets.QApplication.clipboard().setMimeData(data)
-        qt.QtWidgets.QApplication.alert(self.window())  # the taskbar says so if Maya isn't in front
-        if self._open.isChecked():
+        if not capturing and not self._encodes:
+            qt.QtWidgets.QApplication.alert(self.window())  # the taskbar says so if Maya isn't in front
+        if run["open"]:
             open_result(result)
 
     def _set_busy(self, busy: bool) -> None:

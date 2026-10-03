@@ -312,3 +312,12 @@ SessionsTab QSplitter#sessionsSplit::handle:vertical:hover,
 SessionsTab QSplitter#sessionsSplit::handle:vertical:pressed {
     background-color: alpha(var(--accent), 55%);
 }
+
+/* What to check before a launch (MayaGatePage): a quiet warning link under the versions. */
+QPushButton#gateProblems {
+    color: var(--warning);
+    font-size: 11px;
+}
+QPushButton#gateProblems:hover {
+    color: var(--text-primary);
+}
