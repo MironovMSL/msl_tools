@@ -14,7 +14,7 @@ from msl_tools.msl.tools.desktop.media.ffmpeg_bar import FfmpegBar, link_button
 from msl_tools.msl.tools.desktop.media.history import ResultHistory
 from msl_tools.msl.tools.desktop.media.job_queue import DONE, FAILED, JobList, JobQueue
 from msl_tools.msl.ui.desktop_notice import DesktopNotice
-from msl_tools.msl.tools.desktop.media.option_panels import PANELS
+from msl_tools.msl.tools.desktop.media.panels import PANELS
 from msl_tools.msl.tools.desktop.media.source import AUDIO_SUFFIXES, load_source, load_sources, prune_temp
 from msl_tools.msl.tools.desktop.media.source_card import SourceCard
 from msl_tools.msl.ui.process_launcher.process_launcher import ProcessLauncher
@@ -90,7 +90,7 @@ class MediaPage(qt.QtWidgets.QWidget):
       read on a worker thread. SEVERAL can be dropped at once: all videos,
       or all image sequences;
     - the actions: an ActionStrip — icon buttons — of the actions that fit
-      the sources (their panels are option_panels.PANELS). Most make one
+      the sources (their panels are panels.PANELS). Most make one
       result per source; Join and Compare make one result out of all;
     - the picked action's CARD, top to bottom: a header (its icon, its name
       in capitals, one line saying what it does); presets — saved settings

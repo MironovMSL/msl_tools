@@ -1175,7 +1175,7 @@ tools folder): 101 MB in ~4 s, checksum matched, installed and usable in
 
 `msl/tools/desktop/media/` — a hub tool (sidebar "Media", icon
 `tools/media`): quick work with video and image sequences without knowing
-ffmpeg. Actions (`option_panels.PANELS`, in the picker's order): To video
+ffmpeg. Actions (`panels.PANELS`, in the picker's order): To video
 (sequences) · Make smaller · Trim · Loop · Stamp · Sound · GIF · To
 frames · For editing · Adjust · Join (2+ videos) · Compare (exactly 2).
 
@@ -1423,7 +1423,10 @@ frames · For editing · Adjust · Join (2+ videos) · Compare (exactly 2).
   choose a file (`actions/file_video`) / a folder (`actions/browse`)),
   loading (the same frame says "Reading <name>…"), loaded (104 px) (thumbnail, name, facts, a warning for
   missing frames, a chooser when the folder holds several sequences, "×").
-- `option_panels.py`: `OptionPanel` (a caption / control form;
+- `panels/` (was option_panels.py, ~1900 lines; split 2026-10-04 — `base.py` OptionPanel,
+  SectionHeader, _OverlayRows, shared choices; `sequence`, `shrink`, `trim`, `frames`, `adjust`,
+  `simple` (Stamp, Loop, Sound, GIF, For editing, Fit, Sheet), `combine` (Chain, Join, Compare);
+  `__init__` = PANELS): `OptionPanel` (a caption / control form;
   `job(source, output)`, `output_for(source, taken)`, `settings()` /
   `apply_settings()`, `accepts(sources)`, `COMBINES`, `PRESETS`, `TAG` /
   `suffix()` for the result's name) -> `SequencePanel` (frame rate, format
