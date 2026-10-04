@@ -1210,7 +1210,10 @@ frames · For editing · Adjust · Join (2+ videos) · Compare (exactly 2).
   click on the name: opens it in its program); a folder of frames has the `image_stack` icon
   there (opens the folder). The slot keeps its room while it is hidden
   (waiting / running / failed rows), so every name starts at the same x.
-- `page.py` `MediaPage` (registers `media.qss`), top to bottom:
+- `page.py` `MediaPage` (registers `media.qss`; split 2026-10-04 — its methods by concern in mixins,
+  moved as they were: `page_output.py` _OutputMixin presets + where results go, `page_jobs.py`
+  _JobsMixin start / preview / estimate / queue / jobs card, `page_drops.py` _DropsMixin drops,
+  paste, recent, Send to; `start_button.py` StartButton), top to bottom:
   header (+ the "ffmpeg 8.0" link) · `FfmpegBar` · `SourceCard` · the
   actions (an `ActionStrip` of the panels whose `accepts(sources)` is
   true) · the action's card: header · presets (a `ChipBar` shelf) · that
