@@ -8,9 +8,11 @@ In a source checkout, theme files hot-reload (edit assets/themes/*.css or
 ui/theme/base.qss, save, the hub repaints). MSL_THEME_HOT_RELOAD=0/1
 forces it off/on.
 
-`--open <files...>` (what Explorer's "Send to → MSL Media" runs): the files
-are opened in Media — handed to the hub that is running already, if there
-is one (InstanceLink), and this start quits without a window.
+One hub per install (InstanceLink): a second start hands over what it was
+asked to do and quits without a window. `--open <files...>` (what
+Explorer's "Send to → MSL Media" runs): the files are opened in Media of
+the hub already running; a plain second start (the shortcut clicked
+again) brings that hub to the front.
 """
 import sys
 import threading
@@ -126,23 +128,38 @@ def _files_to_open(argv: list) -> list:
     return [argument for argument in argv[argv.index("--open") + 1:] if not argument.startswith("--")]
 
 
-def _open_in_media(window: HubWindow, paths: list) -> None:
-    """Media, in front, with `paths` loaded."""
-    page = window.open_tool("media")
-    if page is not None and paths:
-        page.open(paths)
+def _bring_to_front(window: HubWindow) -> None:
     if window.isMinimized():
         window.showNormal()
     window.raise_()
     window.activateWindow()
 
 
+def _open_in_media(window: HubWindow, paths: list) -> None:
+    """Media, in front, with `paths` loaded."""
+    page = window.open_tool("media")
+    if page is not None and paths:
+        page.open(paths)
+    _bring_to_front(window)
+
+
+def _on_second_start(window: HubWindow, message: dict) -> None:
+    """What another start of this install handed over: files to open, or just "come to the front"."""
+    files = list(message.get("open") or [])
+    if files:
+        _open_in_media(window, files)
+    else:
+        _bring_to_front(window)
+
+
 def main() -> None:
     # One hub per install: a start that only brings files hands them to the hub that is running
     # and quits - BEFORE the application context, whose exit runs the event loop in any case.
+    # Without files it asks that hub to come to the front: two hubs of one install would each
+    # keep their own copy of the configs and save over each other's changes.
     instance_name = InstanceLink.instance_name(Resources().fsManager.ROOT_DIR)
     files = _files_to_open(sys.argv)
-    if files and InstanceLink.send(instance_name, {"open": files}):
+    if InstanceLink.send(instance_name, {"open": files} if files else {"raise": True}):
         return
     _use_own_taskbar_icon()
     with QtApplicationContext():
@@ -226,7 +243,7 @@ def main() -> None:
         if last_update is not None:
             qt.QtCore.QTimer.singleShot(300, lambda: report_update(last_update))
         instance_link = InstanceLink(instance_name, window)
-        instance_link.received.connect(lambda message: _open_in_media(window, list(message.get("open") or [])))
+        instance_link.received.connect(lambda message: _on_second_start(window, message))
         if files:
             qt.QtCore.QTimer.singleShot(0, lambda: _open_in_media(window, files))
 

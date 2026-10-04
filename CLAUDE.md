@@ -351,6 +351,13 @@ NEVER runs inside Maya; it's a pure standalone desktop app. Future
   on `FramelessWindowMixin`, so any frameless window can remember itself.
   Maximized/snapped state isn't kept (the un-maximized rect is); a rect
   whose header is on no screen is ignored, an oversized one is clamped.
+  ONE hub per install folder (since 2026-10-04): every start first tries
+  `InstanceLink.send()` — files (`--open`) go to the running hub's Media,
+  a plain start asks it to come to the front (`{"raise": true}`,
+  `_on_second_start`) — and quits if one answered. Two hubs of one folder
+  kept two copies of the configs and saved over each other. In a dev
+  checkout this means: close the running hub before starting it again
+  from the IDE (a second start only raises the first).
 
 ### Maya Gate — fully ported from MSL_MayaGate
 
@@ -1849,7 +1856,9 @@ under a running hub:
   downloads `Resources().releaseArchiveUrl` (GitHub's source zip of the
   tag; `MSL_UPDATE_ARCHIVE_URL` overrides the template, e.g. a `file:///`
   URL in tests), checks it (zip CRC, no paths outside the folder, complete
-  `msl/`, `__version__` == the release's version) and stages `msl/` + root
+  `msl/`, `__version__` == the release's version — READ from the file's
+  text by `LocalVersionReader` (ast), never by running the downloaded
+  `__init__.py` inside the hub) and stages `msl/` + root
   files in `<root>/.update/staged`; raises `UpdateError` with a message for
   the user. `start_apply(version, previous)` starts the helper;
   `take_result()` reads `.update/result.json` once on the next start.
