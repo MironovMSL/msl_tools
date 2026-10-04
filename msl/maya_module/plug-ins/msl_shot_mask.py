@@ -27,6 +27,13 @@ warning color while the current frame is outside `rangeStart`..`rangeEnd`
 angle in the scene's units, other numbers with at most two decimals; "?" when
 there is no such attribute.
 
+Outside the picture a playblast takes (`outsideFill`, on by default) the
+viewport is covered in the bars' color: Maya's own film gate often has
+another shape than the playblast (a 1.5:1 film back against 16:9), and the
+strip between them is no part of the playblast. With overscan the room around
+the frame stays visible — it is in the picture. A playblast itself has
+nothing outside its picture, so this never shows in one.
+
 Over the frame, thin lines: the safe frames (`safeAction` 90 %, `safeTitle` 80 %
 of the frame, the second dashed), and — when the camera has overscan, so the
 picture shows room around the frame — the frame's own edge.
@@ -154,6 +161,7 @@ class ShotMaskNode(omui.MPxLocatorNode):
     warn_color = None
     safe_action = None
     safe_title = None
+    outside_fill = None
 
     @staticmethod
     def creator():
@@ -210,6 +218,7 @@ class ShotMaskNode(omui.MPxLocatorNode):
         ShotMaskNode.counter_padding = number("counterPadding", "smcp", om.MFnNumericData.kInt, 4, 1, 8)
         ShotMaskNode.safe_action = number("safeAction", "smsa", om.MFnNumericData.kBoolean, False)
         ShotMaskNode.safe_title = number("safeTitle", "smst", om.MFnNumericData.kBoolean, False)
+        ShotMaskNode.outside_fill = number("outsideFill", "smof", om.MFnNumericData.kBoolean, True)
         ShotMaskNode.text_color = color("textColor", "smtc", (1.0, 1.0, 1.0))
         ShotMaskNode.bar_color = color("barColor", "smbc", (0.0, 0.0, 0.0))
         ShotMaskNode.warn_color = color("warnColor", "smwc", (1.0, 0.33, 0.28))
@@ -242,6 +251,9 @@ class _MaskData(om.MUserData):
         self.safe_action = False
         self.safe_title = False
         self.gate = False        # the camera has overscan: the frame's edge is drawn too
+        self.view = (0.0, 0.0)   # the viewport's width, height
+        self.picture = (0.0, 0.0, 0.0, 0.0)  # what a playblast takes: the frame + the overscan's room
+        self.outside_fill = True
 
 
 class ShotMaskDrawOverride(omr.MPxDrawOverride):
@@ -299,6 +311,13 @@ class ShotMaskDrawOverride(omr.MPxDrawOverride):
             width, height = width / overscan, height / overscan
         data.gate = aspect > 0.0 and camera.overscan > 1.0001
         data.rect = ((view_width - width) / 2.0, (view_height - height) / 2.0, width, height)
+        data.view = (float(view_width), float(view_height))
+        scale = camera.overscan if aspect > 0.0 and camera.overscan > 1.0 else 1.0
+        picture_width = min(float(view_width), width * scale)
+        picture_height = min(float(view_height), height * scale)
+        data.picture = ((view_width - picture_width) / 2.0, (view_height - picture_height) / 2.0,
+                        picture_width, picture_height)
+        data.outside_fill = aspect > 0.0 and plug(ShotMaskNode.outside_fill).asBool()
         data.bar_height = height * BAR_PART * plug(ShotMaskNode.bar_scale).asFloat()
         data.font_size = max(6, int(round(height * TEXT_PART * plug(ShotMaskNode.text_scale).asFloat())))
         letterbox = plug(ShotMaskNode.letterbox).asFloat()
@@ -471,6 +490,7 @@ class ShotMaskDrawOverride(omr.MPxDrawOverride):
                     if part:
                         draw_manager.text2d(om.MPoint(at, first - index * step - size * 0.36), part, alignment)
         draw_manager.endDrawable()
+        ShotMaskDrawOverride._draw_outside(draw_manager, data)
         ShotMaskDrawOverride._draw_guides(draw_manager, data)
         if logos:
             draw_manager.beginDrawable()
@@ -483,6 +503,28 @@ class ShotMaskDrawOverride(omr.MPxDrawOverride):
                                     logo_width / 2.0, logo_height / 2.0, True)
             draw_manager.setTexture(None)
             draw_manager.endDrawable()
+
+    @staticmethod
+    def _draw_outside(draw_manager, data):
+        """Covers the viewport outside the picture a playblast takes (see the module's docstring)."""
+        if not data.outside_fill:
+            return
+        view_width, view_height = data.view
+        x, y, width, height = data.picture
+        strips = []  # (left, bottom, width, height): left and right full height, top and bottom between them
+        if x > 0.5:
+            strips += [(0.0, 0.0, x, view_height), (x + width, 0.0, view_width - x - width, view_height)]
+        if y > 0.5:
+            strips += [(x, 0.0, width, y), (x, y + height, width, view_height - y - height)]
+        if not strips:
+            return
+        draw_manager.beginDrawable()
+        draw_manager.setColor(om.MColor((data.bar_color.r, data.bar_color.g, data.bar_color.b, 1.0)))
+        for left, bottom, strip_width, strip_height in strips:
+            if strip_width > 0.0 and strip_height > 0.0:
+                draw_manager.rect2d(om.MPoint(left + strip_width / 2.0, bottom + strip_height / 2.0),
+                                    om.MVector(0.0, 1.0, 0.0), strip_width / 2.0, strip_height / 2.0, True)
+        draw_manager.endDrawable()
 
     @staticmethod
     def _draw_guides(draw_manager, data):

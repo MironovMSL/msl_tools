@@ -78,6 +78,7 @@ class MaskSettings:
         warn_range: Draw the slots that show the frame in `warn_color` while the
             current frame is outside range_start..range_end.
         safe_action / safe_title: Draw the safe frames (90 % / 80 % of the frame).
+        outside_fill: Cover the viewport outside the picture a playblast takes.
     """
 
     texts: dict = field(default_factory=lambda: dict(DEFAULT_TEXTS))
@@ -105,6 +106,7 @@ class MaskSettings:
     warn_color: tuple = (1.0, 0.33, 0.28)
     safe_action: bool = False
     safe_title: bool = False
+    outside_fill: bool = True
 
 
 class _Quiet:
@@ -359,6 +361,7 @@ def _apply(shape: str, settings: MaskSettings) -> None:
     cmds.setAttr(f"{shape}.rangeEnd", int(settings.range_end))
     # Newer attributes: a Maya whose plug-in was loaded before they existed (code reloaded, plug-in
     # not) hasn't got them — the rest of the mask still shows.
-    for attribute, value in (("safeAction", settings.safe_action), ("safeTitle", settings.safe_title)):
+    for attribute, value in (("safeAction", settings.safe_action), ("safeTitle", settings.safe_title),
+                             ("outsideFill", settings.outside_fill)):
         if cmds.attributeQuery(attribute, node=shape, exists=True):
             cmds.setAttr(f"{shape}.{attribute}", bool(value))

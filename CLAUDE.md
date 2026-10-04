@@ -1821,6 +1821,11 @@ came from: CLAUDE.local.md). Step 1 of 4 is built (2026-10-03):
   per draw by the plug-in (`attribute_text`: enum by name, on / off, lengths and angles in scene
   units, <= 2 decimals, "?" for none) and for the sketch by mask.attribute_text; the button
   beside the slot's text puts in the Channel Box's selected attribute (capture.channel_box_attributes).
+  OUTSIDE FILL (`outsideFill`, on by default, the crop toggle in Guides): the viewport outside
+  the picture a playblast takes (the frame x the overscan's room) is covered in the bars' color.
+  Maya's own film gate + gate mask has the FILM BACK's shape (~1.5:1), not the playblast's
+  (16:9): the strip between them looked like part of the frame but never was (the user saw it).
+  A playblast has nothing outside its picture, so the fill never shows in one.
 - What a playblast goes on to (2026-10-05, `panel_share.py` _ShareMixin + RunEnding side jobs):
   a RECENT tile's menu — "Open in MSL Tools Media" (HubLink.open_in_media -> the link event
   `open_in_media` {"paths"} -> MayaLinkServer.media_requested (existing files only, at most 20;

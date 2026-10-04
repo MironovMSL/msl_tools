@@ -213,6 +213,10 @@ class PlayblastPanel(_ShareMixin, _MaskMixin, _PresetsMixin, _RunMixin, qt.QtWid
                                          "A thin frame at 90 % of the picture: what a screen surely shows.")
         self._mask_safe_title = _Toggle("Title safe", "text_frame",
                                         "A dashed frame at 80 % of the picture: where text is safe to put.")
+        self._mask_outside = _Toggle("Cover outside the picture", "crop",
+                                     "The viewport outside what the playblast takes is covered in the bars'\n"
+                                     "color — the camera's own film gate may have another shape. With overscan\n"
+                                     "the room around the frame stays: it is in the picture.")
         self._mask_attr = IconPushButton(icons.get_icon("attribute", sub_folder="actions"),
                                          "Put in the value of an attribute: select a control, then the attribute\n"
                                          "in the Channel Box, then click — {attr:ctrl.stretch} shows its value on "
@@ -423,7 +427,7 @@ class PlayblastPanel(_ShareMixin, _MaskMixin, _PresetsMixin, _RunMixin, qt.QtWid
         self._mask_preview.slot_picked.connect(self._select_mask_slot)
         self._mask_edit.textEdited.connect(self._on_mask_edit)
         self._mask_attr.clicked.connect(self._on_insert_attribute)
-        for box in (self._mask_safe_action, self._mask_safe_title):
+        for box in (self._mask_safe_action, self._mask_safe_title, self._mask_outside):
             box.toggled.connect(self._on_mask_changed)
         self._mask_edit.token_inserted.connect(self._on_mask_edit)
         self._mask_text.currentTextChanged.connect(self._on_mask_changed)

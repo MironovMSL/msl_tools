@@ -40,7 +40,8 @@ MASK_DIGITS = ("2", "3", "4", "5", "6")
 # every key of a mask's look with its default: a preset saved before a key existed means the default
 MASK_LOOK_DEFAULTS = {"text": "Medium", "bars": "Solid", "text_color": "#ffffff", "bar_color": "#000000",
                       "top_bar": True, "bottom_bar": True, "font": "Consolas", "text_opacity": "Solid",
-                      "letterbox": "Off", "digits": "4", "safe_action": False, "safe_title": False}
+                      "letterbox": "Off", "digits": "4", "safe_action": False, "safe_title": False,
+                      "outside_fill": True}
 # A preset of the WHOLE playblast keeps these settings (not the camera, not custom frames: those
 # belong to the scene) and, under "mask", the mask's look and whether it is shown.
 PRESET_KEYS = ("size", "width", "height", "range", "show", "format", "quality", "sound", "ornaments", "smooth",

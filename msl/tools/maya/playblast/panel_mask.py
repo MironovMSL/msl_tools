@@ -53,7 +53,7 @@ class _MaskMixin:
                 ("Bars", [(self._mask_bars, 2), (self._mask_letterbox, 2), (self._mask_top, 0), (self._mask_bottom, 0),
                           (self._mask_bar_color, 0)]),
                 ("Counter", [(self._mask_digits, 0)]),
-                ("Guides", [(self._mask_safe_action, 0), (self._mask_safe_title, 0)]),
+                ("Guides", [(self._mask_outside, 0), (self._mask_safe_action, 0), (self._mask_safe_title, 0)]),
                 ("Note", [(self._mask_note, 1)]),
                 ("Logo", [(self._mask_logo, 1), (self._mask_logo_browse, 0), (self._mask_logo_brand, 0)]))
         for index, (caption, widgets) in enumerate(rows):
@@ -70,7 +70,7 @@ class _MaskMixin:
                 line.addWidget(digits)
                 line.addStretch(1)
             if caption == "Guides":
-                guides = qt.QtWidgets.QLabel("safe frames: action, title")
+                guides = qt.QtWidgets.QLabel("outside covered · safe frames: action, title")
                 guides.setObjectName("playblastHint")
                 line.addWidget(guides)
                 line.addStretch(1)
@@ -131,7 +131,8 @@ class _MaskMixin:
             logo=self._mask_logo.text().strip() or str(BRAND_LOGO),
             note=self._mask_note.text(), project=Path(capture.project_folder().rstrip("/\\")).name,
             width=width, height=height, warn_range=self._mask_warn.isChecked(), range_start=start, range_end=end,
-            safe_action=self._mask_safe_action.isChecked(), safe_title=self._mask_safe_title.isChecked())
+            safe_action=self._mask_safe_action.isChecked(), safe_title=self._mask_safe_title.isChecked(),
+            outside_fill=self._mask_outside.isChecked())
 
     def _mask_look(self) -> dict:
         """What a preset keeps: the texts, the sizes, the colors."""
@@ -141,7 +142,8 @@ class _MaskMixin:
                 "top_bar": self._mask_top.isChecked(), "bottom_bar": self._mask_bottom.isChecked(),
                 "font": self._mask_font.currentText(), "text_opacity": self._mask_text_opacity.currentText(),
                 "letterbox": self._mask_letterbox.currentText(), "digits": self._mask_digits.currentText(),
-                "safe_action": self._mask_safe_action.isChecked(), "safe_title": self._mask_safe_title.isChecked()}
+                "safe_action": self._mask_safe_action.isChecked(), "safe_title": self._mask_safe_title.isChecked(),
+                "outside_fill": self._mask_outside.isChecked()}
 
     def _apply_mask_look(self, look) -> None:
         texts = look.get("texts") or mask.DEFAULT_TEXTS
@@ -162,6 +164,7 @@ class _MaskMixin:
         self._set_combo(self._mask_digits, look.get("digits", MASK_LOOK_DEFAULTS["digits"]))
         self._mask_safe_action.set_checked_immediate(bool(look.get("safe_action", False)))
         self._mask_safe_title.set_checked_immediate(bool(look.get("safe_title", False)))
+        self._mask_outside.set_checked_immediate(bool(look.get("outside_fill", True)))
 
     # presets of the mask: the built-in ones until the user saves or removes one, then the config's
 
