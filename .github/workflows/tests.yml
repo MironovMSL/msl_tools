@@ -1,0 +1,35 @@
+# Runs the unit tests on every push and pull request.
+# The checkout goes into a folder named msl_tools: the repository IS the package, so its parent
+# (the workspace) is what goes on PYTHONPATH.
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  unittest:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.13"]   # the range setup_express_launcher.bat accepts
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHONPATH: ${{ github.workspace }}
+      # Nothing a test does may reach a real user's folders
+      MSL_RUNTIME_DIR: ${{ runner.temp }}\msl_runtime
+      MSL_TOOLS_DIR: ${{ runner.temp }}\msl_tools_dir
+      MSL_SENDTO_DIR: ${{ runner.temp }}\msl_sendto
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: msl_tools
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install the hub's packages
+        run: python -m pip install -r msl_tools/requirements.txt
+      - name: Unit tests
+        working-directory: msl_tools
+        run: python -m unittest discover -s tests -t . -v
