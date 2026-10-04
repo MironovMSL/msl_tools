@@ -992,6 +992,9 @@ subclass's own `__init__` body finishes.
 Clicking the version in the hub's sidebar opens `WhatsNewDialog`: one block
 per PUBLISHED GitHub release, newest first — what changed with each version,
 not every commit. The notes are the release's description on GitHub:
+- `Version.parse` takes the FIRST major.minor.patch as it stands and drops
+  the rest ("v0.2.0-rc1" -> 0.2.0). It used to keep every digit, which
+  read that tag as 0.2.1. A pre-release thus compares equal to its final.
 - `core/version/release_notes.py` (Qt-free, no I/O): `ReleaseNote`,
   `parse_releases(json)`, `split_sections(body)` — cuts the Markdown at its
   headings, so write a release description as `### New` / `### Improved` /
@@ -1857,7 +1860,16 @@ under a running hub:
   runs `runtime_bootstrap.ensure()` if requirements.txt changed (only when
   running in the msl_tools environment), starts the hub and watches it for
   12 s. Any failure — also the new hub exiting with an error in that time —
-  puts the backup back and starts the previous version. `configs/` and
+  puts the backup back and starts the previous version.
+  The order matters (fixed 2026-10-04, `tests/core/test_update_helper.py`):
+  the new `msl/` first goes BESIDE the old one (`<root>/.msl-incoming`),
+  the old backup is renamed away (`.update/trash-*`, swept next time) —
+  never half-deleted in place —, then two renames swap the code, so the
+  install is without `msl/` only between them. `Swap.backed_up` tells
+  restore() whether the current code was taken out at all: before that,
+  nothing is put back (it once copied a half-deleted old backup over the
+  working code). A rollback copies the backup beside `msl/` first and
+  falls back to copying when the rename is refused. `configs/` and
   `logs/` are never touched; `.update/update.log` tells what happened; the
   backup stays until the next update. Uninstall removes `.update/`.
 - Freshly unpacked folders are often held by an antivirus scan for a

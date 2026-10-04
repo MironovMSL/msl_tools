@@ -115,7 +115,9 @@ class HubInstaller:
             self._logger.warning(f'Refusing to uninstall "{target}": that is the folder the installer runs from.')
             return False
 
-        doomed = [target / self.MAIN_MODULE, target / self.UPDATE_DIR, *(target / name for name in self.ROOT_FILES)]
+        doomed = [target / self.MAIN_MODULE, target / self.UPDATE_DIR, *(target / name for name in self.ROOT_FILES),
+                  # what an interrupted update can leave beside msl/ (update_helper.INCOMING_NAME / RESTORING_NAME)
+                  target / ".msl-incoming", target / ".msl-restoring"]
         if remove_user_data:
             doomed += [target / name for name in self.USER_DATA_DIRS]
         try:

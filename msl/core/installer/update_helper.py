@@ -6,8 +6,10 @@ HubUpdater (hub_updater.py) downloads and checks the new version into
 to it and starts it, then the hub quits. This process then:
 
     1. waits for the hub to exit,
-    2. moves the current `msl/` and root files into `.update/backup`, and the
-       staged ones into place,
+    2. brings the staged `msl/` next to the current one, moves the current
+       `msl/` and root files into `.update/backup`, and the staged ones into
+       place — the install is without an `msl/` only between two folder
+       renames,
     3. brings the Python environment up to date if requirements.txt changed,
     4. starts the hub again and watches it for a few seconds,
     5. on ANY failure — including the new hub crashing on start — puts the
@@ -38,6 +40,9 @@ MOVE_RETRY_SECONDS = 15      # a just-closed program's files can stay locked for
 HEALTH_SECONDS = 12          # a hub that dies with an error within this time = a bad update
 RESULT_NAME = "result.json"
 LOG_NAME = "update.log"
+INCOMING_NAME = ".msl-incoming"    # the new code, waiting beside msl/ for the swap
+RESTORING_NAME = ".msl-restoring"  # the backup's copy, waiting beside msl/ during a rollback
+TRASH_PREFIX = "trash-"            # folders in .update/ on their way out
 
 
 class _Log:
@@ -96,33 +101,93 @@ def _move(source: Path, destination: Path, copy_instead: bool = False) -> None:
     shutil.copytree(source, destination)
 
 
-def swap_in(root: Path, staged: Path, backup: Path, root_files: list[str], log) -> None:
-    """Current code -> `backup`, staged code -> `root`. Raises OSError,
-    leaving whatever was already moved for restore() to put back."""
-    if backup.exists():
-        shutil.rmtree(backup)
+class Swap:
+    """How far swap_in() got — restore() undoes exactly that, nothing more.
+
+    `backed_up` turns True only once the CURRENT `msl/` has been moved into
+    this run's backup: before that, the installed code was never touched,
+    and whatever `backup/` holds (an older backup, a half-deleted one) must
+    not be put over it.
+    """
+
+    def __init__(self) -> None:
+        self.backed_up = False
+
+
+def _discard(folder: Path, work_dir: Path) -> None:
+    """Gets `folder` out of the way at once (a rename — it raises if that
+    isn't possible, before anything else was changed), then deletes it as
+    far as it can. Leftovers are swept up by the next update."""
+    if not folder.exists():
+        return
+    trash = work_dir / f"{TRASH_PREFIX}{time.strftime('%Y%m%d-%H%M%S')}-{os.getpid()}-{folder.name}"
+    _move(folder, trash)
+    shutil.rmtree(trash, ignore_errors=True)
+
+
+def _discard_quietly(folder: Path, work_dir: Path) -> None:
+    try:
+        _discard(folder, work_dir)
+    except OSError:
+        shutil.rmtree(folder, ignore_errors=True)
+
+
+def sweep_trash(work_dir: Path) -> None:
+    """Deletes what earlier runs couldn't (files that were locked then)."""
+    for leftover in work_dir.glob(TRASH_PREFIX + "*"):
+        shutil.rmtree(leftover, ignore_errors=True)
+
+
+def swap_in(root: Path, staged: Path, backup: Path, root_files: list[str], log, swap: Swap) -> None:
+    """Current code -> `backup`, staged code -> `root`. Raises OSError;
+    `swap` tells restore() what to undo.
+
+    The order keeps the time without a `root/msl` to two folder renames:
+    the new code is first brought next to the old one (`.msl-incoming`,
+    copied if it can't be moved), then the old one goes out and the new
+    one in. The previous backup is renamed away, never half-deleted in
+    place.
+    """
+    work_dir = backup.parent
+    incoming = root / INCOMING_NAME
+    _discard(incoming, work_dir)  # a leftover of an interrupted run
+    _move(staged / MAIN_MODULE, incoming, copy_instead=True)
+
+    _discard(backup, work_dir)
     backup.mkdir(parents=True)
-    if (root / MAIN_MODULE).exists():
-        _move(root / MAIN_MODULE, backup / MAIN_MODULE)
     for name in root_files:
         if (root / name).is_file():
             shutil.copy2(root / name, backup / name)
+    if (root / MAIN_MODULE).exists():
+        _move(root / MAIN_MODULE, backup / MAIN_MODULE)
+    swap.backed_up = True
     log("previous version moved to the backup")
 
-    _move(staged / MAIN_MODULE, root / MAIN_MODULE, copy_instead=True)
+    _move(incoming, root / MAIN_MODULE)
     for name in root_files:
         if (staged / name).is_file():
             shutil.copy2(staged / name, root / name)
     log("new version in place")
 
 
-def restore(root: Path, backup: Path, root_files: list[str], log) -> bool:
-    """Puts the backup back. False if even that failed (logged)."""
+def restore(root: Path, backup: Path, root_files: list[str], log, swap: Swap) -> bool:
+    """Puts the backup back — only what this run took out (see Swap).
+    False if even that failed (logged)."""
+    work_dir = backup.parent
+    _discard_quietly(root / INCOMING_NAME, work_dir)
+    if not swap.backed_up:
+        log("the installed version was not touched")
+        return True
     try:
         if (backup / MAIN_MODULE).is_dir():
-            if (root / MAIN_MODULE).exists():
-                shutil.rmtree(root / MAIN_MODULE)
-            shutil.copytree(backup / MAIN_MODULE, root / MAIN_MODULE)
+            # The copy is made first, beside the code in place; then two renames.
+            restoring = root / RESTORING_NAME
+            _discard(restoring, work_dir)
+            shutil.copytree(backup / MAIN_MODULE, restoring)
+            _discard(root / MAIN_MODULE, work_dir)
+            # copy_instead: whatever kept the new code from being renamed in may hold this rename too
+            _move(restoring, root / MAIN_MODULE, copy_instead=True)
+            shutil.rmtree(restoring, ignore_errors=True)
         for name in root_files:
             if (backup / name).is_file():
                 shutil.copy2(backup / name, root / name)
@@ -201,10 +266,11 @@ def main(argv: list[str]) -> int:
     log = _Log(work_dir / LOG_NAME)
     version, previous, root_files = arguments.version, arguments.previous_version, arguments.root_files
     log(f"--- update {previous or '?'} -> {version or '?'} (helper pid {os.getpid()}) ---")
+    swap = Swap()
 
     def roll_back(reason: str) -> int:
         log(reason)
-        restored = restore(root, backup, root_files, log)
+        restored = restore(root, backup, root_files, log, swap)
         shutil.rmtree(staged, ignore_errors=True)
         write_result(work_dir, "rolled_back" if restored else "failed", version, previous, reason)
         if restored and not arguments.no_start:
@@ -222,8 +288,9 @@ def main(argv: list[str]) -> int:
             start_hub(root)
         return 1
 
+    sweep_trash(work_dir)
     try:
-        swap_in(root, staged, backup, root_files, log)
+        swap_in(root, staged, backup, root_files, log, swap)
     except OSError:
         return roll_back("Could not replace the files:\n" + traceback.format_exc())
     try:

@@ -3,7 +3,7 @@ import re
 
 
 class Version:
-    """Чистая работа с семантическими версиями. Без I/O, без исключений наружу (кроме parse — там осмысленно)."""
+    """Semantic versions, pure: no I/O, nothing raised except by parse()."""
 
     SemanticVersion = namedtuple("SemanticVersion", ["major", "minor", "patch"])
 
@@ -17,6 +17,8 @@ class Version:
         r"(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$"
     )
     _PATTERN_STRICT = r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$"
+    # The FIRST major.minor.patch: "1.2.3", "v1.2.3", "MSL Tools v1.2.3", "1.2.3-rc1", "1.2.3.4" (-> 1.2.3).
+    _FIRST_VERSION = re.compile(r"(?<![\d.])(\d+)\.(\d+)\.(\d+)(?!\d)")
 
     @classmethod
     def is_valid(cls, version_str: str, metadata_ok: bool = True) -> bool:
@@ -25,22 +27,30 @@ class Version:
 
     @classmethod
     def parse(cls, version_string: str, as_tuple: bool = False):
-        """Извлекает major.minor.patch из строки версии. Игнорирует суффиксы (e.g. "v1.2.3-dev" -> "1.2.3")."""
-        try:
-            digits_only = re.sub(r"[^\d.]", "", version_string)
-            major, minor, patch = map(int, digits_only.split(".")[:3])
-        except (ValueError, AttributeError):
+        """major.minor.patch of a version string; what stands before and after
+        it is ignored ("v1.2.3-rc1" -> "1.2.3").
+
+        The three numbers are taken as they stand — never pieced together
+        from digits elsewhere in the string (that once read "v0.2.0-rc1"
+        as 0.2.1).
+
+        Raises:
+            ValueError: no major.minor.patch in the string.
+        """
+        match = cls._FIRST_VERSION.search(version_string) if isinstance(version_string, str) else None
+        if match is None:
             raise ValueError(f'Invalid version format: "{version_string}". Expected semantic versioning: "1.2.3".')
+        major, minor, patch = (int(number) for number in match.groups())
         if as_tuple:
             return cls.SemanticVersion(major=major, minor=minor, patch=patch)
         return f"{major}.{minor}.{patch}"
 
     @classmethod
     def compare(cls, version_a: str, version_b: str) -> int:
-        """-1 если A старше B, 0 если равны, 1 если A новее B."""
+        """1 if A is newer than B, -1 if older, 0 if the same (suffixes ignored)."""
         a = cls.parse(version_a, as_tuple=True)
         b = cls.parse(version_b, as_tuple=True)
-        if a > b:  # namedtuple сравнивается лексикографически: (major, minor, patch)
+        if a > b:  # a namedtuple compares field by field: (major, minor, patch)
             return cls.BIGGER
         if a < b:
             return cls.SMALLER
