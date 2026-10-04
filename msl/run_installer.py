@@ -28,8 +28,18 @@ def _make_package_importable() -> None:
     sys.modules["msl_tools"] = package
 
 
+def _use_own_taskbar_icon() -> None:
+    """Windows groups a script's window under python(w).exe — and shows the
+    Python icon on the taskbar — unless the process has its own AppUserModelID.
+    Not the hub's: the setup is another program (and may run beside it)."""
+    if sys.platform == "win32":
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("msl_tools.setup")
+
+
 def main() -> None:
     _make_package_importable()
+    _use_own_taskbar_icon()
     from msl_tools.msl.ui.app.application_context import QtApplicationContext
     from msl_tools.msl.tools.desktop.installer.installer_view import InstallerView
 

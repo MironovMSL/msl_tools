@@ -54,7 +54,7 @@ class InstallerView(FramelessDialog):
         self._worker: CallableWorker | None = None
 
         super().__init__(title="MSL Tools Setup", width=self.WIDTH, height=self.HEIGHT,
-                         icon=self._ui.iconManager.get_icon("hub", sub_folder="brand"),
+                         icon=self._ui.iconManager.get_icon("installer", sub_folder="brand"),  # the hub's tile + install badge
                          show_minimize_button=False, show_maximize_button=False, show_theme_toggle=False,
                          fade_when_inactive=False, resources=self._ui, parent=parent)
         self._build_widgets()

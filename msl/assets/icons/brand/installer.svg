@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- MSL Tools SETUP app icon: the hub's "M" tile (brand/hub.svg) with an "install" badge -
+       an arrow going down into a tray. Full-color on purpose (window / taskbar icon), not a
+       #000000 one-color icon. The tile is the hub's, a little smaller, so the badge can stand
+       out of its corner. -->
+  <defs>
+    <linearGradient id="setupBackground" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4d96ff"/>
+      <stop offset="1" stop-color="#2a6fc9"/>
+    </linearGradient>
+    <linearGradient id="setupBadge" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3ccf7a"/>
+      <stop offset="1" stop-color="#1fa85a"/>
+    </linearGradient>
+  </defs>
+  <rect x="2" y="2" width="52" height="52" rx="12" fill="url(#setupBackground)"/>
+  <path d="M14 40V16l14 16 14-16v24" fill="none" stroke="#ffffff" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- the badge: a ring the color of the page around it keeps it apart from the tile -->
+  <circle cx="47" cy="47" r="15" fill="url(#setupBadge)" stroke="#ffffff" stroke-width="3"/>
+  <path d="M47 38v11M42 45l5 5 5-5" fill="none" stroke="#ffffff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M40.5 54h13" fill="none" stroke="#ffffff" stroke-width="3.2" stroke-linecap="round"/>
+</svg>
