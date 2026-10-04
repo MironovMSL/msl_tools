@@ -17,10 +17,6 @@ jobs:
     env:
       QT_QPA_PLATFORM: offscreen
       PYTHONPATH: ${{ github.workspace }}
-      # Nothing a test does may reach a real user's folders
-      MSL_RUNTIME_DIR: ${{ runner.temp }}\msl_runtime
-      MSL_TOOLS_DIR: ${{ runner.temp }}\msl_tools_dir
-      MSL_SENDTO_DIR: ${{ runner.temp }}\msl_sendto
     steps:
       - uses: actions/checkout@v4
         with:
@@ -32,4 +28,9 @@ jobs:
         run: python -m pip install -r msl_tools/requirements.txt
       - name: Unit tests
         working-directory: msl_tools
+        # Nothing a test does may reach a real user's folders (the runner context exists only in steps)
+        env:
+          MSL_RUNTIME_DIR: ${{ runner.temp }}\msl_runtime
+          MSL_TOOLS_DIR: ${{ runner.temp }}\msl_tools_dir
+          MSL_SENDTO_DIR: ${{ runner.temp }}\msl_sendto
         run: python -m unittest discover -s tests -t . -v
