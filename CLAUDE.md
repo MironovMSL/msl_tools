@@ -31,6 +31,7 @@ msl_tools/                 (repo root)
     ref/                    the user's local collection of OTHER people's scripts, kept as
                             references to learn from — NOT in git (.gitignore), not part of
                             msl_tools, never installed. Read it for ideas; don't edit or import it.
+    tests/                  unit tests (stdlib unittest) of the Qt-free logic; not installed
     sandbox/                local scratch for test media (clips, image sequences, renders) while
                             developing - NOT in git (.gitignore). Run media experiments here, never
                             in the user's working folders.
@@ -257,6 +258,19 @@ msl_tools/                 (repo root)
   `JsonConfig`/`ConfigNode` (MutableMapping, supports `move_key_left`/
   `move_key_right`/`reorder_keys`, detached-node pattern so reads don't
   create phantom keys).
+- **Files holding the user's data** (configs, histories, snippets — any JSON
+  a tool keeps across restarts) go through `core/fs/safe_json.py`:
+  `read_json_object()` / `write_json_atomic()`, never `write_text(json.dumps())`.
+  A write goes to a unique temporary file, is fsynced, then replaces the
+  target; a broken file (not JSON / not an object) is moved aside as
+  `<name>.broken-<stamp>.json` and reads as {}; a file that exists but
+  can't be read (antivirus, sync client) raises `JsonUnavailable` — the
+  owner must then NOT write over it (`JsonConfig.read_only`, the stores'
+  `_locked`). Before 0.1.8 a broken or locked config.json was silently
+  replaced by the defaults.
+- **Unit tests**: `tests/` (stdlib `unittest`, nothing to install; run
+  from the repo root: `py -3 -m unittest discover -s tests -t .`).
+  Qt-free logic gets a test there; tests write only into temporary folders.
 - **Testing widgets**: use `ThemedWidgetPlaygroundDialog`
   (`ui/widgets/themed_widget_playground_dialog.py`) in a file's
   `if __name__ == "__main__":` block, NOT the older

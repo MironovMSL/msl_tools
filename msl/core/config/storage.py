@@ -1,8 +1,8 @@
-import json
 import threading
 from abc import ABC, abstractmethod
-from pathlib import Path
 from typing import Any
+
+from msl_tools.msl.core.fs.safe_json import JsonUnavailable, read_json_object, write_json_atomic
 
 # =========================================================
 # STORAGE LAYER (ABSTRACT & THREAD-SAFE)
@@ -26,42 +26,27 @@ class ConfigStorage(ABC):
 
 class JsonStorage(ConfigStorage):
     """
-    Thread-safe JSON storage implementation with atomic writes.
+    Thread-safe JSON storage with atomic writes (core/fs/safe_json.py).
+
+    read() returns {} for a missing file and for a broken one — which is
+    moved aside as ``config.broken-<stamp>.json`` first, never overwritten.
+    A file that exists but can't be read right now raises JsonUnavailable:
+    the caller must not save over it.
     """
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
 
     def read(self, path: str) -> dict[str, Any]:
-        p = Path(path)
-
-        if not p.exists():
-            return {}
-
         with self._lock:
-            try:
-                return json.loads(p.read_text(encoding="utf-8"))
-            except (json.JSONDecodeError, OSError):
-                return {}
+            return read_json_object(path)
 
     def write(self, path: str, data: dict[str, Any]) -> None:
-        p = Path(path)
-
         with self._lock:
             try:
-                p.parent.mkdir(parents=True, exist_ok=True)
-                tmp_path = p.with_suffix(".tmp")
-
-                tmp_path.write_text(
-                    json.dumps(data, indent=4, ensure_ascii=False),
-                    encoding="utf-8"
-                )
-
-                tmp_path.replace(p)
+                write_json_atomic(path, data, indent=4)
             except OSError as e:
-                if tmp_path.exists():
-                    try:
-                        tmp_path.unlink()
-                    except OSError:
-                        pass
-                raise RuntimeError(f"Failed to write config safely to {path}: {e}")
+                raise RuntimeError(f"Failed to write config safely to {path}: {e}") from e
+
+
+__all__ = ["ConfigStorage", "JsonStorage", "JsonUnavailable"]

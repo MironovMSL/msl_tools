@@ -23,6 +23,10 @@ BOOST_SKIP = "MSL_GATE_BOOST_SKIP"
 BOOST_REPORT = "MSL_GATE_BOOST_REPORT"
 LAUNCH_FILE = "MSL_GATE_LAUNCH_FILE"       # this launch's record; the loader adds the startup time to it
 
+# Never printed: whoever has the link token can drive this Maya from the hub's port
+# (the report gets pasted into chats). Same name as hub_link.TOKEN_VARIABLE.
+_HIDDEN_VARIABLES = ("MSL_GATE_LINK_TOKEN",)
+
 # Variables shown besides every MAYA_* / MSL_* one.
 _EXTRA_VARIABLES = ("PYTHONPATH", "XBMLANGPATH", "OCIO", "TEMP", "TMP", "PYTHONDONTWRITEBYTECODE")
 _PATH_LIST_HINTS = ("PATH",)  # a name containing this and a value with os.pathsep = one entry per line
@@ -43,6 +47,8 @@ def _variable_lines(name: str, value: str, full: bool) -> list[str]:
     ok / MISSING mark when `full`, else summed up as a count — Maya extends
     its own lists (MAYA_SCRIPT_PATH, XBMLANGPATH, ...) with dozens of
     module folders that would bury everything else."""
+    if name in _HIDDEN_VARIABLES:
+        return [f"  {name} = (hidden)"]
     entries = [entry for entry in value.split(os.pathsep) if entry.strip()]
     is_list = any(hint in name for hint in _PATH_LIST_HINTS) and (len(entries) > 1 or os.path.isabs(value))
     if not is_list:

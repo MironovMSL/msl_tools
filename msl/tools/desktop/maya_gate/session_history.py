@@ -13,12 +13,13 @@ two ends of that format.
 """
 from __future__ import annotations
 
-import json
 import os
 import re
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
+
+from msl_tools.msl.core.fs.safe_json import JsonUnavailable, read_json_object, write_json_atomic
 
 
 @dataclass
@@ -108,7 +109,8 @@ class SessionHistory:
 
     Nothing is read until records() / add() is first called. A file that
     can't be read or written is treated as an empty history — losing the
-    history must never get in the way of the tab.
+    history must never get in the way of the tab. A broken file is moved
+    aside, a locked one is never written over (core/fs/safe_json.py).
     """
 
     KEPT = 30
@@ -116,6 +118,7 @@ class SessionHistory:
     def __init__(self, base_dir: str | Path):
         self._path = Path(base_dir) / "sessions" / "history.json"
         self._records: list[SessionRecord] | None = None
+        self._locked = False  # the file exists but couldn't be read: never write over it
 
     def records(self) -> list[SessionRecord]:
         if self._records is None:
@@ -142,17 +145,23 @@ class SessionHistory:
 
     def _read(self) -> list[SessionRecord]:
         try:
-            data = json.loads(self._path.read_text(encoding="utf-8"))
-            items = data.get("sessions") if isinstance(data, dict) else None
-            return [SessionRecord.from_dict(item) for item in items or [] if isinstance(item, dict)][:self.KEPT]
-        except (OSError, ValueError, TypeError):
+            items = read_json_object(self._path).get("sessions")
+        except JsonUnavailable:  # locked right now: show nothing, and don't write over it
+            self._locked = True
             return []
+        records = []
+        for item in items if isinstance(items, list) else []:
+            try:
+                records.append(SessionRecord.from_dict(item))
+            except (AttributeError, ValueError, TypeError):  # one bad record doesn't cost the others
+                continue
+        return records[:self.KEPT]
 
     def _write(self) -> None:
+        if self._locked:
+            return
         try:
-            self._path.parent.mkdir(parents=True, exist_ok=True)
-            payload = {"sessions": [asdict(record) for record in self._records or []]}
-            self._path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+            write_json_atomic(self._path, {"sessions": [asdict(record) for record in self._records or []]}, indent=2)
         except OSError:
             pass
 

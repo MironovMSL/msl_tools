@@ -1,10 +1,13 @@
 import copy
+import logging
 
 from collections.abc import MutableMapping, Iterator
 from contextlib import AbstractContextManager
 from pathlib import Path
 from typing import Any, Optional
-from msl_tools.msl.core.config.storage import JsonStorage
+from msl_tools.msl.core.config.storage import JsonStorage, JsonUnavailable
+
+logger = logging.getLogger(__name__)
 
 
 def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
@@ -190,6 +193,7 @@ class JsonConfig:
         self.autosave = autosave
 
         self._dirty: bool                = False
+        self.read_only: bool             = False   # the file couldn't be read: never save over it
         self._batch_level: int           = 0
         self._root: Optional[ConfigNode] = None
 
@@ -201,8 +205,22 @@ class JsonConfig:
         If defaults introduced data that isn't present on disk yet (including
         the case where the file doesn't exist at all), persist immediately
         instead of waiting for the first explicit write.
+
+        A broken file has been moved aside by the storage by then (the
+        config starts from the defaults); one that can't be read right now
+        makes the config read_only — it works from the defaults and never
+        saves over the file. reload() tries again.
         """
-        loaded = self.storage.read(self.path) or {}
+        try:
+            loaded = self.storage.read(self.path) or {}
+            self.read_only = False
+        except JsonUnavailable as error:
+            # The file is there but can't be read right now (locked by an
+            # antivirus scan / a sync client): work from the defaults this
+            # session, and never write them over the user's data.
+            logger.warning("%s; its settings are not used and nothing is saved until it can be read.", error)
+            loaded = {}
+            self.read_only = True
         data   = deep_merge(self.defaults, loaded)
 
         self._root  = ConfigNode(root=self, parent=None, data=data, attached=True)
@@ -232,6 +250,8 @@ class JsonConfig:
         if not self._dirty:
             return
         if self._root is None:
+            return
+        if self.read_only:
             return
 
         self.storage.write(self.path, self._root.to_dict())

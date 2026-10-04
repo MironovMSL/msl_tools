@@ -2,9 +2,10 @@
 """The results the Media tool made, kept across hub restarts — Qt-free."""
 from __future__ import annotations
 
-import json
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
+
+from msl_tools.msl.core.fs.safe_json import JsonUnavailable, read_json_object, write_json_atomic
 
 
 @dataclass
@@ -39,19 +40,22 @@ class ResultHistory:
 
     Nothing is read until load() is called. A file that can't be read or
     written is an empty history — losing it must never get in the way of
-    the tool.
+    the tool. A broken file is moved aside, a locked one is never written
+    over (core/fs/safe_json.py).
     """
 
     KEPT = 50
 
     def __init__(self, base_dir: str | Path):
         self._path = Path(base_dir) / "history.json"
+        self._locked = False  # the file exists but couldn't be read: never write over it
 
     def load(self) -> list[ResultRecord]:
         try:
-            data = json.loads(self._path.read_text(encoding="utf-8"))
-            items = data.get("results") if isinstance(data, dict) else None
-        except (OSError, ValueError):
+            items = read_json_object(self._path).get("results")
+            self._locked = False
+        except JsonUnavailable:
+            self._locked = True
             return []
         known = {field.name for field in fields(ResultRecord)}
         records = []
@@ -65,10 +69,9 @@ class ResultHistory:
         return records[-self.KEPT:]
 
     def save(self, records: list[ResultRecord]) -> None:
+        if self._locked:
+            return
         try:
-            self._path.parent.mkdir(parents=True, exist_ok=True)
-            text = json.dumps({"results": [asdict(record) for record in records[-self.KEPT:]]},
-                              indent=2, ensure_ascii=False)
-            self._path.write_text(text, encoding="utf-8")
+            write_json_atomic(self._path, {"results": [asdict(record) for record in records[-self.KEPT:]]}, indent=2)
         except OSError:
             pass
