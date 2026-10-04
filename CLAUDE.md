@@ -1496,10 +1496,9 @@ real mouse.
 
 `msl/tools/maya/playblast/` — the first tool of ours with a window INSIDE
 Maya (MSL menu > Playblast). Maya 2025+ only (PySide6, through the shim);
-older Mayas aren't supported. Inspired by the feature list of Zurbrigg's
-Advanced Playblast (in `ref/`, commercial: its EULA forbids copying, and
-this repo is public) — NO code of it is used, everything is written from
-scratch on Maya's public API. Step 1 of 4 is built (2026-10-03):
+older Mayas aren't supported. No code of anyone else's is used —
+everything is written from scratch on Maya's public API (where the ideas
+came from: CLAUDE.local.md). Step 1 of 4 is built (2026-10-03):
 
 - `window.py` `PlayblastWindow(FramelessDialog)` — what the menu opens
   (`launcher_entry_point` -> `PlayblastWindow.open()`): our own frameless
@@ -1631,8 +1630,7 @@ scratch on Maya's public API. Step 1 of 4 is built (2026-10-03):
   is used for the scene's name). (5) a `rect2d` is drawn OVER every
   text, whatever the order or depth priority — the bars are the
   background boxes of empty `text2d` calls.
-- Mask looks (2026-10-03, after studying LabelMatic in `ref/` — commercial
-  too, a compiled plug-in: only its feature list was read): colors of the
+- Mask looks (2026-10-03; written from scratch, see CLAUDE.local.md): colors of the
   text and the bars (`ColorSwatchButton`, ui/widgets/atoms/buttons — a
   button that shows the color it holds and opens the color dialog; the
   color is the user's data, only its frame is QSS); more tokens —

@@ -221,7 +221,7 @@ __marimo__/
 /configs/
 /logs/
 
-# Reference material: other people's scripts kept locally to learn from - never committed
+# Local material, never committed
 /ref/
 
 # Local notes for Claude Code (what must not be committed)
