@@ -65,7 +65,7 @@ class MaskPreview(qt.QtWidgets.QWidget):
 
     def set_look(self, **look) -> None:
         """Any of: texts, values, text_color, bar_color, bar_opacity, text_opacity, top_bar,
-        bottom_bar, font, aspect, letterbox, logo (a picture's path)."""
+        bottom_bar, font, aspect, letterbox, logo (a picture's path), safe_action, safe_title."""
         self._look.update(look)
         path = str(self._look.get("logo") or "")
         if path != self._logo_path:
@@ -171,6 +171,16 @@ class MaskPreview(qt.QtWidgets.QWidget):
                 self._rects[slot] = rect
                 self._paint_slot(painter, slot, rect, text_color, shown and bar_color.alphaF() > 0.3,
                                  ("left", "center", "right")[index])
+        # the safe frames, as the viewport draws them (90 % solid, 80 % dashed) — a sketch, not to scale
+        guides = qt.QtGui.QColor(text_color)
+        guides.setAlphaF(text_color.alphaF() * 0.55)
+        for wanted, part, style in ((look.get("safe_action"), 0.9, qt.QtCore.Qt.PenStyle.SolidLine),
+                                    (look.get("safe_title"), 0.8, qt.QtCore.Qt.PenStyle.DashLine)):
+            if wanted:
+                painter.setPen(qt.QtGui.QPen(guides, 1, style))
+                painter.setBrush(qt.QtCore.Qt.BrushStyle.NoBrush)
+                painter.drawRect(qt.QtCore.QRectF(frame.center().x() - width * part / 2,
+                                                  frame.center().y() - height * part / 2, width * part, height * part))
         painter.setClipping(False)
         painter.setPen(qt.QtGui.QPen(self._border_color, 1))
         painter.setBrush(qt.QtCore.Qt.BrushStyle.NoBrush)

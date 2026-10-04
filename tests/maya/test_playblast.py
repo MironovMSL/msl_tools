@@ -21,7 +21,8 @@ class FakeCmds:
                       "undo": True, "vis": {}, "attrs": {"hardwareRenderingGlobals.multiSampleEnable": False,
                                                        "hardwareRenderingGlobals.lineAAEnable": False,
                                                        "hardwareRenderingGlobals.ssaoEnable": False},
-                      "range": (1.0, 24.0)}
+                      "range": (1.0, 24.0), "gradient": True, "background": (0.2, 0.3, 0.5)}
+        self.state["attrs"]["shotCamShape.overscan"] = 1.0
         self.fail = set()  # names of calls that raise RuntimeError
 
     def _maybe_fail(self, name):
@@ -92,8 +93,26 @@ class FakeCmds:
     def nodeType(self, name):
         return "transform"
 
+    def listRelatives(self, node, shapes=False, type=None, fullPath=False):
+        return [node + "Shape"]
+
+    def displayPref(self, query=False, displayGradient=None):
+        if query:
+            return self.state["gradient"]
+        self.state["gradient"] = displayGradient
+
+    def displayRGBColor(self, name, *color, query=False):
+        if query:
+            return list(self.state["background"])
+        self.state["background"] = tuple(color)
+
     def timeControl(self, slider, query=False, **flags):
         return "" if "sound" in flags else False  # no sound on the timeline, no range highlighted
+
+
+def _render_switches():
+    """The values of Viewport 2.0's switches a capture may turn on."""
+    return [value for plug, value in cmds.state["attrs"].items() if plug.startswith("hardwareRenderingGlobals.")]
 
 
 def setUpModule():
@@ -161,7 +180,7 @@ class CaptureSessionPutsBack(unittest.TestCase):
         self.assertEqual(state["selection"], ["|ctrl"])
         self.assertEqual(state["time"], 7.0)
         self.assertFalse(state["modified"])
-        self.assertFalse(any(state["attrs"].values()))
+        self.assertFalse(any(_render_switches()))
         self.assertTrue(state["undo"])
 
     def test_a_whole_capture(self):
@@ -177,7 +196,7 @@ class CaptureSessionPutsBack(unittest.TestCase):
         with self.assertRaises(capture.CaptureError):
             capture.CaptureSession(self.settings)
         cmds.fail.clear()
-        self.assertFalse(any(cmds.state["attrs"].values()))
+        self.assertFalse(any(_render_switches()))
         self.assertTrue(cmds.state["undo"])
 
     def test_one_failing_restore_step_doesnt_stop_the_others(self):
@@ -186,7 +205,7 @@ class CaptureSessionPutsBack(unittest.TestCase):
         cmds.fail.add("lookThru")  # e.g. another scene was opened meanwhile
         session.abort()
         cmds.fail.clear()
-        self.assertFalse(any(cmds.state["attrs"].values()))  # the render switches still went back
+        self.assertFalse(any(_render_switches()))  # the render switches still went back
         self.assertEqual(cmds.state["time"], 7.0)
         self.assertEqual(cmds.state["selection"], ["|ctrl"])
 
@@ -197,6 +216,16 @@ class CaptureSessionPutsBack(unittest.TestCase):
         session.step()
         session.finish()
         self.assertFalse(cmds.state["undo"])
+
+    def test_background_and_overscan_are_set_for_the_capture_and_put_back(self):
+        self.settings.background, self.settings.overscan = (0.0, 0.0, 0.0), 1.1
+        session = capture.CaptureSession(self.settings)
+        self.assertEqual((cmds.state["gradient"], cmds.state["background"]), (False, (0.0, 0.0, 0.0)))
+        self.assertEqual(cmds.state["attrs"]["shotCamShape.overscan"], 1.1)
+        session.step()
+        session.finish()
+        self.assertEqual((cmds.state["gradient"], cmds.state["background"]), (True, (0.2, 0.3, 0.5)))
+        self.assertEqual(cmds.state["attrs"]["shotCamShape.overscan"], 1.0)
 
     def test_sub_frame_ranges_cover_whole_frames(self):
         cmds.state["range"] = (-0.5, 100.5)

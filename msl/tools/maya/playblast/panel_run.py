@@ -11,10 +11,13 @@ from pathlib import Path
 import msl_tools.msl.ui.qt_bindings as qt
 from msl_tools.msl.core.fs.manager import FileSystemManager
 from msl_tools.msl.core.media import FfmpegLocator, MediaError, find_sequences, run_job, sequence_to_video
+from msl_tools.msl.core.media.recipes import gpu_encoding_works
 from msl_tools.msl.tools.maya.playblast import capture, naming
 from msl_tools.msl.tools.maya.playblast.ending import RunEnding
 from msl_tools.msl.ui.workers.result_worker import ResultWorker
-from msl_tools.msl.tools.maya.playblast.panel_tables import FORMAT_MP4, QUALITY
+from msl_tools.msl.tools.maya.playblast.panel_tables import (BACKGROUNDS, CODECS, FORMAT_MP4, OVERSCAN, QUALITY,
+                                                             VIDEO_FORMATS)
+from msl_tools.msl.tools.maya.playblast.preview_dialog import PreviewDialog
 
 
 class _RunMixin:
@@ -51,6 +54,13 @@ class _RunMixin:
             self._start_when_ready = False
             qt.QtCore.QTimer.singleShot(0, self._on_start)
         self._refresh_recent()  # pictures need ffmpeg
+        if tools is not None and not getattr(type(self), "_gpu_known", False):
+            worker = ResultWorker(functools.partial(gpu_encoding_works, tools))
+            worker.done.connect(self._on_gpu_known)
+            self._keep(worker)
+            worker.start()
+        elif getattr(type(self), "_gpu_works", False):
+            self._gpu.show()
         if tools is not None:
             self._ffmpeg_note.setText(f"ffmpeg {tools.short_version}")
             self._ffmpeg_note.setToolTip(str(tools.ffmpeg))
@@ -88,7 +98,7 @@ class _RunMixin:
             return
         self.refresh()
         self._save_settings()
-        if self._format.current() == FORMAT_MP4 and self._tools is None:
+        if self._format.current() in VIDEO_FORMATS and self._tools is None:
             self._say("ffmpeg wasn’t found — open Media in the MSL Tools hub to download it, "
                       "or choose “Frames”.", "error")
             return
@@ -99,7 +109,7 @@ class _RunMixin:
         """Starts the capture of the next camera of this run."""
         camera = self._queue.pop(0)
         self._capture_camera = camera
-        video = self._format.current() == FORMAT_MP4
+        video = self._format.current() in VIDEO_FORMATS
         width, height = self._frame_size()
         start, end = self._frames()
         target = self._output_path()
@@ -118,12 +128,16 @@ class _RunMixin:
         settings = capture.CaptureSettings(
             folder=frames_folder, name=frames_name, start=start, end=end, width=width, height=height,
             camera=camera or capture.ACTIVE_VIEW, ornaments=self._ornaments.isChecked(),
+            background=BACKGROUNDS.get(self._background.current()), overscan=OVERSCAN.get(self._overscan.currentText(), 1.0),
             visibility=self._shown_kinds(), smooth=self._smooth.isChecked(), occlusion=self._occlusion.isChecked())
         # everything the end of this playblast needs, as the controls say NOW: by the time its video is
         # made the user may have changed them, or started the next one
         self._run = {"settings": settings, "target": target, "video": video, "latest": latest,
                      "copy": self._copy.isChecked(), "open": self._open.isChecked(),
                      "light": self._light.isChecked() and video, "tools": self._tools,
+                     "video_format": VIDEO_FORMATS[self._format.current()][0] if video else "",
+                     "codec": CODECS.get(self._codec.currentText(), "h264"),
+                     "gpu": self._format.current() == FORMAT_MP4 and self._gpu.isChecked() and self._gpu.isVisible(),
                      "sound": self._sound.isChecked(), "quality": QUALITY.get(self._quality.currentText(), "high"),
                      "started": time.time(), "left": len(self._queue), "id": RunEnding.next_id(),
                      # as they are NOW: another scene may be open by the time the video is made
@@ -237,6 +251,52 @@ class _RunMixin:
         else:
             RunEnding.instance().take(run)
 
+    def _on_gpu_known(self, works) -> None:
+        """Whether this ffmpeg encodes on the graphics card here (asked once per Maya session)."""
+        type(self)._gpu_known, type(self)._gpu_works = True, bool(works)
+        if works:
+            self._gpu.show()
+
+    def _on_preview_frame(self) -> None:
+        """One frame — the current one — as the playblast would draw it, shown in a window: the
+        size, the background, the overscan and the shot mask, without the whole range."""
+        if self._busy:
+            return
+        self.refresh()
+        self._sync_mask()
+        width, height = self._frame_size()
+        frame = capture.current_frame()
+        camera = self._one_camera()
+        folder = Path(tempfile.gettempdir()) / "msl_tools" / "playblast" / f"preview_{time.time_ns()}"
+        settings = capture.CaptureSettings(
+            folder=folder, name="preview", start=frame, end=frame, width=width, height=height,
+            camera=camera or capture.ACTIVE_VIEW, ornaments=self._ornaments.isChecked(),
+            visibility=self._shown_kinds(), smooth=self._smooth.isChecked(), occlusion=self._occlusion.isChecked(),
+            background=BACKGROUNDS.get(self._background.current()),
+            overscan=OVERSCAN.get(self._overscan.currentText(), 1.0))
+        try:
+            session = capture.CaptureSession(settings)
+            try:
+                session.step()
+            finally:
+                session.finish()
+            pictures = sorted(folder.glob("*.png"))
+            image = qt.QtGui.QImage(str(pictures[0])) if pictures else qt.QtGui.QImage()
+        except Exception as error:
+            self._say(f"The preview couldn’t be made: {error}", "error")
+            return
+        finally:
+            shutil.rmtree(folder, ignore_errors=True)
+        if image.isNull():
+            self._say("Maya drew no picture for the preview.", "error")
+            return
+        # A playblast's PNG keeps the background in its colors but marks it see-through (alpha 0);
+        # the video drops the alpha (measured: Gray comes out 91, 91, 91) — so does the preview.
+        image = image.convertToFormat(qt.QtGui.QImage.Format.Format_ARGB32)
+        image.reinterpretAsFormat(qt.QtGui.QImage.Format.Format_RGB32)
+        caption = f"Frame {frame} · {width}×{height} · {self._camera_name()}"
+        PreviewDialog.show_for(self.window(), image, caption)
+
     def _encoding_text(self) -> str:
         return "Making the video…" if self._encodes == 1 else f"Making {self._encodes} videos…"
 
@@ -259,7 +319,9 @@ class _RunMixin:
             if not sequences:
                 raise MediaError("Maya wrote no frames.")
             job = sequence_to_video(sequences[0], run["target"], fps=shot.fps, quality=run["quality"], speed="fast",
-                                    audio=sound, audio_start=shot.sound_start)
+                                    audio=sound, audio_start=shot.sound_start,
+                                    video_format=run.get("video_format") or "mp4", codec=run.get("codec", "h264"),
+                                    gpu=bool(run.get("gpu")))
             run_job(tools, job, on_progress=report)
         except Exception as error:
             run = dict(run, error=str(error) or "The video couldn’t be made.")

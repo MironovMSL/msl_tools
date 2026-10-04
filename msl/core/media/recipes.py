@@ -157,7 +157,8 @@ class Overlays:
 def sequence_to_video(sequence: ImageSequence, output: str | Path, fps: float = 24.0, quality: str = "good",
                       speed: str = "balanced", audio: str | Path | None = None, gaps: str = GAPS_ERROR,
                       work_dir: str | Path | None = None, overlays: Overlays | None = None,
-                      frame_size: tuple = (0, 0), video_format: str = "mp4", audio_start: float = 0.0) -> Job:
+                      frame_size: tuple = (0, 0), video_format: str = "mp4", audio_start: float = 0.0,
+                      codec: str = "h264", gpu: bool = False) -> Job:
     """The frames of `sequence` as a video at `fps`, with `audio` under it if given.
     `audio_start`: the second of the sound at which the first frame lies
     (a playblast that starts in the middle of the timeline's sound);
@@ -167,7 +168,8 @@ def sequence_to_video(sequence: ImageSequence, output: str | Path, fps: float = 
     names them); GAPS_HOLD shows the frame before a gap for as long as the
     gap lasts, so the timing stays right.
     `overlays` draws burn-ins / a watermark (it needs `frame_size`, the
-    frames' width and height). `video_format`: a key of FORMATS.
+    frames' width and height). `video_format`: a key of FORMATS; for "mp4",
+    `codec` ("h264" / "h265") and `gpu` (NVIDIA encoding, see _video).
     """
     output = Path(output)
     missing = sequence.missing
@@ -192,7 +194,7 @@ def sequence_to_video(sequence: ImageSequence, output: str | Path, fps: float = 
     picture, more = _picture(inputs, filters, overlays, frame_size, work_dir)
     temporary += more
     video_codec, sound_codec, _suffix = FORMATS.get(video_format, FORMATS["mp4"])
-    tail = list(video_codec) if video_codec else _video(quality, speed)
+    tail = list(video_codec) if video_codec else _video(quality, speed, codec, gpu)
     if missing:
         tail += ["-frames:v", str(frames)]  # the list ends with its last frame twice (see _hold_list)
     if audio:

@@ -73,6 +73,11 @@ class CaptureSettings:
             hidden for the capture; None = as the viewport is.
         smooth: Anti-aliasing on for the capture (edges without stairs).
         occlusion: Ambient occlusion on for the capture (soft contact shadows).
+        background: An even background (r, g, b in 0..1) instead of the viewport's own, for the
+            capture; None = as the viewport is. (Maya's background is one setting for every
+            viewport: it is put back afterwards.)
+        overscan: Room around the frame (the camera's overscan, e.g. 1.1 = 10 %) for the capture;
+            1.0 = none. The shot mask then marks the frame's edge inside the picture.
     """
 
     folder: Path
@@ -87,6 +92,8 @@ class CaptureSettings:
     visibility: tuple | None = None
     smooth: bool = False
     occlusion: bool = False
+    background: tuple | None = None
+    overscan: float = 1.0
 
 
 @dataclass
@@ -272,9 +279,24 @@ class CaptureSession:
                 self._render[plug] = cmds.getAttr(plug)
             except (RuntimeError, ValueError):
                 continue
+        # The background (a preference of Maya's, not of the scene) and the camera's overscan
+        self._background = None
+        if settings.background is not None:
+            self._background = (bool(cmds.displayPref(query=True, displayGradient=True)),
+                                tuple(cmds.displayRGBColor("background", query=True)))
+        self._overscan = None
+        if abs(settings.overscan - 1.0) > 1e-6:
+            camera_shape = _camera_shape(settings.camera or self._previous_camera)
+            if camera_shape:
+                self._overscan = (camera_shape, cmds.getAttr(camera_shape + ".overscan"))
         self._open = True
         try:
             with _NoUndo():
+                if self._background is not None:
+                    cmds.displayPref(displayGradient=False)
+                    cmds.displayRGBColor("background", *settings.background)
+                if self._overscan is not None:
+                    cmds.setAttr(self._overscan[0] + ".overscan", settings.overscan)
                 for plug in self._render:
                     cmds.setAttr(plug, True)
                 if settings.visibility is not None:
@@ -343,6 +365,13 @@ class CaptureSession:
             steps.append(lambda: cmds.modelEditor(self._panel, edit=True, **self._shown))
         for plug, value in self._render.items():
             steps.append(lambda plug=plug, value=value: cmds.setAttr(plug, value))
+        if self._background is not None:
+            gradient, color = self._background
+            steps.append(lambda: cmds.displayRGBColor("background", *color))
+            steps.append(lambda: cmds.displayPref(displayGradient=gradient))
+        if self._overscan is not None:
+            shape, value = self._overscan
+            steps.append(lambda: cmds.setAttr(shape + ".overscan", value))
         with _NoUndo():
             for step in steps:
                 try:
@@ -354,6 +383,16 @@ class CaptureSession:
                     cmds.file(modified=False)  # looking through another camera marks the scene as changed
                 except Exception:
                     pass
+
+
+def _camera_shape(camera: str) -> str:
+    """The camera shape of `camera` (a transform or a shape); "" if there is none."""
+    if not camera or not cmds.objExists(camera):
+        return ""
+    if cmds.nodeType(camera) == "camera":
+        return camera
+    shapes = cmds.listRelatives(camera, shapes=True, type="camera", fullPath=True) or []
+    return shapes[0] if shapes else ""
 
 
 class _NoUndo:
@@ -379,3 +418,21 @@ def capture(settings: CaptureSettings) -> Capture:
     while session.step():
         pass
     return session.finish()
+
+
+def current_frame() -> int:
+    """The frame the time slider is on."""
+    return int(round(cmds.currentTime(query=True)))
+
+
+def channel_box_attributes() -> list:
+    """"node.attribute" for each attribute selected in the Channel Box, on the last selected node."""
+    nodes = cmds.ls(selection=True) or []
+    if not nodes:
+        return []
+    try:
+        names = cmds.channelBox("mainChannelBox", query=True, selectedMainAttributes=True) or []
+    except RuntimeError:
+        return []
+    return [f"{nodes[-1]}.{name}" for name in names]
+

@@ -10,6 +10,7 @@ the tool's settings; after a scene is opened the tool puts the mask back.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -44,6 +45,8 @@ TOKENS = {
     "note": "the note typed below: WIP, for review...",
     "logo": "the logo picture chosen below",
 }
+# {attr:node.attribute}: that attribute's value, filled in on every draw (the plug-in reads it)
+ATTRIBUTE_TOKEN = re.compile(r"\{attr:([^{}|]+)\}")
 DEFAULT_TEXTS = {"topLeft": "{scene}", "topCenter": "", "topRight": "{date}",
                  "bottomLeft": "{camera}  {focal_length}", "bottomCenter": "{user}", "bottomRight": "{counter}"}
 
@@ -74,6 +77,7 @@ class MaskSettings:
         width / height: The playblast's frame size, for {resolution}.
         warn_range: Draw the slots that show the frame in `warn_color` while the
             current frame is outside range_start..range_end.
+        safe_action / safe_title: Draw the safe frames (90 % / 80 % of the frame).
     """
 
     texts: dict = field(default_factory=lambda: dict(DEFAULT_TEXTS))
@@ -99,6 +103,8 @@ class MaskSettings:
     range_start: int = 0
     range_end: int = 0
     warn_color: tuple = (1.0, 0.33, 0.28)
+    safe_action: bool = False
+    safe_title: bool = False
 
 
 class _Quiet:
@@ -130,6 +136,34 @@ def _load_plugin() -> None:
         raise MaskError(f"The shot mask’s plug-in couldn’t be loaded: {str(error).strip()}") from error
 
 
+def _number(value) -> str:
+    text = ("%.2f" % value).rstrip("0").rstrip(".")
+    return "0" if text in ("-0", "") else text
+
+
+def attribute_text(name: str) -> str:
+    """What {attr:`name`} reads right now — as the plug-in writes it ("?" if there is none)."""
+    name = name.strip()
+    try:
+        if not cmds.objExists(name):
+            return "?"
+        node, attribute = name.split(".", 1)
+        if cmds.attributeQuery(attribute.split("[")[0], node=node, enum=True):
+            return str(cmds.getAttr(name, asString=True))
+        value = cmds.getAttr(name)
+    except (RuntimeError, ValueError, TypeError):
+        return "?"
+    if isinstance(value, list) and value and isinstance(value[0], tuple):
+        value = value[0]  # a compound (translate, color): one tuple in a list
+    if isinstance(value, (tuple, list)):
+        return "(" + ", ".join(_number(part) if isinstance(part, float) else str(part) for part in value) + ")"
+    if isinstance(value, bool):
+        return "on" if value else "off"
+    if isinstance(value, float):
+        return _number(value)
+    return str(value)
+
+
 def token_values(camera: str, settings: MaskSettings) -> dict:
     """token -> what it reads right now, as the plug-in would fill it in (for a sketch of the
     mask outside the viewport). `camera`: the camera it is seen through."""
@@ -159,7 +193,10 @@ def token_values(camera: str, settings: MaskSettings) -> dict:
             "timecode": "%02d:%02d:%02d:%02d" % (seconds // 3600, seconds // 60 % 60, seconds % 60, part),
             "start": str(start), "end": str(end), "range": f"{start}-{end}", "frames": str(end - start + 1),
             "fps": f"{fps:g}", "date": time.strftime("%Y-%m-%d"), "time": time.strftime("%H:%M"),
-            "user": user, "note": settings.note}
+            "user": user, "note": settings.note,
+            # the attributes the texts name: "attr:ctrl.stretch" -> "1.2"
+            **{"attr:" + name: attribute_text(name)
+               for text in settings.texts.values() for name in ATTRIBUTE_TOKEN.findall(str(text or ""))}}
 
 
 def fonts() -> list[str]:
@@ -320,3 +357,8 @@ def _apply(shape: str, settings: MaskSettings) -> None:
     cmds.setAttr(f"{shape}.warnRange", bool(settings.warn_range))
     cmds.setAttr(f"{shape}.rangeStart", int(settings.range_start))
     cmds.setAttr(f"{shape}.rangeEnd", int(settings.range_end))
+    # Newer attributes: a Maya whose plug-in was loaded before they existed (code reloaded, plug-in
+    # not) hasn't got them — the rest of the mask still shows.
+    for attribute, value in (("safeAction", settings.safe_action), ("safeTitle", settings.safe_title)):
+        if cmds.attributeQuery(attribute, node=shape, exists=True):
+            cmds.setAttr(f"{shape}.{attribute}", bool(value))

@@ -24,10 +24,10 @@ from msl_tools.msl.ui.widgets.atoms.segmented.segmented_control import Segmented
 from msl_tools.msl.ui.widgets.atoms.surfaces.stable_scroll_area import StableScrollArea
 from msl_tools.msl.ui.widgets.compositions.chip_bar import ChipBar
 from msl_tools.msl.ui.widgets.compositions.fact_tiles import FactTiles
-from msl_tools.msl.tools.maya.playblast.panel_tables import (ACTIVE_VIEW, FORMAT_FRAMES, FORMAT_MP4, MASK_BARS,
-                                                             MASK_DIGITS, MASK_LETTERBOX, MASK_OPACITY, MASK_PLACES,
-                                                             MASK_TEXT, QUALITY, RANGE_CUSTOM, SHOW_VIEWPORT,
-                                                             SIZE_CUSTOM, SIZE_RENDER, _plain)
+from msl_tools.msl.tools.maya.playblast.panel_tables import (
+    ACTIVE_VIEW, BACKGROUNDS, CODECS, FORMAT_FRAMES, FORMAT_MOV, FORMAT_MP4, MASK_BARS, MASK_DIGITS, MASK_LETTERBOX,
+    MASK_OPACITY, MASK_PLACES, MASK_TEXT, OVERSCAN, QUALITY, RANGE_CUSTOM, SHOW_VIEWPORT, SIZE_CUSTOM, SIZE_RENDER,
+    VIDEO_FORMATS, _plain)
 from msl_tools.msl.tools.maya.playblast.panel_cards import _Card, _Toggle
 from msl_tools.msl.tools.maya.playblast.panel_mask import _MaskMixin
 from msl_tools.msl.tools.maya.playblast.panel_presets import _PresetsMixin
@@ -59,7 +59,8 @@ class PlayblastPanel(_ShareMixin, _MaskMixin, _PresetsMixin, _RunMixin, qt.QtWid
     DEFAULTS = {"camera": "", "size": "HD 1080", "width": 1920, "height": 1080, "range": capture.RANGE_PLAYBACK,
                 "start": 1, "end": 24, "folder": naming.DEFAULT_FOLDER, "name": naming.DEFAULT_NAME,
                 "format": FORMAT_MP4, "quality": "High", "sound": True, "overwrite": False, "open": True,
-                "copy": False, "light": False, "smooth": False, "occlusion": False, "cameras": [],
+                "copy": False, "light": False, "smooth": False, "background": "Viewport", "overscan": "Off",
+                "codec": "H.264", "gpu": False, "occlusion": False, "cameras": [],
                 "folded": {"picture": False, "result": False},
                 "ornaments": False, "show": SHOW_VIEWPORT, "show_custom": list(capture.VISIBILITY_PRESETS["Geometry"]),
                 "mask": {"shown": False, "texts": dict(mask.DEFAULT_TEXTS), "text": "Medium", "bars": "Solid",
@@ -143,6 +144,18 @@ class PlayblastPanel(_ShareMixin, _MaskMixin, _PresetsMixin, _RunMixin, qt.QtWid
                                   "Ambient occlusion switched on for the playblast — soft contact shadows\n"
                                   "(the viewport gets its own back).")
         self._start, self._end = self._number_field(6, signed=True), self._number_field(6, signed=True)
+        self._background = SegmentedControl(list(BACKGROUNDS), "Viewport")
+        self._background.setToolTip("The background of the playblast.\nViewport: as the viewport shows it "
+                                    "(often a gradient).\nGray / Black: one even color — calmer, smaller files.\n"
+                                    "Maya's own background is put back afterwards.")
+        self._overscan = BaseComboBox(list(OVERSCAN), "Off")
+        self._overscan.setToolTip("Room around the frame: the picture shows that much more past its edges,\n"
+                                  "for notes on the composition. The shot mask marks the frame's edge.\n"
+                                  "The camera's own overscan is put back afterwards.")
+        self._still = IconPushButton(icons.get_icon("still", sub_folder="actions"),
+                                     "Preview this frame: one picture with the size, background, overscan\n"
+                                     "and shot mask chosen here — before the whole playblast")
+        self._still.setFixedSize(24, 22)
         self._dash = qt.QtWidgets.QLabel("–")
         self._dash.setObjectName("playblastHint")
 
@@ -159,8 +172,16 @@ class PlayblastPanel(_ShareMixin, _MaskMixin, _PresetsMixin, _RunMixin, qt.QtWid
         self._path = ElidedLabel("", qt.QtCore.Qt.TextElideMode.ElideLeft)
         self._path.setObjectName("playblastHint")
 
-        self._format = SegmentedControl([FORMAT_MP4, FORMAT_FRAMES], FORMAT_MP4)
-        self._format.setToolTip("MP4: a video, with the timeline's sound.\nFrames: PNG pictures in a folder.")
+        self._format = SegmentedControl([FORMAT_MP4, FORMAT_MOV, FORMAT_FRAMES], FORMAT_MP4)
+        self._format.setToolTip("MP4: a video for watching and sending, with the timeline's sound.\n"
+                                "MOV: ProRes 422 — a big file that keeps the picture, for editing.\n"
+                                "Frames: PNG pictures in a folder.")
+        self._codec = BaseComboBox(list(CODECS), "H.264")
+        self._codec.setToolTip("H.264: plays everywhere.\nH.265: about half the size at the same look; "
+                               "some older players can't play it.")
+        self._gpu = _Toggle("Graphics card", "gpu", "The MP4 is made on the graphics card (NVIDIA): much faster,\n"
+                                                    "a somewhat bigger file for the same look.")
+        self._gpu.hide()  # shown once this ffmpeg was seen encoding on the card here
         self._quality = BaseComboBox(list(QUALITY), "High")
         self._sound = _Toggle("Sound", "volume", "The sound shown on the timeline goes under the video.")
         self._ornaments = _Toggle("Viewport HUD", "hud",
@@ -188,6 +209,15 @@ class PlayblastPanel(_ShareMixin, _MaskMixin, _PresetsMixin, _RunMixin, qt.QtWid
         self._mask_slot_label = qt.QtWidgets.QLabel(MASK_PLACES["topLeft"])
         self._mask_slot_label.setObjectName("playblastCaption")
         self._mask_slot_label.setFixedWidth(84)
+        self._mask_safe_action = _Toggle("Action safe", "safe_frame",
+                                         "A thin frame at 90 % of the picture: what a screen surely shows.")
+        self._mask_safe_title = _Toggle("Title safe", "text_frame",
+                                        "A dashed frame at 80 % of the picture: where text is safe to put.")
+        self._mask_attr = IconPushButton(icons.get_icon("attribute", sub_folder="actions"),
+                                         "Put in the value of an attribute: select a control, then the attribute\n"
+                                         "in the Channel Box, then click — {attr:ctrl.stretch} shows its value on "
+                                         "every frame")
+        self._mask_attr.setFixedSize(24, 22)
         self._mask_edit = TokenLineEdit(mask.TOKENS)
         self._mask_edit.setPlaceholderText("nothing here — right click for the tokens")
         self._mask_edit.setToolTip(f"The text of the picked slot. A | starts a new line.\n"
@@ -266,14 +296,16 @@ class PlayblastPanel(_ShareMixin, _MaskMixin, _PresetsMixin, _RunMixin, qt.QtWid
             (("camera", "Camera"), [self._camera, self._cameras_button]),
             (("eye", "What it shows"), [self._visible, self._visible_edit]),
             (("frame_fit", "Size"), [self._size, self._width, self._times, self._height]),
-            (("film", "Frames"), [self._range, self._start, self._dash, self._end]),
+            (("film", "Frames"), [self._range, self._start, self._dash, self._end, self._still]),
+            (("background", "Background"), [self._background]),
+            (("overscan", "Room around the frame (overscan)"), [self._overscan]),
         ])
         output = self._result_card = self._card("RESULT", "save", extras=[self._sound, self._ornaments, self._overwrite, self._open,
-                                                      self._copy, self._light], rows=[
+                                                      self._copy, self._light, self._gpu], rows=[
             ("Folder", [self._folder, self._browse]),
             ("Name", [self._name]),
             ("", [self._path]),
-            ("Format", [self._format, self._quality]),
+            ("Format", [self._format, self._quality, self._codec]),
         ])
 
         body = qt.QtWidgets.QWidget()
@@ -360,6 +392,11 @@ class PlayblastPanel(_ShareMixin, _MaskMixin, _PresetsMixin, _RunMixin, qt.QtWid
         for field in (self._width, self._height, self._start, self._end, self._folder, self._name):
             field.textEdited.connect(self._on_changed)
         self._format.current_changed.connect(self._on_changed)
+        self._background.current_changed.connect(self._on_changed)
+        self._overscan.currentTextChanged.connect(self._on_changed)
+        self._codec.currentTextChanged.connect(self._on_changed)
+        self._gpu.toggled.connect(self._on_changed)
+        self._still.clicked.connect(self._on_preview_frame)
         self._quality.currentTextChanged.connect(self._on_changed)
         for box in (self._sound, self._ornaments, self._overwrite, self._open, self._copy, self._light,
                     self._smooth, self._occlusion):
@@ -385,6 +422,9 @@ class PlayblastPanel(_ShareMixin, _MaskMixin, _PresetsMixin, _RunMixin, qt.QtWid
         self._mask_on.toggled.connect(self._on_mask_toggled)
         self._mask_preview.slot_picked.connect(self._select_mask_slot)
         self._mask_edit.textEdited.connect(self._on_mask_edit)
+        self._mask_attr.clicked.connect(self._on_insert_attribute)
+        for box in (self._mask_safe_action, self._mask_safe_title):
+            box.toggled.connect(self._on_mask_changed)
         self._mask_edit.token_inserted.connect(self._on_mask_edit)
         self._mask_text.currentTextChanged.connect(self._on_mask_changed)
         self._mask_bars.currentTextChanged.connect(self._on_mask_changed)
@@ -422,6 +462,11 @@ class PlayblastPanel(_ShareMixin, _MaskMixin, _PresetsMixin, _RunMixin, qt.QtWid
         self._folder.setText(get("folder"))
         self._name.setText(get("name"))
         self._format.set_current(get("format") if get("format") in self._format.options() else FORMAT_MP4, animate=False)
+        self._background.set_current(get("background") if get("background") in BACKGROUNDS else "Viewport",
+                                     animate=False)
+        self._set_combo(self._overscan, get("overscan") if get("overscan") in OVERSCAN else "Off")
+        self._set_combo(self._codec, get("codec") if get("codec") in CODECS else "H.264")
+        self._gpu.set_checked_immediate(bool(get("gpu")))
         self._set_combo(self._quality, get("quality"))
         for box, key in ((self._sound, "sound"), (self._ornaments, "ornaments"), (self._overwrite, "overwrite"),
                          (self._open, "open"), (self._copy, "copy"), (self._light, "light"),
@@ -454,7 +499,9 @@ class PlayblastPanel(_ShareMixin, _MaskMixin, _PresetsMixin, _RunMixin, qt.QtWid
                   "ornaments": self._ornaments.isChecked(), "overwrite": self._overwrite.isChecked(),
                   "show": self._visible.currentText(),
                   "open": self._open.isChecked(), "copy": self._copy.isChecked(),
-                  "light": self._light.isChecked(),
+                  "light": self._light.isChecked(), "background": self._background.current(),
+                  "overscan": self._overscan.currentText(), "codec": self._codec.currentText(),
+                  "gpu": self._gpu.isChecked(),
                   "smooth": self._smooth.isChecked(), "occlusion": self._occlusion.isChecked()}
         if self._size.currentText() == SIZE_CUSTOM:
             values["width"], values["height"] = self._frame_size()
@@ -473,8 +520,11 @@ class PlayblastPanel(_ShareMixin, _MaskMixin, _PresetsMixin, _RunMixin, qt.QtWid
         for field in (self._start, self._end):
             field.setReadOnly(not custom_range)
             self._set_state(field, "" if custom_range else "shown")
-        video = self._format.current() == FORMAT_MP4
-        self._quality.setEnabled(video)
+        video = self._format.current() in VIDEO_FORMATS
+        mp4 = self._format.current() == FORMAT_MP4
+        self._quality.setEnabled(mp4)  # ProRes has one quality
+        self._codec.setVisible(mp4)
+        self._gpu.setEnabled(mp4)
         self._sound.setEnabled(video)
 
     @staticmethod
@@ -645,7 +695,7 @@ class PlayblastPanel(_ShareMixin, _MaskMixin, _PresetsMixin, _RunMixin, qt.QtWid
     def _output_path(self) -> Path:
         """Where the playblast would go with what is on screen: the video's file, or the frames' folder."""
         values = self._token_values()
-        suffix = ".mp4" if self._format.current() == FORMAT_MP4 else ""
+        suffix = VIDEO_FORMATS[self._format.current()][1] if self._format.current() in VIDEO_FORMATS else ""
         name = self._name_template()
         if naming.VERSION_TOKEN in name:
             # the next version — or, replacing, the last one
@@ -658,7 +708,7 @@ class PlayblastPanel(_ShareMixin, _MaskMixin, _PresetsMixin, _RunMixin, qt.QtWid
         if not self._keeps_latest():
             return None
         values = self._token_values()
-        suffix = ".mp4" if self._format.current() == FORMAT_MP4 else ""
+        suffix = VIDEO_FORMATS[self._format.current()][1] if self._format.current() in VIDEO_FORMATS else ""
         folder = str(Path(values["work"]).parent)
         return naming.output_path(folder, naming.without_version(self._name_template()), values, suffix)
 

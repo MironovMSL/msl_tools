@@ -22,12 +22,21 @@ slot shows the logo alone).
 A slot that shows the frame ({frame}, {counter}, {timecode}) is drawn in the
 warning color while the current frame is outside `rangeStart`..`rangeEnd`
 (with `warnRange` on) — the frames a playblast would not take.
+`{attr:node.attribute}` is that attribute's value on every draw ("ctrl.ikFk",
+"spine_ctrl.stretch"): an enum by its name, a switch as on / off, a length or an
+angle in the scene's units, other numbers with at most two decimals; "?" when
+there is no such attribute.
+
+Over the frame, thin lines: the safe frames (`safeAction` 90 %, `safeTitle` 80 %
+of the frame, the second dashed), and — when the camera has overscan, so the
+picture shows room around the frame — the frame's own edge.
 
 The node is driven by tools/maya/playblast/mask.py, which creates it, marks it
 "do not write" (it never lands in a saved scene) and sets its attributes.
 """
 import getpass
 import os
+import re
 import time
 
 import maya.OpenMaya as om1  # API 1.0: the scene's file name (MFileIO has no API 2.0 form)
@@ -55,8 +64,56 @@ LOGO_TOKEN = "{logo}"
 NEW_LINE = "|"        # in a slot's text: what follows goes on the next line
 LINE_PART = 1.22      # a line's height as a part of its font size
 LINES_PART = 0.9      # how much of a bar's height the lines of a slot may take
+SAFE_ACTION, SAFE_TITLE = 0.9, 0.8  # the safe frames, as parts of the frame
+GUIDE_ALPHA = 0.55    # how solid the guide lines are, as a part of the text's opacity
+ATTRIBUTE_TOKEN = re.compile(r"\{attr:([^{}|]+)\}")
 ERROR_VARIABLE = "MSL_SHOT_MASK_ERROR"  # environment variable of this process: the last failed draw's traceback
 STATE_VARIABLE = "MSL_SHOT_MASK_STATE"  # ... and how far drawing got: "prepared", "drawn"
+
+
+def _number(value):
+    """A number for reading: at most two decimals, no trailing zeros ("1.5", "2", "-0.25")."""
+    text = ("%.2f" % value).rstrip("0").rstrip(".")
+    return "0" if text in ("-0", "") else text
+
+
+def attribute_text(name):
+    """The value of attribute `name` ("node.attr") as text; "?" if there is no such attribute."""
+    try:
+        selection = om.MSelectionList()
+        selection.add(name.strip())
+        plug = selection.getPlug(0)
+    except Exception:
+        return "?"
+    return _plug_text(plug)
+
+
+def _plug_text(plug):
+    attribute = plug.attribute()
+    try:
+        if plug.isCompound:
+            return "(" + ", ".join(_plug_text(plug.child(index)) for index in range(plug.numChildren())) + ")"
+        if attribute.hasFn(om.MFn.kEnumAttribute):
+            return om.MFnEnumAttribute(attribute).fieldName(plug.asShort())
+        if attribute.hasFn(om.MFn.kUnitAttribute):
+            kind = om.MFnUnitAttribute(attribute).unitType()
+            if kind == om.MFnUnitAttribute.kAngle:
+                return _number(plug.asMAngle().asUnits(om.MAngle.uiUnit()))
+            if kind == om.MFnUnitAttribute.kDistance:
+                return _number(plug.asMDistance().asUnits(om.MDistance.uiUnit()))
+            return _number(plug.asDouble())
+        if attribute.hasFn(om.MFn.kNumericAttribute):
+            kind = om.MFnNumericAttribute(attribute).numericType()
+            if kind == om.MFnNumericData.kBoolean:
+                return "on" if plug.asBool() else "off"
+            if kind in (om.MFnNumericData.kFloat, om.MFnNumericData.kDouble):
+                return _number(plug.asDouble())
+            return str(plug.asInt())
+        if attribute.hasFn(om.MFn.kTypedAttribute):
+            return plug.asString()
+    except Exception:
+        return "?"
+    return "?"
 
 
 def _failed():
@@ -95,6 +152,8 @@ class ShotMaskNode(omui.MPxLocatorNode):
     range_end = None
     warn_range = None
     warn_color = None
+    safe_action = None
+    safe_title = None
 
     @staticmethod
     def creator():
@@ -149,6 +208,8 @@ class ShotMaskNode(omui.MPxLocatorNode):
         ShotMaskNode.top_bar = number("topBar", "smtb", om.MFnNumericData.kBoolean, True)
         ShotMaskNode.bottom_bar = number("bottomBar", "smbb", om.MFnNumericData.kBoolean, True)
         ShotMaskNode.counter_padding = number("counterPadding", "smcp", om.MFnNumericData.kInt, 4, 1, 8)
+        ShotMaskNode.safe_action = number("safeAction", "smsa", om.MFnNumericData.kBoolean, False)
+        ShotMaskNode.safe_title = number("safeTitle", "smst", om.MFnNumericData.kBoolean, False)
         ShotMaskNode.text_color = color("textColor", "smtc", (1.0, 1.0, 1.0))
         ShotMaskNode.bar_color = color("barColor", "smbc", (0.0, 0.0, 0.0))
         ShotMaskNode.warn_color = color("warnColor", "smwc", (1.0, 0.33, 0.28))
@@ -178,6 +239,9 @@ class _MaskData(om.MUserData):
         self.logo_slots = set()  # the slots that hold {logo}
         self.logo = None         # the logo's MTexture (None = no picture)
         self.logo_aspect = 1.0   # its width / height
+        self.safe_action = False
+        self.safe_title = False
+        self.gate = False        # the camera has overscan: the frame's edge is drawn too
 
 
 class ShotMaskDrawOverride(omr.MPxDrawOverride):
@@ -233,6 +297,7 @@ class ShotMaskDrawOverride(omr.MPxDrawOverride):
             height = width / aspect
             overscan = camera.overscan if camera.overscan > 0.0 else 1.0
             width, height = width / overscan, height / overscan
+        data.gate = aspect > 0.0 and camera.overscan > 1.0001
         data.rect = ((view_width - width) / 2.0, (view_height - height) / 2.0, width, height)
         data.bar_height = height * BAR_PART * plug(ShotMaskNode.bar_scale).asFloat()
         data.font_size = max(6, int(round(height * TEXT_PART * plug(ShotMaskNode.text_scale).asFloat())))
@@ -242,6 +307,8 @@ class ShotMaskDrawOverride(omr.MPxDrawOverride):
             # a thin bar still has to hold its text
             data.font_size = max(6, min(data.font_size, int(data.bar_height * 0.8)))
         data.padding = height * PADDING_PART
+        data.safe_action = plug(ShotMaskNode.safe_action).asBool()
+        data.safe_title = plug(ShotMaskNode.safe_title).asBool()
         data.top_bar = plug(ShotMaskNode.top_bar).asBool()
         data.bottom_bar = plug(ShotMaskNode.bottom_bar).asBool()
         data.font_name = plug(ShotMaskNode.font_name).asString() or "Consolas"
@@ -286,6 +353,8 @@ class ShotMaskDrawOverride(omr.MPxDrawOverride):
                 text = text.replace(LOGO_TOKEN, "").strip()
             for token, value in values.items():
                 text = text.replace("{" + token + "}", value)
+            if "{attr:" in text:
+                text = ATTRIBUTE_TOKEN.sub(lambda match: attribute_text(match.group(1)), text)
             data.texts[slot] = text
         data.logo, data.logo_aspect = (self._logo(plug(ShotMaskNode.logo).asString())
                                        if data.logo_slots else (None, 1.0))
@@ -402,6 +471,7 @@ class ShotMaskDrawOverride(omr.MPxDrawOverride):
                     if part:
                         draw_manager.text2d(om.MPoint(at, first - index * step - size * 0.36), part, alignment)
         draw_manager.endDrawable()
+        ShotMaskDrawOverride._draw_guides(draw_manager, data)
         if logos:
             draw_manager.beginDrawable()
             draw_manager.setTexture(data.logo)
@@ -413,6 +483,29 @@ class ShotMaskDrawOverride(omr.MPxDrawOverride):
                                     logo_width / 2.0, logo_height / 2.0, True)
             draw_manager.setTexture(None)
             draw_manager.endDrawable()
+
+    @staticmethod
+    def _draw_guides(draw_manager, data):
+        """Thin lines over the frame: its edge (with overscan), the safe frames."""
+        if not (data.gate or data.safe_action or data.safe_title):
+            return
+        x, y, width, height = data.rect
+        centre, up = om.MPoint(x + width / 2.0, y + height / 2.0), om.MVector(0.0, 1.0, 0.0)
+        color = om.MColor((data.text_color.r, data.text_color.g, data.text_color.b,
+                           data.text_color.a * GUIDE_ALPHA))
+        draw_manager.beginDrawable()
+        draw_manager.setColor(color)
+        draw_manager.setLineWidth(1.0)
+        if data.gate:
+            draw_manager.setLineStyle(omr.MUIDrawManager.kSolid)
+            draw_manager.rect2d(centre, up, width / 2.0, height / 2.0, False)
+        if data.safe_action:
+            draw_manager.setLineStyle(omr.MUIDrawManager.kSolid)
+            draw_manager.rect2d(centre, up, width * SAFE_ACTION / 2.0, height * SAFE_ACTION / 2.0, False)
+        if data.safe_title:
+            draw_manager.setLineStyle(omr.MUIDrawManager.kDashed)
+            draw_manager.rect2d(centre, up, width * SAFE_TITLE / 2.0, height * SAFE_TITLE / 2.0, False)
+        draw_manager.endDrawable()
 
 
 def initializePlugin(plugin):

@@ -41,6 +41,7 @@ class _MaskMixin:
         editor.setSpacing(8)
         editor.addWidget(self._mask_slot_label)
         editor.addWidget(self._mask_edit, 1)
+        editor.addWidget(self._mask_attr)
         # caption | controls, one row per thing the mask is made of
         look = qt.QtWidgets.QGridLayout()
         look.setContentsMargins(0, 0, 0, 0)
@@ -52,6 +53,7 @@ class _MaskMixin:
                 ("Bars", [(self._mask_bars, 2), (self._mask_letterbox, 2), (self._mask_top, 0), (self._mask_bottom, 0),
                           (self._mask_bar_color, 0)]),
                 ("Counter", [(self._mask_digits, 0)]),
+                ("Guides", [(self._mask_safe_action, 0), (self._mask_safe_title, 0)]),
                 ("Note", [(self._mask_note, 1)]),
                 ("Logo", [(self._mask_logo, 1), (self._mask_logo_browse, 0), (self._mask_logo_brand, 0)]))
         for index, (caption, widgets) in enumerate(rows):
@@ -66,6 +68,11 @@ class _MaskMixin:
                 digits = qt.QtWidgets.QLabel("digits")
                 digits.setObjectName("playblastHint")
                 line.addWidget(digits)
+                line.addStretch(1)
+            if caption == "Guides":
+                guides = qt.QtWidgets.QLabel("safe frames: action, title")
+                guides.setObjectName("playblastHint")
+                line.addWidget(guides)
                 line.addStretch(1)
             look.addLayout(line, index, 1)
 
@@ -84,6 +91,14 @@ class _MaskMixin:
         box.addWidget(self._mask_header)
         box.addWidget(self._mask_body)
         return card
+
+    def _on_insert_attribute(self) -> None:
+        """{attr:node.attribute} for the attribute picked in the Channel Box, into the slot's text."""
+        names = capture.channel_box_attributes()
+        if not names:
+            self._say("Select a control, then the attribute in the Channel Box — then click again.", "error")
+            return
+        self._mask_edit.insert_token("{attr:%s}" % names[0])  # token_inserted saves it (_on_mask_edit)
 
     def _set_mask_open(self, opened: bool, save: bool = True) -> None:
         icons = UiResources().iconManager
@@ -115,7 +130,8 @@ class _MaskMixin:
             top_bar=self._mask_top.isChecked(), bottom_bar=self._mask_bottom.isChecked(),
             logo=self._mask_logo.text().strip() or str(BRAND_LOGO),
             note=self._mask_note.text(), project=Path(capture.project_folder().rstrip("/\\")).name,
-            width=width, height=height, warn_range=self._mask_warn.isChecked(), range_start=start, range_end=end)
+            width=width, height=height, warn_range=self._mask_warn.isChecked(), range_start=start, range_end=end,
+            safe_action=self._mask_safe_action.isChecked(), safe_title=self._mask_safe_title.isChecked())
 
     def _mask_look(self) -> dict:
         """What a preset keeps: the texts, the sizes, the colors."""
@@ -124,7 +140,8 @@ class _MaskMixin:
                 "text_color": self._mask_text_color.hex(), "bar_color": self._mask_bar_color.hex(),
                 "top_bar": self._mask_top.isChecked(), "bottom_bar": self._mask_bottom.isChecked(),
                 "font": self._mask_font.currentText(), "text_opacity": self._mask_text_opacity.currentText(),
-                "letterbox": self._mask_letterbox.currentText(), "digits": self._mask_digits.currentText()}
+                "letterbox": self._mask_letterbox.currentText(), "digits": self._mask_digits.currentText(),
+                "safe_action": self._mask_safe_action.isChecked(), "safe_title": self._mask_safe_title.isChecked()}
 
     def _apply_mask_look(self, look) -> None:
         texts = look.get("texts") or mask.DEFAULT_TEXTS
@@ -143,6 +160,8 @@ class _MaskMixin:
         self._set_combo(self._mask_text_opacity, look.get("text_opacity", MASK_LOOK_DEFAULTS["text_opacity"]))
         self._set_combo(self._mask_letterbox, look.get("letterbox", MASK_LOOK_DEFAULTS["letterbox"]))
         self._set_combo(self._mask_digits, look.get("digits", MASK_LOOK_DEFAULTS["digits"]))
+        self._mask_safe_action.set_checked_immediate(bool(look.get("safe_action", False)))
+        self._mask_safe_title.set_checked_immediate(bool(look.get("safe_title", False)))
 
     # presets of the mask: the built-in ones until the user saves or removes one, then the config's
 
@@ -229,7 +248,8 @@ class _MaskMixin:
             texts=dict(self._mask_texts), values=values, text_color=self._mask_text_color.hex(),
             bar_color=self._mask_bar_color.hex(), bar_opacity=settings.bar_opacity,
             text_opacity=settings.text_opacity, top_bar=settings.top_bar, bottom_bar=settings.bottom_bar,
-            font=settings.font, aspect=settings.aspect or 16 / 9, letterbox=settings.letterbox, logo=settings.logo)
+            font=settings.font, aspect=settings.aspect or 16 / 9, letterbox=settings.letterbox, logo=settings.logo,
+            safe_action=settings.safe_action, safe_title=settings.safe_title)
         filled = sum(1 for text in self._mask_texts.values() if text.strip())
         current = self._mask_look()
         preset = next((name for name, look in self._mask_preset_list()
