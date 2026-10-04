@@ -18,7 +18,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from msl_tools.msl.core.media.ffmpeg import FfmpegTools, MediaError
+from msl_tools.msl.core.media.ffmpeg import FfmpegTools, MediaError, run_quiet
 from msl_tools.msl.core.media.probe import probe
 from msl_tools.msl.core.media.recipes import Job
 
@@ -258,14 +258,12 @@ def quality_crops(tools: FfmpegTools, job: Job, info, folder: str | Path, tag: s
     start = float(job.sample[1]) if len(job.sample) > 1 and job.sample[0] == "-ss" else 0.0
     at = 0.4  # into the piece: past its very first frame (a key frame, the best one)
     after, before = folder / f"{tag}_after.png", folder / f"{tag}_before.png"
-    flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
     for command in ([str(tools.ffmpeg), "-hide_banner", "-nostdin", "-v", "error", "-y", "-ss", f"{at:.3f}", "-i",
                      str(encoded), "-frames:v", "1", "-update", "1", "-vf", crop, str(after)],
                     [str(tools.ffmpeg), "-hide_banner", "-nostdin", "-v", "error", "-y", "-ss", f"{start + at:.3f}",
                      "-i", str(info.path), "-frames:v", "1", "-update", "1", "-vf",
                      f"scale={result.width}:{result.height},{crop}", str(before)]):
-        done = subprocess.run(command, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60,
-                              creationflags=flags)
+        done = run_quiet(command, timeout=60)  # UTF-8: ffmpeg's messages aren't in the system's code page
         if done.returncode != 0:
             raise MediaError(error_summary(done.stderr))
     try:
@@ -280,10 +278,8 @@ def _whole_size(tools: FfmpegTools, sample: str, length: float, job: Job) -> int
     total = os.path.getsize(sample)
     plain = int(total / length * job.duration)
     try:
-        listing = subprocess.run([str(tools.ffprobe), "-v", "error", "-select_streams", "v:0", "-show_entries",
-                                  "packet=size,flags", "-of", "csv=p=0", sample], stdin=subprocess.DEVNULL,
-                                 capture_output=True, text=True, timeout=30,
-                                 creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0).stdout
+        listing = run_quiet([str(tools.ffprobe), "-v", "error", "-select_streams", "v:0", "-show_entries",
+                             "packet=size,flags", "-of", "csv=p=0", sample], timeout=30).stdout
     except (OSError, subprocess.SubprocessError):
         return plain
     key_bytes = key_count = other_bytes = other_count = 0

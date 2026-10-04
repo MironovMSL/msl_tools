@@ -299,6 +299,16 @@ class OptionPanel(qt.QtWidgets.QFrame):
         pass
 
 
+def _remove_files(paths) -> None:
+    """Deletes the temporary pictures of a preview (None entries skipped)."""
+    for path in paths or []:
+        if path is not None:
+            try:
+                Path(path).unlink()
+            except OSError:
+                pass
+
+
 def _videos(sources: list) -> bool:
     return bool(sources) and not any(source.is_sequence for source in sources)
 
@@ -757,6 +767,7 @@ class TrimPanel(OptionPanel):
         self._syncing = False
         self._workers: list = []
         self._token = 0
+        self._ends_token = 0  # the end pictures' own (see _load_previews)
         self._strip = RangeStrip()
         self._strip.setToolTip("Drag the handles to pick the piece; drag between them to move it." + NL
                                + "Left / Right move the handle you touched last by one frame (Shift: ten).")
@@ -940,11 +951,15 @@ class TrimPanel(OptionPanel):
         start, end = self._times()
         if tools is None or source is None or start is None or end is None:
             return
-        token = self._token
+        # Each request counts (a handle nudged twice within ffmpeg's start-up sends two): only the
+        # newest is shown, and each writes files of its own — never ones another run is writing.
+        self._ends_token += 1
+        token, source_token = self._ends_token, self._token
         last = max(min(end, source.info.duration) - 0.04, 0.0)  # the last frame that is still in the piece
 
         def done(paths) -> None:
-            if token != self._token:
+            if token != self._ends_token or source_token != self._token:
+                _remove_files(paths)
                 return
             for label, path in zip((self._first_preview, self._last_preview), paths):
                 pixmap = qt.QtGui.QPixmap(str(path)) if path is not None else qt.QtGui.QPixmap()
@@ -956,8 +971,10 @@ class TrimPanel(OptionPanel):
                                        qt.QtCore.Qt.TransformationMode.SmoothTransformation)
                 scaled.setDevicePixelRatio(ratio)
                 label.setPixmap(scaled)
+            _remove_files(paths)  # in memory now
 
-        self._run(lambda: frames_at(tools, source.info, [start, last], self._cache(), f"ends_{id(self)}", 256), done)
+        prefix = f"ends_{id(self)}_{token}"
+        self._run(lambda: frames_at(tools, source.info, [start, last], self._cache(), prefix, 256), done)
 
     # --- the job -------------------------------------------------------------------------------
 
@@ -1444,6 +1461,7 @@ class FramesPanel(OptionPanel):
         self._source: MediaSource | None = None
         self._workers: list = []
         self._token = 0
+        self._one_token = 0  # the one-frame picture's own (see _load_preview)
         self._take = self._switch([self.ALL, self.SOME, self.ONE], self.ALL,
                                   "All frames: the whole video as an image sequence." + NL
                                   + "Every Nth: a thinner sequence — every 2nd, 5th, ... frame." + NL
@@ -1540,12 +1558,15 @@ class FramesPanel(OptionPanel):
         at = parse_time(self._at.text())
         if tools is None or source is None or at is None or self._take.current() != self.ONE:
             return
-        token = self._token
+        self._one_token += 1  # as in TrimPanel._load_previews: the newest request wins, own files
+        token, source_token = self._one_token, self._token
 
         def done(paths) -> None:
-            if token != self._token:
+            if token != self._one_token or source_token != self._token:
+                _remove_files(paths)
                 return
             pixmap = qt.QtGui.QPixmap(str(paths[0])) if paths and paths[0] is not None else qt.QtGui.QPixmap()
+            _remove_files(paths)  # in memory now
             if pixmap.isNull():
                 self._preview.setPixmap(qt.QtGui.QPixmap())
                 return
@@ -1556,7 +1577,7 @@ class FramesPanel(OptionPanel):
             self._preview.setPixmap(scaled)
 
         cache = Path(tempfile.gettempdir()) / "msl_tools" / "media" / "trim"
-        worker = ResultWorker(lambda: frames_at(tools, source.info, [at], cache, f"one_{id(self)}", 256), parent=self)
+        worker = ResultWorker(lambda: frames_at(tools, source.info, [at], cache, f"one_{id(self)}_{token}", 256), parent=self)
         self._workers.append(worker)
         worker.done.connect(done)
         worker.finished.connect(lambda: self._workers.remove(worker) if worker in self._workers else None)

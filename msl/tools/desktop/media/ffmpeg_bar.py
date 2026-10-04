@@ -178,7 +178,7 @@ class FfmpegBar(qt.QtWidgets.QFrame):
                 lambda: ProcessLauncher.open_file_explorer(self._tools.ffmpeg))
             menu.addSeparator()
         menu.addAction("Use another copy…").triggered.connect(self.choose_folder)
-        if self._installer.installed() is None:
+        if not self._installer.is_downloaded():  # files only: installed() would run ffmpeg on the UI thread
             megabytes = self._installer.download_size() / 1024 ** 2
             menu.addAction(f"Download ffmpeg {self._installer.version} ({megabytes:.0f} MB)").triggered.connect(self.download)
         self._menu = menu  # for tests; the menu deletes itself on close

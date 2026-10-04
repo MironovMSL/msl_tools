@@ -60,8 +60,15 @@ class FfmpegInstaller:
         return ARCHIVE_SIZE.get(self.version, 0)
 
     def installed(self) -> FfmpegTools | None:
-        """The managed copy of the pinned version, if it is there and runs."""
+        """The managed copy of the pinned version, if it is there and runs.
+        Runs ffmpeg (up to 15 s while an antivirus scans a fresh copy): not on a UI thread."""
         return FfmpegLocator.inspect(self.target_dir(), FfmpegLocator.MANAGED)
+
+    def is_downloaded(self) -> bool:
+        """Whether the pinned version's files are in place — file checks only, no run (a menu
+        may ask this). installed() is the one that also checks they work."""
+        bin_dir = self.target_dir() / "bin"
+        return all((bin_dir / f"{name}{EXECUTABLE_SUFFIX}").is_file() for name in ("ffmpeg", "ffprobe"))
 
     def install(self, progress=None, should_cancel=None) -> FfmpegTools:
         if sys.platform != "win32" and not os.environ.get(URL_ENV_VAR):

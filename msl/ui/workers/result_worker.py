@@ -12,6 +12,8 @@ class ResultWorker(qt.QtCore.QThread):
         worker.start()
 
     Keep a reference to the worker (or give it a parent) until it is over.
+    A worker WITH a parent deletes itself once finished: drop the reference
+    in a `finished` handler and don't touch it afterwards.
     When the application quits while it runs, it is waited for (up to
     QUIT_WAIT_MS): a QThread destroyed while running takes the process down.
 
@@ -28,6 +30,12 @@ class ResultWorker(qt.QtCore.QThread):
     def __init__(self, target, parent=None):
         super().__init__(parent)
         self._target = target
+        if parent is not None:
+            # Over = gone: a parented worker would otherwise live (a QThread each) until its
+            # parent dies — Media made one per estimate, picture and thumbnail. The delete is
+            # deferred, so the owner's own `finished` handlers still run first. Parentless
+            # workers (the Playblast panel's, kept by the class) are left to their owner.
+            self.finished.connect(self.deleteLater)
         application = qt.QtCore.QCoreApplication.instance()
         if application is not None:
             application.aboutToQuit.connect(self._wait_on_quit)

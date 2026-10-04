@@ -5,6 +5,7 @@ from pathlib import Path
 
 import msl_tools.msl.ui.qt_bindings as qt
 from msl_tools.msl.core.media import Job
+from msl_tools.msl.core.media.run import clean_up
 from msl_tools.msl.tools.desktop.media.ffmpeg_bar import link_button
 from msl_tools.msl.tools.desktop.media.history import ResultRecord
 from msl_tools.msl.tools.desktop.media.source import result_thumbnail
@@ -249,6 +250,7 @@ class JobQueue(qt.QtCore.QObject):
             return
         tools = self._tools()
         if tools is None:
+            clean_up(item.job, remove_output=False)  # its burn-in texts / frame lists are files
             item.state, item.message = FAILED, "ffmpeg isn’t available."
             self.changed.emit(item)
             self._start_next()

@@ -15,7 +15,7 @@ from msl_tools.msl.tools.desktop.media.history import ResultHistory
 from msl_tools.msl.tools.desktop.media.job_queue import DONE, FAILED, JobList, JobQueue
 from msl_tools.msl.ui.desktop_notice import DesktopNotice
 from msl_tools.msl.tools.desktop.media.option_panels import PANELS
-from msl_tools.msl.tools.desktop.media.source import AUDIO_SUFFIXES, load_source, load_sources
+from msl_tools.msl.tools.desktop.media.source import AUDIO_SUFFIXES, load_source, load_sources, prune_temp
 from msl_tools.msl.tools.desktop.media.source_card import SourceCard
 from msl_tools.msl.ui.process_launcher.process_launcher import ProcessLauncher
 from msl_tools.msl.core.theme import ThemeRegistry
@@ -134,6 +134,7 @@ class MediaPage(qt.QtWidgets.QWidget):
         self._settings = self._config["settings"]
         self._history = ResultHistory(resources.configsDesktopHubMng.base_dir / self.TOOL_NAME)
         self._history_loaded = False
+        self._history_saved: list = []  # what history.json holds now (ResultRecords compare by value)
         self._taskbar: TaskbarProgress | None = None
         self._notice: DesktopNotice | None = None
         self._sources: list = []
@@ -418,6 +419,8 @@ class MediaPage(qt.QtWidgets.QWidget):
             self._card.set_recent(self._recent())
             self._queue.restore(self._history.load())  # what was made before the hub was last closed
             self._history_loaded = True
+            self._history_saved = self._queue.results()
+            self._run(prune_temp, lambda _removed: None)  # week-old previews, thumbnails, texts
 
     # --- settings ------------------------------------------------------------------------
 
@@ -1017,8 +1020,13 @@ class MediaPage(qt.QtWidgets.QWidget):
         return bool(self._settings.get("notify", True))
 
     def _save_history(self) -> None:
-        if self._history_loaded:  # never before the old list was read: it would be overwritten
-            self._history.save(self._queue.results())
+        if not self._history_loaded:  # never before the old list was read: it would be overwritten
+            return
+        records = self._queue.results()
+        if records == self._history_saved:
+            return  # a finished row only got its picture (50 of them on a start): nothing new to keep
+        self._history.save(records)
+        self._history_saved = records
 
     def _on_queue_changed(self, item) -> None:
         if item.state == DONE:

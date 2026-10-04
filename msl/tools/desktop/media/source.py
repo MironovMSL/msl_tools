@@ -7,7 +7,10 @@ the page calls it on a worker thread.
 from __future__ import annotations
 
 import hashlib
+import math
+import os
 import tempfile
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -186,6 +189,38 @@ def _thumbnail(tools: FfmpegTools, info: MediaInfo) -> Path | None:
     return thumbnail(tools, info, target, THUMBNAIL_WIDTH)
 
 
+TEMP_KEEP_DAYS = 7
+
+
+def media_temp_dir() -> Path:
+    """Where Media keeps throwaway files: thumbs/, preview/, trim/, look/, the jobs' texts and lists."""
+    return Path(tempfile.gettempdir()) / "msl_tools" / "media"
+
+
+def prune_temp(max_age_days: float = TEMP_KEEP_DAYS, root: Path | None = None, now: float | None = None) -> int:
+    """Deletes Media's throwaway files older than `max_age_days` (and folders left empty);
+    returns how many files went. Nothing else prunes them — previews of earlier hub runs
+    (up to a minute of video each) stayed forever. Blocking: run it on a worker."""
+    root = media_temp_dir() if root is None else Path(root)
+    limit = (time.time() if now is None else now) - max_age_days * 86400
+    removed = 0
+    for folder, _folders, files in os.walk(root, topdown=False):
+        for name in files:
+            path = Path(folder) / name
+            try:
+                if path.stat().st_mtime < limit:
+                    path.unlink()
+                    removed += 1
+            except OSError:  # in use (a running job's file) or already gone
+                continue
+        if Path(folder) != root:
+            try:
+                Path(folder).rmdir()  # only succeeds when empty
+            except OSError:
+                pass
+    return removed
+
+
 def parse_time(text: str) -> float | None:
     """"12.5", "0:12.5", "1:02:03" -> seconds; None if it isn't a time."""
     text = text.strip().replace(",", ".")
@@ -195,7 +230,8 @@ def parse_time(text: str) -> float | None:
         parts = [float(part) for part in text.split(":")]
     except ValueError:
         return None
-    if len(parts) > 3 or any(part < 0 for part in parts):
+    # float() also takes "nan" / "inf", which would reach ffmpeg as "-ss nan".
+    if len(parts) > 3 or any(part < 0 or not math.isfinite(part) for part in parts):
         return None
     seconds = 0.0
     for part in parts:
@@ -205,7 +241,9 @@ def parse_time(text: str) -> float | None:
 
 def format_time(seconds: float) -> str:
     """12.5 -> "0:12.5"; 125 -> "2:05"; 3725.25 -> "1:02:05.25"."""
-    seconds = max(float(seconds), 0.0)
+    # Rounded to what is shown BEFORE it is split: 9.9997 is "0:10", not "0:09" with the
+    # rounded-up fraction dropped (Trim's end then lost the video's last second).
+    seconds = round(max(float(seconds), 0.0), 3)
     whole = int(seconds)
     rest = f"{seconds - whole:.3f}".rstrip("0").rstrip(".")[1:]  # ".5", ".25", ""
     hours, minutes, secs = whole // 3600, whole % 3600 // 60, whole % 60

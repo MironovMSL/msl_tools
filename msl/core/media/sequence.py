@@ -6,10 +6,20 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass, field
+from functools import cached_property
 from pathlib import Path
 
 IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".tif", ".tiff", ".exr", ".tga", ".bmp", ".dpx", ".webp")
 _NUMBERED = re.compile(r"^(.*?)(\d+)(\.[^.]+)$")
+
+
+def pattern_in(folder: str | Path, pattern: str) -> str:
+    """`folder` + a numbered file pattern ("shot.%04d.png") as ffmpeg's image
+    reader / writer takes it. ffmpeg expands `%` over the WHOLE path, so a
+    `%` in the folder is doubled too (measured: "50%_scale/f.%04d.png" is
+    "No such file", "50%%_scale/..." reads). `pattern`'s own `%` are the
+    caller's to escape."""
+    return str(folder).replace("%", "%%") + os.sep + pattern
 
 
 @dataclass(frozen=True)
@@ -43,9 +53,11 @@ class ImageSequence:
     def count(self) -> int:
         return len(self.frames)
 
-    @property
+    @cached_property
     def missing(self) -> list[int]:
-        """Numbers between the first and the last frame that have no file."""
+        """Numbers between the first and the last frame that have no file.
+        Worked out once per sequence: it walks the whole first..last range,
+        which "x_1.png" + "x_5000000.png" makes millions long."""
         present = set(self.frames)
         return [number for number in range(self.first, self.last + 1) if number not in present]
 
@@ -57,7 +69,7 @@ class ImageSequence:
 
     @property
     def pattern_path(self) -> str:
-        return str(self.folder / self.pattern)
+        return pattern_in(self.folder, self.pattern)
 
     def file(self, frame: int) -> Path:
         """The file of frame `frame` (whether it exists or not)."""

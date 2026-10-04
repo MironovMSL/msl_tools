@@ -23,6 +23,7 @@ The traps of ffmpeg are handled here once, so no caller has to know them
 """
 from __future__ import annotations
 
+import itertools
 import os
 import subprocess
 import tempfile
@@ -32,7 +33,7 @@ from pathlib import Path
 
 from msl_tools.msl.core.media.ffmpeg import FfmpegTools, MediaError
 from msl_tools.msl.core.media.probe import MediaInfo
-from msl_tools.msl.core.media.sequence import ImageSequence
+from msl_tools.msl.core.media.sequence import ImageSequence, pattern_in
 
 # Flags every run gets (the runners add them): quiet, never waiting for a key, progress as
 # key=value on stdout, overwrite without asking (the output name was chosen not to clash).
@@ -568,9 +569,9 @@ def convert_sequence(sequence: ImageSequence, folder: str | Path, image_format: 
     scale = ["-vf", f"scale=-2:{int(max_height) // 2 * 2}"] if max_height and height > max_height else []
     name = (sequence.prefix.rstrip("._- ") or sequence.folder.name).replace("%", "%%")
     digits = f"%0{sequence.padding}d" if sequence.padding else "%d"
-    pattern = folder / f"{name}.{digits}{suffix}"
+    pattern = pattern_in(folder, f"{name}.{digits}{suffix}")
     body = ["-start_number", str(sequence.first), "-i", sequence.pattern_path, *scale, *arguments,
-            "-start_number", str(sequence.first), str(pattern)]
+            "-start_number", str(sequence.first), pattern]
     return Job(title=f"{sequence.name} → {folder.name}/ ({suffix.lstrip('.').upper()})", output=folder, passes=[body],
                frames=sequence.count, folder=folder)
 
@@ -693,8 +694,8 @@ def to_frames(info: MediaInfo, folder: str | Path, name: str = "", image_format:
     rate = (info.fps or 24.0) / every
     filters = ["-vf", f"fps={_number(rate)}"] if every > 1 else []
     name = (name or info.path.stem).replace("%", "%%")
-    pattern = folder / f"{name}.%0{max(int(padding), 1)}d{suffix}"
-    body = ["-i", str(info.path), *filters, *arguments, "-start_number", str(int(first_number)), str(pattern)]
+    pattern = pattern_in(folder, f"{name}.%0{max(int(padding), 1)}d{suffix}")
+    body = ["-i", str(info.path), *filters, *arguments, "-start_number", str(int(first_number)), pattern]
     frames = int(round(info.duration * rate)) if info.duration else 0
     return Job(title=f"{info.path.name} → {folder.name}/ ({frames} {suffix.lstrip('.').upper()} frames)",
                output=folder, passes=[body], duration=info.duration, frames=frames, folder=folder)
@@ -817,8 +818,13 @@ def _work_dir(work_dir: str | Path | None) -> Path:
 
 def _value(path: str | Path) -> str:
     """A path as the value of a filter option: quoted, forward slashes, the
-    drive's colon escaped once (the one spelling both 7.1 and 8.0 take)."""
-    return "'" + str(path).replace(chr(92), "/").replace(":", chr(92) + ":") + "'"
+    drive's colon escaped once (the one spelling both 7.1 and 8.0 take).
+    A quote in the path (C:/Users/O'Brien/...) closes the quoting, is
+    escaped for both of ffmpeg's parsing levels (\\\\\\') and opens it again —
+    measured: a single backslash there fails in 7.1.1 and 8.0."""
+    backslash = chr(92)
+    text = str(path).replace(backslash, "/").replace(":", backslash + ":")
+    return "'" + text.replace("'", "'" + backslash * 3 + "''") + "'"
 
 
 def _font() -> str:
@@ -830,11 +836,20 @@ def _font() -> str:
     return ""
 
 
+_COUNTER = itertools.count(1)
+
+
+def _unique() -> str:
+    """A name part no other temporary file of this process has (the clock alone can repeat
+    within one tick)."""
+    return f"{os.getpid()}_{next(_COUNTER)}_{time.time_ns() % 10 ** 12}"
+
+
 def _text_file(text: str, work_dir: str | Path | None) -> Path:
     """`text` in a temporary file: drawtext reads it with `textfile=`, so no
     character of it has to be escaped."""
     folder = _work_dir(work_dir)
-    path = folder / f"text_{os.getpid()}_{time.time_ns() % 10 ** 12}.txt"
+    path = folder / f"text_{_unique()}.txt"
     path.write_text(text, encoding="utf-8")
     return path
 
@@ -893,7 +908,9 @@ def _hold_list(sequence: ImageSequence, fps: float, work_dir: str | Path | None)
     """Writes the list ffmpeg's concat reader takes for a sequence with gaps:
     every frame that exists, shown until the next one that exists."""
     folder = _work_dir(work_dir)
-    listing = folder / f"frames_{os.getpid()}_{abs(hash(sequence.pattern_path)) % 10 ** 8}.txt"
+    # A name of its own per call (like _text_file): the estimate, Preview and "Command" build
+    # throwaway jobs of the same sequence and delete their list — it must not be a waiting job's.
+    listing = folder / f"frames_{_unique()}.txt"
     frames = list(sequence.frames)
     lines = []
     for index, frame in enumerate(frames):
