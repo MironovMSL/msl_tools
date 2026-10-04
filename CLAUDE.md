@@ -947,6 +947,10 @@ maya_gate/
     boost.py               BoostStore (Maya's auto-load list, the boosted launch + its loader, reports, backups, Qt-free)
     boost_tab.py           BoostTab (per-environment plug-in list: checked = loaded at startup)
     sessions_tab.py        SessionsTab (the Mayas connected to the hub right now; the finished ones while none is)
+    session_rows.py        its rows: _SessionRow, _EndedRow, _HistoryRow, _SceneLabel (+ size / duration helpers)
+    sessions_console.py    _ConsoleMixin: the console + snippets  (methods of SessionsTab, moved as they were)
+    sessions_console_widgets.py  _ConsoleInput, _NameField
+    sessions_control.py    _ControlMixin: start / reopen / close / restart / force close, requests to a Maya
     snippets.py            SnippetStore (named pieces of code for the console, Qt-free)
     session_history.py     SessionHistory / SessionRecord (the sessions that are over, kept across hub restarts, Qt-free)
     version_row.py         MayaVersionRow (animated row of installed versions)
