@@ -6,6 +6,11 @@ The hub listens (ui/maya_link/server.py); this client connects, says hello
 (which Maya, which environment, which scene) and then reports scene changes
 and what the Script Editor prints — warnings and errors, and plain messages
 too once the hub asks for them.
+The token is never sent: hello carries a random number, the hub's welcome
+proves it knows the token, and only then this Maya proves it in turn, sends
+anything else, or answers a request (core/link/protocol.py). Whatever took
+the hub's port while the hub was closed learns nothing and can make this
+Maya do nothing.
 If the hub isn't there — closed, restarting — it quietly tries again every
 few seconds, so a restarted hub gets its running Mayas back.
 
@@ -61,6 +66,8 @@ class HubLink(QtCore.QObject):
         self.setObjectName(OBJECT_NAME)
         self._port = port
         self._token = token
+        self._nonce = ""        # this connection's random number (hello)
+        self._verified = False  # the hub on the other end proved it knows the token
         self._decoder = protocol.FrameDecoder()
         self._script_jobs: list[int] = []
         self._sent_scene: tuple | None = None  # (scene, modified, autosave, its folder) the hub was last told
@@ -152,13 +159,16 @@ class HubLink(QtCore.QObject):
             self._retry.start()
 
     def _on_disconnected(self) -> None:
+        self._verified = False  # the next hub on that port proves itself again
         if not self._retry.isActive():
             self._retry.start()
 
     # --- messages ------------------------------------------------------------------
 
     def _send(self, message: dict) -> None:
-        if self.is_connected():
+        # Until the hub has proven itself only the handshake goes out: no logs, no scene
+        # paths, no replies to a stranger on the hub's port.
+        if self.is_connected() and (self._verified or message.get("name") in (protocol.HELLO, protocol.PROOF)):
             self._socket.write(protocol.encode(message))
 
     def _on_connected(self) -> None:
@@ -172,9 +182,10 @@ class HubLink(QtCore.QObject):
         # A fresh connection starts on "warnings and errors only": the hub that
         # wants more says so again (it may be a different, restarted hub).
         self._log_all = False
+        self._verified, self._nonce = False, protocol.new_nonce()
         self._send(protocol.event(
             protocol.HELLO,
-            token=self._token,
+            nonce=self._nonce,
             pid=os.getpid(),
             version=str(cmds.about(version=True)),
             full_version=full_version,
@@ -196,8 +207,27 @@ class HubLink(QtCore.QObject):
             self._socket.abort()
             return
         for message in messages:
-            if message.get("type") == protocol.REQUEST:
+            if not self._verified:
+                self._on_welcome(message)
+                if not self._verified:
+                    return  # the connection was dropped
+            elif message.get("type") == protocol.REQUEST:
                 self._on_request(message)
+
+    def _on_welcome(self, message: dict) -> None:
+        """The first message must be the hub's welcome with a proof that it knows the token.
+        Anything else: not our hub — dropped (and tried again later: the real one may come)."""
+        data = message.get("data") if isinstance(message.get("data"), dict) else {}
+        hub_nonce = data.get("nonce")
+        if message.get("type") != protocol.EVENT or message.get("name") != protocol.WELCOME \
+                or not protocol.is_nonce(hub_nonce) \
+                or not protocol.same_secret(protocol.hub_proof(self._token, self._nonce, hub_nonce),
+                                            data.get("proof")):
+            self._socket.abort()
+            return
+        self._send(protocol.event(protocol.PROOF, proof=protocol.maya_proof(self._token, self._nonce, hub_nonce)))
+        self._verified = True
+        self._flush_log()  # what was printed while the link was being made
 
     def _on_request(self, message: dict) -> None:
         """Requests from the hub: a FIXED list (_HANDLERS) — a name that isn't
@@ -254,7 +284,7 @@ class HubLink(QtCore.QObject):
             pass
 
     def _flush_log(self) -> None:
-        if not self._log_buffer or not self.is_connected():
+        if not self._log_buffer or not self.is_connected() or not self._verified:
             return
         entries, dropped = self._log_buffer, self._log_dropped
         self._log_buffer, self._log_dropped = [], 0
@@ -450,6 +480,8 @@ class HubLink(QtCore.QObject):
         only when one of them changed. Reached from Maya's scene events (new +
         rename + save fire several for one change) and from the poll: Maya has
         no event for "the scene was modified"."""
+        if not self._verified:
+            return  # the hello told the scene; changes count from the verified link on
         state = self._scene_state()
         if state != self._sent_scene:
             self._sent_scene = state

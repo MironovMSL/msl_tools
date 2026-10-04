@@ -581,9 +581,26 @@ What changed vs. the original (all deliberate, not oversights):
     `ensure_listening()`. 127.0.0.1 only; port 47611 (next free of 10 if
     taken — a second hub) and a random token, both kept in
     `configs/desktop/maya_link`, so a Maya that outlives a hub restart
-    reconnects. A connection becomes a session only after a `hello` with
-    the token (5 s to say it); anything else is dropped. Nothing the hub
+    reconnects. A connection becomes a session only after it PROVED it
+    knows the token (5 s for it); anything else is dropped. Nothing the hub
     RECEIVES is executed.
+    The handshake (since 2026-10-04, protocol.py's docstring): hello
+    carries Maya's nonce (no token) -> the hub's `welcome` = its nonce +
+    HMAC(token, "hub|n_maya|n_hub") -> Maya checks it, then sends `proof`
+    = HMAC(token, "maya|n_hub|n_maya") -> session. Maya (`HubLink._verified`)
+    sends nothing but the handshake and answers NO request until the hub
+    proved itself: before, whatever took port 47611 while the hub was
+    closed got the token and could send quit_maya / run_python. Before
+    its proof a peer may send 64 KB per message (`FrameDecoder.max_body`);
+    a message with wrong types drops the peer instead of raising in a
+    slot. A hello WITH the token (Maya code from before) is still accepted
+    — Mayas started before an update keep their link. The other way round
+    does NOT work: a Maya with the new code can't join a hub still running
+    the old one (a dev hub started before the change): restart that hub.
+    Tests: `tests/ui/test_maya_link_auth.py` (real server on a private
+    port vs a raw-socket Maya; real HubLink vs a fake hub / an impostor).
+    Checked with real Maya 2023 (PySide2, 3.9) and 2025 joining a test hub
+    on a private port: joined, launch report (no token in it), quit clean.
   - `tools/maya/hub_link.py` (inside Maya): QTcpSocket in Maya's main
     thread, hello on connect, a `scene` event on SceneOpened /
     NewSceneOpened / SceneSaved (sent once per real change), retry every

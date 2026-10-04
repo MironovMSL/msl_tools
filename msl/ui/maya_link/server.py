@@ -17,9 +17,11 @@ Maya left or took longer than the timeout. Replies are matched by id, so a
 slow answer is never mistaken for the answer to a later question.
 
 Safety: it listens on 127.0.0.1 only (not reachable from the network), and
-a connection is a session only after a hello carrying the hub's token, which
-only a Maya launched by this hub was given (environment variable). Anything
-else is dropped. Messages are data (core/link/protocol.py) — nothing here
+a connection is a session only after it proved it knows the hub's token,
+which only a Maya launched by this hub was given (environment variable) —
+the token itself never goes over the wire, and Maya first checks the hub's
+proof in turn (core/link/protocol.py). Anything else is dropped; until then
+a peer may send 64 KB per message. Messages are data (core/link/protocol.py) — nothing here
 executes code that arrives. The other way round there is exactly one
 request that carries code, `run_python` (the Sessions tab's console), and
 Maya's side refuses it unless that Maya was launched with the console
@@ -39,8 +41,10 @@ class _Peer:
 
     def __init__(self, socket: "qt.QtNetwork.QTcpSocket"):
         self.socket = socket
-        self.decoder = protocol.FrameDecoder()
+        self.decoder = protocol.FrameDecoder(max_body=protocol.MAX_BODY_BEFORE_AUTH)
         self.session: MayaSession | None = None
+        self.hello: dict | None = None  # its hello, kept until its proof comes (see protocol.py)
+        self.hub_nonce = ""             # what the hub's welcome asked it to prove itself with
         self.said_bye = False   # it announced that it is leaving (a quit, a link restart)
         self.bye_reason = ""    # why it left: protocol.BYE_* / ENDED_BY_HUB; "" = the connection just broke
         self.pinging = False    # a ping is out and not answered yet
@@ -273,21 +277,17 @@ class MayaLinkServer(qt.QtCore.QObject):
         for message in messages:
             if peer not in self._peers:
                 return
-            self._handle(peer, message)
+            try:
+                self._handle(peer, message)
+            except Exception:  # a well-framed message with wrong types in it: that peer is out of step
+                peer.socket.abort()
+                return
 
     def _handle(self, peer: _Peer, message: dict) -> None:
         kind, name = message.get("type"), message.get("name")
         data = message.get("data") if isinstance(message.get("data"), dict) else {}
         if peer.session is None:
-            # The first message must be a hello with our token - otherwise it isn't one of ours.
-            if kind != protocol.EVENT or name != protocol.HELLO or \
-                    not secrets.compare_digest(str(data.get("token", "")), self._token):
-                peer.socket.abort()
-                return
-            peer.session = MayaSession.from_hello(self._next_id, data)
-            peer.session.connected_at = time.time()
-            self._next_id += 1
-            self.sessions_changed.emit()
+            self._authenticate(peer, kind, name, data)
             return
         if kind == protocol.EVENT and name == protocol.BYE:
             peer.said_bye = True
@@ -319,6 +319,35 @@ class MayaLinkServer(qt.QtCore.QObject):
             if entry is not None and entry[0] is peer:  # only the Maya that was asked may answer
                 self._finish(request_id, {"success": bool(message.get("success")), "data": data,
                                           "error": str(message.get("error") or "")})
+
+    def _authenticate(self, peer: _Peer, kind, name, data: dict) -> None:
+        """A connection becomes a session only once it proved it knows the token — hello, welcome,
+        proof (protocol.py); anything else, or a wrong proof, and it is dropped."""
+        if kind == protocol.EVENT and name == protocol.HELLO and peer.hello is None:
+            maya_nonce = data.get("nonce")
+            if protocol.is_nonce(maya_nonce):
+                peer.hello, peer.hub_nonce = data, protocol.new_nonce()
+                peer.socket.write(protocol.encode(protocol.event(
+                    protocol.WELCOME, nonce=peer.hub_nonce,
+                    proof=protocol.hub_proof(self._token, maya_nonce, peer.hub_nonce))))
+                return
+            # A Maya with code from before the proofs sends the token itself (see protocol.py).
+            if protocol.same_secret(self._token, data.get("token")):
+                self._open_session(peer, data)
+                return
+        elif kind == protocol.EVENT and name == protocol.PROOF and peer.hello is not None:
+            expected = protocol.maya_proof(self._token, peer.hello["nonce"], peer.hub_nonce)
+            if protocol.same_secret(expected, data.get("proof")):
+                self._open_session(peer, peer.hello)
+                return
+        peer.socket.abort()
+
+    def _open_session(self, peer: _Peer, hello: dict) -> None:
+        peer.session = MayaSession.from_hello(self._next_id, hello)
+        peer.session.connected_at = time.time()
+        peer.decoder.max_body = protocol.MAX_BODY_SIZE  # proven: full-size messages (logs, replies)
+        self._next_id += 1
+        self.sessions_changed.emit()
 
     def _on_disconnected(self, peer: _Peer) -> None:
         if peer not in self._peers:

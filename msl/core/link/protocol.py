@@ -17,20 +17,39 @@ Three kinds of message, told apart by "type":
 The id is what keeps answers matched to questions when one side is slow —
 without it a late reply would be taken for the answer to the next request.
 
+Who is who (since 0.1.8) — the token itself never goes over the wire:
+
+    Maya -> hub   hello    {..., "nonce": n_maya}              who I am + a random number
+    hub -> Maya   welcome  {"nonce": n_hub, "proof": P_hub}    P_hub  = HMAC(token, "hub|n_maya|n_hub")
+    Maya -> hub   proof    {"proof": P_maya}                   P_maya = HMAC(token, "maya|n_hub|n_maya")
+
+Maya answers no request until the hub has proven it knows the token (so a
+program that took the hub's port while it was closed learns nothing and can
+make Maya do nothing); the hub opens no session until Maya has. Fresh
+random numbers on each side make an old proof worthless. An older Maya's
+hello carries the token itself — still accepted, so Mayas started before an
+update keep their link; their next start uses the proofs.
+
 This module runs inside Maya too (2023: Python 3.9), so: standard library
 only, and no syntax newer than 3.9 at runtime.
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
+import secrets
 
 HEADER_SIZE = 10
 MAX_BODY_SIZE = 8 * 1024 * 1024  # a message announcing more than this is garbage, not a message
+MAX_BODY_BEFORE_AUTH = 64 * 1024  # what a peer that hasn't proven itself may send in one message
 
 EVENT, REQUEST, REPLY = "event", "request", "reply"
 
 # Message names.
-HELLO = "hello"      # event, Maya -> hub, first message: who am I (with the token)
+HELLO = "hello"      # event, Maya -> hub, first message: who am I + a nonce (see the docstring)
+WELCOME = "welcome"  # event, hub -> Maya, answer to hello: the hub's nonce + its proof
+PROOF = "proof"      # event, Maya -> hub: Maya's proof; only then the hub opens the session
 SCENE = "scene"      # event, Maya -> hub: {"scene": path, "modified": bool} - the open scene, or its unsaved state, changed
 LOG = "log"          # event, Maya -> hub: {"entries": [[level, text], ...], "dropped": n} - Script Editor output
 BYE = "bye"          # event, Maya -> hub: {"reason": BYE_QUIT | BYE_RESTART} - leaving on purpose
@@ -54,6 +73,42 @@ RUN_PYTHON = "run_python"         # {"code": str} -> {"output": str, "result": s
 LOG_ERROR, LOG_WARNING, LOG_INFO, LOG_TRACE = "error", "warning", "info", "trace"
 LOG_LEVELS = (LOG_ERROR, LOG_WARNING, LOG_INFO, LOG_TRACE)
 LOG_INPUT = "input"   # hub side only: code the user sent from the console
+
+
+NONCE_LENGTH = 32  # hex digits of a nonce (16 random bytes)
+
+
+def new_nonce() -> str:
+    return secrets.token_hex(NONCE_LENGTH // 2)
+
+
+def is_nonce(value) -> bool:
+    """A nonce as new_nonce() makes it (anything else in its place is refused)."""
+    return isinstance(value, str) and len(value) == NONCE_LENGTH and all(c in "0123456789abcdef" for c in value)
+
+
+def _proof(token: str, side: str, first: str, second: str) -> str:
+    text = "%s|%s|%s" % (side, first, second)
+    return hmac.new(token.encode("utf-8"), text.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def hub_proof(token: str, maya_nonce: str, hub_nonce: str) -> str:
+    """What the hub sends to prove it knows `token` (see the docstring)."""
+    return _proof(token, "hub", maya_nonce, hub_nonce)
+
+
+def maya_proof(token: str, maya_nonce: str, hub_nonce: str) -> str:
+    """What Maya sends to prove it knows `token` — another text than the hub's, so one
+    side's proof can't be sent back as the other's."""
+    return _proof(token, "maya", hub_nonce, maya_nonce)
+
+
+def same_secret(expected: str, given) -> bool:
+    """`given` equals `expected`, compared in constant time; anything not a string is False.
+    (secrets.compare_digest on two str raises for non-ASCII text — from a stranger, that is input.)"""
+    if not isinstance(given, str):
+        return False
+    return hmac.compare_digest(expected.encode("utf-8"), given.encode("utf-8"))
 
 
 class ProtocolError(Exception):
@@ -87,8 +142,9 @@ class FrameDecoder:
     """Cuts a byte stream into messages. Feed it whatever arrived; it keeps
     an incomplete tail until the rest comes."""
 
-    def __init__(self) -> None:
+    def __init__(self, max_body: int = MAX_BODY_SIZE) -> None:
         self._buffer = bytearray()
+        self.max_body = max_body  # the hub raises it once the peer has proven itself
 
     def feed(self, data: bytes) -> list[dict]:
         """Adds `data` and returns every message now complete (maybe none).
@@ -104,7 +160,7 @@ class FrameDecoder:
             if not header.isdigit():
                 raise ProtocolError("bad header: %r" % header)
             size = int(header)
-            if size > MAX_BODY_SIZE:
+            if size > min(self.max_body, MAX_BODY_SIZE):
                 raise ProtocolError("message too large: %d bytes" % size)
             if len(self._buffer) < HEADER_SIZE + size:
                 break  # the body hasn't fully arrived yet
