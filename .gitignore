@@ -224,5 +224,8 @@ __marimo__/
 # Reference material: other people's scripts kept locally to learn from - never committed
 /ref/
 
+# Local notes for Claude Code (what must not be committed)
+/CLAUDE.local.md
+
 # Local scratch for test media (clips, image sequences, renders) while developing - never committed
 /sandbox/

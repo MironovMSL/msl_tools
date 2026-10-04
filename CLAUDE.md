@@ -28,9 +28,6 @@ msl_tools/                 (repo root)
                             every default must come from code (get_config
                             defaults, UserSetupStore.DEFAULT_SCRIPT), never
                             from a committed config file.
-    ref/                    the user's local collection of OTHER people's scripts, kept as
-                            references to learn from — NOT in git (.gitignore), not part of
-                            msl_tools, never installed. Read it for ideas; don't edit or import it.
     tests/                  unit tests (stdlib unittest) of the Qt-free logic; not installed
     sandbox/                local scratch for test media (clips, image sequences, renders) while
                             developing - NOT in git (.gitignore). Run media experiments here, never
