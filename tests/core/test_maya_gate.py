@@ -1,6 +1,7 @@
 """Maya Gate's Qt-free stores: the userSetup script and its wrapper, the launch records."""
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -94,6 +95,17 @@ class Wrapper(_Store):
         self.assertEqual(done.returncode, 0, output)
         self.assertIn("ok", output)
         self.assertNotIn("failed", output)
+
+
+class VariableNames(unittest.TestCase):
+    def test_the_loader_spells_the_shared_names(self):
+        # The boost loader is generated code that imports nothing: it writes the names out itself.
+        from msl_tools.msl.core.link import variables
+        from msl_tools.msl.tools.desktop.maya_gate import boost
+        source = Path(boost.__file__).read_text(encoding="utf-8")
+        used = set(re.findall(r"MSL_GATE_[A-Z_]+", source))
+        self.assertTrue(used)
+        self.assertEqual(used - set(variables.ALL), set())
 
 
 class LaunchRecords(unittest.TestCase):

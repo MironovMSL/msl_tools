@@ -40,14 +40,16 @@ except ImportError:  # Maya 2023 / 2024
 
 from msl_tools.msl import __version__ as _msl_version
 from msl_tools.msl.core.link import protocol
+from msl_tools.msl.core.link import variables
 
-PORT_VARIABLE = "MSL_GATE_LINK_PORT"
-TOKEN_VARIABLE = "MSL_GATE_LINK_TOKEN"
-ENVIRONMENT_VARIABLE = "MSL_GATE_ENVIRONMENT"
-BOOST_VARIABLE = "MSL_GATE_BOOST_SKIP"
-CONSOLE_VARIABLE = "MSL_GATE_CONSOLE"   # "1": this Maya may be sent code (Maya Gate: the Dev environment)
-LAUNCH_TIME_VARIABLE = "MSL_GATE_LAUNCH_TIME"       # time.time() of the click in Maya Gate
-STARTUP_VARIABLE = "MSL_GATE_STARTUP_SECONDS"       # set here once: how long the start took
+# The names Maya Gate set this Maya's variables under (core/link/variables.py)
+PORT_VARIABLE = variables.LINK_PORT
+TOKEN_VARIABLE = variables.LINK_TOKEN
+ENVIRONMENT_VARIABLE = variables.ENVIRONMENT
+BOOST_VARIABLE = variables.BOOST_SKIP
+CONSOLE_VARIABLE = variables.CONSOLE
+LAUNCH_TIME_VARIABLE = variables.LAUNCH_TIME
+STARTUP_VARIABLE = variables.STARTUP_SECONDS
 OBJECT_NAME = "mslHubLink"
 
 

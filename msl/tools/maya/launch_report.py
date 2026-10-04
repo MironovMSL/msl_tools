@@ -15,17 +15,18 @@ import json
 import os
 import sys
 from pathlib import Path
+from msl_tools.msl.core.link import variables
 
-# Set by Maya Gate on every launch / on a boosted one (tools/desktop/maya_gate: page.py, boost.py).
-GATE_ENVIRONMENT = "MSL_GATE_ENVIRONMENT"
-GATE_VARIABLES = "MSL_GATE_VARIABLES"      # os.pathsep-joined names of the variables Maya Gate set
-BOOST_SKIP = "MSL_GATE_BOOST_SKIP"
-BOOST_REPORT = "MSL_GATE_BOOST_REPORT"
-LAUNCH_FILE = "MSL_GATE_LAUNCH_FILE"       # this launch's record; the loader adds the startup time to it
+# Set by Maya Gate on every launch / on a boosted one (core/link/variables.py).
+GATE_ENVIRONMENT = variables.ENVIRONMENT
+GATE_VARIABLES = variables.VARIABLES
+BOOST_SKIP = variables.BOOST_SKIP
+BOOST_REPORT = variables.BOOST_REPORT
+LAUNCH_FILE = variables.LAUNCH_FILE
 
-# Never printed: whoever has the link token can drive this Maya from the hub's port
-# (the report gets pasted into chats). Same name as hub_link.TOKEN_VARIABLE.
-_HIDDEN_VARIABLES = ("MSL_GATE_LINK_TOKEN",)
+# Never printed: whoever has the link token could make itself this Maya's hub
+# (the report gets pasted into chats).
+_HIDDEN_VARIABLES = (variables.LINK_TOKEN,)
 
 # Variables shown besides every MAYA_* / MSL_* one.
 _EXTRA_VARIABLES = ("PYTHONPATH", "XBMLANGPATH", "OCIO", "TEMP", "TMP", "PYTHONDONTWRITEBYTECODE")

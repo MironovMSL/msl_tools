@@ -1,6 +1,4 @@
 # ui/widgets/atoms/checkboxes/base_checkbox.py
-import shiboken6
-
 import msl_tools.msl.ui.qt_bindings as qt
 from msl_tools.msl.core.theme import Theme, ThemeRegistry
 from msl_tools.msl.ui.theme.qss import color_property
@@ -76,7 +74,7 @@ class BaseCheckbox(qt.QtWidgets.QAbstractButton):
         self._animate_to(1.0 if checked else 0.0)
 
     def _animate_to(self, target: float) -> None:
-        if self._animation is not None and shiboken6.isValid(self._animation):
+        if self._animation is not None and qt.shiboken.isValid(self._animation):
             self._animation.stop()
 
         anim = qt.QtCore.QPropertyAnimation(self, b"checkProgress", self)
@@ -97,7 +95,7 @@ class BaseCheckbox(qt.QtWidgets.QAbstractButton):
         """Sets checked state without animating and without emitting
         toggled — used to sync initial state from theme/config at
         construction time (same convention as BaseToggle)."""
-        if self._animation is not None and shiboken6.isValid(self._animation):
+        if self._animation is not None and qt.shiboken.isValid(self._animation):
             self._animation.stop()
             self._animation = None
 

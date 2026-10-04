@@ -4,13 +4,12 @@ from pathlib import Path
 
 from msl_tools.msl.core.fs.paths import Paths
 from msl_tools.msl.core.fs.system_info import SystemInfo
-from msl_tools.msl.core.fs.qt_paths import QtPaths
 from msl_tools.msl.core.fs.maya_paths import MayaPaths
 from msl_tools.msl.core.fs.files import Files
 
 
 class FileSystemManager:
-    """Единая точка входа в fs/."""
+    """The one way into fs/: the package's folders, paths, system info, file helpers."""
 
     ROOT_DIR   = Path(__file__).resolve().parents[3]
     PARENT_DIR = ROOT_DIR.parent
@@ -39,7 +38,6 @@ class FileSystemManager:
 
         self.paths     = Paths
         self.system    = SystemInfo
-        self.qtPaths   = QtPaths
         self.mayaPaths = MayaPaths
         self.files     = Files(logger=self._logger)
 

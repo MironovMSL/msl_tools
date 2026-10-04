@@ -61,6 +61,7 @@ from pathlib import Path
 from typing import Mapping
 
 from msl_tools.msl.core.fs.maya_paths import MayaPaths
+from msl_tools.msl.core.link import variables
 
 _QUOTE = '\\"'  # \" as written inside pluginPrefs.mel
 
@@ -208,9 +209,9 @@ class BoostStore:
 
     SUBDIR = "boost"
     FLAG = "-noAutoloadPlugins"
-    SKIP_VARIABLE = "MSL_GATE_BOOST_SKIP"            # os.pathsep-joined names; its PRESENCE switches the loader on
-    REPORT_VARIABLE = "MSL_GATE_BOOST_REPORT"
-    ENVIRONMENT_VARIABLE = "MSL_GATE_BOOST_ENVIRONMENT"
+    SKIP_VARIABLE = variables.BOOST_SKIP              # os.pathsep-joined names; its PRESENCE switches the loader on
+    REPORT_VARIABLE = variables.BOOST_REPORT
+    ENVIRONMENT_VARIABLE = variables.BOOST_ENVIRONMENT
     BLOCKING_VARIABLE = "MAYA_SKIP_USERSETUP_PY"     # with it the loader never runs: boosting would empty Maya's list
     BACKUPS_KEPT = 5
 
@@ -413,8 +414,8 @@ class LaunchLog:
          "plugin_seconds": 3.6}     # boosted launches: the part spent loading plug-ins
     """
 
-    TIME_VARIABLE = "MSL_GATE_LAUNCH_TIME"   # time.time() of the click
-    FILE_VARIABLE = "MSL_GATE_LAUNCH_FILE"   # the launch's file, for the loader to complete
+    TIME_VARIABLE = variables.LAUNCH_TIME   # time.time() of the click
+    FILE_VARIABLE = variables.LAUNCH_FILE   # the launch's file, for the loader to complete
     KEPT = 40
 
     def __init__(self, folder: str | Path):

@@ -32,6 +32,7 @@ import time
 
 import msl_tools.msl.ui.qt_bindings as qt
 from msl_tools.msl.core.link import protocol
+from msl_tools.msl.core.link import variables
 from msl_tools.msl.core.link.session import MayaSession
 
 
@@ -81,8 +82,8 @@ class MayaLinkServer(qt.QtCore.QObject):
     PORT_ATTEMPTS = 10          # DEFAULT_PORT busy (another hub?) -> the next ones are tried
     HELLO_TIMEOUT_MS = 5000     # a connection that doesn't introduce itself in time is dropped
     CONFIG_NAME = "maya_link"
-    PORT_VARIABLE = "MSL_GATE_LINK_PORT"    # handed to a launched Maya
-    TOKEN_VARIABLE = "MSL_GATE_LINK_TOKEN"
+    PORT_VARIABLE = variables.LINK_PORT     # handed to a launched Maya
+    TOKEN_VARIABLE = variables.LINK_TOKEN
 
     MAX_LOG_ENTRIES = 500       # per message; more than that is cut
     MAX_LOG_TEXT = 8000         # characters per entry

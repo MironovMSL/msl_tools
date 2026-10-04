@@ -43,8 +43,9 @@ msl_tools/                 (repo root)
                               environment, theme, version, installer, network,
                               media (ffmpeg: find it, probe files, image sequences, recipes),
                               resources.py (core.Resources singleton)
-                              (known Qt leftovers: config/ini_config.py uses QSettings,
-                              fs/qt_paths.py imports Qt lazily)
+                              (no Qt at all since 2026-10-04: the unused IniConfig / QtPaths
+                              went; core/ imports with PySide6 blocked — keep it that way;
+                              core/link/variables.py = the MSL_GATE_* names, shared by hub and Maya)
         ui/                   Qt-DEPENDENT layer: qt_bindings shim (QtCore/Gui/Widgets/Svg/Network), icon_manager,
                               maya_link/ (MayaLinkServer: the hub's end of the hub <-> Maya link),
                               media/ (FfmpegRunner: runs a media Job without blocking the window),

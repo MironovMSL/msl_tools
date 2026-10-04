@@ -1,6 +1,6 @@
 import msl_tools.msl.ui.qt_bindings as qt
 from enum import Enum, auto
-from msl_tools.msl.core.theme import Theme
+from msl_tools.msl.core.theme import Theme, ThemeRegistry
 from msl_tools.msl.ui.theme import StylesheetBuilder
 from msl_tools.msl.ui.widgets.compositions.window_header import WindowHeader
 from msl_tools.msl.ui.widgets.windows.snap_layout_flyout import SnapLayoutFlyout
@@ -169,7 +169,8 @@ class FramelessWindowMixin:
         self._outer_margin_normal = outer_margin
         self._outer_margin        = outer_margin
         self._root_layout: qt.QtWidgets.QLayout | None = None
-        self._background_color = qt.QtGui.QColor("#b07878")
+        # Until _apply_theme sets the real one: the bundled default theme's chrome, not a debug color.
+        self._background_color = qt.QtGui.QColor(ThemeRegistry.fallback().chrome_background)
 
         self._is_snapped = False
         self._snap_flyout: SnapLayoutFlyout | None = None

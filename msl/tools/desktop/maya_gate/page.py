@@ -4,6 +4,7 @@ import threading
 
 import msl_tools.msl.ui.qt_bindings as qt
 from msl_tools.msl.core.resources import Resources
+from msl_tools.msl.core.link import variables
 from msl_tools.msl.core.fs.maya_paths import MayaPaths
 from msl_tools.msl.ui.process_launcher.process_launcher import ProcessLauncher
 from msl_tools.msl.core.theme import ThemeRegistry
@@ -97,8 +98,8 @@ class MayaGatePage(qt.QtWidgets.QWidget):
     UI_SECTION = "_ui"
     BOOST_KEY = "boost"   # {"<env>": {"enabled": bool, "skip": [plug-in, ...]}} - see BoostTab
     # Tells the launched Maya which environment it is (read by the MSL menu's "Print Launch Report").
-    ENVIRONMENT_VARIABLE = "MSL_GATE_ENVIRONMENT"
-    VARIABLES_VARIABLE = "MSL_GATE_VARIABLES"   # names of the variables this launch sets (os.pathsep-joined)
+    ENVIRONMENT_VARIABLE = variables.ENVIRONMENT
+    VARIABLES_VARIABLE = variables.VARIABLES   # names of the variables this launch sets (os.pathsep-joined)
     # Environments whose Mayas accept code from the Sessions tab's console. The launched Maya
     # is told with MSL_GATE_CONSOLE=1 and enforces it itself (tools/maya/hub_link.py).
     CONSOLE_ENVIRONMENTS = ("Dev",)
@@ -107,7 +108,7 @@ class MayaGatePage(qt.QtWidgets.QWidget):
 
     # Color of the icons in a version's right-click menu (maya_gate.qss) - see tinted_menu_icon().
     menuIconColor = color_property("_menu_icon_color", None)
-    CONSOLE_VARIABLE = "MSL_GATE_CONSOLE"
+    CONSOLE_VARIABLE = variables.CONSOLE
     TAB_KEYS = ("variables", "user_setup", "boost", "sessions")  # tab order; stored by key, not index
     SESSIONS_TAB_TITLE = "Sessions"
     DEFAULTS = {MAYA_KEY: {env: {} for env in ENVIRONMENTS},
