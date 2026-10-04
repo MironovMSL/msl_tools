@@ -1575,7 +1575,10 @@ scratch on Maya's public API. Step 1 of 4 is built (2026-10-03):
   camera, the selection, the current frame and the scene's "modified"
   mark (lookThru sets it), all outside the undo queue
   (`undoInfo(stateWithoutFlush=False)`).
-- `panel.py` `PlayblastPanel` (registers `playblast.qss`): FactTiles of
+- `panel.py` `PlayblastPanel` (registers `playblast.qss`; split 2026-10-04, methods moved as they
+  were into mixins: `panel_mask.py` _MaskMixin the shot mask card, `panel_presets.py` _PresetsMixin
+  what it shows / whole presets / history, `panel_run.py` _RunMixin ffmpeg + capture + encoding;
+  `panel_tables.py` the fixed choices and presets, `panel_cards.py` _Toggle, _Card): FactTiles of
   the scene, a PICTURE card (Camera, Size, Frames — the number fields
   only SHOW what a named choice gives, and are editable on "Custom"), a
   RESULT card (Folder + browse — a folder inside the project is written
