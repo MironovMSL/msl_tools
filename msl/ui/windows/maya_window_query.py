@@ -1,5 +1,5 @@
 """
-Запросы состояния Maya main window: поиск и закрытие Qt-элементов внутри неё.
+Queries on Maya's main window: finding and closing Qt elements inside it.
 """
 
 import logging
@@ -10,17 +10,17 @@ logger = logging.getLogger(__name__)
 
 class MayaWindowQuery:
     """
-    Утилитный класс для работы с главным окном Maya и его Qt-дочерними элементами.
-    Не инстанцируется — используется как класс-реф (по аналогии с Paths, SystemInfo).
+    Utility class for Maya's main window and its Qt children.
+    Never instantiated — used as a class reference (like Paths, SystemInfo).
     """
 
     @classmethod
     def get_maya_main_window(cls):
         """
-        Находит инстанс главного окна Maya.
+        Finds the instance of Maya's main window.
 
         Returns:
-            QtWidgets.QWidget | None: Главное окно Maya, либо None, если Maya недоступна.
+            QtWidgets.QWidget | None: Maya's main window, or None if Maya is unavailable.
         """
         try:
             from maya import OpenMayaUI
@@ -37,13 +37,13 @@ class MayaWindowQuery:
     @classmethod
     def get_maya_main_window_qt_elements(cls, class_object):
         """
-        Возвращает список Qt-элементов заданного класса внутри главного окна Maya.
+        Returns the Qt elements of the given class inside Maya's main window.
 
         Args:
-            class_object (type | str): Класс, либо полный путь к классу строкой.
+            class_object (type | str): A class, or the class's full path as a string.
 
         Returns:
-            list: Найденные элементы (пустой список, если не найдено или Maya недоступна).
+            list: The elements found (an empty list if none or Maya is unavailable).
         """
         if isinstance(class_object, str):
             from msl_tools.msl.core.reflection import Reflection
@@ -77,14 +77,14 @@ class MayaWindowQuery:
     @classmethod
     def close_ui_elements(cls, obj_list):
         """
-        Закрывает и удаляет список Qt-элементов.
+        Closes and deletes a list of Qt elements.
 
         Args:
-            obj_list (list): Элементы для закрытия.
+            obj_list (list): The elements to close.
         """
         for obj in obj_list:
             if not cls.is_widget_valid(obj):
-                continue  # объект уже мёртв или None -- штатная ситуация, не ошибка
+                continue  # the object is already dead or None -- expected, not an error
 
             try:
                 obj.close()

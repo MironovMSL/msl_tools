@@ -59,12 +59,12 @@ if __name__ == "__main__":
     modeling_cnf = RES1.configsMaya.get_config("modeling", ext=".ini")
     modeling_cnf["startup"]["window_geometry"] = 6
 
-    # Повторный запрос того же tool_name с тем же ext -> вернёт закэшированный, ОК
+    # Asking again for the same tool_name with the same ext -> returns the cached one, OK
     same = RES1.configsMaya.get_config("rename", ext=".json")
     print(same is renam_con)  # True
 
-    # Попытка запросить "rename" как .ini -> теперь падает с понятной ошибкой,
-    # а не молча возвращает JsonConfig
+    # Asking for "rename" as .ini -> now fails with a clear error
+    # instead of silently returning a JsonConfig
     RES1.configsMaya.get_config("rename", ext=".ini")
 
     print(RES1.versionManager.check_for_update(RES1.fsManager.msl))

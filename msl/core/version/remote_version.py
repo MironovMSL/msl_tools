@@ -10,7 +10,7 @@ class RemoteVersionConfig:
 
 
 class RemoteVersionChecker:
-    """Проверка последней доступной версии через GitHub Releases API."""
+    """Checks the latest available version through the GitHub Releases API."""
 
     def __init__(self, config: RemoteVersionConfig, network_client, *,
                  logger: logging.Logger | None = None):

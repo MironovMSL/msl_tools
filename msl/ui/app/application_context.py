@@ -1,5 +1,5 @@
 """
-Контекст-менеджер для жизненного цикла QApplication.
+Context manager for the QApplication's lifecycle.
 """
 
 import logging
@@ -14,14 +14,14 @@ logger = logging.getLogger(__name__)
 
 class QtApplicationContext:
     """
-    Context manager для QtWidgets.QApplication.
+    Context manager for QtWidgets.QApplication.
 
     Usage:
         with QtApplicationContext() as context:
             view = SomeWindow(parent=context.get_parent())
 
     Attributes:
-        app (QtWidgets.QApplication | None): Инстанс QApplication (только вне интерактивной Maya).
+        app (QtWidgets.QApplication | None): The QApplication instance (only outside interactive Maya).
     """
 
     def __init__(self):
@@ -29,11 +29,11 @@ class QtApplicationContext:
         self.parent = None
 
     def is_in_interactive_maya(self) -> bool:
-        """True, если скрипт выполняется внутри интерактивной Maya (не mayapy/batch)."""
+        """True if the script runs inside interactive Maya (not mayapy/batch)."""
         return MayaEnvironment.is_interactive()
 
     def get_parent(self):
-        """Maya main window, если внутри Maya, иначе None."""
+        """Maya's main window when inside Maya, else None."""
         return self.parent
 
     def __enter__(self):

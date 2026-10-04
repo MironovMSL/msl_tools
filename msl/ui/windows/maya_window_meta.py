@@ -1,5 +1,5 @@
 """
-Метакласс для управления Maya Qt окнами.
+Metaclass that manages Maya Qt windows.
 
 Features:
     - Maya dockable windows
@@ -229,10 +229,10 @@ class MayaWindowMeta(_QtMetaBase):
 
 class MayaWindowMetaOld(type):
     """
-    Метакласс Maya-окна. Делает Qt-класс докабельным в Maya (когда это возможно) и добавляет:
-      - автозакрытие предыдущих окон того же класса перед открытием нового;
-      - сохранение/восстановление geometry при доке;
-      - Tool-modality на macOS в non-dockable режиме.
+    Metaclass of a Maya window. Makes a Qt class dockable in Maya (when possible) and adds:
+      - closing earlier windows of the same class before a new one opens;
+      - saving/restoring the geometry when docked;
+      - Tool modality on macOS in non-dockable mode.
 
     Example:
         class ToolView(metaclass=MayaWindowMeta):

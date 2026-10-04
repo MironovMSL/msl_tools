@@ -3,9 +3,9 @@ import sys
 
 
 class SystemInfo:
-    """Определение ОС. Не имеет состояния, ни от чего в fs/ не зависит —
-    отдельный модуль именно чтобы избежать циклического импорта между
-    FileSystemManager и MayaPaths."""
+    """OS detection. Stateless and independent of everything else in fs/ —
+    a separate module precisely to avoid a circular import between
+    FileSystemManager and MayaPaths."""
 
     OS_MAC        = "darwin"
     OS_LINUX      = "linux"

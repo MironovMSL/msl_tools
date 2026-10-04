@@ -3,7 +3,7 @@ from pathlib import Path
 
 
 class Files:
-    """Фабрика File-объектов с общим логгером (DI, как остальные core-классы)."""
+    """Factory of File objects sharing one logger (DI, like the other core classes)."""
 
     def __init__(self, logger: logging.Logger | None = None):
         self._logger = logger or logging.getLogger(__name__)
@@ -13,8 +13,8 @@ class Files:
 
 
 class File:
-    """Работа с содержимым конкретного файла. Никаких исключений наружу —
-    ошибки логируются, методы возвращают False/None/""/[]/0 на неудаче."""
+    """Works with the contents of one file. No exceptions escape —
+    errors are logged, methods return False/None/""/[]/0 on failure."""
 
     def __init__(self, path: str | Path, encoding: str = 'utf-8',
                  logger: logging.Logger | None = None) -> None:
@@ -31,13 +31,13 @@ class File:
             return False
 
     def _open(self, mode: str):
-        """Открывает файл. Может кинуть исключение — вызывающие методы этого класса
-        всегда оборачивают вызов в try/except, наружу класса это не протекает."""
+        """Opens the file. May raise — the methods of this class that call it
+        always wrap the call in try/except, so nothing leaks out of the class."""
         if mode in ("w", "a") and not self._ensure_dir_exists():
             raise OSError(f'Unable to ensure parent directory for "{self.path}"')
         return self.path.open(mode, encoding=self.encoding)
 
-    # --- СВОЙСТВА (PROPERTIES) ---
+    # --- PROPERTIES ---
 
     @property
     def size(self) -> int:
@@ -70,7 +70,7 @@ class File:
             self._logger.warning(f'Unable to count lines in "{self.path}". Issue: {e}')
             return 0
 
-    # --- МЕТОДЫ ЧТЕНИЯ И ЗАПИСИ ---
+    # --- READING AND WRITING ---
 
     def read(self) -> str:
         if not self.exists:
@@ -127,7 +127,7 @@ class File:
             self._logger.warning(f'Unable to clear "{self.path}". Issue: {e}')
             return False
 
-    # --- МЕТОДЫ МОДИФИКАЦИИ ---
+    # --- MODIFICATION ---
 
     def append(self, content: str) -> bool:
         try:
@@ -234,24 +234,24 @@ class File:
 
 
 if __name__ == '__main__':
-    # Создаем объект файла один раз
+    # Create the file object once
     py_file = File("system2.py")
 
-    # Работаем с ним через методы и свойства
+    # Work with it through methods and properties
     py_file.write("Initialization...\n")
     py_file.append_line("User logged in")
     py_file.append_line("Database connected")
     py_file.append_line("import msl")
     py_file.append_line("msl.bootstrap()")
 
-    # Свойства вызываются без круглых скобок ()
-    print(f"Размер: {py_file.size} байт")
-    print(f"Строк: {py_file.line_count}")
+    # Properties are accessed without parentheses ()
+    print(f"Size: {py_file.size} bytes")
+    print(f"Lines: {py_file.line_count}")
 
     if py_file.contains("Database"):
-        print("Лог содержит информацию о БД")
+        print("The log mentions the database")
 
-    print("чтение линий",py_file.read_lines())
+    print("reading lines",py_file.read_lines())
 
     FILES = Files()
 

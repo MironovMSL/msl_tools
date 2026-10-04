@@ -10,12 +10,12 @@ logger = logging.getLogger(__name__)
 
 class MayaPaths:
     """Installation discovery layer for Autodesk Maya.
-    Чистый query-слой: только поиск путей, без побочных эффектов и без кэша
-    (кэш/персистентность — забота отдельного компонента, см. MayaInstallConfig)."""
+    A pure query layer: only finds paths, no side effects and no cache
+    (caching/persistence belong to a separate component, see MayaInstallConfig)."""
 
     @classmethod
     def get_install_root(cls, *, system: str | None = None) -> Path | None:
-        """Папка Autodesk, где лежат все установленные версии Maya.
+        """The Autodesk folder that holds every installed Maya version.
         e.g. C:/Program Files/Autodesk"""
         system = system or SystemInfo.get_system()
         install_roots = {
@@ -31,7 +31,7 @@ class MayaPaths:
 
     @classmethod
     def get_executable_path(cls, version: str, *, system: str | None = None, python_executable: bool = False) -> Path | None:
-        """Путь к конкретному maya.exe / mayapy.exe для указанной версии."""
+        """Path to the maya.exe / mayapy.exe of the given version."""
         if not version:
             logger.warning("Unable to resolve Maya executable path. No version provided.")
             return None
@@ -54,7 +54,7 @@ class MayaPaths:
 
     @classmethod
     def get_preferences_root(cls, *, system: str | None = None, use_maya_commands: bool = False) -> Path | None:
-        """Родительская папка препочтений Maya (папка, где лежат версии, e.g. .../maya/2024)."""
+        """Parent folder of Maya's preferences (the folder holding the versions, e.g. .../maya/2024)."""
         system = system or SystemInfo.get_system()
 
         if use_maya_commands:
@@ -89,7 +89,7 @@ class MayaPaths:
 
     @classmethod
     def get_available_installs(cls, *, system: str | None = None) -> dict[str, Path]:
-        """{"2024": Path(".../Maya2024")} — все найденные установки Maya."""
+        """{"2024": Path(".../Maya2024")} — every Maya installation found."""
         system = system or SystemInfo.get_system()
         install_root = cls.get_install_root(system=system)
         if install_root is None or not install_root.exists():
@@ -105,7 +105,7 @@ class MayaPaths:
 
     @classmethod
     def get_available_preferences(cls, system: str | None = None, use_maya_commands: bool = False) -> dict[str, Path]:
-        """{"2024": Path(".../maya/2024")} — все найденные папки препочтений по версиям."""
+        """{"2024": Path(".../maya/2024")} — every preferences folder found, by version."""
         preferences_root = cls.get_preferences_root(system=system, use_maya_commands=use_maya_commands)
         if preferences_root is None or not preferences_root.exists():
             logger.warning(f'Unable to find Maya preferences. Missing or invalid path: "{preferences_root}"')
@@ -119,7 +119,7 @@ class MayaPaths:
 
     @classmethod
     def get_latest_executable(cls, preferred_version: str | None = None, *, system: str | None = None, python_executable: bool = False) -> Path | None:
-        """Последняя обнаруженная версия, либо preferred_version, если она доступна."""
+        """The latest version found, or preferred_version if it is available."""
         system = system or SystemInfo.get_system()
         installs = cls.get_available_installs(system=system)
         if not installs:

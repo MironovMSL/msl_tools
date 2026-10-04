@@ -37,11 +37,11 @@ class UpdateInfo:
 
 
 class VersionManager:
-    """Связывает локальную версию (любого пути с __init__.py) с проверкой релизов на GitHub.
-    Не хранит фиксированный путь — принимает его при каждом вызове check_for_update()."""
+    """Ties a local version (of any path with an __init__.py) to the release check on GitHub.
+    Keeps no fixed path — takes it on every check_for_update() call."""
 
-    # Относительный путь от корня установки до пакета с версией.
-    # Единственное место, где это знание закодировано — меняется здесь, если структура пакета изменится.
+    # Relative path from the install root to the package that holds the version.
+    # The only place this knowledge is encoded — change it here if the package layout changes.
     PACKAGE_SUBPATH = Path("msl_tools") / "msl"
 
     def __init__(self,
@@ -60,7 +60,7 @@ class VersionManager:
         self._logger             = logger or logging.getLogger(__name__)
 
     def _resolve_package_root(self, install_root: str | Path) -> Path:
-        """Достраивает полный путь до пакета (с __init__.py) внутри переданной корневой папки."""
+        """Builds the full path to the package (with __init__.py) inside the given root folder."""
         return Path(install_root) / self.PACKAGE_SUBPATH
 
     def check_for_remote_update(self) -> UpdateInfo:
@@ -92,9 +92,9 @@ class VersionManager:
         return self._remote_checker.get_releases()
 
     def check_install_status(self, install_root: str | Path) -> UpdateInfo:
-        """install_root — корневая папка установки (например, Documents\\maya\\scripts
-        или H:\\ProjectsDev\\MSL_Others), а не путь до самого пакета.
-        Метод сам находит msl_tools\\msl внутри неё."""
+        """install_root is the install's root folder (e.g. Documents\\maya\\scripts
+        or H:\\ProjectsDev\\MSL_Others), not the path of the package itself.
+        The method finds msl_tools\\msl inside it by itself."""
 
         if self.core_raw_version is None:
             self._logger.warning(f"Failed to read package version: {self.core_module_path}")

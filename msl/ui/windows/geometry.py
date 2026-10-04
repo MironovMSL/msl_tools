@@ -1,5 +1,5 @@
 """
-Позиционирование и геометрия окон относительно экрана.
+Window positioning and geometry relative to the screen.
 """
 
 import logging
@@ -11,14 +11,14 @@ logger = logging.getLogger(__name__)
 
 def get_cursor_position(offset_x: int = 0, offset_y: int = 0):
     """
-    Текущая позиция курсора мыши.
+    Current position of the mouse cursor.
 
     Args:
-        offset_x (int): Смещение по X в пикселях.
-        offset_y (int): Смещение по Y в пикселях.
+        offset_x (int): X offset in pixels.
+        offset_y (int): Y offset in pixels.
 
     Returns:
-        QtCore.QPoint: Позиция курсора со смещением.
+        QtCore.QPoint: Cursor position with the offset applied.
     """
     cursor_position = qt.QtGui.QCursor().pos()
     return qt.QtCore.QPoint(cursor_position.x() + offset_x, cursor_position.y() + offset_y)
@@ -26,10 +26,10 @@ def get_cursor_position(offset_x: int = 0, offset_y: int = 0):
 
 def get_main_window_screen_number() -> int:
     """
-    Номер экрана, на котором находится активное окно приложения.
+    Index of the screen the application's active window is on.
 
     Returns:
-        int: Индекс экрана, либо -1, если QApplication не инициализирован.
+        int: Screen index, or -1 if QApplication is not initialized.
     """
     app = qt.QtWidgets.QApplication.instance()
     if app is None:
@@ -45,13 +45,13 @@ def get_main_window_screen_number() -> int:
 
 def get_window_screen_number(window) -> int:
     """
-    Номер экрана, на котором находится указанное окно.
+    Index of the screen the given window is on.
 
     Args:
-        window (QtWidgets.QWidget): Окно, для которого определяется экран.
+        window (QtWidgets.QWidget): The window whose screen is looked up.
 
     Returns:
-        int: Индекс экрана, либо -1, если не найден.
+        int: Screen index, or -1 if not found.
     """
     app = qt.QtGui.QGuiApplication.instance()
     if not app:
@@ -67,10 +67,10 @@ def get_window_screen_number(window) -> int:
 
 def get_screen_center():
     """
-    Центр экрана, на котором находится главное окно приложения.
+    Center of the screen the application's main window is on.
 
     Returns:
-        QtCore.QPoint: Координаты центра экрана.
+        QtCore.QPoint: Coordinates of the screen's center.
     """
     screen_number = get_main_window_screen_number()
     screens = qt.QtWidgets.QApplication.screens()
@@ -81,10 +81,10 @@ def get_screen_center():
 
 def center_window(window):
     """
-    Перемещает окно в центр экрана.
+    Moves the window to the center of the screen.
 
     Args:
-        window (QtWidgets.QWidget): Окно для центрирования.
+        window (QtWidgets.QWidget): The window to center.
     """
     rect = window.frameGeometry()
     rect.moveCenter(get_screen_center())
@@ -98,16 +98,16 @@ def resize_to_screen(
     height_percentage: int | None = None,
 ):
     """
-    Изменяет размер окна пропорционально размеру экрана.
+    Resizes the window in proportion to the screen size.
 
     Args:
-        window (QtWidgets.QWidget): Окно для изменения размера.
-        percentage (int): Процент от размера экрана (0-100). По умолчанию 20.
-        width_percentage (int, optional): Переопределяет percentage для ширины.
-        height_percentage (int, optional): Переопределяет percentage для высоты.
+        window (QtWidgets.QWidget): The window to resize.
+        percentage (int): Percentage of the screen size (0-100). Defaults to 20.
+        width_percentage (int, optional): Overrides percentage for the width.
+        height_percentage (int, optional): Overrides percentage for the height.
 
     Raises:
-        ValueError: Если percentage вне диапазона [0, 100].
+        ValueError: If percentage is outside [0, 100].
     """
     if not 0 <= percentage <= 100:
         raise ValueError("Percentage should be between 0 and 100")

@@ -9,21 +9,21 @@ DEFAULT_NAME = "msl-tools"
 
 class LoggerManager:
     """
-    Единая точка получения логгеров для инструментов MSL.
+    The single place MSL tools get their loggers from.
 
-    Структура файлов на диске (по аналогии с ConfigManager):
+    File layout on disk (like ConfigManager's):
         base_dir / tool_name / log.log
 
-    Пример:
+    Example:
         logs = LoggerManager(Paths.logs)
-        log  = logs.get("rename")     # -> logs/rename/log.log + консоль
+        log  = logs.get("rename")     # -> logs/rename/log.log + console
     """
 
     def __init__(self, base_dir: Union[str, Path]):
         self.base_dir = Path(base_dir)
         self.base_dir.mkdir(parents=True, exist_ok=True)
 
-        # Кэш активных логгеров: { "tool_name": MSLLogger_instance }
+        # Cache of active loggers: { "tool_name": MSLLogger_instance }
         self._cache: dict[str, MSLLogger] = {}
 
     def __repr__(self) -> str:
@@ -38,18 +38,18 @@ class LoggerManager:
         file_level: str    = "WARNING",
         ) -> MSLLogger:
         """
-        Возвращает логгер по имени. При первом обращении создаёт консольный
-        (и, опционально, файловый) хендлер. Повторные вызовы с тем же name
-        просто возвращают закэшированный логгер — параметры повторно не
-        применяются (см. предупреждение ниже).
+        Returns the logger of that name. The first call creates a console
+        (and, optionally, a file) handler. Later calls with the same name
+        just return the cached logger — the parameters are not applied
+        again (see the warning below).
 
-        :param name: имя логгера / инструмента; также используется как имя
-                     папки для лог-файла (base_dir / name / log.log)
-        :param colored: цветной вывод в консоль
-        :param fmt: кастомный формат консоли (None -> MSLLogger.CONSOLE_FORMAT)
-        :param level: уровень логгера
-        :param to_file: писать ли в файл base_dir/name/log.log
-        :param file_level: минимальный уровень для файла
+        :param name: logger / tool name; also used as the name of the
+                     log file's folder (base_dir / name / log.log)
+        :param colored: colored console output
+        :param fmt: custom console format (None -> MSLLogger.CONSOLE_FORMAT)
+        :param level: logger level
+        :param to_file: whether to write to base_dir/name/log.log
+        :param file_level: minimum level for the file
         """
         if name in self._cache:
             return self._cache[name]
@@ -71,9 +71,9 @@ class LoggerManager:
     @staticmethod
     def _create_logger(name: str) -> MSLLogger:
         """
-        Создаёт логгер класса MSLLogger, временно подменяя logger class
-        только на момент создания -- чтобы не влиять на logging глобально
-        для остального процесса (например, сторонних библиотек внутри Maya).
+        Creates an MSLLogger, swapping the logger class only for the moment
+        of creation -- so logging isn't affected globally
+        for the rest of the process (e.g. third-party libraries inside Maya).
         """
         prev_cls = logging.getLoggerClass()
         try:
@@ -97,7 +97,7 @@ if __name__ == "__main__":
     log.error("error")
     log.path(r"C:\Project\character.mb")
 
-    # Повторный вызов с тем же name -> тот же объект, файл уже подключён
+    # A second call with the same name -> the same object, the file is already attached
     same_log = logs.get("rename")
     print(same_log is log)  # True
 

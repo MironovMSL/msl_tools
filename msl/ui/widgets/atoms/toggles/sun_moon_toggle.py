@@ -50,7 +50,7 @@ class SunMoonToggle(BaseToggle):
         painter = qt.QtGui.QPainter(self)
         painter.setRenderHint(qt.QtGui.QPainter.RenderHint.Antialiasing)
 
-        # DEBUG: показать реальную hit-area виджета — убрать после проверки
+        # DEBUG: show the widget's real hit area — remove after checking
         # painter.fillRect(self.rect(), qt.QtGui.QColor(255, 0, 0, 80))
 
         painter.save()

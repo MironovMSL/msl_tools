@@ -1,4 +1,4 @@
-# ui/ui_resources.py — Qt-зависимый, отдельная точка входа
+# ui/ui_resources.py — Qt-dependent, a separate entry point
 import msl_tools.msl.ui.qt_bindings as qt
 from msl_tools.msl.core.resources import Resources
 from msl_tools.msl.core.pattern.singleton import SingletonMeta
@@ -55,7 +55,7 @@ if __name__ == '__main__':
         apply_baseline(uiCore.themeManager.current_theme)
         uiCore.themeManager.theme_changed.connect(apply_baseline)
 
-        # --- переключатель темы ---
+        # --- theme toggle ---
         theme_checkbox = qt.QtWidgets.QCheckBox("dark theme")
         theme_checkbox.setChecked(uiCore.themeManager.current_theme.name == "dark")
         theme_checkbox.toggled.connect(
@@ -64,7 +64,7 @@ if __name__ == '__main__':
         dialog.add_widget(theme_checkbox)
         dialog.add_separator()
 
-        # --- обычные виджеты: ничего не подписываем, красятся глобальным QSS ---
+        # --- plain widgets: nothing to subscribe, the global QSS colors them ---
         dialog.add_case("QPushButton / QLineEdit (global QSS)", qt.QtWidgets.QPushButton("click me"))
         dialog.add_widget(qt.QtWidgets.QLineEdit("plain QLineEdit"))
 

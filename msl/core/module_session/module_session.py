@@ -5,19 +5,19 @@ logger = logging.getLogger(__name__)
 
 
 class ModuleSession:
-    """Отслеживание и управление состоянием sys.modules в рамках текущего процесса.
-    Baseline фиксируется при создании инстанса (in-memory), без персистентности на диск."""
+    """Tracks and manages the state of sys.modules within the current process.
+    The baseline is taken when the instance is created (in memory), never persisted to disk."""
 
     def __init__(self, logger=None):
         self._logger = logger or logging.getLogger(__name__)
         self._baseline: set[str] = set(sys.modules.keys())
 
     def get_new_modules(self) -> list[str]:
-        """Модули, загруженные после фиксации baseline."""
+        """Modules loaded after the baseline was taken."""
         return [name for name in sys.modules if name not in self._baseline]
 
     def remove_modules(self, module_names: list[str]) -> list[str]:
-        """Выгружает модули из sys.modules. Возвращает список реально удалённых."""
+        """Unloads modules from sys.modules. Returns the ones actually removed."""
         removed = []
         for name in module_names:
             if name not in sys.modules:
@@ -29,16 +29,16 @@ class ModuleSession:
         return removed
 
     def reset(self) -> list[str]:
-        """Выгружает всё, что появилось в sys.modules после baseline."""
+        """Unloads everything that appeared in sys.modules after the baseline."""
         return self.remove_modules(self.get_new_modules())
 
     def remove_modules_startswith(self, prefix: str) -> list[str]:
-        """Выгружает все модули, чьё имя начинается с prefix (независимо от baseline)."""
+        """Unloads every module whose name starts with prefix (regardless of the baseline)."""
         matched = [name for name in list(sys.modules) if name.startswith(prefix)]
         return self.remove_modules(matched)
 
     def filter_loaded_modules_path_containing(self, filter_strings: str | list[str], return_module: bool = True) -> list:
-        """Модули, чей __file__ содержит любую из filter_strings."""
+        """Modules whose __file__ contains any of filter_strings."""
         if isinstance(filter_strings, str):
             filter_strings = [filter_strings]
         if not isinstance(filter_strings, list):
@@ -56,7 +56,7 @@ class ModuleSession:
 
     @staticmethod
     def prepend_sys_path(new_path: str) -> None:
-        """Добавляет путь в начало sys.path, если его там ещё нет."""
+        """Prepends the path to sys.path if it isn't there yet."""
         if not isinstance(new_path, str):
             raise TypeError("new_path must be a string.")
         if not new_path:

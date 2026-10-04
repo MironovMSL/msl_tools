@@ -4,13 +4,13 @@ from enum import Enum
 logger = logging.getLogger(__name__)
 
 class MayaEnvironment:
-    """Детекция рантайма Maya в текущем процессе.
-    Чистый query-слой: без кэша, без side effects, не инициализирует standalone сам."""
+    """Detects the Maya runtime in the current process.
+    A pure query layer: no cache, no side effects, never initializes standalone itself."""
 
 
     class State(Enum):
-        NOT_RUNNING = "not_running"   # maya.cmds недоступен вовсе (обычный интерпретатор/IDE)
-        INTERACTIVE = "interactive"   # maya.exe, полноценный GUI
+        NOT_RUNNING = "not_running"   # maya.cmds is not available at all (plain interpreter/IDE)
+        INTERACTIVE = "interactive"   # maya.exe, full GUI
         BATCH       = "batch"         # mayapy / maya -batch / maya.standalone.initialize()
 
     @classmethod
@@ -23,9 +23,9 @@ class MayaEnvironment:
         try:
             return cls.State.BATCH if cmds.about(batch=True) else cls.State.INTERACTIVE
         except AttributeError:
-            # cmds импортирован, но не полностью инициализирован
-            # (mayapy/standalone до maya.standalone.initialize(), либо переходный момент загрузки GUI).
-            # Трактуем как BATCH — это самая частая реальная причина такой ошибки на практике.
+            # cmds is imported but not fully initialized
+            # (mayapy/standalone before maya.standalone.initialize(), or a transitional moment while the GUI loads).
+            # Treated as BATCH: in practice the most common real cause of this error.
             return cls.State.BATCH
 
     @classmethod
