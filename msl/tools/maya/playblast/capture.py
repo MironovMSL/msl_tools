@@ -9,6 +9,7 @@ or is cancelled, and none of it reaches the undo queue.
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -188,7 +189,8 @@ def frame_range(kind: str) -> tuple[int, int]:
             slider = mel.eval("$msl_playback_slider = $gPlayBackSlider")
             if cmds.timeControl(slider, query=True, rangeVisible=True):
                 first, after = cmds.timeControl(slider, query=True, rangeArray=True)
-                return int(first), max(int(first), int(after) - 1)  # the end of a selection is exclusive
+                first = math.floor(first)
+                return first, max(first, math.ceil(after) - 1)  # the end of a selection is exclusive
         except RuntimeError:
             pass
         kind = RANGE_PLAYBACK
@@ -199,7 +201,13 @@ def frame_range(kind: str) -> tuple[int, int]:
         start, end = cmds.getAttr("defaultRenderGlobals.startFrame"), cmds.getAttr("defaultRenderGlobals.endFrame")
     else:
         start, end = cmds.playbackOptions(query=True, minTime=True), cmds.playbackOptions(query=True, maxTime=True)
-    return int(start), int(end)
+    return whole_frames(start, end)
+
+
+def whole_frames(start: float, end: float) -> tuple[int, int]:
+    """A range that may end on sub-frames (-0.5 .. 100.5) as the whole frames covering it
+    (-1 .. 101): int() cut toward zero and lost a frame at each end of such a range."""
+    return math.floor(start), math.ceil(end)
 
 
 def render_resolution() -> tuple[int, int]:
@@ -265,15 +273,20 @@ class CaptureSession:
             except (RuntimeError, ValueError):
                 continue
         self._open = True
-        with _NoUndo():
-            for plug in self._render:
-                cmds.setAttr(plug, True)
-            if settings.visibility is not None:
-                wanted = set(settings.visibility)
-                cmds.modelEditor(self._panel, edit=True, **{flag: flag in wanted for flag in VISIBILITY})
-            if settings.camera:
-                cmds.lookThru(self._panel, settings.camera)
-            cmds.select(clear=True)  # selection highlights and manipulators don't belong in the picture
+        try:
+            with _NoUndo():
+                for plug in self._render:
+                    cmds.setAttr(plug, True)
+                if settings.visibility is not None:
+                    wanted = set(settings.visibility)
+                    cmds.modelEditor(self._panel, edit=True, **{flag: flag in wanted for flag in VISIBILITY})
+                if settings.camera:
+                    cmds.lookThru(self._panel, settings.camera)
+                cmds.select(clear=True)  # selection highlights and manipulators don't belong in the picture
+        except Exception as error:
+            # Half set up: whatever was changed goes back before the error is passed on.
+            self._restore()
+            raise CaptureError(f"Maya couldn’t prepare the playblast: {str(error).strip()}") from error
 
     def step(self) -> bool:
         """Draws the next frame. True while there are more to draw."""
@@ -317,31 +330,44 @@ class CaptureSession:
         if not self._open:
             return
         self._open = False
+        # Each step on its own: one that fails (the camera was deleted, another scene was opened
+        # meanwhile) must not keep the others — the render switches above all — from going back.
+        steps = []
+        if self._previous_camera:
+            steps.append(lambda: cmds.lookThru(self._panel, self._previous_camera))
+        if self._selection:
+            steps.append(lambda: cmds.select([name for name in self._selection if cmds.objExists(name)],
+                                             replace=True))
+        steps.append(lambda: cmds.currentTime(self._time, edit=True))
+        if self._shown is not None:
+            steps.append(lambda: cmds.modelEditor(self._panel, edit=True, **self._shown))
+        for plug, value in self._render.items():
+            steps.append(lambda plug=plug, value=value: cmds.setAttr(plug, value))
         with _NoUndo():
-            try:
-                if self._previous_camera:
-                    cmds.lookThru(self._panel, self._previous_camera)
-                if self._selection:
-                    cmds.select([name for name in self._selection if cmds.objExists(name)], replace=True)
-                cmds.currentTime(self._time, edit=True)
-                if self._shown is not None:
-                    cmds.modelEditor(self._panel, edit=True, **self._shown)
-                for plug, value in self._render.items():
-                    cmds.setAttr(plug, value)
-            finally:
-                if not self._modified:
+            for step in steps:
+                try:
+                    step()
+                except Exception:
+                    continue
+            if not self._modified:
+                try:
                     cmds.file(modified=False)  # looking through another camera marks the scene as changed
+                except Exception:
+                    pass
 
 
 class _NoUndo:
     """Inside: what happens is no edit of the scene, and stays out of the undo queue."""
 
     def __enter__(self):
+        # Put back as it WAS: switching it on regardless re-enabled undo for whoever had it off.
+        self._was_on = cmds.undoInfo(query=True, stateWithoutFlush=True)
         cmds.undoInfo(stateWithoutFlush=False)
         return self
 
     def __exit__(self, *_exc):
-        cmds.undoInfo(stateWithoutFlush=True)
+        if self._was_on:
+            cmds.undoInfo(stateWithoutFlush=True)
         return False
 
 

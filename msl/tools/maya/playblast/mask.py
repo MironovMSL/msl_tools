@@ -106,11 +106,13 @@ class _Quiet:
 
     def __enter__(self):
         self._modified = cmds.file(query=True, modified=True)
+        self._undo_was_on = cmds.undoInfo(query=True, stateWithoutFlush=True)  # put back as it WAS
         cmds.undoInfo(stateWithoutFlush=False)
         return self
 
     def __exit__(self, *_exc):
-        cmds.undoInfo(stateWithoutFlush=True)
+        if self._undo_was_on:
+            cmds.undoInfo(stateWithoutFlush=True)
         if not self._modified:
             cmds.file(modified=False)
         return False
@@ -183,6 +185,23 @@ def is_shown() -> bool:
 
 _state = {"settings": None, "callbacks": [], "put_back": False}
 
+# The save callbacks' ids also live on maya.cmds — a module "Reload Code" doesn't replace. A copy
+# of this module from before a reload left its callbacks registered, still putting back the OLD
+# mask after every save (and more of them with every reload): they are taken off on import.
+_CALLBACKS_KEPT_ON = "_msl_shot_mask_save_callbacks"
+
+
+def _drop_callbacks_of_an_older_copy() -> None:
+    for callback in getattr(cmds, _CALLBACKS_KEPT_ON, None) or []:
+        try:
+            om.MMessage.removeCallback(callback)
+        except RuntimeError:  # already gone
+            pass
+    setattr(cmds, _CALLBACKS_KEPT_ON, [])
+
+
+_drop_callbacks_of_an_older_copy()
+
 
 def last_draw_error() -> str:
     """The traceback of the mask's last failed draw ("" = it draws). Maya swallows a draw's exception;
@@ -213,12 +232,14 @@ def _watch_saves() -> None:
     if not _state["callbacks"]:
         _state["callbacks"] = [om.MSceneMessage.addCallback(om.MSceneMessage.kBeforeSave, _before_save),
                                om.MSceneMessage.addCallback(om.MSceneMessage.kAfterSave, _after_save)]
+        setattr(cmds, _CALLBACKS_KEPT_ON, list(_state["callbacks"]))
 
 
 def _unwatch_saves() -> None:
     for callback in _state["callbacks"]:
         om.MMessage.removeCallback(callback)
     _state["callbacks"] = []
+    setattr(cmds, _CALLBACKS_KEPT_ON, [])
 
 
 def show(settings: MaskSettings) -> str:

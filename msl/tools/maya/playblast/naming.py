@@ -56,16 +56,23 @@ def output_path(folder: str, name: str, values: dict, suffix: str) -> Path:
     file_name = _FORBIDDEN.sub("_", expand(name.strip() or DEFAULT_NAME, values)).strip(" .") or "playblast"
     if suffix and Path(file_name).suffix.lower() in (".mp4", ".mov", ".png", ".jpg"):
         file_name = Path(file_name).stem
-    return Path(expand(folder.strip() or DEFAULT_FOLDER, values)) / (file_name + suffix)
+    target_folder = Path(expand(folder.strip() or DEFAULT_FOLDER, values))
+    if not target_folder.is_absolute() and values.get("project"):
+        # "movies" typed without {project}: inside the project, not wherever Maya's working folder is
+        target_folder = Path(values["project"]) / target_folder
+    return target_folder / (file_name + suffix)
 
 
 VERSION_TOKEN = "{version}"
 
 
-def version_for(folder: str, name: str, values: dict, suffix: str, reuse: bool = False) -> str:
+def version_for(folder: str, name: str, values: dict, suffix: str, reuse: bool = False,
+                taken=()) -> str:
     """What {version} stands for: "v001" for the first playblast of this name, then the number
     after the highest one found in the folder ("v007" -> "v008"). `reuse`: the highest one
-    itself (a playblast that replaces the last version instead of adding one)."""
+    itself (a playblast that replaces the last version instead of adding one). `taken`: paths
+    of results still being made — no file yet, but their number counts (a second playblast
+    started while the first one's video is made got the same version)."""
     mark = "\uE000"
     target = output_path(folder, name, dict(values, version=mark), suffix)
     if mark not in target.name:
@@ -73,13 +80,16 @@ def version_for(folder: str, name: str, values: dict, suffix: str, reuse: bool =
     before, after = target.name.split(mark, 1)
     pattern = re.compile(re.escape(before) + r"v(\d+)" + re.escape(after.replace(mark, "")) + "$", re.IGNORECASE)
     highest = 0
+    names = []
     try:
-        for entry in target.parent.iterdir():
-            match = pattern.match(entry.name)
-            if match:
-                highest = max(highest, int(match.group(1)))
-    except (OSError, ValueError):
+        names = [entry.name for entry in target.parent.iterdir()]
+    except OSError:
         pass
+    names += [Path(path).name for path in taken if Path(path).parent == target.parent]
+    for entry_name in names:
+        match = pattern.match(entry_name)
+        if match:
+            highest = max(highest, int(match.group(1)))
     number = max(1, highest) if reuse else highest + 1
     return f"v{number:03d}"
 
@@ -89,10 +99,12 @@ def without_version(name: str) -> str:
     return re.sub(r"[ _.\-]*\{version\}", "", name).strip(" _.-")
 
 
-def free_path(path: Path) -> Path:
-    """`path`, or — if something is there already — the first of `<name>_2`, `<name>_3`, ... that is free."""
+def free_path(path: Path, taken=()) -> Path:
+    """`path`, or — if something is there already, or it is in `taken` (results on their way,
+    no file yet) — the first of `<name>_2`, `<name>_3`, ... that is free."""
+    taken = {Path(item) for item in taken}
     candidate, counter = path, 2
-    while candidate.exists():
+    while candidate.exists() or candidate in taken:
         candidate = path.with_name(f"{path.stem}_{counter}{path.suffix}")
         counter += 1
     return candidate

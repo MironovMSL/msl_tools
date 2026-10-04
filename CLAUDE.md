@@ -1743,6 +1743,31 @@ scratch on Maya's public API. Step 1 of 4 is built (2026-10-03):
   keys stay on their frame numbers), camera / frames = open that list.
   A folded card needs one more turn of the event loop to shrink: a
   screenshot taken at once still shows it tall.
+- The END of a run lives outside the panel (2026-10-04): `ending.py`
+  `RunEnding` (one parentless QObject per Maya session, `instance()`)
+  takes every finished run — worker `done` is connected to it, never to
+  the panel — and does the latest copy, the history record (scene, scene
+  path and note as at the capture's START), clipboard, player; then
+  emits `ended` / `progressed`, which a panel that still exists only
+  SHOWS. Before, closing the window while its video was made lost all of
+  that. `RunEnding.taken` = names of results on their way, shared by all
+  panels; `naming.version_for(taken=)` / `free_path(taken)` count them
+  (a second playblast got the same v003). History records match a scene
+  by `scene_path` (name for older records). `start()` does nothing while
+  busy (the repeat hotkey pressed twice cancelled the playblast); a
+  SPONTANEOUS hide (Maya minimized) no longer aborts a capture. capture.py:
+  a set-up that fails halfway is undone, each restore step runs on its
+  own, `_NoUndo` / mask `_Quiet` put undo back as it WAS, sub-frame ranges
+  round outward (`whole_frames`). The mask's save callbacks are kept on
+  maya.cmds and removed on import (Reload Code left the old ones). Old
+  temporary frame folders (>12 h, a crashed capture's) are swept on first
+  show. Tests: `tests/maya/test_playblast.py` (a fake maya.cmds). Checked
+  in real windowed Maya 2025 (prefs copy, temp project): window closed
+  right after the frames -> video, history, ending all there; repeat
+  pressed twice -> v001 then v002, nothing cancelled; viewport, undo and
+  the modified mark as before. A PlayblastWindow built DURING Maya's
+  startup (a -command script) died in repolish ("QProxyStyle already
+  deleted") — open it after startup (evalDeferred + a moment); not fixed.
 - Progress (2026-10-03): the capture runs ONE FRAME PER TURN of the event
   loop — `capture.CaptureSession` (`step()` = `cmds.playblast(startTime=f,
   endTime=f)`, so files keep real frame numbers; `frame=[f]` numbers

@@ -1,4 +1,6 @@
 # tools/maya/playblast/panel.py
+import functools
+import glob
 import json
 import shutil
 import tempfile
@@ -10,8 +12,9 @@ from msl_tools.msl.core.fs.manager import FileSystemManager
 from msl_tools.msl.core.media import FfmpegLocator, MediaError, find_sequences, run_job, sequence_to_video
 from msl_tools.msl.core.resources import Resources
 from msl_tools.msl.tools.maya.playblast import capture, mask, naming
+from msl_tools.msl.tools.maya.playblast.ending import RunEnding
 from msl_tools.msl.tools.maya.playblast.mask_preview import MaskPreview
-from msl_tools.msl.tools.maya.playblast.recent import RecentCard, open_result, size_text
+from msl_tools.msl.tools.maya.playblast.recent import RecentCard
 from msl_tools.msl.tools.maya.playblast.visibility_dialog import VisibilityDialog
 from msl_tools.msl.ui.theme import StylesheetBuilder
 from msl_tools.msl.ui.theme.qss import make_rounded_popup, repolish
@@ -220,7 +223,6 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
                          "text_color": "#ffffff", "bar_color": "#000000", "note": "", "warn": True,
                          "top_bar": True, "bottom_bar": True, "logo": "", "open": False}}
 
-    _encoding_progressed = qt.QtCore.Signal(float)
     # Running workers, kept by the CLASS and parentless: a docked panel can be closed (and deleted)
     # at any moment, and a QThread destroyed while it runs takes Maya down with it.
     _workers: set = set()
@@ -234,14 +236,14 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
         self._tools = None            # FfmpegTools once found
         self._tools_looked = False
         self._busy = False
-        self._result: Path | None = None
         self._session = None                     # the CaptureSession while Maya draws the frames
         self._tools_known = False                # ffmpeg was looked for (found or not)
         self._queue: list = []                   # the cameras still to shoot in this run
         self._run: dict | None = None            # the capture going on now
         self._capture_camera = None              # its camera ("" = the active view), for the tokens
-        self._encodes = 0                        # videos being made in the background
-        self._taken: set = set()                 # results on their way: not offered to the next one
+        self._encoding: set = set()              # ids of this panel's runs whose video is being made
+        self._mask_applied = None                # the MaskSettings last put into the viewport
+        self._recent_scene = None                # the scene the RECENT card was filled for
         self._run_number = 0
         self._start_when_ready = False           # start() came before that
         self._cancelled = False
@@ -608,7 +610,10 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
         self._picture_card.toggled.connect(self._on_card_folded)
         self._result_card.toggled.connect(self._on_card_folded)
         self._recent.clear_requested.connect(self._on_recent_clear)
-        self._encoding_progressed.connect(self._on_encoding_progress)
+        # The end of a run lives outside the panel (ending.py): the panel may be closed before
+        # its video is made. Bound methods: the connections go with the panel.
+        RunEnding.instance().ended.connect(self._on_run_ended)
+        RunEnding.instance().progressed.connect(self._on_encoding_progress)
         self._mask_on.toggled.connect(self._on_mask_toggled)
         self._mask_preview.slot_picked.connect(self._select_mask_slot)
         self._mask_edit.textEdited.connect(self._on_mask_edit)
@@ -717,6 +722,28 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
         if not self._tools_looked:
             self._tools_looked = True
             self._find_ffmpeg()
+            self._sweep_old_frames()
+
+    FRAMES_KEPT_HOURS = 12  # temporary frames of a capture this old belong to no run any more
+
+    @classmethod
+    def _sweep_old_frames(cls) -> None:
+        """Removes the temporary frame folders a capture left behind (Maya crashed or was closed
+        mid-run: nothing else ever deletes them — gigabytes of PNGs). On a worker: it may be a lot."""
+        root = Path(tempfile.gettempdir()) / "msl_tools" / "playblast"
+        limit = time.time() - cls.FRAMES_KEPT_HOURS * 3600
+
+        def sweep() -> None:
+            for folder in root.iterdir() if root.is_dir() else []:
+                try:
+                    if folder.is_dir() and folder.name[:8].isdigit() and folder.stat().st_mtime < limit:
+                        shutil.rmtree(folder, ignore_errors=True)
+                except OSError:
+                    continue
+
+        worker = ResultWorker(sweep)
+        cls._keep(worker)
+        worker.start()
 
     def enterEvent(self, event) -> None:
         super().enterEvent(event)
@@ -747,7 +774,8 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
         self._sync_mask()
         self._refresh_mask_preview()
         self._mark_presets()
-        self._refresh_recent()
+        if capture.scene_path() != self._recent_scene:  # refresh() runs on every pointer enter:
+            self._refresh_recent()                      # the files are checked when the scene changed
 
     def _refresh_facts(self) -> None:
         start, end = self._frames()
@@ -1051,7 +1079,6 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
 
     # ------------------------------------------------------------------ what was made before
 
-    HISTORY_KEPT = 40   # results remembered, all scenes together
     RECENT_SHOWN = 4    # ... of which the scene's last ones are listed
 
     def _history(self) -> list:
@@ -1060,24 +1087,29 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
         except (KeyError, TypeError, ValueError):
             return []
 
-    def _remember(self, result: Path, frames: int, camera: str) -> None:
-        entry = {"path": str(result), "scene": capture.scene_name() or "untitled", "camera": camera,
-                 "frames": int(frames), "time": time.time(), "note": self._mask_note.text().strip()}
-        kept = [old for old in self._history() if old.get("path") != entry["path"]]
-        self._config["history"] = (kept + [entry])[-self.HISTORY_KEPT:]
+    @staticmethod
+    def _is_this_scene(entry: dict, scene: str, scene_path: str) -> bool:
+        """A record of this scene: by the scene's FILE when the record has one (two "shot_010"
+        of two projects aren't one scene); by name for older records and unsaved scenes."""
+        if entry.get("scene_path") and scene_path:
+            return entry["scene_path"] == scene_path
+        return entry.get("scene") == scene
 
     def _refresh_recent(self) -> None:
         """The RECENT card: this scene's last playblasts that still exist, newest first."""
-        scene = capture.scene_name() or "untitled"
+        scene, scene_path = capture.scene_name() or "untitled", capture.scene_path()
+        self._recent_scene = scene_path
         mine = [entry for entry in self._history()
-                if entry.get("scene") == scene and entry.get("path") and Path(entry["path"]).exists()]
+                if self._is_this_scene(entry, scene, scene_path) and entry.get("path")
+                and Path(entry["path"]).exists()]
         self._recent.show_results(mine[-self.RECENT_SHOWN:][::-1], self._tools, total=len(mine),
                                   slots=self.RECENT_SHOWN)
 
     def _on_recent_clear(self) -> None:
         """Forgets this scene's results (the files stay)."""
-        scene = capture.scene_name() or "untitled"
-        self._config["history"] = [entry for entry in self._history() if entry.get("scene") != scene]
+        scene, scene_path = capture.scene_name() or "untitled", capture.scene_path()
+        self._config["history"] = [entry for entry in self._history()
+                                   if not self._is_this_scene(entry, scene, scene_path)]
         self._refresh_recent()
 
     def _on_fact_clicked(self, caption: str) -> None:
@@ -1285,9 +1317,15 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
             return
         try:
             if self._mask_on.isChecked():
-                mask.show(self._mask_settings())
+                settings = self._mask_settings()
+                # refresh() runs on every pointer enter: ~20 setAttr + a viewport redraw only when
+                # something changed, or the scene lost the mask (a new / reopened scene)
+                if settings != self._mask_applied or not mask.is_shown():
+                    mask.show(settings)
+                    self._mask_applied = settings
             elif mask.is_shown():
                 mask.hide()
+                self._mask_applied = None
         except mask.MaskError as error:
             self._mask_on.set_checked_immediate(False)
             self._save_mask()
@@ -1365,6 +1403,8 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
     def start(self) -> None:
         """Starts a playblast with what the controls say (what the button does) — also right after
         the panel was made: it waits for ffmpeg to be found first."""
+        if self._busy:
+            return  # a second press of the "repeat" hotkey must not cancel the playblast going on
         if self._tools is None and not self._tools_known:
             self._start_when_ready = True
             return
@@ -1397,11 +1437,10 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
         start, end = self._frames()
         target = self._output_path()
         latest = self._latest_path()
-        if not self._overwrite.isChecked():
-            target = naming.free_path(target)
-        while target in self._taken:  # a result still being made has no file yet: its name is taken all the same
-            target = target.with_name(f"{target.stem}_next{target.suffix}")
-        self._taken.add(target)
+        taken = RunEnding.taken  # results still being made have no file yet: their names are taken all the same
+        if not self._overwrite.isChecked() or target in taken:
+            target = naming.free_path(target, taken)
+        taken.add(target)
         self._run_number += 1
         if video:
             frames_folder = (Path(tempfile.gettempdir()) / "msl_tools" / "playblast"
@@ -1418,7 +1457,10 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
         self._run = {"settings": settings, "target": target, "video": video, "latest": latest,
                      "copy": self._copy.isChecked(), "open": self._open.isChecked(),
                      "sound": self._sound.isChecked(), "quality": QUALITY.get(self._quality.currentText(), "high"),
-                     "started": time.time(), "left": len(self._queue)}
+                     "started": time.time(), "left": len(self._queue), "id": RunEnding.next_id(),
+                     # as they are NOW: another scene may be open by the time the video is made
+                     "scene": capture.scene_name() or "untitled", "scene_path": capture.scene_path(),
+                     "note": self._mask_note.text().strip()}
         self._set_busy(True)
         self._say("Maya is drawing the frames…")
         # a moment later, so the line above is on screen before Maya takes over (and never
@@ -1433,11 +1475,11 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
         try:
             target.parent.mkdir(parents=True, exist_ok=True)
             if not video and target.is_dir() and self._overwrite.isChecked():
-                for old in target.glob(f"{target.name}.*.png"):
+                for old in target.glob(glob.escape(target.name) + ".*.png"):  # "[v2]" in a name isn't a pattern
                     old.unlink()  # a shorter range must not leave the longer one's last frames behind
             self._session = capture.CaptureSession(settings)
-        except (capture.CaptureError, OSError) as error:
-            self._capture_failed(str(error))
+        except Exception as error:  # Maya's own RuntimeError too: the panel must never stay "Working…"
+            self._capture_failed(str(error) or type(error).__name__)
             return
         self._cancelled = False
         self._progress.set_progress(0)
@@ -1459,9 +1501,13 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
             return
         try:
             more = session.step()
-        except capture.CaptureError as error:
+        except Exception as error:  # CaptureError, or Maya's own (another scene opened meanwhile)
             self._step_timer.stop()
-            self._capture_failed(str(error))
+            try:
+                session.abort()
+            except Exception:
+                pass
+            self._capture_failed(str(error) or type(error).__name__)
             return
         self._progress.set_progress(int(session.done * 100 / session.total))
         camera = f"{self._camera_name()}: " if self._run["left"] or self._several_cameras() else ""
@@ -1469,8 +1515,13 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
         if more:
             return
         self._step_timer.stop()
+        try:
+            shot = session.finish()
+        except Exception as error:
+            self._capture_failed(f"Maya couldn’t finish the playblast: {error}")
+            return
         self._session = None
-        self._after_capture(session.finish())
+        self._after_capture(shot)
 
     def _capture_failed(self, message: str) -> None:
         """The capture going on gave up (an error, Cancel): the rest of this run is dropped too."""
@@ -1480,7 +1531,7 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
         if run["video"]:
             shutil.rmtree(run["settings"].folder, ignore_errors=True)
         self._free()
-        self._done(dict(run, error=message))
+        RunEnding.instance().take(dict(run, error=message))
 
     def _free(self) -> None:
         """No capture is going on any more: the button is the start button again."""
@@ -1496,16 +1547,18 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
         run = dict(self._run, frames=shot.frames, camera=shot.camera, error="")
         if run["video"]:
             sound = shot.sound if run["sound"] and shot.sound and Path(shot.sound).is_file() else None
-            tools, report = self._tools, self._report_progress
-            self._encodes += 1
-            worker = ResultWorker(lambda: self._encode(tools, shot, run, sound, report))
-            worker.done.connect(self._on_encoded)
-            worker.failed.connect(self._on_encode_broke)
+            ending = RunEnding.instance()
+            self._encoding.add(run["id"])
+            # Nothing of the panel goes along: it may be closed before the video is made.
+            # _encode never raises, so `done` always comes — to the ending, in the main thread.
+            worker = ResultWorker(functools.partial(PlayblastPanel._encode, self._tools, shot, run, sound,
+                                                    RunEnding.report_progress))
+            worker.done.connect(ending.take)
             self._keep(worker)
             worker.start()
         if self._queue:
             if not run["video"]:
-                self._done(run)
+                RunEnding.instance().take(run)
             self._next_capture()
             return
         self._free()
@@ -1514,23 +1567,19 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
             self._progress.show()
             self._say(self._encoding_text())
         else:
-            self._done(run)
+            RunEnding.instance().take(run)
 
     def _encoding_text(self) -> str:
         return "Making the video…" if self._encodes == 1 else f"Making {self._encodes} videos…"
 
     def hideEvent(self, event) -> None:
         super().hideEvent(event)
-        if self._session is not None:  # the window was closed in the middle of a capture
+        # The window closed mid-capture. Not a SPONTANEOUS hide: minimizing Maya (the window's
+        # owner) or another tab in front of a docked panel isn't a reason to throw the frames away.
+        if self._session is not None and not event.spontaneous():
             self._step_timer.stop()
             self._session.abort()
             self._capture_failed("Cancelled.")
-
-    def _report_progress(self, fraction: float, _report=None) -> None:
-        try:
-            self._encoding_progressed.emit(fraction)
-        except RuntimeError:
-            pass  # the panel was closed meanwhile; the video is finished all the same
 
     @staticmethod
     def _encode(tools, shot, run: dict, sound, report) -> dict:
@@ -1550,64 +1599,34 @@ class PlayblastPanel(qt.QtWidgets.QWidget):
             shutil.rmtree(shot.folder, ignore_errors=True)
         return run
 
-    def _on_encoded(self, run) -> None:
-        self._encodes = max(0, self._encodes - 1)
-        self._done(run)
-
-    def _on_encode_broke(self, error) -> None:
-        self._encodes = max(0, self._encodes - 1)  # _encode never raises; this is the worker itself failing
-        if not self._busy:
-            self._progress.setVisible(bool(self._encodes))
-            self._say(str(error) or "The video couldn’t be made.", "error")
-
     def _on_encoding_progress(self, fraction: float) -> None:
         if not self._busy:  # while Maya draws frames the bar is the capture's
             self._progress.set_progress(int(fraction * 100))
 
-    def _done(self, run: dict) -> None:
-        """One playblast is over: its result is remembered, copied, opened — or its error said."""
-        self._taken.discard(run["target"])
+    @property
+    def _encodes(self) -> int:
+        """Videos of this panel's runs being made in the background."""
+        return len(self._encoding)
+
+    def _on_run_ended(self, run: dict) -> None:
+        """A run is over and its end was taken care of (RunEnding): only SHOWN here — the
+        status line, the RECENT card. Also for a run a closed window started."""
+        self._encoding.discard(run.get("id"))
         capturing = self._busy
         if not capturing and not self._encodes:
             self._progress.hide()
-        if run.get("error"):
-            self._result = None
-            self._logger.warning(f"Playblast failed: {run['error']}")
-            if not capturing:
-                self._say(run["error"], "error")
-            return
-        result = self._result = run["target"]
-        note = size_text(result.stat().st_size) if result.is_file() else f"{run.get('frames', 0)} frames"
-        message, state = " · ".join(("Done", note, f"{time.time() - run['started']:.1f} s")), "done"
-        if self._encodes:
-            message += f" · {self._encoding_text()[:-1].lower()}"
-        latest = run.get("latest")
-        if latest is not None:
-            try:
-                if result.is_dir():
-                    shutil.rmtree(latest, ignore_errors=True)
-                    shutil.copytree(result, latest)
-                else:
-                    latest.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(result, latest)
-            except OSError as error:
-                message, state = f"Done — but the latest copy couldn’t be written: {error}", "error"
         if not capturing:  # the line belongs to the capture while one is going on
-            self._say(message, state)
-            self._status.setToolTip(str(result))
-        self._remember(result, run.get("frames", 0), run.get("camera", ""))
-        if not capturing:
-            self._refresh_facts()
-        self._refresh_recent()
-        if run["copy"]:
-            data = qt.QtCore.QMimeData()  # the FILE, as a file manager copies it — and its path as text
-            data.setUrls([qt.QtCore.QUrl.fromLocalFile(str(result))])
-            data.setText(str(result))
-            qt.QtWidgets.QApplication.clipboard().setMimeData(data)
-        if not capturing and not self._encodes:
-            qt.QtWidgets.QApplication.alert(self.window())  # the taskbar says so if Maya isn't in front
-        if run["open"]:
-            open_result(result)
+            message = run.get("message", "")
+            if self._encodes and run.get("state") == "done":
+                message += f" · {self._encoding_text()[:-1].lower()}"
+            self._say(message, run.get("state", ""))
+            if run.get("state") == "done":
+                self._status.setToolTip(str(run["target"]))
+                self._refresh_facts()
+        if run.get("state") == "done":
+            self._refresh_recent()
+            if not capturing and not self._encodes:
+                qt.QtWidgets.QApplication.alert(self.window())  # the taskbar says so if Maya isn't in front
 
     def _set_busy(self, busy: bool) -> None:
         self._busy = busy
