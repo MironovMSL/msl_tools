@@ -30,6 +30,9 @@ from pathlib import Path
 
 RUNTIME_ENV_VAR = "MSL_RUNTIME_DIR"
 MINIMUM_PYTHON = (3, 10)
+# The newest Python the pinned PySide6 has wheels for (requirements.txt: 6.8 -> below 3.14).
+# Raise it together with the pin; setup_express_launcher.bat names the same range.
+NEWEST_PYTHON = (3, 13)
 _MARKER_NAME = "requirements.sha256"
 
 
@@ -120,6 +123,13 @@ def start(script: Path, arguments: list[str] | None = None, working_dir: Path | 
 def main(argv: list[str]) -> int:
     if sys.version_info < MINIMUM_PYTHON:
         print("MSL Tools needs Python %d.%d or newer. This is Python %s." % (*MINIMUM_PYTHON, sys.version.split()[0]))
+        return 1
+    if sys.version_info[:2] > NEWEST_PYTHON:
+        # pip would only say "no matching distribution found for PySide6-Essentials".
+        print("MSL Tools works with Python %d.%d to %d.%d - this is Python %s, which is too new for its Qt"
+              " (PySide6) yet." % (*MINIMUM_PYTHON, *NEWEST_PYTHON, sys.version.split()[0]))
+        print("Install Python %d.%d as well (https://www.python.org/downloads/) and run the setup again."
+              % NEWEST_PYTHON)
         return 1
     if len(argv) < 2 or argv[0] != "--run":
         print("usage: runtime_bootstrap.py --run <script.py> [args...]")

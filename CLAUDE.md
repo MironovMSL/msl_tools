@@ -1805,8 +1805,14 @@ folders (no userSetup spread over Maya installs) — Maya Gate injects its
 userSetup + the msl_tools path at launch. The flow, from a downloaded
 release archive or a checkout:
 
-1. `setup_express_launcher.bat` (CRLF, plain ASCII) finds Python 3.10+
-   (`py -3`, then `python`; none -> a message with the download link) and
+1. `setup_express_launcher.bat` (CRLF, plain ASCII) finds Python 3.10 -
+   3.13 — the range the pinned PySide6 6.8 has wheels for (it has none
+   for 3.14, python.org's default since late 2025; checked on PyPI
+   2026-10-04: 6.10.1+ supports 3.14). `py -3.13` ... `-3.10` first, then
+   `python`; none -> a message with the download link (and "too new" if
+   only a newer Python is there). `runtime_bootstrap.NEWEST_PYTHON`
+   refuses a too-new Python too; `tests/core/test_runtime_bootstrap.py`
+   keeps the two ranges equal — raise both together with the pin. It then
    runs `msl/core/installer/runtime_bootstrap.py --run msl/run_installer.py`.
 2. `runtime_bootstrap.py` — STDLIB ONLY and run by path (it runs before
    anything is installed, so it must not import msl_tools or Qt): makes the
