@@ -94,8 +94,9 @@ PlayblastPanel MaskPreview {
 }
 /* RECENT: a result's picture, and the quiet "Clear" link. */
 PlayblastPanel _Picture {
-    qproperty-groundColor: alpha(var(--text-primary), 8%);
-    qproperty-markColor:   var(--on-accent);
+    qproperty-groundColor:   alpha(var(--text-primary), 8%);
+    qproperty-markColor:     var(--on-accent);
+    qproperty-menuIconColor: var(--text-secondary);   /* icons of its right-click menu */
 }
 PlayblastPanel QPushButton#playblastLink {
     color: var(--text-secondary);

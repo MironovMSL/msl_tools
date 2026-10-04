@@ -8,6 +8,7 @@ import msl_tools.msl.ui.qt_bindings as qt
 from msl_tools.msl.core.media import probe
 from msl_tools.msl.core.media.thumbnail import thumbnail
 from msl_tools.msl.core.theme import ThemeRegistry
+from msl_tools.msl.ui.icon_manager import tinted_menu_icon
 from msl_tools.msl.ui.process_launcher.process_launcher import ProcessLauncher
 from msl_tools.msl.ui.theme.qss import color_property, make_rounded_popup
 from msl_tools.msl.ui.ui_resources import UiResources
@@ -46,6 +47,9 @@ class _Picture(qt.QtWidgets.QWidget):
 
     groundColor = color_property("_ground_color", "update")
     markColor = color_property("_mark_color", "update")
+    # The right-click menu's icons: QIcons, which QSS can't tint — tinted with this when it opens.
+    menuIconColor = color_property("_menu_icon_color", None)
+    MENU_ICON_SIZE = 16
 
     def __init__(self, path: Path, parent=None, on_action=None):
         super().__init__(parent)
@@ -53,6 +57,7 @@ class _Picture(qt.QtWidgets.QWidget):
         fallback = ThemeRegistry.fallback()  # until QSS applies
         self._ground_color = qt.QtGui.QColor(fallback.border)
         self._mark_color = qt.QtGui.QColor(fallback.text_primary)
+        self._menu_icon_color = qt.QtGui.QColor(fallback.text_secondary)
         self._path = path
         self._pixmap = qt.QtGui.QPixmap()
         self._pressed_at = None
@@ -125,20 +130,30 @@ class _Picture(qt.QtWidgets.QWidget):
             self._pressed_at = None
             open_result(self._path)
 
+    def _menu_icon(self, name: str, sub_folder: str = "actions") -> qt.QtGui.QIcon:
+        """A one-color icon for the menu, in the theme's color (an empty icon if the file is missing)."""
+        return tinted_menu_icon(UiResources().iconManager.get_icon(name, sub_folder=sub_folder),
+                                self._menu_icon_color, self.devicePixelRatioF(), self.MENU_ICON_SIZE)
+
     def contextMenuEvent(self, event) -> None:
         path = self._path
         menu = make_rounded_popup(qt.QtWidgets.QMenu(self))
-        menu.addAction("Open").triggered.connect(lambda: open_result(path))
-        menu.addAction("Show in folder").triggered.connect(lambda: ProcessLauncher.open_file_explorer(path))
-        menu.addAction("Copy path").triggered.connect(lambda: qt.QtWidgets.QApplication.clipboard().setText(str(path)))
+        icon = self._menu_icon
+        menu.addAction(icon("play"), "Open").triggered.connect(lambda: open_result(path))
+        menu.addAction(icon("browse"), "Show in folder").triggered.connect(
+            lambda: ProcessLauncher.open_file_explorer(path))
+        menu.addAction(icon("copy"), "Copy path").triggered.connect(
+            lambda: qt.QtWidgets.QApplication.clipboard().setText(str(path)))
         if self._on_action is not None and path.exists():
             menu.addSeparator()
             act = self._on_action
-            menu.addAction("Open in MSL Tools Media").triggered.connect(lambda: act(ACTION_MEDIA, str(path)))
+            menu.addAction(icon("media", "tools"), "Open in MSL Tools Media").triggered.connect(
+                lambda: act(ACTION_MEDIA, str(path)))
             if path.is_file():  # a video, not a folder of frames
-                menu.addAction("Compare with the previous version").triggered.connect(
+                menu.addAction(icon("split_view"), "Compare with the previous version").triggered.connect(
                     lambda: act(ACTION_COMPARE, str(path)))
-                menu.addAction("Make a light copy for a chat").triggered.connect(lambda: act(ACTION_LIGHT, str(path)))
+                menu.addAction(icon("compress"), "Make a light copy for a chat").triggered.connect(
+                    lambda: act(ACTION_LIGHT, str(path)))
         menu.exec(event.globalPos())
 
 
