@@ -231,7 +231,11 @@ msl_tools/                 (repo root)
     (Maya plug-in families on the Boost start tab, our own neutral glyphs —
     NOT the vendors' logos: `plugin` (any), `bifrost`, `arnold`, `xgen`,
     `mash`, `usd`, `bullet`, `redshift`, `flow`, `lookdevx`; the file name is
-    the family's name in lower case), `brand/` (our own app icons: `hub` — an "M" monogram, full-color, NOT the
+    the family's name in lower case), `menu/` (PNGs of the MSL menu INSIDE Maya — Maya's classic menus
+    take an image FILE and the menu is built without Qt: rendered from our SVGs by
+    `ui/maya_menu_icons.py` (MENU_ICONS: menu name -> SVG; 32 px like Maya's own, light grey for its
+    dark menus) — `python -m msl_tools.msl.ui.maya_menu_icons` after a change; menu_definition.py
+    names them), `brand/` (our own app icons: `hub` — an "M" monogram, full-color, NOT the
     #000000 one-color convention: used as the window/taskbar icon, never
     tinted). Per-theme variants only when the SHAPE
     differs: `<name>_dark.svg` / `<name>_light.svg`.
