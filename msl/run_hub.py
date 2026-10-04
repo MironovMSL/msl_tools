@@ -239,6 +239,7 @@ def main() -> None:
         # previous hub (it retries every few seconds) finds this one.
         link = MayaLinkServer.instance()
         _add_link_indicator(window, link)
+        link.media_requested.connect(lambda paths: _open_in_media(window, paths))  # e.g. a playblast from Maya
         link.ensure_listening()
         if last_update is not None:
             qt.QtCore.QTimer.singleShot(300, lambda: report_update(last_update))

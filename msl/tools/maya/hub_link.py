@@ -202,6 +202,15 @@ class HubLink(QtCore.QObject):
             startup_seconds=_startup_seconds(),
             msl_version=_msl_version))
 
+    def open_in_media(self, paths: list) -> bool:
+        """Asks the hub to open `paths` in its Media tool. False when there is no proven
+        connection to the hub right now (nothing is queued for later)."""
+        if not (self.is_connected() and self._verified):
+            return False
+        self._send(protocol.event(protocol.OPEN_IN_MEDIA, paths=[str(path) for path in paths]))
+        self._socket.flush()
+        return True
+
     def _on_ready_read(self) -> None:
         try:
             messages = self._decoder.feed(bytes(self._socket.readAll().data()))

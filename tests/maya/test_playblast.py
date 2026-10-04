@@ -130,6 +130,14 @@ class Naming(unittest.TestCase):
         (self.folder / "shot_2.mp4").write_bytes(b"")
         self.assertEqual(naming.free_path(target, {target}), self.folder / "shot_3.mp4")
 
+    def test_previous_version(self):
+        for name in ("shot_v001.mp4", "shot_v002.mp4", "shot_v002_light.mp4", "shot_v010.mp4", "other_v002.mp4"):
+            (self.folder / name).write_bytes(b"")
+        self.assertEqual(naming.previous_version(self.folder / "shot_v010.mp4"), self.folder / "shot_v002.mp4")
+        self.assertEqual(naming.previous_version(self.folder / "shot_v002.mp4"), self.folder / "shot_v001.mp4")
+        self.assertIsNone(naming.previous_version(self.folder / "shot_v001.mp4"))
+        self.assertIsNone(naming.previous_version(self.folder / "shot.mp4"))  # no version in the name
+
     def test_relative_folder_goes_into_the_project(self):
         # Before: "movies" was written to Maya's working folder (its bin folder, or Documents).
         values = {"project": str(self.folder / "proj")}
@@ -267,3 +275,79 @@ class RunEndsWithoutThePanel(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def _ffmpeg():
+    try:
+        from msl_tools.msl.core.media import FfmpegLocator
+        return FfmpegLocator().find()
+    except Exception:
+        return None
+
+
+@unittest.skipIf(qt is None or _ffmpeg() is None, "needs PySide6 and ffmpeg")
+class SideJobs(unittest.TestCase):
+    """The light copy and the comparison, made by RunEnding with a real ffmpeg."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.app = qt.QtWidgets.QApplication.instance() or qt.QtWidgets.QApplication([])
+        from msl_tools.msl.tools.maya.playblast import ending
+        cls.ending = ending
+        cls.tools = _ffmpeg()
+
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.folder = Path(temp.name)
+        for name, color in (("shot_v001.mp4", "red"), ("shot_v002.mp4", "blue")):
+            import subprocess
+            subprocess.run([str(self.tools.ffmpeg), "-v", "error", "-f", "lavfi", "-i",
+                            f"color={color}:size=640x480:rate=24", "-t", "1", "-pix_fmt", "yuv420p",
+                            str(self.folder / name)], check=True, stdin=subprocess.DEVNULL)
+        resources = types.SimpleNamespace(logsMaya=types.SimpleNamespace(get=lambda _n: logging.getLogger("t")))
+        for name, value in (("Resources", lambda: resources), ("open_result", lambda _path: None)):
+            patch = mock.patch.object(self.ending, name, value)
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def wait(self, ending) -> dict:
+        results = []
+        ending.side_done.connect(results.append)
+        deadline = time.monotonic() + 60
+        while not results and time.monotonic() < deadline:
+            self.app.processEvents()
+            time.sleep(0.02)
+        self.assertTrue(results, "no answer")
+        return results[0]
+
+    def test_light_copy(self):
+        ending = self.ending.RunEnding()
+        with mock.patch.object(self.ending, "LIGHT_HEIGHT", 240):  # 480 px is "too tall" now: a copy is made
+            ending.make_light_copy(self.folder / "shot_v002.mp4", self.tools, copy=True)
+            result = self.wait(ending)
+        self.assertEqual(result["state"], "done", result.get("message"))
+        self.assertEqual(Path(result["output"]).name, "shot_v002_light.mp4")
+        self.assertTrue(Path(result["output"]).is_file())
+        from msl_tools.msl.core.media import probe
+        self.assertEqual(probe(self.tools, Path(result["output"])).height, 240)
+        # under the size limit, only too tall: a small-quality copy, never bigger than the playblast
+        self.assertLess(Path(result["output"]).stat().st_size, (self.folder / "shot_v002.mp4").stat().st_size)
+        urls = qt.QtWidgets.QApplication.clipboard().mimeData().urls()
+        self.assertEqual(Path(urls[0].toLocalFile()).name, "shot_v002_light.mp4")  # the light one, ready to paste
+
+    def test_light_enough_already(self):
+        ending = self.ending.RunEnding()
+        ending.make_light_copy(self.folder / "shot_v002.mp4", self.tools)
+        result = self.wait(ending)
+        self.assertEqual(Path(result["output"]), self.folder / "shot_v002.mp4")
+        self.assertIn("Light enough already", result["message"])
+
+    def test_compare_with_previous(self):
+        ending = self.ending.RunEnding()
+        ending.compare_with(self.folder / "shot_v002.mp4", self.folder / "shot_v001.mp4", self.tools)
+        result = self.wait(ending)
+        self.assertEqual(result["state"], "done", result.get("message"))
+        self.assertEqual(Path(result["output"]).name, "shot_v002_vs_shot_v001.mp4")
+        from msl_tools.msl.core.media import probe
+        self.assertEqual(probe(self.tools, Path(result["output"])).width, 1280)  # two 640 wide side by side

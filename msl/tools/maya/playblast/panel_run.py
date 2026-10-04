@@ -123,6 +123,7 @@ class _RunMixin:
         # made the user may have changed them, or started the next one
         self._run = {"settings": settings, "target": target, "video": video, "latest": latest,
                      "copy": self._copy.isChecked(), "open": self._open.isChecked(),
+                     "light": self._light.isChecked() and video, "tools": self._tools,
                      "sound": self._sound.isChecked(), "quality": QUALITY.get(self._quality.currentText(), "high"),
                      "started": time.time(), "left": len(self._queue), "id": RunEnding.next_id(),
                      # as they are NOW: another scene may be open by the time the video is made

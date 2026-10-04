@@ -27,6 +27,7 @@ request that carries code, `run_python` (the Sessions tab's console), and
 Maya's side refuses it unless that Maya was launched with the console
 allowed — see tools/maya/hub_link.py.
 """
+import os
 import secrets
 import time
 
@@ -96,6 +97,8 @@ class MayaLinkServer(qt.QtCore.QObject):
     log_received = qt.QtCore.Signal(int, list)
     session_ended = qt.QtCore.Signal(object, bool, str)   # (MayaSession, clean, reason): see the class docstring
     attention_changed = qt.QtCore.Signal()
+    # A Maya asked to open files in the hub's Media tool (protocol.OPEN_IN_MEDIA): existing files only.
+    media_requested = qt.QtCore.Signal(list)
     listening_changed = qt.QtCore.Signal()
 
     _instance: "MayaLinkServer | None" = None
@@ -301,6 +304,12 @@ class MayaLinkServer(qt.QtCore.QObject):
             if state != (session.scene, session.modified, session.autosave, session.autosave_folder):
                 session.scene, session.modified, session.autosave, session.autosave_folder = state
                 self.sessions_changed.emit()
+        elif kind == protocol.EVENT and name == protocol.OPEN_IN_MEDIA:
+            paths = data.get("paths")
+            paths = [path for path in (paths if isinstance(paths, list) else [])[:protocol.MAX_MEDIA_PATHS]
+                     if isinstance(path, str) and os.path.exists(path)]
+            if paths:
+                self.media_requested.emit(paths)
         elif kind == protocol.EVENT and name == protocol.LOG:
             entries = []
             for entry in (data.get("entries") or [])[:self.MAX_LOG_ENTRIES]:

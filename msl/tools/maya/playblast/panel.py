@@ -4,7 +4,8 @@ from pathlib import Path
 import msl_tools.msl.ui.qt_bindings as qt
 from msl_tools.msl.core.resources import Resources
 from msl_tools.msl.tools.maya.playblast import capture, mask, naming
-from msl_tools.msl.tools.maya.playblast.ending import RunEnding
+from msl_tools.msl.tools.maya.playblast.ending import LIGHT_MB, RunEnding
+from msl_tools.msl.tools.maya.playblast.panel_share import _ShareMixin
 from msl_tools.msl.tools.maya.playblast.mask_preview import MaskPreview
 from msl_tools.msl.tools.maya.playblast.recent import RecentCard
 from msl_tools.msl.ui.theme import StylesheetBuilder
@@ -36,7 +37,7 @@ from msl_tools.msl.tools.maya.playblast.panel_run import _RunMixin
 StylesheetBuilder.register_template(Path(__file__).with_name("playblast.qss"))
 
 
-class PlayblastPanel(_MaskMixin, _PresetsMixin, _RunMixin, qt.QtWidgets.QWidget):
+class PlayblastPanel(_ShareMixin, _MaskMixin, _PresetsMixin, _RunMixin, qt.QtWidgets.QWidget):
     """The playblast tool's panel inside Maya (shown in a PlayblastWindow; it
     can also sit in a Maya panel through MayaDock).
 
@@ -58,7 +59,7 @@ class PlayblastPanel(_MaskMixin, _PresetsMixin, _RunMixin, qt.QtWidgets.QWidget)
     DEFAULTS = {"camera": "", "size": "HD 1080", "width": 1920, "height": 1080, "range": capture.RANGE_PLAYBACK,
                 "start": 1, "end": 24, "folder": naming.DEFAULT_FOLDER, "name": naming.DEFAULT_NAME,
                 "format": FORMAT_MP4, "quality": "High", "sound": True, "overwrite": False, "open": True,
-                "copy": False, "smooth": False, "occlusion": False, "cameras": [],
+                "copy": False, "light": False, "smooth": False, "occlusion": False, "cameras": [],
                 "folded": {"picture": False, "result": False},
                 "ornaments": False, "show": SHOW_VIEWPORT, "show_custom": list(capture.VISIBILITY_PRESETS["Geometry"]),
                 "mask": {"shown": False, "texts": dict(mask.DEFAULT_TEXTS), "text": "Medium", "bars": "Solid",
@@ -169,6 +170,10 @@ class PlayblastPanel(_MaskMixin, _PresetsMixin, _RunMixin, qt.QtWidgets.QWidget)
         self._open = _Toggle("Open when done", "play", "The finished playblast opens in the system's player.")
         self._copy = _Toggle("Copy file", "copy", "The finished playblast is put on the clipboard as a FILE:\n"
                                                   "Ctrl+V pastes it into a chat or a folder.")
+        self._light = _Toggle("Light copy", "compress",
+                              f"After each video playblast, a copy for a chat next to it: at most {LIGHT_MB:g} MB "
+                              f"and 720p,\n<name>_light.mp4. With “Copy file” on, the light copy goes on the "
+                              f"clipboard.")
 
         self._mask_on = BaseCheckbox("In the viewport")
         self._mask_on.setToolTip("Bars and text over the viewport while you animate — and so in the playblast.\n"
@@ -264,7 +269,7 @@ class PlayblastPanel(_MaskMixin, _PresetsMixin, _RunMixin, qt.QtWidgets.QWidget)
             (("film", "Frames"), [self._range, self._start, self._dash, self._end]),
         ])
         output = self._result_card = self._card("RESULT", "save", extras=[self._sound, self._ornaments, self._overwrite, self._open,
-                                                      self._copy], rows=[
+                                                      self._copy, self._light], rows=[
             ("Folder", [self._folder, self._browse]),
             ("Name", [self._name]),
             ("", [self._path]),
@@ -356,8 +361,8 @@ class PlayblastPanel(_MaskMixin, _PresetsMixin, _RunMixin, qt.QtWidgets.QWidget)
             field.textEdited.connect(self._on_changed)
         self._format.current_changed.connect(self._on_changed)
         self._quality.currentTextChanged.connect(self._on_changed)
-        for box in (self._sound, self._ornaments, self._overwrite, self._open, self._copy, self._smooth,
-                    self._occlusion):
+        for box in (self._sound, self._ornaments, self._overwrite, self._open, self._copy, self._light,
+                    self._smooth, self._occlusion):
             box.toggled.connect(self._on_changed)
         self._folder.token_inserted.connect(self._on_changed)
         self._name.token_inserted.connect(self._on_changed)
@@ -371,6 +376,8 @@ class PlayblastPanel(_MaskMixin, _PresetsMixin, _RunMixin, qt.QtWidgets.QWidget)
         self._picture_card.toggled.connect(self._on_card_folded)
         self._result_card.toggled.connect(self._on_card_folded)
         self._recent.clear_requested.connect(self._on_recent_clear)
+        self._recent.action_requested.connect(self._on_recent_action)
+        RunEnding.instance().side_done.connect(self._on_side_done)
         # The end of a run lives outside the panel (ending.py): the panel may be closed before
         # its video is made. Bound methods: the connections go with the panel.
         RunEnding.instance().ended.connect(self._on_run_ended)
@@ -417,7 +424,8 @@ class PlayblastPanel(_MaskMixin, _PresetsMixin, _RunMixin, qt.QtWidgets.QWidget)
         self._format.set_current(get("format") if get("format") in self._format.options() else FORMAT_MP4, animate=False)
         self._set_combo(self._quality, get("quality"))
         for box, key in ((self._sound, "sound"), (self._ornaments, "ornaments"), (self._overwrite, "overwrite"),
-                         (self._open, "open"), (self._copy, "copy"), (self._smooth, "smooth"),
+                         (self._open, "open"), (self._copy, "copy"), (self._light, "light"),
+                         (self._smooth, "smooth"),
                          (self._occlusion, "occlusion")):
             box.set_checked_immediate(bool(get(key)))
         saved = self._settings.get("mask") or {}
@@ -446,6 +454,7 @@ class PlayblastPanel(_MaskMixin, _PresetsMixin, _RunMixin, qt.QtWidgets.QWidget)
                   "ornaments": self._ornaments.isChecked(), "overwrite": self._overwrite.isChecked(),
                   "show": self._visible.currentText(),
                   "open": self._open.isChecked(), "copy": self._copy.isChecked(),
+                  "light": self._light.isChecked(),
                   "smooth": self._smooth.isChecked(), "occlusion": self._occlusion.isChecked()}
         if self._size.currentText() == SIZE_CUSTOM:
             values["width"], values["height"] = self._frame_size()

@@ -53,6 +53,10 @@ PROOF = "proof"      # event, Maya -> hub: Maya's proof; only then the hub opens
 SCENE = "scene"      # event, Maya -> hub: {"scene": path, "modified": bool} - the open scene, or its unsaved state, changed
 LOG = "log"          # event, Maya -> hub: {"entries": [[level, text], ...], "dropped": n} - Script Editor output
 BYE = "bye"          # event, Maya -> hub: {"reason": BYE_QUIT | BYE_RESTART} - leaving on purpose
+# event, Maya -> hub: {"paths": [file, ...]} - open these in the hub's Media tool (a playblast to work on).
+# The hub only OPENS existing files there; nothing is run.
+OPEN_IN_MEDIA = "open_in_media"
+MAX_MEDIA_PATHS = 20
 BYE_QUIT, BYE_RESTART = "quit", "restart"   # Maya is closing / only its link restarts ("Reload code")
 PING = "ping"        # request, either way
 # Requests hub -> Maya (handled in tools/maya/hub_link.py; replies carry the result in "data"):

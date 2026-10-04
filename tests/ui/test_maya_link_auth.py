@@ -149,6 +149,29 @@ class HubSide(_Qt):
         self.assert_dropped()
 
 
+class OpenInMedia(HubSide):
+    def join(self):
+        self.hello()
+        welcome = self.welcome()
+        self.maya.send(protocol.event(protocol.PROOF, proof=protocol.maya_proof(TOKEN, self.nonce, welcome["nonce"])))
+        self.assertTrue(self.pump(lambda: len(self.server.sessions()) == 1))
+
+    def test_existing_files_are_handed_to_media(self):
+        self.join()
+        asked = []
+        self.server.media_requested.connect(asked.append)
+        real = os.path.abspath(__file__)
+        self.maya.send(protocol.event(protocol.OPEN_IN_MEDIA, paths=[real, "C:/nowhere/x.mp4", 5]))
+        self.assertTrue(self.pump(lambda: asked))
+        self.assertEqual(asked, [[real]])  # only what exists; nothing else is done with it
+
+    def test_before_the_proof_it_is_dropped(self):
+        self.hello()
+        self.welcome()
+        self.maya.send(protocol.event(protocol.OPEN_IN_MEDIA, paths=[os.path.abspath(__file__)]))
+        self.assert_dropped()
+
+
 class _FakeHub:
     """What sits on the hub's port: a QTcpServer that answers the way it is told."""
 
@@ -219,6 +242,19 @@ class MayaSide(_Qt):
         self.pump(lambda: False, seconds=0.5)
         self.assertEqual(hub.received, [])
         self.assertFalse(link._verified)
+
+    def test_open_in_media_only_once_the_hub_proved_itself(self):
+        hub = _FakeHub(TOKEN)
+        link, nonce = self.connect(hub)
+        self.assertFalse(link.open_in_media(["C:/a.mp4"]))  # not verified yet: nothing goes out
+        hub_nonce = protocol.new_nonce()
+        hub.send(protocol.event(protocol.WELCOME, nonce=hub_nonce, proof=protocol.hub_proof(TOKEN, nonce, hub_nonce)))
+        self.assertTrue(self.pump(lambda: hub.received))
+        hub.received.clear()  # the proof
+        self.assertTrue(link.open_in_media(["C:/a.mp4"]))
+        self.assertTrue(self.pump(lambda: hub.received))
+        self.assertEqual((hub.received[0]["name"], hub.received[0]["data"]["paths"]),
+                         (protocol.OPEN_IN_MEDIA, ["C:/a.mp4"]))
 
     def test_the_real_hub_gets_the_proof_then_answers(self):
         hub = _FakeHub(TOKEN)

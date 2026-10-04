@@ -108,3 +108,28 @@ def free_path(path: Path, taken=()) -> Path:
         candidate = path.with_name(f"{path.stem}_{counter}{path.suffix}")
         counter += 1
     return candidate
+
+
+_VERSIONED = re.compile(r"^(.*?)v(\d+)(.*)$", re.IGNORECASE)
+
+
+def previous_version(path: Path) -> Path | None:
+    """The playblast one version before `path` in the same folder ("shot_v003.mp4" ->
+    the highest of shot_v001 / shot_v002 that exists); None for a name without a version
+    or when there is no earlier one. Derived files (_light, _vs_) aren't versions."""
+    path = Path(path)
+    match = _VERSIONED.match(path.name)
+    if match is None:
+        return None
+    before, number, after = match.group(1), int(match.group(2)), match.group(3)
+    pattern = re.compile(re.escape(before) + r"v(\d+)" + re.escape(after) + "$", re.IGNORECASE)
+    best, best_number = None, 0
+    try:
+        entries = list(path.parent.iterdir())
+    except OSError:
+        return None
+    for entry in entries:
+        found = pattern.match(entry.name)
+        if found and best_number < int(found.group(1)) < number:
+            best, best_number = entry, int(found.group(1))
+    return best

@@ -17,6 +17,10 @@ from msl_tools.msl.ui.widgets.atoms.labels.elided_label import ElidedLabel
 from msl_tools.msl.ui.workers.result_worker import ResultWorker
 
 
+# What a tile's menu can ask the panel for (RecentCard.action_requested)
+ACTION_MEDIA, ACTION_COMPARE, ACTION_LIGHT = "media", "compare", "light"
+
+
 def open_result(path: Path) -> None:
     """Opens a playblast with the system's player (a folder of frames: the folder)."""
     if path.exists():
@@ -43,8 +47,9 @@ class _Picture(qt.QtWidgets.QWidget):
     groundColor = color_property("_ground_color", "update")
     markColor = color_property("_mark_color", "update")
 
-    def __init__(self, path: Path, parent=None):
+    def __init__(self, path: Path, parent=None, on_action=None):
         super().__init__(parent)
+        self._on_action = on_action  # (action, path) -> None: what the card's menu asks for
         fallback = ThemeRegistry.fallback()  # until QSS applies
         self._ground_color = qt.QtGui.QColor(fallback.border)
         self._mark_color = qt.QtGui.QColor(fallback.text_primary)
@@ -126,6 +131,14 @@ class _Picture(qt.QtWidgets.QWidget):
         menu.addAction("Open").triggered.connect(lambda: open_result(path))
         menu.addAction("Show in folder").triggered.connect(lambda: ProcessLauncher.open_file_explorer(path))
         menu.addAction("Copy path").triggered.connect(lambda: qt.QtWidgets.QApplication.clipboard().setText(str(path)))
+        if self._on_action is not None and path.exists():
+            menu.addSeparator()
+            act = self._on_action
+            menu.addAction("Open in MSL Tools Media").triggered.connect(lambda: act(ACTION_MEDIA, str(path)))
+            if path.is_file():  # a video, not a folder of frames
+                menu.addAction("Compare with the previous version").triggered.connect(
+                    lambda: act(ACTION_COMPARE, str(path)))
+                menu.addAction("Make a light copy for a chat").triggered.connect(lambda: act(ACTION_LIGHT, str(path)))
         menu.exec(event.globalPos())
 
 
@@ -146,10 +159,10 @@ class _RecentTile(qt.QtWidgets.QWidget):
     """One finished playblast: its picture (a click opens it) over its name (a click shows it
     in its folder) and a line of facts ending in a folder button that does the same."""
 
-    def __init__(self, entry: dict, parent=None):
+    def __init__(self, entry: dict, parent=None, on_action=None):
         super().__init__(parent)
         path = Path(entry["path"])
-        self.picture = _Picture(path)
+        self.picture = _Picture(path, on_action=on_action)
         name = _FolderLink(path)
         name.setObjectName("playblastRecentName")
         facts = []
@@ -196,9 +209,12 @@ class RecentCard(qt.QtWidgets.QFrame):
 
     Signals:
         clear_requested() — forget this scene's results (the files stay).
+        action_requested(str, str) — (ACTION_*, path): a tile's menu asked to send the result to
+            the hub's Media, compare it with the previous version, or make a light copy.
     """
 
     clear_requested = qt.QtCore.Signal()
+    action_requested = qt.QtCore.Signal(str, str)
     _picture_ready = qt.QtCore.Signal(str, str)
     # kept by the CLASS, parentless: the card can be deleted while a worker runs (see PlayblastPanel)
     _workers: set = set()
@@ -247,7 +263,7 @@ class RecentCard(qt.QtWidgets.QFrame):
                 item.widget().deleteLater()
         self._tiles = {}
         for entry in entries:
-            tile = _RecentTile(entry)
+            tile = _RecentTile(entry, on_action=self.action_requested.emit)
             self._tiles[entry["path"]] = tile
             self._row.addWidget(tile, 1)
             if tools is not None:

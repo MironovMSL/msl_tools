@@ -1802,6 +1802,19 @@ came from: CLAUDE.local.md). Step 1 of 4 is built (2026-10-03):
   the modified mark as before. A PlayblastWindow built DURING Maya's
   startup (a -command script) died in repolish ("QProxyStyle already
   deleted") — open it after startup (evalDeferred + a moment); not fixed.
+- What a playblast goes on to (2026-10-05, `panel_share.py` _ShareMixin + RunEnding side jobs):
+  a RECENT tile's menu — "Open in MSL Tools Media" (HubLink.open_in_media -> the link event
+  `open_in_media` {"paths"} -> MayaLinkServer.media_requested (existing files only, at most 20;
+  nothing is run) -> run_hub opens them in Media; a Maya not started from the hub says it can't
+  reach it), "Compare with the previous version" (`naming.previous_version`: one version down in
+  the folder, else the scene's previous video in the history; `<name>_vs_<previous>.mp4`, previous
+  on the left, opened in the player) and "Make a light copy". The RESULT card's "Light copy"
+  toggle (`light`) makes `<name>_light.mp4` after every video: at most LIGHT_MB (9) and
+  LIGHT_HEIGHT (720); under the size limit and only too tall -> small quality, not fitted to
+  9 MB (that would RAISE the bitrate); a copy not smaller than the playblast is dropped and the
+  playblast itself counts; with "Copy file" the LIGHT copy goes on the clipboard. Side jobs run
+  on class-kept workers and end in RunEnding.side_done, also with the window closed. Checked in
+  real Maya 2025 against a private-port test hub.
 - Progress (2026-10-03): the capture runs ONE FRAME PER TURN of the event
   loop — `capture.CaptureSession` (`step()` = `cmds.playblast(startTime=f,
   endTime=f)`, so files keep real frame numbers; `frame=[f]` numbers

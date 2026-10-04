@@ -311,9 +311,10 @@ def run_job(tools: FfmpegTools, job: Job, on_progress=None, should_cancel=None) 
         for index, command in enumerate(job.commands(tools)):
             parser = ProgressParser()
             # stderr goes to a file: a pipe nobody reads fills up and ffmpeg stops forever
-            with tempfile.TemporaryFile(mode="w+", encoding="utf-8", errors="replace") as errors:
-                process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=errors,
-                                           text=True, encoding="utf-8", errors="replace", creationflags=flags)
+            # `with` closes ffmpeg's stdout pipe afterwards (left open, one handle leaked per run)
+            with tempfile.TemporaryFile(mode="w+", encoding="utf-8", errors="replace") as errors, \
+                    subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=errors,
+                                     text=True, encoding="utf-8", errors="replace", creationflags=flags) as process:
                 for line in process.stdout:
                     for report in parser.feed(line):
                         if on_progress is not None:
