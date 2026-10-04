@@ -18,7 +18,7 @@ from msl_tools.msl.tools.desktop.maya_gate.toolbar import MayaGateToolbar
 from msl_tools.msl.tools.desktop.maya_gate.version_row import MayaVersionRow
 from msl_tools.msl.tools.desktop.maya_gate.variable_group import CollapsibleVariableGroup
 from msl_tools.msl.tools.desktop.maya_gate.variable_adder import EnvVariableAdder
-from msl_tools.msl.tools.desktop.maya_gate.user_setup import UserSetupStore
+from msl_tools.msl.tools.desktop.maya_gate.user_setup import ScriptUnavailable, UserSetupStore
 from msl_tools.msl.tools.desktop.maya_gate.user_setup_tab import UserSetupTab
 from msl_tools.msl.tools.desktop.maya_gate import launch_check
 from msl_tools.msl.tools.desktop.maya_gate.boost import BoostStore, LaunchLog
@@ -52,7 +52,6 @@ def _default_value_for(name: str) -> str:
 
 
 class MayaGatePage(qt.QtWidgets.QWidget):
-    _problems_found = qt.QtCore.Signal(int, list)   # (which check, its lines): from the checking thread
     """Maya Gate's tool page, fully assembled: pick a Maya version and a
     named environment, edit what that environment brings along in the tabs
     below, then click a version icon to launch it.
@@ -80,6 +79,8 @@ class MayaGatePage(qt.QtWidgets.QWidget):
     window whenever a group's row count changed. Maya Gate is one page
     inside the hub's dialog, so the Variables tab scrolls instead.
     """
+
+    _problems_found = qt.QtCore.Signal(int, list)   # (which check, its lines): from the checking thread
 
     ENVIRONMENTS = ["<default>", "Stable", "Dev"]
     DEFAULT_ENVIRONMENT = "Dev"
@@ -167,6 +168,8 @@ class MayaGatePage(qt.QtWidgets.QWidget):
         self._problems_link.hide()
         self._problems: list[str] = []
         self._problems_check = 0
+        self._problems_busy = False   # a check thread is out (see _check_environment)
+        self._problems_again = False  # another was asked for meanwhile
         self._problems_timer = qt.QtCore.QTimer(self)
         self._problems_timer.setInterval(self.CHECK_EVERY_MS)
         self._problems_timer.timeout.connect(self._check_environment)
@@ -180,7 +183,9 @@ class MayaGatePage(qt.QtWidgets.QWidget):
         self._tabs.addTab(self._indented(self._user_setup_tab), "userSetup")
         self._boost_tab = BoostTab(self._boost_store, self._config[self.BOOST_KEY], self._environment, years,
                                    app_dir_for=lambda: self._launch_variables().get("MAYA_APP_DIR", ""),
-                                   blocked_reason_for=lambda: BoostStore.blocked_reason(self._launch_variables()))
+                                   blocked_reason_for=lambda: BoostStore.blocked_reason(self._launch_variables()),
+                                   running_years_for=lambda: {session.version
+                                                              for session in MayaLinkServer.instance().sessions()})
         self._tabs.addTab(self._indented(self._boost_tab), "Boost start")
         self._link = MayaLinkServer.instance()  # the hub's one server; run_hub starts it listening
         self._sessions_tab = SessionsTab(self._link, self._session_history,
@@ -345,10 +350,19 @@ class MayaGatePage(qt.QtWidgets.QWidget):
     def _check_environment(self) -> None:
         """Looks the current environment over on a thread (it reads the disk: a folder on a slow
         drive must not stall the window); the answer comes back as _problems_found."""
-        self._problems_check += 1
+        self._problems_check += 1  # also when deferred: a check still out is then for old settings
+        if self._problems_busy:
+            # One check at a time: a folder on a dead network drive blocks os.path.exists() for
+            # up to a minute, and a new thread every CHECK_EVERY_MS would pile up meanwhile.
+            self._problems_again = True
+            return
+        self._problems_busy = True
         number, environment = self._problems_check, self._environment
         variables = self._launch_variables(environment)
-        script = self._user_setup_store.read(environment)
+        try:
+            script = self._user_setup_store.read(environment)
+        except ScriptUnavailable:
+            script = ""  # nothing to look over now; the tab says it can't be read
         boost = self._boost_settings(environment)
         blocked = BoostStore.blocked_reason(variables)
         emit = self._problems_found.emit
@@ -366,6 +380,11 @@ class MayaGatePage(qt.QtWidgets.QWidget):
         threading.Thread(target=run, daemon=True).start()
 
     def _on_problems_found(self, number: int, lines: list) -> None:
+        self._problems_busy = False
+        if self._problems_again:  # asked for while this one ran: look again, with what is set now
+            self._problems_again = False
+            self._check_environment()
+            return
         if number != self._problems_check:
             return  # an older check: the environment changed meanwhile
         self._problems = list(lines)
@@ -494,9 +513,12 @@ class MayaGatePage(qt.QtWidgets.QWidget):
             lines.append("Boost start   " + ("on, but not applied" if launch["boost_note"] else "off"))
             if launch["boost_note"]:
                 lines.append("              " + launch["boost_note"])
-        script = self._user_setup_store.read(launch["environment"])
-        lines.append("userSetup     " + (f"this environment's script ({len(script.splitlines())} lines)"
-                                         if script.strip() else "none (the script is blank)"))
+        try:
+            script = self._user_setup_store.read(launch["environment"])
+            lines.append("userSetup     " + (f"this environment's script ({len(script.splitlines())} lines)"
+                                             if script.strip() else "none (the script is blank)"))
+        except ScriptUnavailable as error:
+            lines.append(f"userSetup     this environment's script — {error}; Maya reads it itself")
 
         def show(names: list) -> list:
             width = max((len(name) for name in names), default=0)

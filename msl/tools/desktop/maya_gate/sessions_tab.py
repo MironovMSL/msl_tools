@@ -662,6 +662,7 @@ class SessionsTab(qt.QtWidgets.QWidget):
         self._rows: dict[int, _SessionRow] = {}
         self._logs: dict[int, list] = {}          # pid -> [(level, text, time), ...]
         self._problems: dict[int, list] = {}      # pid -> [errors, warnings]
+        self._console_running: set[int] = set()  # pids of the Mayas running code from the console
         self._selected_pid = 0
         self._gone: dict[int, float] = {}         # pid -> when that Maya left (its log is kept a while)
         self._ended: dict[int, dict] = {}         # pid -> {"session", "when", "file"}: gone without a goodbye
@@ -815,6 +816,10 @@ class SessionsTab(qt.QtWidgets.QWidget):
         self._split.addWidget(self._console)
         self._split.setStretchFactor(0, 1)
         self._split.setStretchFactor(1, 0)
+        self._split_save_timer = qt.QtCore.QTimer(self)
+        self._split_save_timer.setSingleShot(True)
+        self._split_save_timer.setInterval(400)
+        self._split_save_timer.timeout.connect(self._save_console_height)
         self._split.splitterMoved.connect(self._on_split_moved)
         self._log_view.setMinimumHeight(60)
         layout.addWidget(self._split, 1)
@@ -850,6 +855,11 @@ class SessionsTab(qt.QtWidgets.QWidget):
         self._split.setSizes([max(0, total - height), height])
 
     def _on_split_moved(self, *_args) -> None:
+        # Saved once the grip rests: every pixel of a drag would rewrite the whole config file.
+        if self._settings is not None and self._console.isVisible():
+            self._split_save_timer.start()
+
+    def _save_console_height(self) -> None:
         if self._settings is not None and self._console.isVisible():
             self._settings["console_height"] = self._split.sizes()[1]
 
@@ -993,6 +1003,7 @@ class SessionsTab(qt.QtWidgets.QWidget):
         selected = pids.get(self._selected_pid)
         console_was_shown = self._console.isVisible()
         self._console.setVisible(selected is not None and selected.console)
+        self._sync_run_button()
         if self._console.isVisible() and not console_was_shown:
             qt.QtCore.QTimer.singleShot(0, self._place_split)  # once the splitter knows its own height
         if self._console.isVisible() and not self._snippets_shown:
@@ -1322,6 +1333,13 @@ class SessionsTab(qt.QtWidgets.QWidget):
             details=chr(10).join(details), choices=[("force", "Force close"), ("cancel", "Wait")], kind="danger")
         if choice != "force":
             return
+        # The question was open a while: that Maya may have come back, or left by itself.
+        session = self._server.session(session_id)
+        if session is None:
+            return
+        if not session.busy:
+            self._say(f"{name} answers again — it wasn’t closed.")
+            return
         self._forced.add(session.pid)
         if not terminate_process(session.pid):
             self._forced.discard(session.pid)
@@ -1367,8 +1385,9 @@ class SessionsTab(qt.QtWidgets.QWidget):
         it said goodbye, but is still writing its preferences on the way out."""
         if is_process_running(pid):
             if time.time() < deadline:
+                # With `self` as the context: the wait ends with the tab, never calls into a deleted one.
                 qt.QtCore.QTimer.singleShot(
-                    500, lambda: self._start_when_gone(pid, version, environment, scene, deadline))
+                    500, self, lambda: self._start_when_gone(pid, version, environment, scene, deadline))
             else:
                 self._say(f"Maya {version} is still closing — start it again yourself once it is gone.", "error")
             return
@@ -1418,14 +1437,18 @@ class SessionsTab(qt.QtWidgets.QWidget):
         all land in that Maya's log. False if it wasn't sent (no such Maya, no
         code, or the previous run isn't back yet)."""
         session = self._session_by_pid(self._selected_pid)
-        if session is None or not session.console or not code.strip() or not self._run_button.isEnabled():
+        if session is None or not session.console or not code.strip() or session.pid in self._console_running:
             return False
         pid = session.pid
         self._add_to_log(pid, protocol.LOG_INPUT, code)
-        self._run_button.setEnabled(False)
+        # Busy is per Maya: a long script in one doesn't keep the console from another
+        # (CONSOLE_TIMEOUT_MS is minutes).
+        self._console_running.add(pid)
+        self._sync_run_button()
 
         def done(reply: dict) -> None:
-            self._run_button.setEnabled(True)
+            self._console_running.discard(pid)
+            self._sync_run_button()
             row = self._rows.get(session.session_id)
             if row is not None:
                 row.set_busy(False)
@@ -1482,8 +1505,12 @@ class SessionsTab(qt.QtWidgets.QWidget):
         self._snippets_layout.invalidate()
 
     def _run_snippet(self, name: str) -> None:
-        if not self._run_code(self._snippets.code(name)) and not self._run_button.isEnabled():
-            self._say("Maya is still running the previous code.")
+        if not self._run_code(self._snippets.code(name)) and self._selected_pid in self._console_running:
+            self._say("This Maya is still running the previous code.")
+
+    def _sync_run_button(self) -> None:
+        """Run is off only while the SELECTED Maya still runs code sent from here."""
+        self._run_button.setEnabled(self._selected_pid not in self._console_running)
 
     def _on_snippet_menu(self, name: str, position) -> None:
         menu = make_rounded_popup(qt.QtWidgets.QMenu(self))
@@ -1598,9 +1625,12 @@ class SessionsTab(qt.QtWidgets.QWidget):
 
     def _on_plugins(self, session_id: int) -> None:
         """Asks which of the skipped plug-ins are loaded by now, then offers the rest."""
+        session = self._server.session(session_id)
+        if session is None:  # it left while its menu was open
+            return
         self._ask(session_id, protocol.PLUGIN_STATE,
                   lambda session, data: self._show_plugins_menu(session, set(data.get("loaded") or [])),
-                  self.REPORT_TIMEOUT_MS, names=list(self._server.session(session_id).skipped))
+                  self.REPORT_TIMEOUT_MS, names=list(session.skipped))
 
     def _show_plugins_menu(self, session: MayaSession, loaded: set) -> None:
         row = self._rows.get(session.session_id)

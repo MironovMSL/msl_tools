@@ -129,7 +129,8 @@ class BoostTab(qt.QtWidgets.QWidget):
 
     def __init__(self, store: BoostStore, config, environment: str, years: Sequence[str],
                  app_dir_for: Callable[[], str] | None = None,
-                 blocked_reason_for: Callable[[], str] | None = None, parent=None):
+                 blocked_reason_for: Callable[[], str] | None = None,
+                 running_years_for: Callable[[], set] | None = None, parent=None):
         """
         Args:
             store: Maya-side knowledge (autoload lists, reports, backups).
@@ -140,6 +141,8 @@ class BoostTab(qt.QtWidgets.QWidget):
                 ("" = Maya's default preferences folder).
             blocked_reason_for: Returns why the current environment can't be
                 boosted ("" = it can).
+            running_years_for: Returns the Maya versions running right now
+                ({"2025"}): Restore refuses those — Maya rewrites the list on exit.
         """
         super().__init__(parent)
         self._store = store
@@ -148,6 +151,7 @@ class BoostTab(qt.QtWidgets.QWidget):
         self._years = list(years)
         self._app_dir_for = app_dir_for or (lambda: "")
         self._blocked_reason_for = blocked_reason_for or (lambda: "")
+        self._running_years_for = running_years_for or (lambda: set())
         self._rows: dict[str, _PluginRow] = {}
         self._fade: qt.QtCore.QPropertyAnimation | None = None
         self._restore_year = ""
@@ -529,6 +533,17 @@ class BoostTab(qt.QtWidgets.QWidget):
             f"Put back the stored copy of Maya {year}’s auto-load list?",
             details=f"Close Maya {year} first: it rewrites the list when it exits.",
             choices=[("restore", "Restore"), ("cancel", "Cancel")], kind="warning")
-        if choice == "restore":
-            self._store.restore_backup(year, self._app_dir_for() or None)
-            self.refresh()
+        if choice != "restore":
+            return
+        # Asked again AFTER the question: it may have been started meanwhile. A restore under a
+        # running Maya is undone without a word when it exits.
+        if year in {str(running) for running in self._running_years_for()}:
+            ConfirmDialog.ask(self, "Maya is running",
+                              f"Maya {year} is running: it would write its list over the restored one when it "
+                              f"exits. Close it, then restore.", choices=[("ok", "OK")], kind="warning")
+            return
+        if not self._store.restore_backup(year, self._app_dir_for() or None):
+            ConfirmDialog.ask(self, "Not restored",
+                              f"Maya {year}’s auto-load list couldn’t be written — is its preferences folder "
+                              f"read-only, or the file open somewhere?", choices=[("ok", "OK")], kind="warning")
+        self.refresh()

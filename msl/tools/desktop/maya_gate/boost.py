@@ -426,19 +426,25 @@ class LaunchLog:
         with what the loader needs to complete the record."""
         result = dict(variables)
         now = time.time()
+        # Milliseconds in the name: two launches of one version within a second (a double
+        # click on two tiles, a restart) each keep their own record.
+        stamp = time.strftime('%Y%m%d_%H%M%S', time.localtime(now)) + f"_{int(now * 1000) % 1000:03d}"
         try:
             self._folder.mkdir(parents=True, exist_ok=True)
-            path = self._folder / f"{time.strftime('%Y%m%d_%H%M%S', time.localtime(now))}_{year}.json"
+            path = self._folder / f"{stamp}_{year}.json"
             path.write_text(json.dumps({"year": year, "environment": environment, "boosted": bool(boosted),
                                         "skipped": int(skipped),
                                         "clicked": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now))},
                                        indent=1), encoding="utf-8")
-            for old in sorted(self._folder.glob("*.json"), reverse=True)[self.KEPT:]:
-                old.unlink()
         except OSError:
             return result  # no record, no measurement - the launch itself goes on
         result[self.TIME_VARIABLE] = repr(now)
         result[self.FILE_VARIABLE] = str(path)
+        try:  # the old records: a file that can't go now goes next time — this record stays timed
+            for old in sorted(self._folder.glob("*.json"), reverse=True)[self.KEPT:]:
+                old.unlink()
+        except OSError:
+            pass
         return result
 
     def entries(self) -> list[dict]:
@@ -467,7 +473,7 @@ class LaunchLog:
         for entry in self.entries():
             if entry.get("environment") != environment or "ready_seconds" not in entry:
                 continue
-            if year and entry.get("year") != year:
+            if year and str(entry.get("year")) != str(year):
                 continue
             if boosted is not None and bool(entry.get("boosted")) != boosted:
                 continue

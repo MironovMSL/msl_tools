@@ -102,12 +102,17 @@ def read_json_object(path: str | Path) -> dict[str, Any]:
 
 def write_json_atomic(path: str | Path, data: Any, indent: int | None = 4) -> None:
     """Writes ``data`` as JSON into ``path`` all at once (see the module's docstring). Raises OSError."""
+    write_text_atomic(path, json.dumps(data, indent=indent, ensure_ascii=False))
+
+
+def write_text_atomic(path: str | Path, text: str) -> None:
+    """Writes ``text`` (UTF-8) into ``path`` all at once — the same way as
+    write_json_atomic(), for the user's text files (scripts). Raises OSError."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    text = json.dumps(data, indent=indent, ensure_ascii=False)
     handle, temporary = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
     try:
-        with os.fdopen(handle, "w", encoding="utf-8") as stream:
+        with os.fdopen(handle, "w", encoding="utf-8", newline="") as stream:
             stream.write(text)
             stream.flush()
             os.fsync(stream.fileno())

@@ -5,7 +5,7 @@ from msl_tools.msl.ui.theme.qss import repolish
 from msl_tools.msl.ui.ui_resources import UiResources
 from msl_tools.msl.ui.widgets.atoms.buttons import IconPushButton
 from msl_tools.msl.ui.widgets.atoms.editors import CodeEditor
-from msl_tools.msl.tools.desktop.maya_gate.user_setup import UserSetupStore
+from msl_tools.msl.tools.desktop.maya_gate.user_setup import ScriptUnavailable, UserSetupStore
 
 
 class UserSetupTab(qt.QtWidgets.QWidget):
@@ -117,8 +117,14 @@ class UserSetupTab(qt.QtWidgets.QWidget):
         self._save_timer.stop()
         if not self._dirty or self._loaded_environment is None:
             return
-        self._saved_text = self.editor.toPlainText()
-        self._store.write(self._loaded_environment, self._saved_text)
+        text = self.editor.toPlainText()
+        try:
+            self._store.write(self._loaded_environment, text)
+        except OSError as error:  # locked / read-only: keep the edit, say so, try again on the next save
+            self._set_status("error", "Not saved — the file can’t be written",
+                             f"{self._store.script_path(self._loaded_environment)}\n{error}")
+            return
+        self._saved_text = text
         self._dirty = False
         self._show_script_state(just_saved=True)
 
@@ -134,7 +140,19 @@ class UserSetupTab(qt.QtWidgets.QWidget):
         super().hideEvent(event)
 
     def _load(self) -> None:
-        text = self._store.read(self._environment)
+        try:
+            text = self._store.read(self._environment)
+        except ScriptUnavailable as error:
+            # Shown empty and read-only, and NOT loaded: nothing is ever saved over the file.
+            self.editor.blockSignals(True)
+            self.editor.setPlainText("")
+            self.editor.blockSignals(False)
+            self.editor.setReadOnly(True)
+            self._loaded_environment, self._dirty = None, False
+            self._set_status("error", "Can’t read the script right now — switch tabs to try again",
+                             str(error))
+            return
+        self.editor.setReadOnly(False)
         self.editor.blockSignals(True)
         self.editor.setPlainText(text)
         self.editor.blockSignals(False)

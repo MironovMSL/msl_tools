@@ -475,6 +475,15 @@ What changed vs. the original (all deliberate, not oversights):
   raise) and never changes content, so Maya 2022+'s userSetup trust-hash
   prompt appears once, not after every edit. Must stay Python-2.7-valid
   (Maya 2020). Verified end-to-end with mayapy 2020 and 2025 standalone.
+  Since 2026-10-04 the wrapper is plain ASCII (the script's path is an
+  escaped `u'...'` literal — a Cyrillic user name was a SyntaxError in
+  2.7), reads the script as UTF-8 else Windows' code page, and compiles it
+  under a bytes file name in 2.7 (`tests/core/test_maya_gate.py` runs it
+  with `py -2.7` where installed). That change makes Maya 2022+ ask about
+  trusting the userSetup ONCE more. The hub reads the script the same way
+  (`decode_script`); a file it can't read raises `ScriptUnavailable`: the
+  tab shows it read-only and never saves over it, launches go on (Maya
+  reads the file itself), a failed save keeps the edit and says so.
   Every launch also puts the folder holding the msl_tools package
   (`FileSystemManager.PARENT_DIR`) on PYTHONPATH — baked into
   `UserSetupStore.launch_environment()`, deliberately NOT a variable in the
@@ -520,7 +529,9 @@ What changed vs. the original (all deliberate, not oversights):
   boost (`BoostStore.blocked_reason`, a notice on the tab); every boosted
   launch stores a copy of pluginPrefs.mel (`boost/backup/<year>/`, last 5,
   never replaced by a list that lost entries), and the tab offers Restore /
-  "It's fine" when Maya's list has lost plug-ins since. Verified too: a
+  "It's fine" when Maya's list has lost plug-ins since. Restore refuses
+  while that Maya version is connected to the hub (`running_years_for`):
+  it would write its list over the restored one on exit. Verified too: a
   scene whose `requires` names a skipped plug-in loads it on open; a
   skipped plug-in can still come up as a dependency (LookdevX -> USD).
   Measured (windowed Maya 2025, incl. an 8 s wait before quitting):
@@ -646,7 +657,9 @@ What changed vs. the original (all deliberate, not oversights):
     Gate sets for `MayaGatePage.CONSOLE_ENVIRONMENTS` = ("Dev",). The
     decision is made in Maya (`hub_link.console_allowed()`, checked on
     every call) — the hub merely hides the console for sessions whose
-    hello says `console: false`. The log and the console share a
+    hello says `console: false`. Run is locked PER MAYA
+    (`_console_running`: pids with code out) — a long script in one Maya
+    doesn't keep the console from another. The log and the console share a
     QSplitter (`#sessionsSplit`): dragging the grip between them gives
     the console the room of a real editor, taken from the log; its
     height is remembered (`_ui.console_height`). On the tab: `_ConsoleInput` (a small
