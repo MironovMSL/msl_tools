@@ -287,12 +287,22 @@ class _RunMixin:
         if image.isNull():
             self._say("Maya drew no picture for the preview.", "error")
             return
-        # A playblast's PNG keeps the background in its colors but marks it see-through (alpha 0);
-        # the video drops the alpha (measured: Gray comes out 91, 91, 91) — so does the preview.
-        image = image.convertToFormat(qt.QtGui.QImage.Format.Format_ARGB32)
-        image.reinterpretAsFormat(qt.QtGui.QImage.Format.Format_RGB32)
+        image = self._opaque(image)
         caption = f"Frame {frame} · {width}×{height} · {self._camera_name()}"
         PreviewDialog.show_for(self.window(), image, caption)
+
+    @staticmethod
+    def _opaque(image):
+        """A playblast's PNG keeps the background in its colors but marks it see-through (alpha 0);
+        the video drops the alpha (measured: Gray comes out 91, 91, 91) — so does the preview: every
+        pixel's alpha is set to 255, the colors stay. (Only RE-LABELLING the image as RGB32 left the
+        zero alpha bytes in place, and the translucent preview window showed Maya through them.)"""
+        image = image.convertToFormat(qt.QtGui.QImage.Format.Format_ARGB32)
+        data = bytearray(bytes(image.constBits()))
+        data[3::4] = bytes([255]) * (len(data) // 4)   # ARGB32 in memory: B, G, R, A
+        opaque = qt.QtGui.QImage(bytes(data), image.width(), image.height(), image.bytesPerLine(),
+                                 qt.QtGui.QImage.Format.Format_ARGB32)
+        return opaque.convertToFormat(qt.QtGui.QImage.Format.Format_RGB32)  # a copy that owns its pixels
 
     def _encoding_text(self) -> str:
         return "Making the video…" if self._encodes == 1 else f"Making {self._encodes} videos…"
