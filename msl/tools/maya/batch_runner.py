@@ -82,8 +82,57 @@ class Runner(object):
             cmds.file(self.task["scene"], open=True, force=True, ignoreVersion=True, prompt=False)
         except RuntimeError as error:  # missing plug-ins etc.: Maya raises, but the scene IS open
             warnings.append(str(error).strip()[:500])
-        self.say("scene_open", warnings=warnings)
+        self.relinked = self.relink(self.task.get("search") or [])
+        self.say("scene_open", warnings=warnings, relinked=len(self.relinked))
         return warnings
+
+    def relink(self, folders):
+        """Missing textures and Alembic caches looked for BY FILE NAME in `folders` (and their
+        sub-folders, 3 levels down) and pointed there - in memory, for this render only.
+        Returns [(old path, new path)]."""
+        from maya import cmds
+        folders = [folder for folder in folders if folder and os.path.isdir(folder)]
+        if not folders:
+            return []
+        index = {}
+        for folder in folders:
+            base_depth = folder.rstrip("/\\").count(os.sep)
+            for root, dirs, files in os.walk(folder):
+                if root.count(os.sep) - base_depth >= 3:
+                    dirs[:] = []
+                for name in files:
+                    index.setdefault(name.lower(), os.path.join(root, name))
+        changed = []
+        for node_type, attribute in (("file", "fileTextureName"), ("aiImage", "filename"),
+                                     ("AlembicNode", "abc_File")):
+            try:
+                nodes = cmds.ls(type=node_type) or []
+            except Exception:
+                continue
+            for node in nodes:
+                path = cmds.getAttr(node + "." + attribute) or ""
+                if not path or _texture_exists(path):
+                    continue
+                found = index.get(os.path.basename(path.replace("\\", "/")).lower())
+                if found:
+                    try:
+                        cmds.setAttr(node + "." + attribute, found.replace("\\", "/"), type="string")
+                        changed.append([path, found])
+                    except Exception:
+                        continue
+        return changed
+
+    def switch_layer(self, layer):
+        """Renders `layer` (Render Setup) - in memory."""
+        if not layer:
+            return
+        import maya.app.renderSetup.model.renderSetup as render_setup
+        setup = render_setup.instance()
+        for each in setup.getRenderLayers():
+            if each.name() == layer:
+                setup.switchToLayer(each)
+                return
+        raise RuntimeError("The render layer %s isn't in the scene." % layer)
 
     # --- probe --------------------------------------------------------------------------------
 
@@ -151,6 +200,7 @@ class Runner(object):
             report["render_layers"] = [layer.name() for layer in render_setup.instance().getRenderLayers()]
         except Exception:
             report["render_layers"] = []
+        report["relinked"] = self.relinked
         with open(self.task["report"], "w") as handle:
             json.dump(report, handle, indent=1)
         self.say("finished", probe=True)
@@ -161,6 +211,7 @@ class Runner(object):
         from maya import cmds
         task = self.task
         self.open_scene()
+        self.switch_layer(task.get("layer", ""))
         renderer = task.get("renderer", "arnold")
         if renderer != "arnold":
             raise RuntimeError("This runner renders with Arnold only; %s goes through Render.exe." % renderer)
@@ -183,13 +234,24 @@ class Runner(object):
             mtoa.core.createOptions()
         except Exception:
             pass
+        image_format = task.get("image_format", "png")
+        suffix = {"png": "png", "jpg": "jpg", "exr": "exr"}.get(image_format, "png")
         if cmds.objExists("defaultArnoldDriver"):
-            cmds.setAttr("defaultArnoldDriver.ai_translator", "png", type="string")
+            cmds.setAttr("defaultArnoldDriver.ai_translator", {"jpg": "jpeg"}.get(image_format, image_format),
+                         type="string")
+        threads = int(task.get("threads", 0) or 0)
+        if threads and cmds.objExists("defaultArnoldRenderOptions"):
+            try:  # negative = every core but that many: the computer stays usable
+                cmds.setAttr("defaultArnoldRenderOptions.threads_autodetect", False)
+                cmds.setAttr("defaultArnoldRenderOptions.threads", threads)
+            except Exception:
+                pass
         cmds.setAttr("defaultRenderGlobals.imageFilePrefix", prefix, type="string")
         cmds.setAttr("defaultRenderGlobals.animation", True)
         cmds.setAttr("defaultRenderGlobals.putFrameBeforeExt", True)
         cmds.setAttr("defaultRenderGlobals.extensionPadding", 4)
-        cmds.setAttr("defaultRenderGlobals.imageFormat", 32)  # png: what the Render View writes
+        # what the Render View writes in a windowed Maya (png 32, jpeg 8)
+        cmds.setAttr("defaultRenderGlobals.imageFormat", 8 if image_format == "jpg" else 32)
         cmds.setAttr("defaultResolution.width", width)
         cmds.setAttr("defaultResolution.height", height)
         cmds.workspace(fileRule=["images", folder])
@@ -202,7 +264,9 @@ class Runner(object):
         rendered = skipped = failed = 0
         frames = [int(frame) for frame in task["frames"]]
         for index, frame in enumerate(frames):
-            target = "%s/%s.%04d.png" % (folder, prefix, frame)
+            # a layered scene's frames land in the layer's own folder (Maya's doing: task["frame_dir"])
+            frame_dir = (task.get("frame_dir") or folder).replace("\\", "/")
+            target = "%s/%s.%04d.%s" % (frame_dir, prefix, frame, suffix)
             if task.get("skip_existing", True) and os.path.isfile(target) and os.path.getsize(target) > 0:
                 skipped += 1
                 self.say("frame_skipped", frame=frame, index=index, total=len(frames), file=target)
@@ -211,6 +275,8 @@ class Runner(object):
             begun = time.time()
             try:
                 if window:  # interactive render into the Render View, then saved from there
+                    if not os.path.isdir(frame_dir):
+                        os.makedirs(frame_dir)
                     cmds.currentTime(frame)
                     cmds.arnoldRender(width=width, height=height, camera=shapes[0])
                     cmds.renderWindowEditor("renderView", edit=True, writeImage=target)

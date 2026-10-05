@@ -5,9 +5,14 @@ from pathlib import Path
 import msl_tools.msl.ui.qt_bindings as qt
 from msl_tools.msl.core.batch.checks import choose_renderer
 from msl_tools.msl.core.batch.job import CANCELLED, CHECKING, DONE, FAILED, RENDERER_TITLES, RUNNING, BatchJob, BatchStore
+from msl_tools.msl.core.batch import environments
+from msl_tools.msl.core.batch.frames import FramesError
 from msl_tools.msl.core.environment import system_actions
 from msl_tools.msl.core.resources import Resources
-from msl_tools.msl.tools.desktop.batch.job_row import JobRow
+from msl_tools.msl.tools.desktop.batch.job_row import DRAG_MIME, JobRow
+from msl_tools.msl.ui.desktop_notice import DesktopNotice
+from msl_tools.msl.ui.widgets.windows.image_dialog import ImageDialog
+from msl_tools.msl.ui.widgets.windows.text_dialog import TextDialog
 from msl_tools.msl.tools.desktop.batch.runner import BatchRunner
 from msl_tools.msl.ui.process_launcher.process_launcher import ProcessLauncher
 from msl_tools.msl.ui.theme.qss import make_rounded_popup, repolish
@@ -73,6 +78,7 @@ class BatchPage(qt.QtWidgets.QWidget):
     PICTURE = qt.QtCore.QSize(128, 72)
     MESSAGE_MS = 9000
     WHEN_DONE = {"": "Nothing", "sound": "Play a sound", "shutdown": "Shut the computer down"}
+    CORES_FREE = (0, 1, 2, 4)   # Arnold leaves that many cores to the person at the computer
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -89,6 +95,12 @@ class BatchPage(qt.QtWidgets.QWidget):
         self._picture_file = ""
         self._started_at = 0.0
         self.runner = BatchRunner(self.jobs, self._save, self)
+        fs = resources.fsManager
+        self.runner.gate_config = resources.configsDesktopHubMng.base_dir / "maya_gate" / "config.json"
+        self.runner.package_parent = fs.PARENT_DIR
+        self.runner.module_folder = fs.msl / "maya_module"
+        self._apply_computer_settings()
+        self._notice: DesktopNotice | None = None
         self.setAcceptDrops(True)
         self._build()
         self._connect()
@@ -246,6 +258,11 @@ class BatchPage(qt.QtWidgets.QWidget):
         self._when.setIcon(icons.get_icon("bell", sub_folder="actions"))
         self._when.setCursor(qt.QtCore.Qt.CursorShape.PointingHandCursor)
         self._when.setToolTip("What happens when the queue is done")
+        self._computer = qt.QtWidgets.QPushButton()
+        self._computer.setObjectName("batchChip")
+        self._computer.setIcon(icons.get_icon("gpu", sub_folder="actions"))
+        self._computer.setCursor(qt.QtCore.Qt.CursorShape.PointingHandCursor)
+        self._computer.setToolTip("How much of the computer the render takes — so you can keep working")
         self._pause = qt.QtWidgets.QPushButton("Pause")
         self._pause.setIcon(icons.get_icon("pause", sub_folder="actions"))
         self._start = qt.QtWidgets.QPushButton("Start")
@@ -256,6 +273,7 @@ class BatchPage(qt.QtWidgets.QWidget):
         bottom_layout.setSpacing(10)
         bottom_layout.addWidget(output_caption)
         bottom_layout.addWidget(self._output, 1)
+        bottom_layout.addWidget(self._computer)
         bottom_layout.addWidget(self._when)
         bottom_layout.addWidget(self._pause)
         bottom_layout.addWidget(self._start)
@@ -278,6 +296,8 @@ class BatchPage(qt.QtWidgets.QWidget):
         self._start.clicked.connect(self._on_start)
         self._pause.clicked.connect(self._on_pause)
         self._when.clicked.connect(self._on_when)
+        self._computer.clicked.connect(self._on_computer)
+        self.runner.tested.connect(self._on_tested)
         self._shutdown_cancel.clicked.connect(self._on_cancel_shutdown)
         self.runner.changed.connect(self._on_job_changed)
         self.runner.frame.connect(self._on_frame)
@@ -329,8 +349,9 @@ class BatchPage(qt.QtWidgets.QWidget):
 
     def _add_job(self, job: BatchJob, save: bool = True) -> None:
         self.jobs.append(job)
-        row = JobRow(job, self.runner.installed())
+        row = JobRow(job, self.runner.installed(), environments.names(self.runner.gate_config))
         row.picked.connect(self._pick)
+        row.split.connect(self._split)
         row.changed.connect(self._on_row_changed)
         row.reread.connect(self._on_reread)
         row.menu_requested.connect(self._on_row_menu)
@@ -387,6 +408,7 @@ class BatchPage(qt.QtWidgets.QWidget):
         job = self.runner.find(job_id)
         row = self._rows.get(job_id)
         if job is not None and row is not None:
+            row.set_testing(self.runner.testing(job_id))
             row.update_job(job)
         self._refresh_summary()
 
@@ -408,8 +430,15 @@ class BatchPage(qt.QtWidgets.QWidget):
         done = [job for job in self.jobs if job.state == DONE and job.finished > self._started_at]
         failed = [job for job in self.jobs if job.state == FAILED and job.finished > self._started_at]
         if done or failed:
-            self._say(f"The queue is done: {len(done)} rendered" + (f", {len(failed)} failed." if failed else "."))
+            text = f"The queue is done: {len(done)} rendered" + (f", {len(failed)} failed." if failed else ".")
+            self._say(text)
             self._after_queue()
+            window = self.window()
+            if not (self.isVisible() and window.isActiveWindow()):
+                if self._notice is None:
+                    self._notice = DesktopNotice(UiResources().iconManager.get_icon("hub", sub_folder="brand"), self)
+                    self._notice.clicked.connect(self._on_notice_clicked)
+                self._notice.show("MSL Tools · Batch", text)
         qt.QtWidgets.QApplication.alert(self.window())
 
     # --- buttons ---------------------------------------------------------------------------------
@@ -459,15 +488,32 @@ class BatchPage(qt.QtWidgets.QWidget):
             if job.state in (DONE, FAILED, CANCELLED):
                 menu.addAction("Render again (keeps what is there)").triggered.connect(lambda: self._reset(job_id))
         menu.addAction("Hide the check" if row.is_open() else "Show the check").triggered.connect(row.toggle_open)
+        test = menu.addMenu("Test frame — one frame, now")
+        make_rounded_popup(test)
+        try:
+            frames = job.frame_list()
+        except FramesError:
+            frames = []
+        test.setEnabled(bool(job.probe) and bool(frames) and not busy and not self.runner.testing(job_id))
+        for title, frame in (("first", frames[0] if frames else 0), ("middle", frames[len(frames) // 2] if frames else 0),
+                             ("last", frames[-1] if frames else 0)):
+            test.addAction(f"The {title} — frame {frame}").triggered.connect(
+                lambda _checked=False, frame=frame: self._test(job_id, frame))
+        if job.test_file and Path(job.test_file).is_file():
+            menu.addAction("Show the last test frame").triggered.connect(lambda: self._show_test(job_id))
+        log = menu.addAction("Show Maya’s log")
+        log.setEnabled(bool(job.log) and Path(job.log).is_file())
+        log.triggered.connect(lambda: self._show_log(job_id))
         menu.addAction("Duplicate").triggered.connect(lambda: self._duplicate(job_id))
         menu.addSeparator()
         folder = menu.addAction("Show the frames")
         folder.setEnabled(job.output_folder().is_dir())
         folder.triggered.connect(lambda: ProcessLauncher.open_file_explorer(Path(job.last_file) if job.last_file
                                                                             else job.output_folder()))
-        if job.video:
+        if job.video and Path(job.video).is_file():
             menu.addAction("Play the video").triggered.connect(lambda: qt.QtGui.QDesktopServices.openUrl(
                 qt.QtCore.QUrl.fromLocalFile(job.video)))
+            menu.addAction("Open the video in Media").triggered.connect(lambda: self._to_media(job.video))
         menu.addAction("Show the scene").triggered.connect(lambda: ProcessLauncher.open_file_explorer(Path(job.scene)))
         menu.addSeparator()
         menu.addAction("Sooner").triggered.connect(lambda: self._move(job_id, -1))
@@ -477,6 +523,101 @@ class BatchPage(qt.QtWidgets.QWidget):
         remove.triggered.connect(lambda: self._remove(job_id))
         self._row_menu = menu  # for tests; deletes itself on close
         menu.popup(position)
+
+    # --- test frames, logs, Media, one job per camera / layer ------------------------------------------
+
+    def _test(self, job_id: str, frame: int) -> None:
+        job = self.runner.find(job_id)
+        if job is None:
+            return
+        problem = self.runner.test_frame(job, frame)
+        if problem:
+            self._say(problem, "error")
+        else:
+            self._say(f"Rendering frame {frame} of {job.name} as a test — it opens when it is there.")
+
+    def _on_tested(self, job_id: str, file: str, error: str) -> None:
+        job = self.runner.find(job_id)
+        if job is None:
+            return
+        self._on_job_changed(job_id)
+        if error:
+            self._say(f"The test frame of {job.name} failed: {error}", "error")
+            return
+        try:
+            count = len(job.frame_list())
+        except FramesError:
+            count = 0
+        guess = f" — {count} frames ≈ {self._duration(count * job.test_seconds)}" if count > 1 else ""
+        self._say(f"Test frame of {job.name}: {job.test_seconds:.1f} s{guess}.")
+        self._show_test(job_id)
+
+    @staticmethod
+    def _duration(seconds: float) -> str:
+        seconds = int(seconds)
+        if seconds >= 3600:
+            return f"{seconds // 3600} h {seconds % 3600 // 60:02d} min"
+        return f"{seconds // 60} min {seconds % 60:02d} s" if seconds >= 60 else f"{seconds} s"
+
+    def _show_test(self, job_id: str) -> None:
+        job = self.runner.find(job_id)
+        if job is None or not job.test_file:
+            return
+        image = qt.QtGui.QImage(job.test_file)
+        if image.isNull():  # an EXR: Qt has no reader for it
+            self._say(f"The test frame is there, as {Path(job.test_file).suffix} — Qt can’t show it: {job.test_file}")
+            return
+        caption = f"{job.name} · {Path(job.test_file).stem.rsplit('.', 1)[-1]} · {job.test_seconds:.1f} s"
+        ImageDialog.show_for(self.window(), image, caption, title="Test frame")
+
+    def _show_log(self, job_id: str) -> None:
+        job = self.runner.find(job_id)
+        if job is None or not job.log:
+            return
+        try:
+            text = Path(job.log).read_text(encoding="utf-8", errors="replace")
+        except OSError as error:
+            self._say(f"Couldn’t read the log: {error}", "error")
+            return
+        TextDialog.show_for(self, f"Maya’s log  ·  {job.name}", text[-200_000:] or "(empty)")
+
+    def _to_media(self, video: str) -> None:
+        """The video into the hub's Media tool (its sources)."""
+        window = self.window()
+        open_tool = getattr(window, "open_tool", None)
+        if not callable(open_tool):
+            return
+        open_tool("media")
+        from msl_tools.msl.tools.desktop.media.page import MediaPage
+        pages = window.findChildren(MediaPage)
+        if pages:
+            pages[0].open([video])
+
+    def _split(self, job_id: str, kind: str) -> None:
+        """A job for every camera (kind "camera") or Render Setup layer ("layer") of this one's scene —
+        this job takes the first, copies after it take the rest."""
+        job = self.runner.find(job_id)
+        if job is None:
+            return
+        if kind == "camera":
+            values = [camera["name"] for camera in job.probe.get("cameras") or [] if not camera.get("startup")]
+        else:
+            values = list(job.probe.get("render_layers") or [])
+        if len(values) < 2:
+            return
+        setattr(job, kind, values[0])
+        self._on_job_changed(job_id)
+        index = self.jobs.index(job)
+        for offset, value in enumerate(values[1:], start=1):
+            data = {key: value_ for key, value_ in job.to_dict().items()
+                    if key not in ("id", "state", "message", "done", "seconds", "last_file", "started", "finished",
+                                   "video", "test_seconds", "test_file", "log")}
+            data[kind] = value
+            copy = BatchJob.from_dict(data)
+            self._add_job(copy, save=False)
+            self._move(copy.id, index + offset - self.jobs.index(copy))
+        self._save()
+        self._say(f"{job.name}: a job for each of its {len(values)} {kind}s.")
 
     def _reset(self, job_id: str) -> None:
         job = self.runner.find(job_id)
@@ -511,7 +652,7 @@ class BatchPage(qt.QtWidgets.QWidget):
         parts = []
         if running and runner.run_started:
             parts.append(f"running {clock(time.monotonic() - runner.run_started)}")
-        if runner.last_frame_seconds:
+        if runner.last_frame_seconds >= 0.05:
             parts.append(f"last frame {runner.last_frame_seconds:.1f} s")
         if paused:
             parts.append("paused")
@@ -525,7 +666,7 @@ class BatchPage(qt.QtWidgets.QWidget):
                                  + ("with Maya" if job.mode == "window" and renderer == "Arnold" else "no window"))
             retries = runner._retries.get(job.id, 0)
             self._watchdog.setText(f"watchdog on · restarts {retries} / {runner.RETRIES}"
-                                   + (f" · {job.seconds:.1f} s per frame" if job.seconds else ""))
+                                   + (f" · {job.seconds:.1f} s per frame" if job.seconds >= 0.05 else ""))
             self._scene.setText(job.scene)
             self._output.setText(runner.last_output())
         else:
@@ -542,6 +683,9 @@ class BatchPage(qt.QtWidgets.QWidget):
             self._scene.setText("")
             if not running:
                 self._output.setText("")
+        cores = int(self._settings.get("cores_free", 2) or 0)
+        self._computer.setText(("low priority" if self.runner.low_priority else "normal priority")
+                               + (f" · {cores} free" if cores else ""))
         when = self._when_done()
         self._when.setText({"": "after: nothing", "sound": "after: a sound", "shutdown": "after: shut down"}[when])
         if (self._when.property("tone") or "") != ("warning" if when == "shutdown" else ""):
@@ -573,6 +717,47 @@ class BatchPage(qt.QtWidgets.QWidget):
             qt.QtGui.QDesktopServices.openUrl(qt.QtCore.QUrl.fromLocalFile(self._picture_file))
             return True
         return super().eventFilter(watched, event)
+
+    def _on_notice_clicked(self) -> None:
+        window = self.window()
+        open_tool = getattr(window, "open_tool", None)
+        if callable(open_tool):
+            open_tool(self.TOOL_NAME)
+        if window.isMinimized():
+            window.showNormal()
+        window.raise_()
+        window.activateWindow()
+
+    # --- how much of the computer a render takes ------------------------------------------------------
+
+    def _apply_computer_settings(self) -> None:
+        self.runner.low_priority = bool(self._settings.get("low_priority", True))
+        cores = int(self._settings.get("cores_free", 2) or 0)
+        self.runner.threads = -cores if cores else 0
+
+    def _on_computer(self) -> None:
+        menu = make_rounded_popup(qt.QtWidgets.QMenu(self))
+        menu.setAttribute(qt.QtCore.Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        low = menu.addAction("Low priority — the computer stays smooth")
+        low.setCheckable(True)
+        low.setChecked(self.runner.low_priority)
+        low.triggered.connect(lambda checked: self._set_computer("low_priority", bool(checked)))
+        menu.addSeparator()
+        current = int(self._settings.get("cores_free", 2) or 0)
+        for cores in self.CORES_FREE:
+            title = "Arnold takes every core" if not cores else f"Leave {cores} core{'s' if cores != 1 else ''} free"
+            action = menu.addAction(title)
+            action.setCheckable(True)
+            action.setChecked(cores == current)
+            action.triggered.connect(lambda _checked=False, cores=cores: self._set_computer("cores_free", cores))
+        self._computer_menu = menu
+        menu.popup(self._computer.mapToGlobal(qt.QtCore.QPoint(0, -menu.sizeHint().height() - 4)))
+
+    def _set_computer(self, key: str, value) -> None:
+        self._settings[key] = value
+        self._apply_computer_settings()
+        self._refresh_summary()
+        self._say("For the next Maya the queue starts.")
 
     # --- when the queue is done -----------------------------------------------------------------------
 
@@ -642,12 +827,14 @@ class BatchPage(qt.QtWidgets.QWidget):
             repolish(self._jobs_card)
 
     def dragEnterEvent(self, event) -> None:
-        if self._scenes_of(event):
+        if event.mimeData().hasFormat(DRAG_MIME):
+            event.acceptProposedAction()
+        elif self._scenes_of(event):
             event.acceptProposedAction()
             self._set_dragging(True)
 
     def dragMoveEvent(self, event) -> None:
-        if self._scenes_of(event):
+        if event.mimeData().hasFormat(DRAG_MIME) or self._scenes_of(event):
             event.acceptProposedAction()
 
     def dragLeaveEvent(self, event) -> None:
@@ -655,10 +842,28 @@ class BatchPage(qt.QtWidgets.QWidget):
 
     def dropEvent(self, event) -> None:
         self._set_dragging(False)
+        if event.mimeData().hasFormat(DRAG_MIME):
+            event.acceptProposedAction()
+            self._drop_row(bytes(event.mimeData().data(DRAG_MIME)).decode(), event.position().toPoint())
+            return
         scenes = self._scenes_of(event)
         if scenes:
             event.acceptProposedAction()
             self.add_scenes(scenes)
+
+    def _drop_row(self, job_id: str, position) -> None:
+        """A row let go at `position` (page coordinates): it goes before the row under it, or last."""
+        job = self.runner.find(job_id)
+        if job is None:
+            return
+        y = self._holder.mapFrom(self, position).y()
+        target = len(self.jobs) - 1
+        for index, each in enumerate(self.jobs):
+            row = self._rows[each.id]
+            if y < row.geometry().center().y():
+                target = index if index <= self.jobs.index(job) else index - 1
+                break
+        self._move(job_id, target - self.jobs.index(job))
 
     def open(self, paths) -> None:
         """Scenes handed to the page from outside (the hub, a test)."""

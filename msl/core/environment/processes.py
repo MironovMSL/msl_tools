@@ -133,3 +133,30 @@ def _suspend_or_resume(pid: int, suspend: bool) -> bool:
     except OSError:
         return False
     return True
+
+
+def set_low_priority(pid: int) -> bool:
+    """Puts process `pid` below normal priority: it works with what the computer leaves over, and
+    the person at it doesn't feel it. True if it worked."""
+    if pid <= 0:
+        return False
+    if sys.platform == "win32":
+        import ctypes
+        from ctypes import wintypes
+        kernel = ctypes.WinDLL("kernel32")
+        kernel.OpenProcess.restype = wintypes.HANDLE
+        kernel.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+        kernel.SetPriorityClass.argtypes = (wintypes.HANDLE, wintypes.DWORD)
+        kernel.CloseHandle.argtypes = (wintypes.HANDLE,)
+        handle = kernel.OpenProcess(0x0200, False, int(pid))  # PROCESS_SET_INFORMATION
+        if not handle:
+            return False
+        try:
+            return bool(kernel.SetPriorityClass(handle, 0x4000))  # BELOW_NORMAL_PRIORITY_CLASS
+        finally:
+            kernel.CloseHandle(handle)
+    try:
+        os.setpriority(os.PRIO_PROCESS, pid, 10)
+    except (OSError, AttributeError):
+        return False
+    return True

@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from msl_tools.msl.core.batch.frames import FramesError
-from msl_tools.msl.core.batch.job import ARNOLD, AUTO, HW2, REDSHIFT, BatchJob
+from msl_tools.msl.core.batch.job import ARNOLD, AUTO, HW2, MODE_WINDOW, REDSHIFT, BatchJob
 
 ERROR, WARNING, OK = "error", "warning", "ok"
 SCENE_RENDERERS = {"arnold": ARNOLD, "redshift": REDSHIFT, "mayaHardware2": HW2}
@@ -98,6 +98,15 @@ def check(job: BatchJob) -> list[Issue]:
     if renderer == ARNOLD and aa and aa > SLOW_AA:
         issues.append(Issue(WARNING, f"Arnold camera samples are {aa} — every frame will take long",
                             "3–5 is usual for a review."))
+    relinked = probe.get("relinked") or []
+    if relinked:
+        issues.append(Issue(OK, f"{len(relinked)} missing file{'s' if len(relinked) != 1 else ''} found in the "
+                                f"search folder — used for the render", "\n".join(new for _old, new in relinked)))
+    layers = probe.get("render_layers") or []
+    if job.layer and job.layer not in layers:
+        issues.append(Issue(ERROR, f"The render layer {job.layer} isn’t in the scene"))
+    if job.image_format == "exr" and renderer == ARNOLD and job.mode == MODE_WINDOW:
+        issues.append(Issue(ERROR, "EXR frames need “no window” — Maya’s Render View saves 8-bit pictures"))
     try:
         frames = job.frame_list()
     except FramesError as error:

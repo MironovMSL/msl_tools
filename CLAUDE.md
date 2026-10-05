@@ -1010,6 +1010,7 @@ compositions/chip_bar.py                  ChipBar (pills that wrap: a checkable 
 compositions/range_strip.py               RangeStrip (pictures side by side with a range picked by two handles; range_changed / range_released; Left / Right move the handle touched last by set_step())
 themed_widget_playground_dialog.py        ThemedWidgetPlaygroundDialog
 windows/confirm_dialog.py                 ConfirmDialog (themed rounded question window; ask() -> choice key or None)
+windows/image_dialog.py                   ImageDialog (one picture fitted into a window; a click zooms to 2x its real pixels, unsmoothed, in the screen's own pixels; show_for(parent, image, caption, title=) — Playblast's frame preview (playblast/preview_dialog.py re-exports it as PreviewDialog) and Batch's test frame)
 windows/text_dialog.py                    TextDialog (a block of fixed-width text to read and copy: reports, logs; show_for(parent, title, text))
 windows/whats_new_dialog.py               WhatsNewDialog (release notes per published version; show_for(parent, fetch_releases, current_version, releases_url))
 ```
@@ -1973,6 +1974,40 @@ user's three asks: a drop target as clear as Media's, timers, the settings ON th
 The queue lives in `configs/desktop/batch/queue.json` (`BatchStore`, safe_json); a job interrupted
 by the hub closing waits and goes on from its first missing frame.
 
+- Third round (2026-10-05, the user's "all of them" to a list of 15): TEST FRAME (row menu "Test
+  frame — one frame, now" first / middle / last: `BatchRunner.test_frame` renders a copy of the job
+  — same renderer, camera, size, mode, layer — into the work folder on its own Maya slot;
+  `tested(id, file, error)` -> `ImageDialog` + "≈ N min for the whole range"; `job.test_seconds`
+  feeds the time left before anything is rendered; Render.exe's time is the whole run, an upper
+  bound). MAYA'S LOG per job (`_MayaProcess.save_log` -> work/<probe|test|render>.log, with a
+  windowed Maya's `-log maya_window.log` appended) -> "Show Maya's log" (TextDialog). MAYA GATE
+  ENVIRONMENT per job (chip; `core/batch/environments.py`: the environment's non-empty variables
+  from configs/desktop/maya_gate/config.json, msl_tools' package / module paths in front, never the
+  hub's PYTHONPATH; NOT its userSetup / boost / link). The COMPUTER chip (bottom bar): low priority
+  (`processes.set_low_priority` = BELOW_NORMAL_PRIORITY_CLASS on start) and "leave N cores free"
+  (Arnold `threads` = -N, `threads_autodetect` off) — settings `low_priority`, `cores_free` (2).
+  Arnold's "N% done" in OUTPUT (`last_output` looks 250 lines back: a frame's statistics follow
+  its 100%; the runner sets log_verbosity 2 without a window). CAMERA AUTO: the renderable own one,
+  else the one named most like a shot camera ("shot" / "cam" / "render" occurrences, an original
+  before its numbered copy: Cam_cam over Cam and Cam_cam1). SCENE PICTURE: after the probe a
+  Render.exe hw2 frame (middle, 384 px; `thumbnail_command`) is the row's picture until a frame is
+  rendered. DRAG ORDER: a row dragged (DRAG_MIME) and dropped — before the row under the pointer.
+  DESKTOP NOTICE when the queue is done and the window isn't in front (as Media). MISSING FILES:
+  a per-job search folder ("Missing files" in the unfolded row) — the runner looks missing
+  textures / aiImages / Alembic caches up BY FILE NAME (3 levels down) and points them there in
+  memory (`relink`; the probe reports `relinked`, an OK line in the check). RENDER LAYERS (chip:
+  as saved / a layer; "each layer — a job each", like "each camera — a job each": `_split`).
+  FORMATS PNG / JPG / EXR (EXR + With Maya = an ERROR: the Render View saves 8 bits). VIDEO INTO
+  MEDIA (row menu). Not done: Redshift (not installed here), AOVs.
+  LAYERS, measured (Maya 2024): a scene with Render Setup layers gets its frames written into a
+  folder PER LAYER under the output folder — "masterLayer" for the scene as saved, else the
+  layer's name — by arnoldRender -batch and Render.exe alike; Render.exe renders EVERY renderable
+  layer unless given `-rl <layer>` ("defaultRenderLayer" -> masterLayer). Hence `job.frame_dir()`
+  (and the runner's `frame_dir` in the task), `_layer_arguments`, `video_path()` =
+  <output>/<scene>_<camera>[_<layer>].mp4.
+  Verified offscreen with real Maya 2024 on a layered test scene (2 cameras, beauty / ball_only, a
+  missing texture found in a search folder): picture, relink, Dev environment, test frame 2.2 s,
+  split by layer and by camera, drag order, PNG / EXR / JPG, a video each, "100% done" lines.
 - `core/batch/` (Qt-free): `frames.py` parse_frames / format_frames ("1-120, 200", "1 20 78",
   "1-100x5", "1..10"); `job.py` BatchJob (settings — empty = the scene's — + state, probe, done,
   seconds, last_file, video) / BatchStore; `checks.py` check(job) -> Issues ERROR (won't render: the

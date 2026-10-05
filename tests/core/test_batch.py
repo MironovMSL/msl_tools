@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 
 from msl_tools.msl.core.batch import ERROR, OK, WARNING, check, choose_renderer, format_frames, parse_frames
-from msl_tools.msl.core.batch import commands
+from msl_tools.msl.core.batch import commands, environments
 from msl_tools.msl.core.batch.frames import FramesError
 from msl_tools.msl.core.batch.job import (ARNOLD, HW2, MODE_HEADLESS, MODE_WINDOW, REDSHIFT, RUNNING, WAITING, BatchJob,
                                           BatchStore)
@@ -61,6 +61,40 @@ class Jobs(unittest.TestCase):
         self.assertEqual(loaded[0].scene, self.job.scene)
         self.assertEqual(loaded[0].state, WAITING)
         self.assertIn("where it stopped", loaded[0].message)
+
+
+class Layers(unittest.TestCase):
+    def test_a_layered_scenes_frames_land_in_the_layers_folder(self):
+        job = BatchJob(scene="C:/x/shot.ma", probe=dict(PROBE, render_layers=["beauty", "shadow"]))
+        self.assertEqual(job.frame_dir().name, "masterLayer")
+        job.layer = "beauty"
+        self.assertEqual(job.frame_dir(), job.output_folder() / "beauty")
+        self.assertEqual(job.video_path().name, "shot_shotCam_beauty.mp4")
+        job.renderer = HW2
+        _program, arguments, _extra = commands.command(job, "render", Path("M"), Path("task.json"), run=(1, 5))
+        self.assertEqual(arguments[arguments.index("-rl") + 1], "beauty")   # one layer, not every layer
+        plain = BatchJob(scene="C:/x/shot.ma", probe=dict(PROBE))
+        self.assertEqual(plain.frame_dir(), plain.output_folder())
+
+    def test_the_likely_shot_camera_is_picked(self):
+        cameras = [{"name": name, "renderable": False, "startup": False} for name in ("Cam", "Cam_cam1", "Cam_cam")]
+        job = BatchJob(scene="C:/x/shot.ma", probe=dict(PROBE, cameras=cameras))
+        self.assertEqual(job.camera_name(), "Cam_cam")
+
+
+class Environments(unittest.TestCase):
+    def test_variables_and_msl_paths_in_front(self):
+        folder = Path(tempfile.mkdtemp())
+        config = folder / "config.json"
+        config.write_text(json.dumps({"maya": {"Dev": {"MAYA_MODULE_PATH": "D:/modules", "EMPTY": ""}},
+                                      "custom": {"Dev": {"STUDIO": "x"}, "Lighting": {}}}), encoding="utf-8")
+        self.assertIn("Lighting", environments.names(config))
+        result = environments.variables(config, "Dev", "H:/pkg", "H:/pkg/msl/maya_module", base={"PYTHONPATH": "ide"})
+        self.assertEqual(result["STUDIO"], "x")
+        self.assertNotIn("EMPTY", result)
+        self.assertTrue(result["MAYA_MODULE_PATH"].startswith("H:/pkg/msl/maya_module"))
+        self.assertTrue(result["MAYA_MODULE_PATH"].endswith("D:/modules"))
+        self.assertEqual(result["PYTHONPATH"], "H:/pkg")                 # the hub's own PYTHONPATH never goes along
 
 
 class Checks(unittest.TestCase):

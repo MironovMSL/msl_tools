@@ -12,7 +12,8 @@ from msl_tools.msl.core.batch import commands
 from msl_tools.msl.core.batch.checks import ERROR, check
 from msl_tools.msl.core.batch.frames import FramesError
 from msl_tools.msl.core.batch.job import CANCELLED, CHECKING, DONE, FAILED, RUNNING, WAITING, BatchJob
-from msl_tools.msl.core.environment.processes import resume_process, suspend_process
+from msl_tools.msl.core.batch import environments
+from msl_tools.msl.core.environment.processes import resume_process, set_low_priority, suspend_process
 from msl_tools.msl.core.fs.maya_paths import MayaPaths
 from msl_tools.msl.core.media import FfmpegLocator, MediaError, sequence_to_video
 from msl_tools.msl.core.media.sequence import sequence_of
@@ -29,9 +30,11 @@ class _MayaProcess(qt.QtCore.QObject):
 
     TAIL = 20_000
 
-    def __init__(self, program: str, arguments: list, environment: dict, progress: Path | None, parent=None):
+    def __init__(self, program: str, arguments: list, environment: dict, progress: Path | None, parent=None,
+                 low_priority: bool = False):
         super().__init__(parent)
         self.progress = progress
+        self.low_priority = low_priority
         self._offset = 0
         self.output = ""
         self.process = qt.QtCore.QProcess(self)
@@ -46,6 +49,7 @@ class _MayaProcess(qt.QtCore.QObject):
         self.process.readyReadStandardOutput.connect(self._drain)
         self.process.finished.connect(self._on_finished)
         self.process.errorOccurred.connect(self._on_error)
+        self.process.started.connect(self._on_started)
         self._timer = qt.QtCore.QTimer(self)
         self._timer.setInterval(400)
         self._timer.timeout.connect(self.poll)
@@ -57,6 +61,24 @@ class _MayaProcess(qt.QtCore.QObject):
 
     def pid(self) -> int:
         return int(self.process.processId() or 0)
+
+    def _on_started(self) -> None:
+        if self.low_priority:
+            set_low_priority(self.pid())  # the computer stays usable while it renders
+
+    def save_log(self, path: Path, also: Path | None = None) -> str:
+        """Writes what this Maya said (+ the text of `also`, a windowed Maya's -log file) to `path`."""
+        text = self.output
+        if also is not None and also.is_file():
+            try:
+                text += "\n\n--- Maya's own log (" + also.name + ") ---\n" + also.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                pass
+        try:
+            path.write_text(text, encoding="utf-8")
+        except OSError:
+            return ""
+        return str(path)
 
     def kill(self) -> None:
         if self.process.state() != qt.QtCore.QProcess.ProcessState.NotRunning:
@@ -107,6 +129,7 @@ class BatchRunner(qt.QtCore.QObject):
     Signals:
         changed(str) — that job moved on (state, progress, picture).
         frame(str, str) — a frame of that job was written (its file).
+        tested(str, str, str) — a test frame of that job is over: (job id, the picture, an error).
         idle() — nothing left to render (the queue ran through, or was stopped).
         paused_changed(bool)
     """
@@ -115,6 +138,7 @@ class BatchRunner(qt.QtCore.QObject):
     frame = qt.QtCore.Signal(str, str)
     idle = qt.QtCore.Signal()
     paused_changed = qt.QtCore.Signal(bool)
+    tested = qt.QtCore.Signal(str, str, str)
 
     STALL_S = 15 * 60
     START_S = 5 * 60
@@ -126,6 +150,13 @@ class BatchRunner(qt.QtCore.QObject):
         self.jobs = jobs
         self._save = save                     # () -> None: the page keeps the queue on disk
         self.environment = commands.clean_environment()
+        self.threads = 0                      # Arnold's threads: negative = every core but that many
+        self.low_priority = True              # Mayas of the queue run below normal priority
+        self.gate_config = None               # Maya Gate's config.json (its environments)
+        self.package_parent = None            # the folder holding msl_tools (on the Maya's PYTHONPATH)
+        self.module_folder = None             # msl_tools' Maya module (on MAYA_MODULE_PATH)
+        self._test: _MayaProcess | None = None
+        self._test_job: BatchJob | None = None
         self.work_root = Path(tempfile.gettempdir()) / "msl_tools" / "batch"
         self._render: _MayaProcess | None = None
         self._render_job: BatchJob | None = None
@@ -167,6 +198,21 @@ class BatchRunner(qt.QtCore.QObject):
     def find(self, job_id: str) -> BatchJob | None:
         return next((job for job in self.jobs if job.id == job_id), None)
 
+    def environment_for(self, job: BatchJob) -> dict:
+        """What the job's Maya gets: the hub's own environment (cleaned) + its Maya Gate environment."""
+        environment = dict(self.environment)
+        if job.environment and self.gate_config is not None:
+            environment.update(environments.variables(self.gate_config, job.environment, self.package_parent,
+                                                      self.module_folder, base=environment))
+        return environment
+
+    def testing(self, job_id: str) -> bool:
+        return self._test_job is not None and self._test_job.id == job_id
+
+    def _process(self, program, arguments, extra, progress, job) -> _MayaProcess:
+        return _MayaProcess(program, arguments, dict(self.environment_for(job), **extra), progress, self,
+                            low_priority=self.low_priority)
+
     # --- checking --------------------------------------------------------------------------------
 
     def probe(self, job: BatchJob) -> None:
@@ -192,7 +238,7 @@ class BatchRunner(qt.QtCore.QObject):
         work = self.work_root / job.id
         task = commands.write_task(job, "probe", work)
         program, arguments, extra = commands.command(job, "probe", self.installed()[year], task)
-        process = _MayaProcess(program, arguments, dict(self.environment, **extra), work / "probe_progress.jsonl", self)
+        process = self._process(program, arguments, extra, work / "probe_progress.jsonl", job)
         process.ended.connect(lambda code, job=job, work=work: self._on_probe_ended(job, work, code))
         self._probe, self._probe_job = process, job
         job.state, job.message = CHECKING, f"reading the scene in Maya {year}…"
@@ -216,12 +262,99 @@ class BatchRunner(qt.QtCore.QObject):
             tail = process.output.strip().splitlines()[-3:] if process is not None else []
             job.state, job.message = FAILED, "couldn’t read the scene" + (": " + " / ".join(tail)[-200:] if tail else "")
         if process is not None:
+            job.log = process.save_log(work / "probe.log")
             process.deleteLater()
         self.changed.emit(job.id)
         self._save()
+        if job.probe and job.camera_name() and self._thumbnail(job):
+            return  # the probe slot makes the scene's picture first
+        self._probe_done()
+
+    def _probe_done(self) -> None:
         self._next_probe()
         if self._running and self._render is None:
             self._next_render()
+
+    def _thumbnail(self, job: BatchJob) -> bool:
+        """A small viewport picture of the scene (Render.exe, Hardware 2.0) — the row's picture until
+        a frame is rendered. Takes the probe slot; True if started."""
+        year = self.maya_for(job)
+        if not year:
+            return False
+        folder = self.work_root / job.id / "thumb"
+        try:
+            program, arguments = commands.thumbnail_command(job, self.installed()[year], folder)
+        except Exception:
+            return False
+        process = self._process(program, arguments, {}, None, job)
+        process.ended.connect(lambda _code, job=job, folder=folder: self._on_thumbnail(job, folder))
+        self._probe, self._probe_job = process, job
+        process.start()
+        return True
+
+    def _on_thumbnail(self, job: BatchJob, folder: Path) -> None:
+        process, self._probe, self._probe_job = self._probe, None, None
+        if process is not None:
+            process.deleteLater()
+        pictures = sorted(folder.rglob("thumb.*.png")) if folder.is_dir() else []  # a layered scene: in a layer folder
+        if pictures:
+            job.thumbnail = str(pictures[-1])
+            self.changed.emit(job.id)
+            self._save()
+        self._probe_done()
+
+    # --- a test frame ----------------------------------------------------------------------------
+
+    def test_frame(self, job: BatchJob, frame: int) -> str:
+        """Renders ONE frame of `job` the way the job would (its renderer, camera, size, how Maya
+        runs) into a scratch folder — tested(...) follows. Returns "" or why it can't start."""
+        if self._test is not None:
+            return "A test frame is already being made."
+        year = self.maya_for(job)
+        if not year or not job.probe:
+            return "The scene hasn’t been read yet."
+        work = self.work_root / job.id / "test"
+        for old in work.glob("*.*") if work.is_dir() else []:
+            if old.suffix.lower() in (".png", ".jpg", ".exr"):
+                old.unlink(missing_ok=True)
+        trial = BatchJob.from_dict(dict(job.to_dict(), frames=str(frame), folder=str(work / "frames"),
+                                        make_video=False))
+        task = commands.write_task(trial, "render", work, self.threads)
+        task_data = json.loads(task.read_text(encoding="utf-8"))
+        task_data["skip_existing"] = False
+        task.write_text(json.dumps(task_data, indent=1), encoding="utf-8")
+        program, arguments, extra = commands.command(trial, "render", self.installed()[year], task, run=(frame, frame))
+        progress = None if commands.uses_render_exe(trial) else work / "render_progress.jsonl"
+        process = self._process(program, arguments, extra, progress, job)
+        self._test_events = []
+        process.event.connect(self._test_events.append)
+        process.ended.connect(lambda code, job=job, trial=trial, work=work: self._on_test_ended(job, trial, work, code))
+        self._test, self._test_job, self._test_started = process, job, time.monotonic()
+        self.changed.emit(job.id)
+        process.start()
+        return ""
+
+    def _on_test_ended(self, job: BatchJob, trial: BatchJob, work: Path, code: int) -> None:
+        process, self._test, self._test_job = self._test, None, None
+        frame = trial.frame_list()[0]
+        picture = trial.frame_file(frame)
+        error = ""
+        seconds = next((float(event.get("seconds", 0)) for event in self._test_events
+                        if event.get("event") == "frame_done"), 0.0)
+        if picture.is_file():
+            job.test_file = str(picture)
+            # Render.exe tells no frame time: the whole run, Maya's start included (an upper bound)
+            job.test_seconds = round(seconds or (time.monotonic() - self._test_started), 2)
+        else:
+            failed = [event.get("error", "") for event in self._test_events if event.get("event") in ("failed",
+                                                                                                    "frame_failed")]
+            error = (failed[-1] if failed else "") or f"Maya made no picture (exit {code})"
+        if process is not None:
+            job.log = process.save_log(work / "test.log", work / "maya_window.log")
+            process.deleteLater()
+        self.changed.emit(job.id)
+        self._save()
+        self.tested.emit(job.id, str(picture) if not error else "", error)
 
     # --- rendering --------------------------------------------------------------------------------
 
@@ -305,10 +438,10 @@ class BatchRunner(qt.QtCore.QObject):
     def _launch(self, job: BatchJob, year: str) -> None:
         """Starts the Maya that renders `job` (a Render.exe: its next run of missing frames)."""
         work = self.work_root / job.id
-        task = commands.write_task(job, "render", work)
+        task = commands.write_task(job, "render", work, self.threads)
         program, arguments, extra = commands.command(job, "render", self.installed()[year], task)
         progress = None if commands.uses_render_exe(job) else work / "render_progress.jsonl"
-        process = _MayaProcess(program, arguments, dict(self.environment, **extra), progress, self)
+        process = self._process(program, arguments, extra, progress, job)
         process.event.connect(lambda event, job=job: self._on_event(job, event))
         process.ended.connect(lambda code, job=job: self._on_render_ended(job, code))
         self._render, self._render_job = process, job
@@ -391,6 +524,8 @@ class BatchRunner(qt.QtCore.QObject):
             missing = []
         tail = process.output.strip().splitlines()[-4:] if process is not None else []
         if process is not None:
+            work = self.work_root / job.id
+            job.log = process.save_log(work / "render.log", work / "maya_window.log")
             process.deleteLater()
         if job.state != CANCELLED and missing and code == 0 and commands.uses_render_exe(job)                 and len(self._seen_files) > self._files_at_launch:
             self._launch(job, self._render_year)  # that run is rendered: Render.exe for the next one
@@ -444,8 +579,7 @@ class BatchRunner(qt.QtCore.QObject):
             self.changed.emit(job.id)
             self._next_render()
             return
-        folder = job.output_folder()
-        output = folder.parent / f"{folder.name}.mp4"  # named after its frames' folder: two jobs never share one
+        output = job.video_path()  # named after the camera (and the layer): two jobs never share one
         fps = {"film": 24.0, "ntsc": 30.0, "pal": 25.0, "ntscf": 60.0, "game": 15.0, "show": 48.0,
                "palf": 50.0}.get(str(job.probe.get("time_unit", "")), 24.0)
         try:
@@ -486,7 +620,8 @@ class BatchRunner(qt.QtCore.QObject):
         if job is None:
             return ""
         if process is not None and process.output:
-            lines = [line.split("|", 1)[-1].strip() for line in process.output.splitlines()[-40:] if line.strip()]
+            # a frame's statistics follow its "100% done": look further back than the last few lines
+            lines = [line.split("|", 1)[-1].strip() for line in process.output.splitlines()[-250:] if line.strip()]
             lines = [line for line in lines if line and not line.startswith(("@@MSL", "Warning:", "//"))]
             progress = [line for line in lines if "% done" in line]
             if progress:
@@ -511,13 +646,13 @@ class BatchRunner(qt.QtCore.QObject):
             frames_done += done
             jobs_done += job.state == DONE
             if job.state != DONE:
-                left += (count - done) * (job.seconds or 0)
+                left += (count - done) * (job.seconds or job.test_seconds or 0)
         return {"frames_done": frames_done, "frames_all": frames_all, "jobs_done": jobs_done, "jobs_all": jobs_all,
                 "seconds_left": left}
 
     def shutdown(self) -> None:
         """The hub closes: every Maya of the queue goes with it (the job goes on from there next time)."""
-        for process in (self._render, self._probe):
+        for process in (self._render, self._probe, self._test):
             if process is not None:
                 process.kill()
                 process.process.waitForFinished(3000)

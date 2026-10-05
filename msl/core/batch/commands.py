@@ -66,16 +66,20 @@ def clean_environment(base=None) -> dict:
     return environment
 
 
-def write_task(job: BatchJob, mode: str, work: Path) -> Path:
-    """The runner's task file for `mode` ("probe" / "render") in `work`; returns its path."""
+def write_task(job: BatchJob, mode: str, work: Path, threads: int = 0) -> Path:
+    """The runner's task file for `mode` ("probe" / "render") in `work`; returns its path.
+    `threads`: Arnold's thread count (negative = every core but that many; 0 = Arnold's choice)."""
     work.mkdir(parents=True, exist_ok=True)
     task = {"mode": mode, "scene": str(Path(job.scene)), "progress": str(work / f"{mode}_progress.jsonl"),
             "report": str(work / "probe.json"), "renderer": choose_renderer(job) if job.probe else ARNOLD,
-            "window": job.mode == MODE_WINDOW}
+            "window": job.mode == MODE_WINDOW,
+            "search": [job.search_folder] if job.search_folder else []}
     if mode == "render":
         width, height = job.resolution()
         task.update(camera=job.camera_name(), frames=job.frame_list(), width=width, height=height,
-                    folder=str(job.output_folder()), prefix=job.prefix(), skip_existing=True)
+                    folder=str(job.output_folder()), frame_dir=str(job.frame_dir()), prefix=job.prefix(),
+                    skip_existing=True, layer=job.layer,
+                    image_format=job.image_format, threads=int(threads))
     path = work / f"{mode}_task.json"
     Path(task["progress"]).unlink(missing_ok=True)
     path.write_text(json.dumps(task, indent=1), encoding="utf-8")
@@ -95,8 +99,27 @@ def missing_runs(job: BatchJob) -> list[tuple[int, int]]:
     return runs
 
 
+def _layer_arguments(job: BatchJob) -> list:
+    """Render.exe renders EVERY renderable layer of a layered scene unless told one: -rl <layer>
+    ("defaultRenderLayer" = the scene as saved; its frames land in "masterLayer")."""
+    return ["-rl", job.layer or "defaultRenderLayer"] if job.layered() else []
+
+
 def uses_render_exe(job: BatchJob) -> bool:
     return choose_renderer(job) in (HW2, REDSHIFT)
+
+
+def thumbnail_command(job: BatchJob, maya_folder: Path, folder: Path, width: int = 384) -> tuple:
+    """(program, arguments) of a quick viewport picture of the scene — the middle frame, Hardware 2.0,
+    `width` wide — into `folder` as thumb.####.png. No licence, a few seconds after Maya's start."""
+    frames = job.frame_list()
+    middle = frames[len(frames) // 2]
+    scene_width, scene_height = job.resolution()
+    height = max(int(width * scene_height / max(scene_width, 1)) // 2 * 2, 2)
+    arguments = ["-r", "hw2", "-cam", job.camera_name(), "-rd", str(folder), "-im", "thumb", "-of", "png",
+                 "-pad", "4", "-fnc", "3", "-s", str(middle), "-e", str(middle), "-x", str(width), "-y", str(height)]
+    arguments += _layer_arguments(job) + [str(Path(job.scene))]
+    return str(Path(maya_folder) / "bin" / "Render.exe"), arguments
 
 
 def command(job: BatchJob, mode: str, maya_folder: Path, task_path: Path, run: tuple | None = None) -> tuple:
@@ -110,15 +133,19 @@ def command(job: BatchJob, mode: str, maya_folder: Path, task_path: Path, run: t
         width, height = job.resolution()
         first, last = run or (missing_runs(job) or [(job.frame_list()[0],) * 2])[0]
         arguments = ["-r", "hw2" if renderer == HW2 else "redshift", "-cam", job.camera_name(),
-                     "-rd", str(job.output_folder()), "-im", job.prefix(), "-of", "png", "-pad", "4", "-fnc", "3",
-                     "-s", str(first), "-e", str(last), "-x", str(width), "-y", str(height), str(Path(job.scene))]
+                     "-rd", str(job.output_folder()), "-im", job.prefix(), "-of", job.image_format,
+                     "-pad", "4", "-fnc", "3",
+                     "-s", str(first), "-e", str(last), "-x", str(width), "-y", str(height)]
+        arguments += _layer_arguments(job) + [str(Path(job.scene))]
         # Not -ehl ("high quality lighting"): in Maya 2024 it breaks the render script
         # (removeRenderLayerAdjustmentAndUnlock.mel: "No object matches name: .enableHighQualityLighting").
         return str(bin_folder / "Render.exe"), arguments, {}
     if job.mode == MODE_WINDOW:
         runner = str(RUNNER).replace("\\", "/")
         script = f'python("exec(open(r\\"{runner}\\").read())")'
-        return str(bin_folder / "maya.exe"), ["-command", script], {"MSL_BATCH_TASK": str(task_path)}
+        # -log: a windowed Maya's output goes to its Script Editor, not to a pipe — this keeps a copy
+        log = Path(task_path).with_name("maya_window.log")
+        return str(bin_folder / "maya.exe"), ["-log", str(log), "-command", script], {"MSL_BATCH_TASK": str(task_path)}
     return str(bin_folder / "mayapy.exe"), [str(RUNNER), str(task_path)], {}
 
 
