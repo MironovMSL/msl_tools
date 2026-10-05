@@ -30,6 +30,7 @@ class FileSystemManager:
 
     icons    = assets / 'icons'
     themes   = assets / 'themes'
+    sounds   = assets / 'sounds'
 
     PACKAGE_ROOT = f"{ROOT_DIR.name}.{msl.name}" # msl_tools.msl
 

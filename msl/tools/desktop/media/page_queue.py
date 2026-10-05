@@ -5,6 +5,7 @@ import time
 
 import msl_tools.msl.ui.qt_bindings as qt
 from msl_tools.msl.core.environment import system_actions
+from msl_tools.msl.core.resources import Resources
 from msl_tools.msl.tools.desktop.media.ffmpeg_bar import link_button
 from msl_tools.msl.tools.desktop.media.job_queue import DONE, FAILED
 from msl_tools.msl.ui.theme.qss import make_rounded_popup, repolish
@@ -15,7 +16,9 @@ class _QueueMixin:
     """MediaPage's pause button, its "when the jobs are done" menu and the shutdown notice
     (methods of MediaPage; `_build_queue_controls()` makes the widgets, the page lays them out).
 
-    "Play a sound" is remembered (`settings.when_done`). "Shut down" is NOT: it is armed for the
+    "Play a sound" is remembered (`settings.when_done`), and which one (`settings.done_sound`, a
+    name of system_actions.done_sounds(): ours — Bells, Marimba, Soft — or Windows' own; picking
+    one plays it). "Shut down" is NOT: it is armed for the
     jobs in the queue now and disarms itself once it fired — a forgotten setting must never turn
     a computer off days later. It asks Windows for a shutdown in SHUTDOWN_GRACE_S; the page then
     shows a bar with the countdown and "Cancel the shutdown".
@@ -54,6 +57,25 @@ class _QueueMixin:
         for signal in (self._queue.added, self._queue.idle):
             signal.connect(lambda *_arguments: self._refresh_queue_controls())
         self._refresh_queue_controls()
+
+    DEFAULT_SOUND = "Bells"
+
+    def _done_sounds(self) -> dict:
+        return system_actions.done_sounds(Resources().fsManager.sounds)
+
+    def _done_sound(self) -> str:
+        """The name of the sound picked for the end of the jobs."""
+        sounds = self._done_sounds()
+        name = str(self._settings.get("done_sound", "") or "")
+        return name if name in sounds else (self.DEFAULT_SOUND if self.DEFAULT_SOUND in sounds else "")
+
+    def _play_done_sound(self) -> None:
+        system_actions.chime(self._done_sounds().get(self._done_sound(), ""))
+
+    def _pick_sound(self, name: str) -> None:
+        self._settings["done_sound"] = name
+        self._set_when_done("sound")
+        self._play_done_sound()  # what it will sound like
 
     def _when_done(self) -> str:
         if self._shutdown_armed:
@@ -98,6 +120,19 @@ class _QueueMixin:
             action.setCheckable(True)
             action.setChecked(key == current)
             action.triggered.connect(lambda _checked=False, key=key: self._set_when_done(key))
+            if key == "sound":
+                sounds = self._done_sounds()
+                if sounds:
+                    picked = self._done_sound()
+                    action.setText(f"Play a sound: {picked}" if picked else "Play a sound")
+                    which = make_rounded_popup(qt.QtWidgets.QMenu("Which sound", menu))
+                    menu.addMenu(which)
+                    self._sound_menu = which  # for tests; it goes with its menu
+                    for name in sounds:
+                        item = which.addAction(name)
+                        item.setCheckable(True)
+                        item.setChecked(name == picked and key == current)
+                        item.triggered.connect(lambda _checked=False, name=name: self._pick_sound(name))
             if key == "shutdown":
                 action.setToolTip(f"Once — for the jobs in the queue now. Windows gets "
                                   f"{self.SHUTDOWN_GRACE_S // 60} minutes' notice, which you can call off.")
@@ -120,7 +155,7 @@ class _QueueMixin:
             return  # everything was cancelled: nobody waited for this
         when = self._when_done()
         if when == "sound":
-            system_actions.chime()
+            self._play_done_sound()
         elif when == "shutdown":
             self._shutdown_armed = False  # once
             failed = sum(1 for item in ran if item.state == FAILED)

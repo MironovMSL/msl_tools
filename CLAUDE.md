@@ -1510,7 +1510,11 @@ frames · For editing · Adjust · Join (2+ videos) · Compare (exactly 2).
     counted) and starts nothing; a pause doesn't outlive its batch (idle
     unpauses). "When the jobs are done" (`page_queue.py` _QueueMixin, the
     bell in the jobs header; "paused · then shut down" beside it): Nothing
-    / Play a sound (`system_actions.chime`, remembered) / Shut the computer
+    / Play a sound (remembered; "Which sound" submenu = `system_actions.done_sounds()`: OUR
+    Bells / Marimba / Soft — `assets/sounds/*.wav`, synthesized with the stdlib (struck notes:
+    sine partials with exponential decay, a rising arpeggio) — then Windows' own tada / chimes /
+    chord / notify / alarm where they exist; picking one plays it; `settings.done_sound`,
+    `fsManager.sounds`) / Shut the computer
     down — NOT remembered, armed for the queue of now, disarmed once fired:
     `shutdown /s /t 120` and a warning bar with the countdown + "Cancel the
     shutdown" (`shutdown /a`). Only if something ran (all cancelled = no).
