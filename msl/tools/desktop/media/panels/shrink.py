@@ -7,7 +7,7 @@ import msl_tools.msl.ui.qt_bindings as qt
 from msl_tools.msl.core.media import Job, MediaError, gpu_encoding_works, shrink
 from msl_tools.msl.core.media.run import clean_up, quality_crops
 from msl_tools.msl.tools.desktop.media.source import MediaSource
-from msl_tools.msl.ui.workers.result_worker import ResultWorker
+from msl_tools.msl.ui.workers.result_worker import run_in_background
 from msl_tools.msl.tools.desktop.media.panels.base import NL, OptionPanel, _videos
 
 
@@ -135,12 +135,7 @@ class ShrinkPanel(OptionPanel):
                 for label in (self._before, self._after):
                     label.setText("—")
 
-        worker = ResultWorker(work, parent=self)
-        self._workers.append(worker)
-        worker.done.connect(done)
-        worker.failed.connect(failed)
-        worker.finished.connect(lambda: self._workers.remove(worker) if worker in self._workers else None)
-        worker.start()
+        run_in_background(work, done, failed, keep=self._workers, parent=self)
 
     def set_sources(self, sources: list) -> None:
         self._source = sources[0]
@@ -154,11 +149,7 @@ class ShrinkPanel(OptionPanel):
                 self._gpu_works = bool(works)
                 self._sync()
 
-            worker = ResultWorker(lambda: gpu_encoding_works(tools), parent=self)
-            self._workers.append(worker)
-            worker.done.connect(done)
-            worker.finished.connect(lambda: self._workers.remove(worker) if worker in self._workers else None)
-            worker.start()
+            run_in_background(lambda: gpu_encoding_works(tools), done, keep=self._workers, parent=self)
 
     def chain_settings(self) -> dict:
         """What "Several at once" takes from here: the frame size, the quality, the codec."""

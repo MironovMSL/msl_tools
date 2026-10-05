@@ -14,7 +14,7 @@ from msl_tools.msl.core.media import FfmpegLocator, MediaError, find_sequences, 
 from msl_tools.msl.core.media.recipes import gpu_encoding_works
 from msl_tools.msl.tools.maya.playblast import capture, naming
 from msl_tools.msl.tools.maya.playblast.ending import RunEnding
-from msl_tools.msl.ui.workers.result_worker import ResultWorker
+from msl_tools.msl.ui.workers.result_worker import run_in_background
 from msl_tools.msl.tools.maya.playblast.panel_tables import (BACKGROUNDS, CODECS, FORMAT_MP4, OVERSCAN, QUALITY,
                                                              VIDEO_FORMATS)
 from msl_tools.msl.tools.maya.playblast.preview_dialog import PreviewDialog
@@ -29,11 +29,8 @@ class _RunMixin:
     def _find_ffmpeg(self) -> None:
         """Looks for ffmpeg on a worker (its first start from inside Maya takes a few seconds)."""
         configured = self._configured_ffmpeg()
-        worker = ResultWorker(lambda: FfmpegLocator(configured=configured).find())
-        worker.done.connect(self._on_ffmpeg)
-        worker.failed.connect(self._on_ffmpeg_failed)
-        self._keep(worker)
-        worker.start()
+        run_in_background(lambda: FfmpegLocator(configured=configured).find(), self._on_ffmpeg,
+                          self._on_ffmpeg_failed, keep=type(self)._workers)
 
     @staticmethod
     def _configured_ffmpeg() -> str:
@@ -55,10 +52,8 @@ class _RunMixin:
             qt.QtCore.QTimer.singleShot(0, self._on_start)
         self._refresh_recent()  # pictures need ffmpeg
         if tools is not None and not getattr(type(self), "_gpu_known", False):
-            worker = ResultWorker(functools.partial(gpu_encoding_works, tools))
-            worker.done.connect(self._on_gpu_known)
-            self._keep(worker)
-            worker.start()
+            run_in_background(functools.partial(gpu_encoding_works, tools), self._on_gpu_known,
+                              keep=type(self)._workers)
         elif getattr(type(self), "_gpu_works", False):
             self._gpu.show()
         if tools is not None:
@@ -68,12 +63,6 @@ class _RunMixin:
             self._ffmpeg_note.setText("no ffmpeg")
             self._ffmpeg_note.setToolTip("ffmpeg wasn’t found: open Media in the MSL Tools hub to download it.\n"
                                          "Until then a playblast can be saved as frames.")
-
-    @classmethod
-    def _keep(cls, worker) -> None:
-        workers = cls._workers
-        workers.add(worker)
-        worker.finished.connect(lambda: workers.discard(worker))
 
     # ------------------------------------------------------------------ the playblast
 
@@ -233,11 +222,8 @@ class _RunMixin:
             self._encoding.add(run["id"])
             # Nothing of the panel goes along: it may be closed before the video is made.
             # _encode never raises, so `done` always comes — to the ending, in the main thread.
-            worker = ResultWorker(functools.partial(type(self)._encode, self._tools, shot, run, sound,
-                                                    RunEnding.report_progress))
-            worker.done.connect(ending.take)
-            self._keep(worker)
-            worker.start()
+            run_in_background(functools.partial(type(self)._encode, self._tools, shot, run, sound,
+                                                RunEnding.report_progress), ending.take, keep=type(self)._workers)
         if self._queue:
             if not run["video"]:
                 RunEnding.instance().take(run)
@@ -378,6 +364,4 @@ class _RunMixin:
                 except OSError:
                     continue
 
-        worker = ResultWorker(sweep)
-        cls._keep(worker)
-        worker.start()
+        run_in_background(sweep, keep=cls._workers)

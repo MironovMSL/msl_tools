@@ -6,7 +6,7 @@ from msl_tools.msl.core.media import FfmpegInstaller, FfmpegLocator, FfmpegTools
 from msl_tools.msl.ui.process_launcher.process_launcher import ProcessLauncher
 from msl_tools.msl.ui.theme.qss import make_rounded_popup, repolish
 from msl_tools.msl.ui.widgets.atoms.progress.base_progress_bar import BaseProgressBar
-from msl_tools.msl.ui.workers.result_worker import ResultWorker
+from msl_tools.msl.ui.workers.result_worker import run_in_background
 
 
 def link_button(text: str, tooltip: str = "") -> qt.QtWidgets.QPushButton:
@@ -218,9 +218,4 @@ class FfmpegBar(qt.QtWidgets.QFrame):
         return self._state
 
     def _run(self, target, on_done, on_failed=None) -> None:
-        worker = ResultWorker(target, parent=self)
-        self._workers.append(worker)
-        worker.done.connect(on_done)
-        worker.failed.connect(on_failed or (lambda error: on_done(None)))
-        worker.finished.connect(lambda: self._workers.remove(worker) if worker in self._workers else None)
-        worker.start()
+        run_in_background(target, on_done, on_failed or (lambda error: on_done(None)), keep=self._workers, parent=self)

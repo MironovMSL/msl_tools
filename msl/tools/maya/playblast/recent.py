@@ -15,7 +15,7 @@ from msl_tools.msl.ui.ui_resources import UiResources
 from msl_tools.msl.ui.widgets.atoms.buttons.glyph_button import GlyphButton
 from msl_tools.msl.ui.widgets.atoms.icons.tinted_icon import TintedIcon
 from msl_tools.msl.ui.widgets.atoms.labels.elided_label import ElidedLabel
-from msl_tools.msl.ui.workers.result_worker import ResultWorker
+from msl_tools.msl.ui.workers.result_worker import run_in_background
 
 
 # What a tile's menu can ask the panel for (RecentCard.action_requested)
@@ -47,6 +47,7 @@ class _Picture(qt.QtWidgets.QWidget):
 
     groundColor = color_property("_ground_color", "update")
     markColor = color_property("_mark_color", "update")
+    hoverShadeColor = color_property("_hover_shade_color", "update")  # laid over the picture under the pointer
     # The right-click menu's icons: QIcons, which QSS can't tint — tinted with this when it opens.
     menuIconColor = color_property("_menu_icon_color", None)
     MENU_ICON_SIZE = 16
@@ -57,6 +58,8 @@ class _Picture(qt.QtWidgets.QWidget):
         fallback = ThemeRegistry.fallback()  # until QSS applies
         self._ground_color = qt.QtGui.QColor(fallback.border)
         self._mark_color = qt.QtGui.QColor(fallback.text_primary)
+        self._hover_shade_color = qt.QtGui.QColor(fallback.chrome_background)
+        self._hover_shade_color.setAlpha(140)
         self._menu_icon_color = qt.QtGui.QColor(fallback.text_secondary)
         self._path = path
         self._pixmap = qt.QtGui.QPixmap()
@@ -99,7 +102,7 @@ class _Picture(qt.QtWidgets.QWidget):
             painter.drawPixmap(int((self.width() - scaled.width()) / 2), int((self.height() - scaled.height()) / 2),
                                scaled)
         if self.underMouse():
-            painter.fillRect(rect, qt.QtGui.QColor(0, 0, 0, 90))
+            painter.fillRect(rect, self._hover_shade_color)
             side = min(rect.width(), rect.height()) * 0.3
             centre = rect.center()
             mark = qt.QtGui.QPolygonF([qt.QtCore.QPointF(centre.x() - side * 0.4, centre.y() - side * 0.5),
@@ -290,11 +293,7 @@ class RecentCard(qt.QtWidgets.QFrame):
 
     def _make_picture(self, tools, path: str) -> None:
         emit = self._emit_picture
-        worker = ResultWorker(lambda: emit(path, self._thumbnail(tools, Path(path))))
-        workers = RecentCard._workers
-        workers.add(worker)
-        worker.finished.connect(lambda: workers.discard(worker))
-        worker.start()
+        run_in_background(lambda: emit(path, self._thumbnail(tools, Path(path))), keep=RecentCard._workers)
 
     def _emit_picture(self, path: str, file: str) -> None:
         try:

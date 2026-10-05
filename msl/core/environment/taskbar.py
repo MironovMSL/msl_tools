@@ -70,7 +70,7 @@ class TaskbarProgress:
             def guid(text: str) -> Guid:
                 return Guid.from_buffer_copy(uuid.UUID(text).bytes_le)
 
-            ole = ctypes.windll.ole32
+            ole = ctypes.WinDLL("ole32")  # own handle (argtypes are set below)
             ole.CoInitialize(None)  # a GUI thread has done this already; a second call is harmless
             pointer = ctypes.c_void_p()
             ole.CoCreateInstance.argtypes = [ctypes.c_void_p, ctypes.c_void_p, wintypes.DWORD, ctypes.c_void_p,

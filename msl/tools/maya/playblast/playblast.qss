@@ -96,6 +96,7 @@ PlayblastPanel MaskPreview {
 PlayblastPanel _Picture {
     qproperty-groundColor:   alpha(var(--text-primary), 8%);
     qproperty-markColor:     var(--on-accent);
+    qproperty-hoverShadeColor: alpha(var(--chrome-background), 55%);   /* under the pointer, beneath the play mark */
     qproperty-menuIconColor: var(--text-secondary);   /* icons of its right-click menu */
 }
 PlayblastPanel QPushButton#playblastLink {

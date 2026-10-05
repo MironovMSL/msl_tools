@@ -33,7 +33,7 @@ import msl_tools.msl.ui.qt_bindings as qt
 from msl_tools.msl.core.media import compare, probe, run_job, shrink
 from msl_tools.msl.core.resources import Resources
 from msl_tools.msl.tools.maya.playblast.recent import open_result, size_text
-from msl_tools.msl.ui.workers.result_worker import ResultWorker
+from msl_tools.msl.ui.workers.result_worker import run_in_background
 
 TOOL_NAME = "playblast"
 HISTORY_KEPT = 40   # results remembered, all scenes together
@@ -165,12 +165,8 @@ class RunEnding(qt.QtCore.QObject):
                        functools.partial(_compare, tools, Path(previous), Path(current)))
 
     def _side_job(self, info: dict, work) -> None:
-        workers = RunEnding._workers
-        worker = ResultWorker(functools.partial(_side, info, work))
-        worker.done.connect(self._on_side_done)  # a bound method of this main-thread object: queued here
-        workers.add(worker)
-        worker.finished.connect(lambda: workers.discard(worker))
-        worker.start()
+        # on_done is a bound method of this main-thread object: queued here
+        run_in_background(functools.partial(_side, info, work), self._on_side_done, keep=RunEnding._workers)
 
     def _on_side_done(self, result: dict) -> None:
         if result.get("state") == "done":

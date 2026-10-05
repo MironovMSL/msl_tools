@@ -9,7 +9,7 @@ from msl_tools.msl.core.media.recipes import IMAGE_FORMATS
 from msl_tools.msl.core.media.thumbnail import frames_at
 from msl_tools.msl.tools.desktop.media.source import MediaSource, format_time, parse_time
 from msl_tools.msl.ui.widgets.atoms.comboboxes.base_combo_box import BaseComboBox
-from msl_tools.msl.ui.workers.result_worker import ResultWorker
+from msl_tools.msl.ui.workers.result_worker import run_in_background
 from msl_tools.msl.tools.desktop.media.panels.base import NL, OptionPanel, _remove_files, _videos
 
 
@@ -152,11 +152,8 @@ class FramesPanel(OptionPanel):
             self._preview.setPixmap(scaled)
 
         cache = Path(tempfile.gettempdir()) / "msl_tools" / "media" / "trim"
-        worker = ResultWorker(lambda: frames_at(tools, source.info, [at], cache, f"one_{id(self)}_{token}", 256), parent=self)
-        self._workers.append(worker)
-        worker.done.connect(done)
-        worker.finished.connect(lambda: self._workers.remove(worker) if worker in self._workers else None)
-        worker.start()
+        run_in_background(lambda: frames_at(tools, source.info, [at], cache, f"one_{id(self)}_{token}", 256), done,
+                          keep=self._workers, parent=self)
 
     def job(self, source: MediaSource, output: Path) -> Job:
         take = self._take.current()

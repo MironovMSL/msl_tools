@@ -19,10 +19,30 @@ def _post_system_command(window: qt.QtWidgets.QWidget, command: int) -> bool:
     startSystemMove / startSystemResize)."""
     if sys.platform != "win32":
         return False
-    user32 = ctypes.windll.user32
-    user32.PostMessageW.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_size_t, ctypes.c_ssize_t]
-    user32.ReleaseCapture()
-    return bool(user32.PostMessageW(int(window.winId()), _WM_SYSCOMMAND, command, 0))
+    try:
+        user32 = _user32()
+        user32.ReleaseCapture()
+        return bool(user32.PostMessageW(int(window.winId()), _WM_SYSCOMMAND, command, 0))
+    except (OSError, AttributeError, RuntimeError):
+        return False
+
+
+_USER32 = None
+
+
+def _user32():
+    """OUR OWN handle on user32 with the types set — never `ctypes.windll.user32`: that object is
+    shared by everything in the process (Maya, other tools), and setting argtypes on it would change
+    how THEIR calls are passed."""
+    global _USER32
+    if _USER32 is None:
+        user32 = ctypes.WinDLL("user32", use_last_error=True)
+        user32.PostMessageW.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_size_t, ctypes.c_ssize_t]
+        user32.PostMessageW.restype = ctypes.c_int
+        user32.ReleaseCapture.argtypes = []
+        user32.ReleaseCapture.restype = ctypes.c_int
+        _USER32 = user32
+    return _USER32
 
 
 def _qt_system_move(window: qt.QtWidgets.QWidget) -> bool:
@@ -53,7 +73,9 @@ def _round_corners(window: qt.QtWidgets.QWidget, border: str = "") -> bool:
     if sys.platform != "win32":
         return False
     try:
-        dwm = ctypes.windll.dwmapi
+        dwm = ctypes.WinDLL("dwmapi")  # our own handle, not the process-wide ctypes.windll one
+        dwm.DwmSetWindowAttribute.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_void_p, ctypes.c_uint]
+        dwm.DwmSetWindowAttribute.restype = ctypes.c_long
         handle = ctypes.c_void_p(int(window.winId()))
         rounded = ctypes.c_int(2)  # DWMWCP_ROUND
         done = dwm.DwmSetWindowAttribute(handle, 33, ctypes.byref(rounded), ctypes.sizeof(rounded)) == 0

@@ -16,7 +16,7 @@ def is_process_running(pid: int) -> bool:
     if sys.platform == "win32":
         import ctypes
         synchronize, wait_timeout = 0x00100000, 0x00000102
-        kernel = ctypes.windll.kernel32
+        kernel = ctypes.WinDLL("kernel32")
         handle = kernel.OpenProcess(synchronize, False, int(pid))
         if not handle:
             return False
@@ -41,7 +41,7 @@ def terminate_process(pid: int) -> bool:
     if sys.platform == "win32":
         import ctypes
         from ctypes import wintypes
-        kernel = ctypes.windll.kernel32
+        kernel = ctypes.WinDLL("kernel32")
         kernel.OpenProcess.restype = wintypes.HANDLE
         kernel.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
         kernel.TerminateProcess.argtypes = (wintypes.HANDLE, wintypes.UINT)
@@ -76,7 +76,7 @@ def process_memory(pid: int) -> int | None:
                     ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t), ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
                     ("PagefileUsage", ctypes.c_size_t), ("PeakPagefileUsage", ctypes.c_size_t)]
 
-    kernel = ctypes.windll.kernel32
+    kernel = ctypes.WinDLL("kernel32")
     kernel.OpenProcess.restype = wintypes.HANDLE
     kernel.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
     kernel.CloseHandle.argtypes = (wintypes.HANDLE,)
@@ -86,7 +86,7 @@ def process_memory(pid: int) -> int | None:
     try:
         counters = Counters()
         counters.cb = ctypes.sizeof(Counters)
-        psapi = ctypes.windll.psapi
+        psapi = ctypes.WinDLL("psapi")
         psapi.GetProcessMemoryInfo.argtypes = (wintypes.HANDLE, ctypes.POINTER(Counters), wintypes.DWORD)
         if not psapi.GetProcessMemoryInfo(handle, ctypes.byref(counters), counters.cb):
             return None

@@ -24,7 +24,7 @@ from msl_tools.msl.ui.widgets.compositions.action_strip import ActionStrip
 from msl_tools.msl.ui.widgets.compositions.chip_bar import ChipBar
 from msl_tools.msl.ui.widgets.compositions.fact_tiles import FactTiles
 from msl_tools.msl.ui.widgets.windows.text_dialog import TextDialog
-from msl_tools.msl.ui.workers.result_worker import ResultWorker
+from msl_tools.msl.ui.workers.result_worker import run_in_background
 from msl_tools.msl.tools.desktop.media.start_button import StartButton
 from msl_tools.msl.tools.desktop.media.page_output import _OutputMixin
 from msl_tools.msl.tools.desktop.media.page_jobs import _JobsMixin
@@ -439,13 +439,7 @@ class MediaPage(_OutputMixin, _JobsMixin, _DropsMixin, qt.QtWidgets.QWidget):
         self._run(work, done, failed)
 
     def _run(self, target, on_done, on_failed=None) -> None:
-        worker = ResultWorker(target, parent=self)
-        self._workers.append(worker)
-        worker.done.connect(on_done)
-        if on_failed is not None:
-            worker.failed.connect(on_failed)
-        worker.finished.connect(lambda: self._workers.remove(worker) if worker in self._workers else None)
-        worker.start()
+        run_in_background(target, on_done, on_failed, keep=self._workers, parent=self)
 
     def _on_add_sources(self, paths: list) -> None:
         """More files to work on together with what is loaded."""

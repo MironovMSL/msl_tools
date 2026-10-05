@@ -10,7 +10,7 @@ from msl_tools.msl.tools.desktop.media.ffmpeg_bar import link_button
 from msl_tools.msl.tools.desktop.media.source import MediaSource, format_time, parse_time
 from msl_tools.msl.ui.widgets.compositions.chip_bar import ChipBar
 from msl_tools.msl.ui.widgets.compositions.range_strip import RangeStrip
-from msl_tools.msl.ui.workers.result_worker import ResultWorker
+from msl_tools.msl.ui.workers.result_worker import run_in_background
 from msl_tools.msl.tools.desktop.media.panels.base import NL, OptionPanel, _remove_files, _videos
 
 
@@ -218,11 +218,7 @@ class TrimPanel(OptionPanel):
         return Path(tempfile.gettempdir()) / "msl_tools" / "media" / "trim"
 
     def _run(self, target, on_done) -> None:
-        worker = ResultWorker(target, parent=self)
-        self._workers.append(worker)
-        worker.done.connect(on_done)
-        worker.finished.connect(lambda: self._workers.remove(worker) if worker in self._workers else None)
-        worker.start()
+        run_in_background(target, on_done, keep=self._workers, parent=self)
 
     def _load_strip(self) -> None:
         tools, source = self._tools(), self._source

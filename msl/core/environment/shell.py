@@ -18,7 +18,7 @@ def select_in_file_manager(path: str | Path) -> bool:
     try:
         import ctypes
 
-        shell, ole = ctypes.windll.shell32, ctypes.windll.ole32
+        shell, ole = ctypes.WinDLL("shell32"), ctypes.WinDLL("ole32")  # own handles: argtypes set on ctypes.windll would change every caller's calls
         ole.CoInitialize(None)  # a GUI thread has done this already; a second call is harmless
         shell.SHParseDisplayName.argtypes = [ctypes.c_wchar_p, ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p),
                                              ctypes.c_ulong, ctypes.POINTER(ctypes.c_ulong)]

@@ -94,8 +94,11 @@ class VisibilityDialog(FramelessDialog):
     @classmethod
     def ask(cls, parent, shown, preset: str = "", removable: bool = False):
         dialog = cls(shown, preset, removable, parent=parent)
-        dialog.exec()
-        return dialog._result
+        try:
+            dialog.exec()
+            return dialog._result
+        finally:
+            dialog.deleteLater()  # a child of the Playblast window: it would live as long as that one
 
     def keys(self) -> list[str]:
         """The kinds that are ticked, in capture.VISIBILITY's order."""

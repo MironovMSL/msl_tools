@@ -51,3 +51,31 @@ class ResultWorker(qt.QtCore.QThread):
             self.failed.emit(error)
         else:
             self.done.emit(result)
+
+
+def run_in_background(target, on_done=None, on_failed=None, *, keep, parent=None) -> ResultWorker:
+    """Starts `target` on a ResultWorker and returns it — the one way the tools start one.
+
+    keep: the owner's list or set the worker is held in while it runs (removed when it is over).
+        A parentless worker must be held somewhere: a QThread destroyed while running takes the
+        process down. The Playblast panel keeps a CLASS-level set (a panel can be deleted any
+        moment inside Maya); hub pages keep a list of their own and pass `parent=`.
+    on_done(result) / on_failed(error): connected before the start; a parented worker deletes
+        itself after them. Prefer bound methods for parentless workers: a lambda holding a widget
+        keeps calling into it after it is gone.
+    """
+    worker = ResultWorker(target, parent=parent)
+    add = getattr(keep, "add", None) or keep.append
+    add(worker)
+
+    def over() -> None:
+        if worker in keep:
+            keep.remove(worker)
+
+    if on_done is not None:
+        worker.done.connect(on_done)
+    if on_failed is not None:
+        worker.failed.connect(on_failed)
+    worker.finished.connect(over)
+    worker.start()
+    return worker

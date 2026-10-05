@@ -9,7 +9,7 @@ from msl_tools.msl.core.media.thumbnail import frames_at
 from msl_tools.msl.tools.desktop.media.source import MediaSource
 from msl_tools.msl.ui.widgets.atoms.comboboxes.base_combo_box import BaseComboBox
 from msl_tools.msl.ui.widgets.compositions.crop_picker import CropPicker
-from msl_tools.msl.ui.workers.result_worker import ResultWorker
+from msl_tools.msl.ui.workers.result_worker import run_in_background
 from msl_tools.msl.tools.desktop.media.panels.base import OptionPanel, _videos
 
 
@@ -103,12 +103,8 @@ class AdjustPanel(OptionPanel):
                 self._crop.set_picture(qt.QtGui.QPixmap(str(paths[0])))
 
         cache = Path(tempfile.gettempdir()) / "msl_tools" / "media" / "trim"
-        worker = ResultWorker(lambda: frames_at(tools, source.info, [source.info.duration / 2], cache,
-                                                f"crop_{id(self)}", 640), parent=self)
-        self._workers.append(worker)
-        worker.done.connect(done)
-        worker.finished.connect(lambda: self._workers.remove(worker) if worker in self._workers else None)
-        worker.start()
+        run_in_background(lambda: frames_at(tools, source.info, [source.info.duration / 2], cache,
+                                            f"crop_{id(self)}", 640), done, keep=self._workers, parent=self)
 
     def job(self, source: MediaSource, output: Path) -> Job:
         return adjust(source.info, output, rotate=self.TURNS[self._turn.current()],

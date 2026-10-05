@@ -14,7 +14,7 @@ from msl_tools.msl.ui.theme.qss import make_rounded_popup, repolish
 from msl_tools.msl.ui.ui_resources import UiResources
 from msl_tools.msl.ui.widgets.atoms.buttons.glyph_button import GlyphButton
 from msl_tools.msl.ui.widgets.atoms.icons.tinted_icon import TintedIcon
-from msl_tools.msl.ui.workers.result_worker import ResultWorker
+from msl_tools.msl.ui.workers.result_worker import ResultWorker, run_in_background
 from msl_tools.msl.core.theme import ThemeRegistry
 from msl_tools.msl.ui.theme.qss import color_property
 from msl_tools.msl.ui.widgets.atoms.surfaces import StableScrollArea
@@ -101,6 +101,7 @@ class JobQueue(qt.QtCore.QObject):
         self._last_batch: list[QueueItem] = []
         self._thumbnails_owed: list[QueueItem] = []
         self._thumbnail_worker: ResultWorker | None = None
+        self._thumbnail_workers: list = []
         self._runner = FfmpegRunner(self)
         self._runner.progressed.connect(self._on_progress)
         self._runner.finished.connect(self._on_finished)
@@ -156,8 +157,6 @@ class JobQueue(qt.QtCore.QObject):
             self._next_thumbnail()
             return
         output = item.job.output
-        worker = ResultWorker(lambda: result_thumbnail(tools, output), parent=self)
-        self._thumbnail_worker = worker
 
         def done(path) -> None:
             if path is not None and item in self._items:
@@ -168,9 +167,9 @@ class JobQueue(qt.QtCore.QObject):
             self._thumbnail_worker = None
             self._next_thumbnail()
 
-        worker.done.connect(done)
-        worker.finished.connect(over)
-        worker.start()
+        self._thumbnail_worker = run_in_background(lambda: result_thumbnail(tools, output), done,
+                                                   keep=self._thumbnail_workers, parent=self)
+        self._thumbnail_worker.finished.connect(over)
 
     def busy(self) -> bool:
         """Jobs wait or run."""
