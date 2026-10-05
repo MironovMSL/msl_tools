@@ -25,8 +25,8 @@ from msl_tools.msl.ui.widgets.atoms.surfaces.stable_scroll_area import StableScr
 from msl_tools.msl.ui.widgets.compositions.chip_bar import ChipBar
 from msl_tools.msl.ui.widgets.compositions.fact_tiles import FactTiles
 from msl_tools.msl.tools.maya.playblast.panel_tables import (
-    ACTIVE_VIEW, BACKGROUNDS, CODECS, FORMAT_FRAMES, FORMAT_MOV, FORMAT_MP4, MASK_BARS, MASK_DIGITS, MASK_LETTERBOX,
-    MASK_OPACITY, MASK_PLACES, MASK_TEXT, OVERSCAN, QUALITY, RANGE_CUSTOM, SHOW_VIEWPORT, SIZE_CUSTOM, SIZE_RENDER,
+    ACTIVE_VIEW, BACKGROUND_COLOR, BACKGROUNDS, CODECS, DEFAULT_BACKGROUND_COLOR, FORMAT_FRAMES, FORMAT_MOV, FORMAT_MP4, MASK_BARS, MASK_DIGITS, MASK_LETTERBOX,
+    MASK_OPACITY, MASK_PLACES, MASK_TEXT, QUALITY, RANGE_CUSTOM, SHOW_VIEWPORT, SIZE_CUSTOM, SIZE_RENDER,
     VIDEO_FORMATS, _plain)
 from msl_tools.msl.tools.maya.playblast.panel_cards import _Card, _Toggle
 from msl_tools.msl.tools.maya.playblast.panel_mask import _MaskMixin
@@ -59,7 +59,8 @@ class PlayblastPanel(_ShareMixin, _MaskMixin, _PresetsMixin, _RunMixin, qt.QtWid
     DEFAULTS = {"camera": "", "size": "HD 1080", "width": 1920, "height": 1080, "range": capture.RANGE_PLAYBACK,
                 "start": 1, "end": 24, "folder": naming.DEFAULT_FOLDER, "name": naming.DEFAULT_NAME,
                 "format": FORMAT_MP4, "quality": "High", "sound": True, "overwrite": False, "open": True,
-                "copy": False, "light": False, "smooth": False, "background": "Viewport", "overscan": "Off",
+                "copy": False, "light": False, "smooth": False, "background": "Viewport",
+                "background_color": DEFAULT_BACKGROUND_COLOR,
                 "codec": "H.264", "gpu": False, "occlusion": False, "cameras": [],
                 "folded": {"picture": False, "result": False},
                 "ornaments": False, "show": SHOW_VIEWPORT, "show_custom": list(capture.VISIBILITY_PRESETS["Geometry"]),
@@ -147,13 +148,13 @@ class PlayblastPanel(_ShareMixin, _MaskMixin, _PresetsMixin, _RunMixin, qt.QtWid
         self._background = SegmentedControl(list(BACKGROUNDS), "Viewport")
         self._background.setToolTip("The background of the playblast.\nViewport: as the viewport shows it "
                                     "(often a gradient).\nGray / Black: one even color — calmer, smaller files.\n"
+                                    "Color: your own — the swatch beside picks it.\n"
                                     "Maya's own background is put back afterwards.")
-        self._overscan = BaseComboBox(list(OVERSCAN), "Off")
-        self._overscan.setToolTip("Room around the frame: the picture shows that much more past its edges,\n"
-                                  "for notes on the composition. The shot mask marks the frame's edge.\n"
-                                  "The camera's own overscan is put back afterwards.")
+        self._background.setProperty("compact", True)  # as wide as its options, not the row
+        self._background_color = ColorSwatchButton(DEFAULT_BACKGROUND_COLOR,
+                                                   "Your own background color — a click picks it")
         self._still = IconPushButton(icons.get_icon("still", sub_folder="actions"),
-                                     "Preview this frame: one picture with the size, background, overscan\n"
+                                     "Preview this frame: one picture with the size, background\n"
                                      "and shot mask chosen here — before the whole playblast")
         self._still.setFixedSize(24, 22)
         self._dash = qt.QtWidgets.QLabel("–")
@@ -300,9 +301,8 @@ class PlayblastPanel(_ShareMixin, _MaskMixin, _PresetsMixin, _RunMixin, qt.QtWid
             (("camera", "Camera"), [self._camera, self._cameras_button]),
             (("eye", "What it shows"), [self._visible, self._visible_edit]),
             (("frame_fit", "Size"), [self._size, self._width, self._times, self._height]),
-            (("film", "Frames"), [self._range, self._start, self._dash, self._end, self._still]),
-            (("background", "Background"), [self._background]),
-            (("overscan", "Room around the frame (overscan)"), [self._overscan]),
+            (("film", "Frames"), [self._range, self._start, self._dash, self._end]),
+            (("background", "Background"), [self._background, self._background_color, self._still]),
         ])
         output = self._result_card = self._card("RESULT", "save", extras=[self._sound, self._ornaments, self._overwrite, self._open,
                                                       self._copy, self._light, self._gpu], rows=[
@@ -381,8 +381,13 @@ class PlayblastPanel(_ShareMixin, _MaskMixin, _PresetsMixin, _RunMixin, qt.QtWid
                 form.addWidget(label, index, 0)
             line = qt.QtWidgets.QHBoxLayout()
             line.setSpacing(4)
+            # the first widget takes the room that is left — unless it is "compact": then the row
+            # keeps every widget at its own size, from the left
+            compact = bool(widgets and widgets[0].property("compact"))
             for position, widget in enumerate(widgets):
-                line.addWidget(widget, 1 if position == 0 else 0)
+                line.addWidget(widget, 1 if position == 0 and not compact else 0)
+            if compact:
+                line.addStretch(1)
             form.addLayout(line, index, 1)
         card.body_layout.addLayout(form)
         return card
@@ -397,7 +402,7 @@ class PlayblastPanel(_ShareMixin, _MaskMixin, _PresetsMixin, _RunMixin, qt.QtWid
             field.textEdited.connect(self._on_changed)
         self._format.current_changed.connect(self._on_changed)
         self._background.current_changed.connect(self._on_changed)
-        self._overscan.currentTextChanged.connect(self._on_changed)
+        self._background_color.color_changed.connect(self._on_background_color)
         self._codec.currentTextChanged.connect(self._on_changed)
         self._gpu.toggled.connect(self._on_changed)
         self._still.clicked.connect(self._on_preview_frame)
@@ -468,7 +473,8 @@ class PlayblastPanel(_ShareMixin, _MaskMixin, _PresetsMixin, _RunMixin, qt.QtWid
         self._format.set_current(get("format") if get("format") in self._format.options() else FORMAT_MP4, animate=False)
         self._background.set_current(get("background") if get("background") in BACKGROUNDS else "Viewport",
                                      animate=False)
-        self._set_combo(self._overscan, get("overscan") if get("overscan") in OVERSCAN else "Off")
+        color = qt.QtGui.QColor(str(get("background_color") or ""))
+        self._background_color.set_color(color.name() if color.isValid() else DEFAULT_BACKGROUND_COLOR)
         self._set_combo(self._codec, get("codec") if get("codec") in CODECS else "H.264")
         self._gpu.set_checked_immediate(bool(get("gpu")))
         self._set_combo(self._quality, get("quality"))
@@ -504,7 +510,7 @@ class PlayblastPanel(_ShareMixin, _MaskMixin, _PresetsMixin, _RunMixin, qt.QtWid
                   "show": self._visible.currentText(),
                   "open": self._open.isChecked(), "copy": self._copy.isChecked(),
                   "light": self._light.isChecked(), "background": self._background.current(),
-                  "overscan": self._overscan.currentText(), "codec": self._codec.currentText(),
+                  "background_color": self._background_color.hex(), "codec": self._codec.currentText(),
                   "gpu": self._gpu.isChecked(),
                   "smooth": self._smooth.isChecked(), "occlusion": self._occlusion.isChecked()}
         if self._size.currentText() == SIZE_CUSTOM:

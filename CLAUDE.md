@@ -1860,10 +1860,15 @@ came from: CLAUDE.local.md). Step 1 of 4 is built (2026-10-03):
 - Picture and format additions (2026-10-05, checked in real Maya 2025):
   BACKGROUND (PICTURE card: Viewport / Gray / Black; `CaptureSettings.background`): the capture
   turns `displayPref displayGradient` off and sets `displayRGBColor background`, both put back
-  (a Maya preference, not the scene). OVERSCAN (Off / 5 / 10 / 20 %; `CaptureSettings.overscan`):
+  (a Maya preference, not the scene); since 2026-10-05 also "Color" = the user's own, picked with the
+  ColorSwatchButton beside it (`settings.background_color`, a pick switches to Color;
+  `_RunMixin._background_rgb`); the row is "compact" (`_card`: a first widget with the property
+  compact=True keeps its size, the row runs from the left) and holds the frame-preview button.
+  OVERSCAN was taken OFF the panel (2026-10-05, the user's call: not used); `CaptureSettings.overscan`
+  stays in capture.py, unused by the panel. What it was (Off / 5 / 10 / 20 %; `CaptureSettings.overscan`):
   the camera shape's `.overscan` for the capture, put back — measured: a playblast DOES take it
   (a cube 114 px -> 88 px at 1.3); the mask plug-in already framed the gate by 1/overscan and now
-  also draws the frame's edge there. PREVIEW FRAME (the `still` button in the Frames row,
+  also draws the frame's edge there. PREVIEW FRAME (the `still` button, now in the Background row,
   _RunMixin._on_preview_frame): one CaptureSession of the current frame, shown in
   `preview_dialog.py` PreviewDialog; a playblast PNG keeps the background in its RGB with alpha
   0 — the video drops the alpha (Gray = 91,91,91) — so the preview reinterprets the image as

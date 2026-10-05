@@ -11,10 +11,11 @@ RANGE_CUSTOM = "Custom"
 FORMAT_MP4, FORMAT_MOV, FORMAT_FRAMES = "MP4", "MOV", "Frames"
 VIDEO_FORMATS = {FORMAT_MP4: ("mp4", ".mp4"), FORMAT_MOV: ("prores", ".mov")}  # shown -> (core/media format, suffix)
 CODECS = {"H.264": "h264", "H.265": "h265"}   # MP4's picture codec (H.265: smaller, slower to play back)
-# The viewport's background for the capture (put back afterwards): None = as the viewport is
-BACKGROUNDS = {"Viewport": None, "Gray": (0.36, 0.36, 0.36), "Black": (0.0, 0.0, 0.0)}
-# Room around the frame in the picture (camera overscan for the capture): composition notes see past the edge
-OVERSCAN = {"Off": 1.0, "5 %": 1.05, "10 %": 1.1, "20 %": 1.2}
+# The viewport's background for the capture (put back afterwards): None = as the viewport is;
+# BACKGROUND_COLOR = the user's own color (settings.background_color, picked with the swatch beside)
+BACKGROUND_COLOR = "Color"
+BACKGROUNDS = {"Viewport": None, "Gray": (0.36, 0.36, 0.36), "Black": (0.0, 0.0, 0.0), BACKGROUND_COLOR: None}
+DEFAULT_BACKGROUND_COLOR = "#3c4654"
 QUALITY = {"Best": "best", "High": "high", "Good": "good", "Small": "small"}  # the word shown -> core/media's
 SHOW_VIEWPORT, SHOW_CUSTOM = "As in the viewport", "Custom"
 MASK_TEXT = {"Small": 0.8, "Medium": 1.0, "Large": 1.3}       # the word shown -> the mask's text scale
@@ -45,7 +46,7 @@ MASK_LOOK_DEFAULTS = {"text": "Medium", "bars": "Solid", "text_color": "#ffffff"
 # A preset of the WHOLE playblast keeps these settings (not the camera, not custom frames: those
 # belong to the scene) and, under "mask", the mask's look and whether it is shown.
 PRESET_KEYS = ("size", "width", "height", "range", "show", "format", "quality", "sound", "ornaments", "smooth",
-               "occlusion", "overwrite", "open", "copy", "folder", "name", "background", "overscan", "codec")
+               "occlusion", "overwrite", "open", "copy", "folder", "name", "background", "background_color", "codec")
 # The ones that come with the tool (name -> what a click sets; a key left out stays as it is).
 PRESETS = {
     "Review": {"size": "HD 1080", "range": "Playback", "show": "As in the viewport", "format": "MP4",

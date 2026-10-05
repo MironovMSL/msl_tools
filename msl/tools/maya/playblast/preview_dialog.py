@@ -1,6 +1,6 @@
 # tools/maya/playblast/preview_dialog.py
 """A preview of one frame of the playblast — what the camera, the size, the
-background, the overscan and the shot mask make of it — before the real
+background and the shot mask make of it — before the real
 playblast is taken."""
 import msl_tools.msl.ui.qt_bindings as qt
 from msl_tools.msl.ui.widgets.windows.frameless_dialog import FramelessDialog

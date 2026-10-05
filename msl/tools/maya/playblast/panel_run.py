@@ -15,7 +15,7 @@ from msl_tools.msl.core.media.recipes import gpu_encoding_works
 from msl_tools.msl.tools.maya.playblast import capture, naming
 from msl_tools.msl.tools.maya.playblast.ending import RunEnding
 from msl_tools.msl.ui.workers.result_worker import run_in_background
-from msl_tools.msl.tools.maya.playblast.panel_tables import (BACKGROUNDS, CODECS, FORMAT_MP4, OVERSCAN, QUALITY,
+from msl_tools.msl.tools.maya.playblast.panel_tables import (BACKGROUND_COLOR, BACKGROUNDS, CODECS, FORMAT_MP4, QUALITY,
                                                              VIDEO_FORMATS)
 from msl_tools.msl.tools.maya.playblast.preview_dialog import PreviewDialog
 
@@ -117,7 +117,7 @@ class _RunMixin:
         settings = capture.CaptureSettings(
             folder=frames_folder, name=frames_name, start=start, end=end, width=width, height=height,
             camera=camera or capture.ACTIVE_VIEW, ornaments=self._ornaments.isChecked(),
-            background=BACKGROUNDS.get(self._background.current()), overscan=OVERSCAN.get(self._overscan.currentText(), 1.0),
+            background=self._background_rgb(),
             visibility=self._shown_kinds(), smooth=self._smooth.isChecked(), occlusion=self._occlusion.isChecked())
         # everything the end of this playblast needs, as the controls say NOW: by the time its video is
         # made the user may have changed them, or started the next one
@@ -243,9 +243,21 @@ class _RunMixin:
         if works:
             self._gpu.show()
 
+    def _background_rgb(self):
+        """The background the capture gets: None (as the viewport is) or (r, g, b), 0..1."""
+        choice = self._background.current()
+        if choice == BACKGROUND_COLOR:
+            return self._background_color.rgb()
+        return BACKGROUNDS.get(choice)
+
+    def _on_background_color(self, _color: str) -> None:
+        """A color was picked on the swatch: that is the background now."""
+        self._background.set_current(BACKGROUND_COLOR)
+        self._on_changed()
+
     def _on_preview_frame(self) -> None:
         """One frame — the current one — as the playblast would draw it, shown in a window: the
-        size, the background, the overscan and the shot mask, without the whole range."""
+        size, the background and the shot mask, without the whole range."""
         if self._busy:
             return
         self.refresh()
@@ -258,8 +270,7 @@ class _RunMixin:
             folder=folder, name="preview", start=frame, end=frame, width=width, height=height,
             camera=camera or capture.ACTIVE_VIEW, ornaments=self._ornaments.isChecked(),
             visibility=self._shown_kinds(), smooth=self._smooth.isChecked(), occlusion=self._occlusion.isChecked(),
-            background=BACKGROUNDS.get(self._background.current()),
-            overscan=OVERSCAN.get(self._overscan.currentText(), 1.0))
+            background=self._background_rgb())
         try:
             session = capture.CaptureSession(settings)
             try:
