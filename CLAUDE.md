@@ -1870,9 +1870,9 @@ came from: CLAUDE.local.md). Step 1 of 4 is built (2026-10-03):
   (a cube 114 px -> 88 px at 1.3); the mask plug-in already framed the gate by 1/overscan and now
   also draws the frame's edge there. PREVIEW FRAME (the `still` button, now in the Background row,
   _RunMixin._on_preview_frame): one CaptureSession of the current frame, shown in
-  `preview_dialog.py` PreviewDialog; a playblast PNG keeps the background in its RGB with alpha
-  0 — the video drops the alpha (Gray = 91,91,91) — so the preview reinterprets the image as
-  RGB32, never paints it over a color. FORMATS: MP4 / MOV (ProRes 422, `VIDEO_FORMATS`) / Frames;
+  `preview_dialog.py` PreviewDialog (a click shows the spot at 2x its pixels, unsmoothed, in the screen's own pixels — fitted and scaled, "Smooth edges" can't be judged; measured in Maya 2025: the offScreen capture DOES get the MSAA, 8 samples = 6 in-between grey levels on a cube's edge, none without); a playblast PNG keeps the background in its RGB with alpha
+  0 — the video drops the alpha (Gray = 91,91,91) — so the preview sets every alpha byte to 255
+  (`_RunMixin._opaque`; merely re-labelling it RGB32 kept the zero bytes, and the translucent window showed Maya through). FORMATS: MP4 / MOV (ProRes 422, `VIDEO_FORMATS`) / Frames;
   MP4's codec H.264 / H.265 (`CODECS`); "Graphics card" toggle (`gpu`), shown only after
   `gpu_encoding_works` said yes once per session (class attributes _gpu_known / _gpu_works);
   `sequence_to_video(codec=, gpu=)`. SHOT MASK: Guides row — `safeAction` (90 %, solid) /
