@@ -194,6 +194,11 @@ class Runner(object):
         cmds.setAttr("defaultResolution.height", height)
         cmds.workspace(fileRule=["images", folder])
         window = bool(task.get("window"))
+        if not window and cmds.objExists("defaultArnoldRenderOptions"):
+            try:  # "Info": Arnold says how far each frame is ("60% done") - the hub shows the last line
+                cmds.setAttr("defaultArnoldRenderOptions.log_verbosity", 2)
+            except Exception:
+                pass
         rendered = skipped = failed = 0
         frames = [int(frame) for frame in task["frames"]]
         for index, frame in enumerate(frames):

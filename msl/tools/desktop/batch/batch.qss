@@ -102,3 +102,71 @@ BatchPage QPushButton#batchLink {
     padding: 2px 6px;
     font-size: 11px;
 }
+
+/* Settings as chips on a row: a click changes one; a broken one is outlined in the error tone. */
+BatchPage QPushButton#batchChip {
+    qproperty-iconColor: var(--text-secondary);
+    color: var(--text-primary);
+    background: alpha(var(--text-primary), 6%);
+    border: 1px solid alpha(var(--text-primary), 10%);
+    border-radius: 10px;
+    padding: 1px 9px;
+    min-height: 18px;
+    font-size: 11px;
+}
+BatchPage QPushButton#batchChip:hover {
+    border-color: var(--accent);
+}
+BatchPage QPushButton#batchChip:disabled {
+    color: var(--text-secondary);
+}
+BatchPage QPushButton#batchChip[tone="error"] {
+    color: var(--error);
+    border-color: alpha(var(--error), 70%);
+    qproperty-iconColor: var(--error);
+}
+BatchPage QPushButton#batchChip[tone="warning"] {
+    color: var(--warning);
+    border-color: alpha(var(--warning), 70%);
+    qproperty-iconColor: var(--warning);
+}
+/* An unfolded row: its check, where the frames go. */
+BatchPage QFrame#batchDetails {
+    background-color: alpha(var(--text-primary), 4%);
+    border-radius: 7px;
+}
+BatchPage QFrame#batchJob {
+    qproperty-barColor:      var(--accent);
+    qproperty-barTrackColor: alpha(var(--text-primary), 10%);
+}
+/* The time left: a clock. */
+BatchPage QLabel#batchClock {
+    color: var(--text-primary);
+    font-family: "Cascadia Mono", "Consolas", monospace;
+    font-size: 20px;
+    font-weight: 600;
+}
+BatchPage QLabel#batchOutput {
+    color: var(--success);
+    font-family: "Cascadia Mono", "Consolas", monospace;
+    font-size: 11px;
+}
+/* With scenes in the queue: a slim place to drop more. */
+BatchPage QPushButton#batchDropStrip {
+    color: var(--text-secondary);
+    background: transparent;
+    border: 1px dashed alpha(var(--text-secondary), 55%);
+    border-radius: 7px;
+    padding: 5px;
+    font-size: 11px;
+}
+BatchPage QPushButton#batchDropStrip:hover {
+    color: var(--accent);
+    border-color: var(--accent);
+}
+/* Something droppable is dragged over the page: the queue lights up. */
+BatchPage QFrame#batchCard[dragging="true"] {
+    border: 1px solid var(--accent);
+    background-color: alpha(var(--accent), 6%);
+}
+BatchPage QLabel#batchHint[state="error"] { color: var(--error); }

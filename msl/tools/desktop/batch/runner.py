@@ -133,6 +133,8 @@ class BatchRunner(qt.QtCore.QObject):
         self._probe_job: BatchJob | None = None
         self._running = False
         self._paused = False
+        self.run_started = 0.0                # when Start was pressed (monotonic; 0 = not running)
+        self.last_frame_seconds = 0.0         # how long the last frame took
         self._last_sign = 0.0                 # when the running Maya last showed it was alive
         self._seen_files: set = set()
         self._retries: dict = {}
@@ -224,6 +226,8 @@ class BatchRunner(qt.QtCore.QObject):
     # --- rendering --------------------------------------------------------------------------------
 
     def start(self) -> None:
+        if not self._running:
+            self.run_started = time.monotonic()
         self._running = True
         if self._paused:
             self.resume()
@@ -277,6 +281,7 @@ class BatchRunner(qt.QtCore.QObject):
         if job is None:
             if not any(job.enabled and job.state in (WAITING, CHECKING) and not job.probe for job in self.jobs):
                 self._running = False
+                self.run_started = 0.0
                 self.idle.emit()
             return
         year = self.maya_for(job)
@@ -333,6 +338,7 @@ class BatchRunner(qt.QtCore.QObject):
             job.done.append(frame)
         rendered = len(job.done)
         if seconds:
+            self.last_frame_seconds = seconds
             # the average of Maya's own time per frame (what "time left" is worked out from)
             count = max(rendered, 1)
             job.seconds = round((job.seconds * (count - 1) + seconds) / count, 2)
@@ -472,6 +478,20 @@ class BatchRunner(qt.QtCore.QObject):
         self._next_render()
 
     # --- for the summary ---------------------------------------------------------------------------
+
+    def last_output(self) -> str:
+        """The latest word from the Maya at work: Arnold's "60% done" line where Maya's output can be
+        read (no window), else what the runner last reported."""
+        job, process = self._render_job, self._render
+        if job is None:
+            return ""
+        if process is not None and process.output:
+            lines = [line.split("|", 1)[-1].strip() for line in process.output.splitlines()[-40:] if line.strip()]
+            lines = [line for line in lines if line and not line.startswith(("@@MSL", "Warning:", "//"))]
+            progress = [line for line in lines if "% done" in line]
+            if progress:
+                return f"frame {job.done[-1] + 1 if job.done else ''} · {progress[-1]}".replace("frame  · ", "")
+        return job.message
 
     def totals(self) -> dict:
         """Frames and jobs of the enabled queue: done / all, and the seconds still to go (a guess)."""

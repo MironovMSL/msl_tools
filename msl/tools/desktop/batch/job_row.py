@@ -1,142 +1,278 @@
 # tools/desktop/batch/job_row.py
-"""One scene of the Batch queue as a row."""
+"""One scene of the Batch queue as a row — its settings live ON the row, as chips."""
 from pathlib import Path
 
 import msl_tools.msl.ui.qt_bindings as qt
-from msl_tools.msl.core.batch.checks import ERROR, WARNING, check, choose_renderer, worst
-from msl_tools.msl.core.batch.frames import FramesError
-from msl_tools.msl.core.batch.job import (CANCELLED, CHECKING, DONE, FAILED, MODE_WINDOW, RENDERER_TITLES,
-                                          RUNNING, BatchJob)
+from msl_tools.msl.core.batch.checks import ERROR, OK, WARNING, check, choose_renderer, worst
+from msl_tools.msl.core.batch.frames import FramesError, format_frames, parse_frames
+from msl_tools.msl.core.batch.job import (ARNOLD, AUTO, CANCELLED, CHECKING, DONE, FAILED, HW2, MODE_HEADLESS,
+                                          MODE_WINDOW, REDSHIFT, RENDERER_TITLES, RUNNING, SIZES, BatchJob)
 from msl_tools.msl.core.theme import ThemeRegistry
-from msl_tools.msl.ui.theme.qss import color_property, repolish
+from msl_tools.msl.ui.theme.qss import color_property, make_rounded_popup, repolish
 from msl_tools.msl.ui.ui_resources import UiResources
 from msl_tools.msl.ui.widgets.atoms.buttons.glyph_button import GlyphButton
+from msl_tools.msl.ui.widgets.atoms.buttons.icon_push_button import IconPushButton
 from msl_tools.msl.ui.widgets.atoms.checkboxes.base_checkbox import BaseCheckbox
 from msl_tools.msl.ui.widgets.atoms.labels.elided_label import ElidedLabel
+from msl_tools.msl.ui.widgets.atoms.layouts.flow_layout import FlowLayout
+
+RENDERERS = [AUTO, ARNOLD, HW2, REDSHIFT]
+MODES = {MODE_WINDOW: "with Maya", MODE_HEADLESS: "no window"}
+SYMBOLS = {ERROR: "✕", WARNING: "!", OK: "✓"}
+STARTUP_CAMERAS = ("persp", "top", "front", "side")
+
+
+class _Chip(IconPushButton):
+    """Private: one setting of a job as a pill — its icon and its value; a click opens what changes it.
+    `tone` "error" outlines it in the error color (a setting the check found broken)."""
+
+    def __init__(self, icon: str, tooltip: str):
+        super().__init__(UiResources().iconManager.get_icon(icon, sub_folder="actions"), tooltip,
+                         icon_size=qt.QtCore.QSize(13, 13))
+        self.setObjectName("batchChip")
+        self.setCursor(qt.QtCore.Qt.CursorShape.PointingHandCursor)
+        self.setFocusPolicy(qt.QtCore.Qt.FocusPolicy.NoFocus)
+
+    def set_value(self, text: str, tone: str = "") -> None:
+        self.setText(text)
+        if (self.property("tone") or "") != tone:
+            self.setProperty("tone", tone)   # batch.qss: QPushButton#batchChip[tone="error"]
+            repolish(self)
 
 
 class JobRow(qt.QtWidgets.QFrame):
-    """A job: on / off, a picture (its last frame once there is one), the scene's name, camera ·
-    frames · size, the renderer and how Maya runs it, where it stands. A click picks it (its check and
-    settings show under the list); while it renders the row fills from the left as far as it is.
+    """A job: on / off, a fold arrow, its last frame (once there is one), the scene's name, where it
+    stands (a bar + a word); under that its SETTINGS AS CHIPS — frames, renderer, camera, size, how
+    Maya runs, the Maya version — a click on one opens a menu (or a field, for the frames) right
+    there. Unfolded, the row shows the scene's check, where the frames go and "then a video".
+    While it renders the row fills from the left as far as it is.
+
+    The row changes its job directly; `changed(id)` tells the page (it saves, refreshes), `reread(id)`
+    asks for the scene to be read again (another Maya).
 
     Signals:
-        picked(str), toggled(str, bool), menu_requested(str, QPoint) — for the job's id.
+        picked(str), changed(str), reread(str), menu_requested(str, QPoint), folded(str, bool)
     """
 
-    PICTURE = qt.QtCore.QSize(64, 36)
-    STATUS_WIDTH = 170
+    PICTURE = qt.QtCore.QSize(48, 27)
+    STATUS_WIDTH = 150
+    BAR = qt.QtCore.QSize(90, 5)
 
     progressColor = color_property("_progress_color", "update")
     selectedColor = color_property("_selected_color", "update")
     hoverColor = color_property("_hover_color", "update")
+    barColor = color_property("_bar_color", "update")
+    barTrackColor = color_property("_bar_track_color", "update")
 
     picked = qt.QtCore.Signal(str)
-    toggled = qt.QtCore.Signal(str, bool)
+    changed = qt.QtCore.Signal(str)
+    reread = qt.QtCore.Signal(str)
     menu_requested = qt.QtCore.Signal(str, object)
 
-    def __init__(self, job: BatchJob, parent=None):
+    def __init__(self, job: BatchJob, installed=(), parent=None):
         super().__init__(parent)
         self.setObjectName("batchJob")
         self.job_id = job.id
+        self._job = job
+        self._installed = sorted(installed)
         fallback = ThemeRegistry.fallback()  # until QSS applies
         self._progress_color = qt.QtGui.QColor(fallback.accent)
-        self._progress_color.setAlpha(40)
+        self._progress_color.setAlpha(30)
         self._selected_color = qt.QtGui.QColor(fallback.accent)
-        self._selected_color.setAlpha(22)
+        self._selected_color.setAlpha(20)
         self._hover_color = qt.QtGui.QColor(0, 0, 0, 0)
+        self._bar_color = qt.QtGui.QColor(fallback.accent)
+        self._bar_track_color = qt.QtGui.QColor(fallback.border)
         self._fraction: float | None = None
+        self._bar_fraction = 0.0
         self._selected = False
-        self._picture_file = ""
+        self._open = False
+        self._picture_file = None
+        icons = UiResources().iconManager
         self.setCursor(qt.QtCore.Qt.CursorShape.PointingHandCursor)
+
         self._enabled = BaseCheckbox("")
         self._enabled.setToolTip("On: the queue renders it  ·  off: passed by")
-        self._enabled.toggled.connect(lambda checked: self.toggled.emit(self.job_id, bool(checked)))
+        self._enabled.toggled.connect(self._on_enabled)
+        self._fold = GlyphButton("›", "Show the check and where the frames go", size=qt.QtCore.QSize(20, 20))
+        self._fold.setObjectName("batchAction")
+        self._fold.clicked.connect(self.toggle_open)
         self._picture = qt.QtWidgets.QLabel()
         self._picture.setObjectName("batchPicture")
         self._picture.setFixedSize(self.PICTURE)
         self._picture.setAlignment(qt.QtCore.Qt.AlignmentFlag.AlignCenter)
         self._name = ElidedLabel()
         self._name.setObjectName("batchJobName")
-        self._line = ElidedLabel()
-        self._line.setObjectName("batchJobLine")
-        self._renderer = qt.QtWidgets.QLabel()
-        self._renderer.setObjectName("batchPill")
-        self._mode = qt.QtWidgets.QLabel()
-        self._mode.setObjectName("batchPill")
-        self._status = qt.QtWidgets.QLabel()   # elided by hand (_set_status): a fixed column
+        self._bar = qt.QtWidgets.QWidget()       # painted by the row (paintEvent): how far the job is
+        self._bar.setFixedSize(self.BAR)
+        self._count = qt.QtWidgets.QLabel()
+        self._count.setObjectName("batchJobLine")
+        self._status = qt.QtWidgets.QLabel()     # elided by hand: a fixed column
         self._status.setObjectName("batchJobStatus")
         self._status.setFixedWidth(self.STATUS_WIDTH)
+        self._status.setAlignment(qt.QtCore.Qt.AlignmentFlag.AlignRight | qt.QtCore.Qt.AlignmentFlag.AlignVCenter)
         self._more = GlyphButton("⋯", "More", size=qt.QtCore.QSize(24, 22))
         self._more.setObjectName("batchAction")
-        self._more.set_icon(UiResources().iconManager.get_icon("more", sub_folder="actions"))
+        self._more.set_icon(icons.get_icon("more", sub_folder="actions"))
         self._more.clicked.connect(lambda: self.menu_requested.emit(
             self.job_id, self._more.mapToGlobal(qt.QtCore.QPoint(0, self._more.height()))))
-        text = qt.QtWidgets.QVBoxLayout()
-        text.setContentsMargins(0, 0, 0, 0)
-        text.setSpacing(1)
-        text.addWidget(self._name)
-        text.addWidget(self._line)
-        layout = qt.QtWidgets.QHBoxLayout(self)
-        layout.setContentsMargins(10, 6, 8, 6)
-        layout.setSpacing(10)
-        layout.addWidget(self._enabled)
-        layout.addWidget(self._picture)
-        layout.addLayout(text, 1)
+
+        self._chips = {
+            "frames": _Chip("film", "Frames — click to type: 1-120 · 1, 20, 78 · 1-100x5 (every 5th)"),
+            "renderer": _Chip("clapper", "Renderer — Auto: what the scene is set up for"),
+            "camera": _Chip("camera", "The camera that renders"),
+            "size": _Chip("frame_fit", "The scene's resolution, or half / a quarter of it"),
+            "mode": _Chip("hud", "With Maya: Maya opens minimized — Arnold renders without watermarks.\n"
+                                 "No window: starts faster; Arnold marks the frames without a batch licence."),
+            "maya": _Chip("scene", "The Maya that renders it"),
+        }
+        for key, chip in self._chips.items():
+            chip.clicked.connect(lambda _checked=False, key=key: self._on_chip(key))
+
+        top = qt.QtWidgets.QHBoxLayout()
+        top.setContentsMargins(0, 0, 0, 0)
+        top.setSpacing(8)
         middle = qt.QtCore.Qt.AlignmentFlag.AlignVCenter
-        layout.addWidget(self._renderer, 0, middle)
-        layout.addWidget(self._mode, 0, middle)
-        layout.addWidget(self._status, 0, middle)
-        layout.addWidget(self._more, 0, middle)
+        top.addWidget(self._enabled, 0, middle)
+        top.addWidget(self._fold, 0, middle)
+        top.addWidget(self._picture, 0, middle)
+        top.addWidget(self._name, 1, middle)
+        top.addWidget(self._bar, 0, middle)
+        top.addWidget(self._count, 0, middle)
+        top.addWidget(self._status, 0, middle)
+        top.addWidget(self._more, 0, middle)
+        chips = qt.QtWidgets.QWidget()
+        self._chip_flow = FlowLayout(chips, spacing=5)
+        self._chip_flow.setContentsMargins(0, 0, 0, 0)
+        for chip in self._chips.values():
+            self._chip_flow.addWidget(chip)
+
+        # unfolded: the check, the folder, "then a video"
+        self._details = qt.QtWidgets.QFrame()
+        self._details.setObjectName("batchDetails")
+        self._issues = qt.QtWidgets.QVBoxLayout()
+        self._issues.setSpacing(2)
+        self._folder = ElidedLabel(elide=qt.QtCore.Qt.TextElideMode.ElideLeft)  # the end of a path matters
+        self._folder.setObjectName("batchJobLine")
+        self._folder_button = GlyphButton("…", "Pick the folder the frames go to", size=qt.QtCore.QSize(22, 20))
+        self._folder_button.setObjectName("batchAction")
+        self._folder_button.set_icon(icons.get_icon("browse", sub_folder="actions"))
+        self._folder_button.clicked.connect(self._on_pick_folder)
+        self._video = BaseCheckbox("Then make a video of the frames")
+        self._video.toggled.connect(self._on_video)
+        folder_line = qt.QtWidgets.QHBoxLayout()
+        folder_line.setSpacing(6)
+        folder_caption = qt.QtWidgets.QLabel("Frames go to")
+        folder_caption.setObjectName("batchCaption")
+        folder_line.addWidget(folder_caption)
+        folder_line.addWidget(self._folder, 1)
+        folder_line.addWidget(self._folder_button)
+        details = qt.QtWidgets.QVBoxLayout(self._details)
+        details.setContentsMargins(10, 6, 10, 8)
+        details.setSpacing(5)
+        details.addLayout(self._issues)
+        details.addLayout(folder_line)
+        details.addWidget(self._video)
+        self._details.hide()
+        self.set_open(False)
+
+        layout = qt.QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(10, 7, 8, 7)
+        layout.setSpacing(5)
+        layout.addLayout(top)
+        indent = qt.QtWidgets.QHBoxLayout()
+        indent.setContentsMargins(18 + 8 + 20 + 8, 0, 0, 0)   # under the picture, past the checkbox and the arrow
+        indent.addWidget(chips, 1)
+        layout.addLayout(indent)
+        details_indent = qt.QtWidgets.QHBoxLayout()
+        details_indent.setContentsMargins(18 + 8 + 20 + 8, 0, 0, 0)
+        details_indent.addWidget(self._details, 1)
+        layout.addLayout(details_indent)
         self.update_job(job)
+
+    # --- what is shown ------------------------------------------------------------------------
+
+    def set_installed(self, years) -> None:
+        self._installed = sorted(years)
 
     def set_selected(self, selected: bool) -> None:
         if selected != self._selected:
             self._selected = selected
             self.update()
 
+    def is_open(self) -> bool:
+        return self._open
+
+    def toggle_open(self) -> None:
+        self.set_open(not self._open)
+
+    def set_open(self, open_: bool) -> None:
+        self._open = bool(open_)
+        self._details.setVisible(self._open)
+        self._fold.set_glyph("⌄" if self._open else "›")
+        icon = "chevron_down" if self._open else "chevron_right"
+        self._fold.set_icon(UiResources().iconManager.get_icon(icon, sub_folder="actions"))
+
     def update_job(self, job: BatchJob) -> None:
+        self._job = job
         self._enabled.blockSignals(True)
         self._enabled.set_checked_immediate(job.enabled)
         self._enabled.blockSignals(False)
         self._name.setText(job.name)
         self._name.setToolTip(job.scene)
+        issues = check(job)
+        broken = {issue.text for issue in issues if issue.level == ERROR}
         try:
-            count = len(job.frame_list())
+            frames = job.frame_list()
         except FramesError:
-            count = 0
-        width, height = job.resolution() if job.probe else (0, 0)
-        parts = [job.camera_name() or "camera ?", job.frames_text() + (f"  ({count})" if count > 1 else "")]
-        if width:
-            parts.append(f"{width}×{height}")
-        self._line.setText("  ·  ".join(parts))
+            frames = []
+        frames_tone = "error" if job.frames.strip() and not frames else ""
+        self._chips["frames"].set_value(job.frames_text() + (f"  ({len(frames)})" if len(frames) > 1 else ""),
+                                        frames_tone)
         renderer = choose_renderer(job) if job.probe else job.renderer
-        self._renderer.setText(RENDERER_TITLES.get(renderer, renderer) + (" · auto" if job.renderer == "auto" else ""))
-        self._mode.setText("with Maya" if job.mode == MODE_WINDOW and renderer == "arnold" else "no window")
-        self._mode.setToolTip("Maya opens minimized and closes when done — Arnold renders without watermarks"
-                              if job.mode == MODE_WINDOW else "Maya without a window — starts faster")
-        tone, text = self._status_of(job, count)
+        missing_renderer = any("isn’t installed" in text for text in broken)
+        self._chips["renderer"].set_value(
+            RENDERER_TITLES.get(renderer, renderer) + (" — not installed" if missing_renderer else "")
+            + (" · auto" if job.renderer == AUTO and not missing_renderer else ""), "error" if missing_renderer else "")
+        camera_gone = any(text.startswith("The camera") for text in broken)
+        self._chips["camera"].set_value(job.camera_name() or "camera ?", "error" if camera_gone else "")
+        if job.probe:
+            width, height = job.resolution()
+            self._chips["size"].set_value(f"{width}×{height}" + ("" if job.size == "100%" else f" · {job.size}"))
+        else:
+            self._chips["size"].set_value(job.size)
+        self._chips["mode"].set_value(MODES.get(job.mode, job.mode))
+        self._chips["mode"].setVisible(renderer in (ARNOLD, AUTO))
+        self._chips["maya"].set_value(f"Maya {job.maya}" if job.maya else
+                                      f"Maya {job.probe.get('maya', '')}".strip() if job.probe else "Maya auto")
+        tone, text = self._status_of(job, len(frames), issues)
         metrics = self._status.fontMetrics()
         self._status.setText(metrics.elidedText(text, qt.QtCore.Qt.TextElideMode.ElideRight, self.STATUS_WIDTH))
         self._status.setToolTip(text if text == job.message else (text + chr(10) + job.message).strip())
         if self._status.property("tone") != tone:
             self._status.setProperty("tone", tone)  # batch.qss: QLabel#batchJobStatus[tone=...]
             repolish(self._status)
-        fraction = min(len(job.done) / count, 1.0) if job.state == RUNNING and count else None
+        count = len(frames)
+        done = len(job.done) if job.state in (RUNNING, DONE) else len(job.existing_frames()) if job.probe else 0
+        self._bar_fraction = min(done / count, 1.0) if count else 0.0
+        self._count.setText(f"{min(done, count)}/{count}" if count else "")
+        self._bar.setVisible(bool(count))
+        fraction = self._bar_fraction if job.state == RUNNING else None
         if fraction != self._fraction:
             self._fraction = fraction
-            self.update()
+        self.update()
         if job.last_file != self._picture_file:
             self._show_picture(job.last_file)
+        self._fill_details(job, issues)
 
     @staticmethod
-    def _status_of(job: BatchJob, count: int) -> tuple:
+    def _status_of(job: BatchJob, count: int, issues: list) -> tuple:
         if not job.enabled:
             return "", "off"
         if job.state == CHECKING:
             return "running", "reading the scene…"
         if job.state == RUNNING:
-            return "running", f"{len(job.done)} / {count}  ·  {job.message}"
+            return "running", job.message or "rendering"
         if job.state == DONE:
             return "done", "done  ·  " + job.message
         if job.state == FAILED:
@@ -145,7 +281,6 @@ class JobRow(qt.QtWidgets.QFrame):
             return "", "cancelled"
         if not job.probe:
             return "", "waiting to be read"
-        issues = check(job)
         tone = worst(issues)
         if tone == ERROR:
             errors = sum(1 for issue in issues if issue.level == ERROR)
@@ -153,21 +288,162 @@ class JobRow(qt.QtWidgets.QFrame):
         if tone == WARNING:
             warnings = sum(1 for issue in issues if issue.level == WARNING)
             return "warning", f"ready  ·  {warnings} to look at"
-        there = len(job.existing_frames())
-        return "", "ready" + (f"  ·  {there} already there" if there else "")
+        return "done", "ready"
+
+    def _fill_details(self, job: BatchJob, issues: list) -> None:
+        while self._issues.count():
+            widget = self._issues.takeAt(0).widget()
+            if widget is not None:
+                widget.hide()
+                widget.deleteLater()
+        if not job.probe:
+            self._issue("", "The scene is read in Maya before it renders." if job.state != CHECKING else
+                        "Reading the scene in Maya…")
+        for issue in issues:
+            label = self._issue(issue.level, f"{SYMBOLS[issue.level]}  {issue.text}")
+            if issue.detail:
+                label.setToolTip(issue.detail)
+        self._folder.setText(str(job.output_folder()))
+        self._folder.setToolTip(str(job.output_folder()))
+        self._video.blockSignals(True)
+        self._video.set_checked_immediate(job.make_video)
+        self._video.blockSignals(False)
+        editable = job.state not in (RUNNING, CHECKING)
+        for widget in list(self._chips.values()) + [self._folder_button, self._video]:
+            widget.setEnabled(editable)
+
+    def _issue(self, level: str, text: str) -> qt.QtWidgets.QLabel:
+        label = qt.QtWidgets.QLabel(text)
+        label.setObjectName("batchIssue")
+        label.setWordWrap(True)
+        label.setProperty("level", level)
+        repolish(label)
+        self._issues.addWidget(label)
+        return label
 
     def _show_picture(self, file: str) -> None:
         self._picture_file = file
         pixmap = qt.QtGui.QPixmap(file) if file and Path(file).is_file() else qt.QtGui.QPixmap()
         if pixmap.isNull():
             self._picture.setPixmap(qt.QtGui.QPixmap())
-            self._picture.setText("scene")
+            self._picture.setText(".ma" if self._job.scene.lower().endswith(".ma") else ".mb")
             return
         ratio = self.devicePixelRatioF()
         scaled = pixmap.scaled(self.PICTURE * ratio, qt.QtCore.Qt.AspectRatioMode.KeepAspectRatioByExpanding,
                                qt.QtCore.Qt.TransformationMode.SmoothTransformation)
         scaled.setDevicePixelRatio(ratio)
         self._picture.setPixmap(scaled)
+
+    # --- changing the job's settings ---------------------------------------------------------------
+
+    def _menu(self) -> qt.QtWidgets.QMenu:
+        menu = make_rounded_popup(qt.QtWidgets.QMenu(self))
+        menu.setAttribute(qt.QtCore.Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        self._chip_menu = menu  # for tests; the menu deletes itself on close
+        return menu
+
+    def _choices(self, chip: _Chip, choices: list, current, apply) -> None:
+        """A menu under `chip`: (title, value) choices, the current one ticked."""
+        menu = self._menu()
+        for title, value in choices:
+            action = menu.addAction(title)
+            action.setCheckable(True)
+            action.setChecked(value == current)
+            action.triggered.connect(lambda _checked=False, value=value: apply(value))
+        menu.popup(chip.mapToGlobal(qt.QtCore.QPoint(0, chip.height() + 2)))
+
+    def _on_chip(self, key: str) -> None:
+        job, chip = self._job, self._chips[key]
+        self.picked.emit(self.job_id)
+        if key == "frames":
+            self._edit_frames(chip)
+        elif key == "renderer":
+            scene = choose_renderer(BatchJob(scene=job.scene, probe=job.probe)) if job.probe else ""
+            choices = [(f"Auto — as the scene ({RENDERER_TITLES[scene]})" if scene else "Auto — as the scene", AUTO)]
+            choices += [(RENDERER_TITLES[name] + (" (Hardware 2.0 — like the viewport, no licence)" if name == HW2
+                                                  else ""), name) for name in (ARNOLD, HW2, REDSHIFT)]
+            self._choices(chip, choices, job.renderer, lambda value: self._set("renderer", value))
+        elif key == "camera":
+            cameras = [camera["name"] for camera in job.probe.get("cameras") or []]
+            own = [name for name in cameras if name not in STARTUP_CAMERAS]
+            choices = [("Auto — the scene's renderable one", "")] + [(name, name) for name in own] + \
+                      [(name, name) for name in cameras if name in STARTUP_CAMERAS]
+            self._choices(chip, choices, job.camera, lambda value: self._set("camera", value))
+        elif key == "size":
+            self._choices(chip, [(f"{size} of the scene's", size) for size in SIZES], job.size,
+                          lambda value: self._set("size", value))
+        elif key == "mode":
+            self._choices(chip, [("With Maya — clean Arnold frames, Maya opens minimized", MODE_WINDOW),
+                                 ("No window — faster start, Arnold watermarks without a batch licence",
+                                  MODE_HEADLESS)], job.mode, lambda value: self._set("mode", value))
+        elif key == "maya":
+            choices = [("Auto — the version the scene was saved with", "")] + \
+                      [(f"Maya {year}", year) for year in self._installed]
+            self._choices(chip, choices, job.maya, self._set_maya)
+
+    def _edit_frames(self, chip: _Chip) -> None:
+        """A field right under the chip: Enter takes it, Esc / a click elsewhere leaves it."""
+        menu = self._menu()
+        field = qt.QtWidgets.QLineEdit(self._job.frames)
+        playback = self._job.probe.get("playback")
+        field.setPlaceholderText(f"the scene's {format_frames(range(int(playback[0]), int(playback[1]) + 1))}"
+                                 if playback else "1-120")
+        field.setMinimumWidth(220)
+        note = qt.QtWidgets.QLabel("1-120  ·  1, 20, 78  ·  1-100x5  ·  empty = the scene's")
+        note.setObjectName("batchHint")
+        holder = qt.QtWidgets.QWidget()
+        box = qt.QtWidgets.QVBoxLayout(holder)
+        box.setContentsMargins(8, 6, 8, 6)
+        box.setSpacing(4)
+        box.addWidget(field)
+        box.addWidget(note)
+        action = qt.QtWidgets.QWidgetAction(menu)
+        action.setDefaultWidget(holder)
+        menu.addAction(action)
+
+        def take() -> None:
+            text = field.text().strip()
+            if text:
+                try:
+                    parse_frames(text)
+                except FramesError as error:
+                    note.setText(str(error))
+                    note.setProperty("state", "error")
+                    repolish(note)
+                    return
+            self._set("frames", text)
+            menu.close()
+
+        field.returnPressed.connect(take)
+        menu.popup(chip.mapToGlobal(qt.QtCore.QPoint(0, chip.height() + 2)))
+        field.setFocus()
+        field.selectAll()
+
+    def _set(self, key: str, value) -> None:
+        if getattr(self._job, key) == value:
+            return
+        setattr(self._job, key, value)
+        self.update_job(self._job)
+        self.changed.emit(self.job_id)
+
+    def _set_maya(self, year: str) -> None:
+        if year != self._job.maya:
+            self._job.maya = year
+            self.reread.emit(self.job_id)  # another Maya may read the scene differently (plug-ins, renderers)
+
+    def _on_enabled(self, checked: bool) -> None:
+        self._set("enabled", bool(checked))
+
+    def _on_video(self, checked: bool) -> None:
+        self._set("make_video", bool(checked))
+
+    def _on_pick_folder(self) -> None:
+        folder = qt.QtWidgets.QFileDialog.getExistingDirectory(self, "The folder for the frames",
+                                                               str(self._job.output_folder()))
+        if folder:
+            self._set("folder", str(Path(folder)))
+
+    # --- the row itself ------------------------------------------------------------------------------
 
     def enterEvent(self, event) -> None:
         super().enterEvent(event)
@@ -182,17 +458,30 @@ class JobRow(qt.QtWidgets.QFrame):
             self.picked.emit(self.job_id)
         super().mousePressEvent(event)
 
+    def mouseDoubleClickEvent(self, event) -> None:
+        self.toggle_open()
+
     def contextMenuEvent(self, event) -> None:
         self.picked.emit(self.job_id)
         self.menu_requested.emit(self.job_id, event.globalPos())
 
     def paintEvent(self, event) -> None:
         painter = qt.QtGui.QPainter(self)
+        painter.setRenderHint(qt.QtGui.QPainter.RenderHint.Antialiasing)
         if self._selected:
             painter.fillRect(self.rect(), self._selected_color)
         elif self.underMouse():
             painter.fillRect(self.rect(), self._hover_color)
         if self._fraction is not None:
             painter.fillRect(qt.QtCore.QRectF(0, 0, self.width() * self._fraction, self.height()), self._progress_color)
+        if self._bar.isVisible():
+            rect = qt.QtCore.QRectF(self._bar.geometry())
+            painter.setPen(qt.QtCore.Qt.PenStyle.NoPen)
+            painter.setBrush(self._bar_track_color)
+            painter.drawRoundedRect(rect, 2.5, 2.5)
+            if self._bar_fraction > 0:
+                painter.setBrush(self._bar_color)
+                painter.drawRoundedRect(qt.QtCore.QRectF(rect.x(), rect.y(), rect.width() * self._bar_fraction,
+                                                         rect.height()), 2.5, 2.5)
         painter.end()
         super().paintEvent(event)

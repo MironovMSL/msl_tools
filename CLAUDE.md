@@ -1947,18 +1947,31 @@ came from: CLAUDE.local.md). Step 1 of 4 is built (2026-10-03):
 ## Batch tool
 
 `msl/tools/desktop/batch/` (hub sidebar "Batch", icon `tools/batch`; built 2026-10-05 after a
-spike, see below) — Maya scenes rendered one after another without the user opening Maya. Look
-after the user's reference (a Blender "Batch Render Creator" video): a summary card (two
-`RingGauge`s — frames, scenes done —, the job / frame at work + s per frame, "about N min left ·
-done around HH:MM", the last frame written, a click opens it), Add scenes / Start-Stop / Pause /
-the bell ("when done": nothing / a sound / shut down — once, like Media), the QUEUE (`JobRow`:
-on/off, the last frame as a picture, scene, camera · frames · size, renderer pill ("Arnold ·
-auto"), "with Maya" / "no window", status, a "more" menu — read again, render again, duplicate,
-show frames / video / scene, sooner / later, remove; a running row fills from the left), and the
-picked job's CHECK + SETTINGS (`JobDetails`: Maya, renderer, camera, frames, size 100/50/25 %,
-"Maya runs" With Maya / No window, folder, "then make a video"). Scenes are dropped anywhere on
-the page (.ma / .mb). The queue lives in `configs/desktop/batch/queue.json` (`BatchStore`, safe_json);
-a job interrupted by the hub closing waits and goes on from its first missing frame.
+spike, see below) — Maya scenes rendered one after another without the user opening Maya. Laid
+out after the user's reference (a Blender "Batch Render Creator"; second round the same day, the
+user's three asks: a drop target as clear as Media's, timers, the settings ON the queue):
+- RENDER PROGRESS card: two `RingGauge`s (frames x/y, scenes x/y), "time left" as a big clock
+  (`QLabel#batchClock`, HH:MM:SS from the jobs' seconds per frame), "running 00:02:14 · last frame
+  1.5 s" (`runner.run_started`, `last_frame_seconds`), ticking every second.
+- CURRENT RENDER card: the job + its state, "Maya 2024 · Arnold · with Maya", "watchdog on ·
+  restarts 0 / 1 · 2.0 s per frame", the scene's path, the last frame written (a click opens it).
+- QUEUE card: EMPTY = one big `DropArea` (as Media's: icon, line, a "choose" button); with scenes,
+  a slim dashed "drop more" strip (`QPushButton#batchDropStrip`) under them; a drag over the page
+  lights the card (`QFrame#batchCard[dragging="true"]`). "+ Add scenes" in its heading.
+  `JobRow` = two lines: checkbox (our BaseCheckbox — the user asked for it, not a toggle), fold
+  arrow, the last frame, the name, a bar + "2/3", the status, "more"; under it the SETTINGS AS
+  CHIPS (`_Chip` = `QPushButton#batchChip`, in a FlowLayout so a narrow window wraps them):
+  frames (a click opens a field in a menu — Enter takes it, wrong text says why), renderer,
+  camera (the scene's cameras), size, "with Maya" / "no window" (Arnold only), Maya version (a
+  change reads the scene again). A chip the check found broken is outlined (`[tone="error"]`:
+  "Redshift — not installed"). Unfolded (arrow / double click / menu): the check's lines, "Frames
+  go to …" + browse, "Then make a video". The row edits its job itself and emits `changed` /
+  `reread`.
+- Bottom bar: OUTPUT (`runner.last_output()`: Arnold's "N% done" where Maya's output can be read,
+  else the runner's last word), "after: nothing / a sound / shut down" chip, Pause / Go on, Start
+  (red "Stop" while running). The old bottom panels (Check / Settings, `job_details.py`) are gone.
+The queue lives in `configs/desktop/batch/queue.json` (`BatchStore`, safe_json); a job interrupted
+by the hub closing waits and goes on from its first missing frame.
 
 - `core/batch/` (Qt-free): `frames.py` parse_frames / format_frames ("1-120, 200", "1 20 78",
   "1-100x5", "1..10"); `job.py` BatchJob (settings — empty = the scene's — + state, probe, done,
