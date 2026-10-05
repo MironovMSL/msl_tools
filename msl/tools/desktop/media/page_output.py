@@ -4,6 +4,8 @@ from pathlib import Path
 
 import msl_tools.msl.ui.qt_bindings as qt
 from msl_tools.msl.core.environment.send_to import has_send_to
+from msl_tools.msl.core.media import names
+from msl_tools.msl.tools.desktop.media.name_dialog import NameTemplateDialog
 from msl_tools.msl.ui.theme.qss import make_rounded_popup
 
 
@@ -86,7 +88,18 @@ class _OutputMixin:
             current.setChecked(True)
         menu.addSeparator()
         menu.addAction("Choose a folder…").triggered.connect(self._on_choose_folder)
+        template = self._name_template()
+        names_item = menu.addAction(f"Names: {template or names.DEFAULT}…")
+        names_item.setToolTip("How results are named — {name}, {action}, {date}, {time}, {n} for versions")
+        names_item.triggered.connect(self._on_name_template)
         menu.addSeparator()
+        watched = self.watching()
+        if watched is None:
+            watch = menu.addAction("Watch a render folder…")
+            watch.setToolTip("New image sequences that appear in it become videos with To video’s settings")
+            watch.triggered.connect(self._on_choose_watch_folder)
+        else:
+            menu.addAction(f"Stop watching {watched.name}").triggered.connect(self.stop_watching)
         notify = menu.addAction("Tell me when the jobs are done")
         notify.setCheckable(True)
         notify.setChecked(self._notifies())
@@ -100,6 +113,21 @@ class _OutputMixin:
         send_to.triggered.connect(lambda checked: self._set_send_to(bool(checked)))
         self._folder_menu = menu  # for tests; the menu deletes itself on close
         menu.popup(self._folder_button.mapToGlobal(qt.QtCore.QPoint(0, self._folder_button.height())))
+
+    def _name_template(self) -> str:
+        """The template results are named by ("" = "<name>_<action>", names.DEFAULT)."""
+        template = str(self._settings.get("name_template", "") or "")
+        return "" if names.unknown_tokens(template) else template
+
+    def _on_name_template(self) -> None:
+        example = str(self._sources[0].path) if self._sources else ""
+        template = NameTemplateDialog.ask(self, self._name_template(), example)
+        if template is None:
+            return
+        self._settings["name_template"] = template
+        self._output_edited = False
+        self._suggest_output()
+        self._say(f"Results are named “{template or names.DEFAULT}”.")
 
     def _on_choose_folder(self) -> None:
         folder = qt.QtWidgets.QFileDialog.getExistingDirectory(self, "The folder for results", self._folder())
@@ -117,7 +145,8 @@ class _OutputMixin:
         panel = self._panel()
         if panel is None or self._output_edited or not self._one_result():
             return
-        self._set_output(panel.output_for(self._sources[0], self._folder() or None, self._queue.outputs()))
+        self._set_output(panel.output_for(self._sources[0], self._folder() or None, self._queue.outputs(),
+                                          self._name_template()))
         self._output_caption.setToolTip("Save into this folder" if panel.INTO_FOLDER else "Save as")
 
     def _set_output(self, path: Path) -> None:

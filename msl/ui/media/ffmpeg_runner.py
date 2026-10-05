@@ -1,5 +1,6 @@
 # ui/media/ffmpeg_runner.py
 import msl_tools.msl.ui.qt_bindings as qt
+from msl_tools.msl.core.environment.processes import resume_process, suspend_process
 from msl_tools.msl.core.media.ffmpeg import FfmpegTools
 from msl_tools.msl.core.media.recipes import Job
 from msl_tools.msl.core.media.run import Progress, ProgressParser, clean_up, error_summary, fraction, prepare
@@ -17,6 +18,9 @@ class FfmpegRunner(qt.QtCore.QObject):
         runner.cancel()
 
     One job at a time: start() while running is refused (returns False).
+    pause() freezes the ffmpeg that runs (the system suspends the process —
+    it keeps its place, nothing is lost) until resume(); a job of several
+    runs that is paused between them waits before the next one.
     A job that fails or is cancelled leaves no half-written output behind.
     The process's input is closed and its error output is read as it comes
     — an ffmpeg left with either open can hang after its work is done.
@@ -43,6 +47,8 @@ class FfmpegRunner(qt.QtCore.QObject):
         self._parser = ProgressParser()
         self._errors = ""
         self._cancelled = False
+        self._paused = False
+        self._frozen = False        # the process itself is suspended (not merely "don't start the next run")
 
     def is_running(self) -> bool:
         return self._job is not None
@@ -65,9 +71,42 @@ class FfmpegRunner(qt.QtCore.QObject):
 
     def cancel(self) -> None:
         """Stops the job; finished(False, "Cancelled.") follows."""
+        if self._job is not None and self._process is None and self._paused and not self._cancelled:
+            self._paused = False  # waiting, paused, between two runs: there is no process to end
+            self._cancelled = True
+            self._end(False, "Cancelled.")
+            return
         if self._process is not None and not self._cancelled:
             self._cancelled = True
+            self._thaw()
             self._process.kill()
+
+    def is_paused(self) -> bool:
+        return self._paused
+
+    def pause(self) -> bool:
+        """Freezes the running ffmpeg where it is. True if it is paused now."""
+        if self._job is None or self._paused:
+            return self._paused
+        pid = int(self._process.processId()) if self._process is not None else 0
+        if pid and not suspend_process(pid):
+            return False
+        self._paused, self._frozen = True, bool(pid)
+        return True
+
+    def resume(self) -> None:
+        """Lets a paused job go on (or start its next run)."""
+        if not self._paused:
+            return
+        self._paused = False
+        self._thaw()
+        if self._job is not None and self._process is None and not self._cancelled:
+            self._start_run()  # it was paused between two runs
+
+    def _thaw(self) -> None:
+        if self._frozen and self._process is not None:
+            resume_process(int(self._process.processId()))
+        self._frozen = False
 
     def _start_run(self) -> None:
         command = self._job.commands(self._tools)[self._run_index]
@@ -110,17 +149,21 @@ class FfmpegRunner(qt.QtCore.QObject):
             self._end(False, error_summary(self._errors))
         elif self._run_index + 1 < len(self._job.passes):
             self._run_index += 1
-            self._start_run()
+            self._frozen = False
+            if not self._paused:
+                self._start_run()  # paused: resume() starts it
         else:
             self.progressed.emit(1.0, Progress(done=True))
             self._end(True, str(self._job.output))
 
     def _drop_process(self) -> None:
+        self._frozen = False
         process, self._process = self._process, None
         if process is not None:
             process.deleteLater()
 
     def _end(self, ok: bool, message: str) -> None:
+        self._paused = self._frozen = False
         job, self._job = self._job, None
         clean_up(job, remove_output=not ok)
         # Always from the event loop, never from inside start(): a program that can't be

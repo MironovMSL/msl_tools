@@ -31,6 +31,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from msl_tools.msl.core.media import names
 from msl_tools.msl.core.media.ffmpeg import FfmpegTools, MediaError
 from msl_tools.msl.core.media.probe import MediaInfo
 from msl_tools.msl.core.media.sequence import ImageSequence, pattern_in
@@ -359,6 +360,71 @@ def join(infos: list, output: str | Path, quality: str = "high", speed: str = "b
     duration = sum(info.duration for info in infos)
     return Job(title=f"{len(infos)} videos → {output.name}", output=output, passes=[body + [str(output)]],
                duration=duration, frames=int(round(duration * (first.fps or 24.0))))
+
+
+def dailies(infos: list, output: str | Path, captions: list | None = None, slate_seconds: float = 1.0,
+            counter: bool = True, quality: str = "high", speed: str = "balanced",
+            work_dir: str | Path | None = None) -> Job:
+    """A DAILIES reel: several clips (playblasts of shots) one after another,
+    each with its caption burnt in at the top left — "01 · sh010_anim" — and,
+    with `counter`, "1 / 5" at the top right; with `slate_seconds` > 0 a
+    black SLATE before each clip shows its caption big in the middle. Like
+    join(): every clip is fitted (bars, never stretched) into the FIRST one's
+    frame size and rate; the sound is kept only when every clip has sound
+    (the slates are silent then). `captions`: one text per clip (default:
+    the number and the file's name)."""
+    output = Path(output)
+    if not infos:
+        raise MediaError("Dailies need at least one video.")
+    for info in infos:
+        _need_video(info)
+    count = len(infos)
+    captions = list(captions or [])
+    captions += [f"{index + 1:02d}  ·  {info.path.stem}" for index, info in enumerate(infos)][len(captions):]
+    first = infos[0]
+    width, height = first.width // 2 * 2, first.height // 2 * 2
+    rate = first.fps or 24.0
+    fps = _number(rate)
+    sound = all(info.has_audio for info in infos)
+    slate = max(float(slate_seconds or 0.0), 0.0)
+    temporary: list[Path] = []
+    inputs, chains, joined = [], [], ""
+    big = max(int(height / 12), 18)
+    small = max(int(height / 30), 12)
+    for index, info in enumerate(infos):
+        text = _text_file(captions[index], work_dir)
+        temporary.append(text)
+        if slate:
+            source = len(inputs)
+            inputs.append(["-f", "lavfi", "-t", _number(slate), "-i", f"color=c=black:s={width}x{height}:r={fps}"])
+            if sound:
+                inputs.append(["-f", "lavfi", "-t", _number(slate), "-i", "anullsrc=r=48000:cl=stereo"])
+            line = (f"drawtext={_font()}textfile={_value(text)}:expansion=none:fontcolor=white:fontsize={big}:"
+                    f"x=(w-text_w)/2:y=(h-text_h)/2")
+            if counter:
+                line += (f",drawtext={_font()}text='{index + 1} / {count}':fontcolor=white@0.6:fontsize={small}:"
+                         f"x=(w-text_w)/2:y=(h/2)+{big}")
+            chains.append(f"[{source}:v]{line},setsar=1,format=yuv420p[s{index}]")
+            joined += f"[s{index}]" + (f"[{source + 1}:a]" if sound else "")
+        clip = len(inputs)
+        inputs.append(["-i", str(info.path)])
+        chain = (f"[{clip}:v]scale={width}:{height}:force_original_aspect_ratio=decrease,"
+                 f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={fps},"
+                 + _drawtext(height, f"textfile={_value(text)}:expansion=none", "{m}", "{m}"))
+        if counter:
+            chain += "," + _drawtext(height, f"text='{index + 1} / {count}'", "w-text_w-{m}", "{m}")
+        chains.append(chain + f",format=yuv420p[v{index}]")
+        if sound:
+            chains.append(f"[{clip}:a]aformat=sample_rates=48000:channel_layouts=stereo[a{index}]")
+        joined += f"[v{index}]" + (f"[a{index}]" if sound else "")
+    segments = count * (2 if slate else 1)
+    graph = ";".join(chains) + f";{joined}concat=n={segments}:v=1:a={1 if sound else 0}[out]"         + ("[sound]" if sound else "")
+    body = _flat(inputs) + ["-filter_complex", graph, "-map", "[out]"]
+    body += (["-map", "[sound]", "-c:a", "aac", "-b:a", f"{AUDIO_KBPS * 2}k"] if sound else []) + _video(quality, speed)
+    body += ["-movflags", "+faststart"]
+    duration = sum(info.duration for info in infos) + slate * count
+    return Job(title=f"Dailies of {count} → {output.name}", output=output, passes=[body + [str(output)]],
+               duration=duration, frames=int(round(duration * rate)), temporary=temporary)
 
 
 def gif(info: MediaInfo, output: str | Path, width: int = 480, fps: float = 12.0) -> Job:
@@ -714,12 +780,13 @@ def frame(info: MediaInfo, output: str | Path, seconds: float, jpg_quality: str 
 
 
 def default_output(source: str | Path | ImageSequence, tag: str = "", suffix: str = ".mp4",
-                   folder: str | Path | None = None, taken=()) -> Path:
+                   folder: str | Path | None = None, taken=(), template: str = "") -> Path:
     """A name for the result that clashes with nothing: next to the source
     (a sequence's video goes NEXT TO its frames' folder, not among the
     frames) or in `folder`, named after the source + `tag`; "_2", "_3", ...
     if that name is taken — by a file, or by one of `taken` (results of
-    jobs that haven't run yet)."""
+    jobs that haven't run yet). A `template` ("{name}_{date}_v{n}",
+    names.py) names it instead; "" = the source + `tag`."""
     taken = {Path(path) for path in taken}
     if isinstance(source, ImageSequence):
         stem = source.prefix.rstrip("._- ") or source.folder.name
@@ -728,6 +795,8 @@ def default_output(source: str | Path | ImageSequence, tag: str = "", suffix: st
         source = Path(source)
         stem, home = source.stem, source.parent
     home = Path(folder) if folder else home
+    if template:
+        return names.result_path(template, home, stem, tag, suffix, taken)
     candidate = home / f"{stem}{tag}{suffix}"
     counter = 2
     while candidate.exists() or candidate in taken:

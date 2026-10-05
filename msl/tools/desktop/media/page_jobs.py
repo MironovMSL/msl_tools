@@ -45,7 +45,7 @@ class _JobsMixin:
                 return panel.jobs(self._sources[0], output)
             jobs, taken = [], list(self._queue.outputs())
             for source in self._sources:
-                output = panel.output_for(source, self._folder() or None, taken)
+                output = panel.output_for(source, self._folder() or None, taken, self._name_template())
                 made = panel.jobs(source, output)
                 taken += [job.output for job in made]
                 jobs += made
@@ -231,6 +231,7 @@ class _JobsMixin:
 
     def _on_queue_idle(self) -> None:
         batch = self._queue.last_batch()
+        self._after_batch(batch)  # page_queue.py: a sound, or the shutdown
         self._start_button.set_progress(None)
         if self._taskbar is not None:
             self._taskbar.clear()

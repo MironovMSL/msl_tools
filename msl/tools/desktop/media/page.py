@@ -29,12 +29,14 @@ from msl_tools.msl.tools.desktop.media.start_button import StartButton
 from msl_tools.msl.tools.desktop.media.page_output import _OutputMixin
 from msl_tools.msl.tools.desktop.media.page_jobs import _JobsMixin
 from msl_tools.msl.tools.desktop.media.page_drops import _DropsMixin
+from msl_tools.msl.tools.desktop.media.page_queue import _QueueMixin
+from msl_tools.msl.tools.desktop.media.page_watch import _WatchMixin
 
 
 StylesheetBuilder.register_template(Path(__file__).with_name("media.qss"))
 
 
-class MediaPage(_OutputMixin, _JobsMixin, _DropsMixin, qt.QtWidgets.QWidget):
+class MediaPage(_OutputMixin, _JobsMixin, _DropsMixin, _QueueMixin, _WatchMixin, qt.QtWidgets.QWidget):
     """The Media tool: quick work with video and image sequences through
     ffmpeg (core/media), without knowing ffmpeg.
 
@@ -61,6 +63,14 @@ class MediaPage(_OutputMixin, _JobsMixin, _DropsMixin, qt.QtWidgets.QWidget):
     - the queue (job_queue.py): jobs run one after another; a finished one
       is opened with a click, dragged out, copied, shown in its folder.
       The results stay listed across restarts of the hub (history.py).
+      Like a farm's queue it pauses, waiting jobs are reordered (a row's
+      menu), and "when the jobs are done" plays a sound or shuts the
+      computer down (page_queue.py);
+    - a watched render folder (page_watch.py): sequences that finish
+      appearing in it become videos with To video's settings.
+
+    Results are named by a template with tokens ("{name}_{date}_v{n}",
+    core/media/names.py; the folder button's menu).
 
     While jobs run, the window's taskbar button shows how far the batch is;
     when the last one is over and the user is looking elsewhere, the system
@@ -68,7 +78,7 @@ class MediaPage(_OutputMixin, _JobsMixin, _DropsMixin, qt.QtWidgets.QWidget):
 
     Nothing is copied: sources stay where they are. Settings:
     Resources().configsDesktopHubMng "media" — `settings` (ffmpeg_path,
-    output_folder, action, notify), `panels` (each panel's choices),
+    output_folder, action, notify, name_template, when_done, watch_folder), `panels` (each panel's choices),
     `presets`; the results list is `history.json` next to it.
     """
 
@@ -226,6 +236,8 @@ class MediaPage(_OutputMixin, _JobsMixin, _DropsMixin, qt.QtWidgets.QWidget):
         self._clear_button = link_button("Clear finished", "Take the jobs that are over off the list (their files stay)")
         self._queue = JobQueue(self._ffmpeg.tools, self)
         self._job_list = JobList(self._queue)
+        self._build_queue_controls()
+        self._build_watch_bar()
 
     def _build_layout(self) -> None:
         header = qt.QtWidgets.QHBoxLayout()
@@ -292,6 +304,9 @@ class MediaPage(_OutputMixin, _JobsMixin, _DropsMixin, qt.QtWidgets.QWidget):
         jobs.setSpacing(8)
         jobs.addWidget(self._jobs_icon)
         jobs.addWidget(self._jobs_title, 1)
+        jobs.addWidget(self._when_done_note)
+        jobs.addWidget(self._pause_button)
+        jobs.addWidget(self._when_done_button)
         jobs.addWidget(self._clear_button)
         jobs.addWidget(self._jobs_fold)
         jobs_card = qt.QtWidgets.QVBoxLayout(self._jobs_card)
@@ -310,6 +325,8 @@ class MediaPage(_OutputMixin, _JobsMixin, _DropsMixin, qt.QtWidgets.QWidget):
         layout.addWidget(self._actions)
         layout.addWidget(self._action_card)
         layout.addWidget(self._message_label)
+        layout.addWidget(self._shutdown_bar)
+        layout.addWidget(self._watch_bar)
         layout.addWidget(self._jobs_card, 1)
         layout.addWidget(self._filler, 1)
         self._set_jobs_folded(bool(self._settings.get("jobs_folded", False)), remember=False)

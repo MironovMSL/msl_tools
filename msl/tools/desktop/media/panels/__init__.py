@@ -11,7 +11,7 @@ business (core/media/recipes.py), never the panel's.
     frames.py    To frames
     adjust.py    Adjust
     simple.py    Stamp, Loop, Sound, GIF, For editing, Fit a shape, Contact sheet
-    combine.py   Several at once, Join, Compare
+    combine.py   Several at once, Join, Dailies, Compare
 
 PANELS lists them in the order the action picker shows them.
 """
@@ -23,7 +23,7 @@ from msl_tools.msl.tools.desktop.media.panels.frames import FramesPanel
 from msl_tools.msl.tools.desktop.media.panels.adjust import AdjustPanel
 from msl_tools.msl.tools.desktop.media.panels.simple import (StampPanel, LoopPanel, SoundPanel, GifPanel, EditingPanel,
                                                              FitPanel, SheetPanel)
-from msl_tools.msl.tools.desktop.media.panels.combine import ChainPanel, JoinPanel, ComparePanel
+from msl_tools.msl.tools.desktop.media.panels.combine import ChainPanel, JoinPanel, DailiesPanel, ComparePanel
 
 PANELS = (SequencePanel, ReframePanel, ShrinkPanel, TrimPanel, LoopPanel, StampPanel, SoundPanel, AdjustPanel,
-          FitPanel, GifPanel, FramesPanel, SheetPanel, EditingPanel, ChainPanel, JoinPanel, ComparePanel)
+          FitPanel, GifPanel, FramesPanel, SheetPanel, EditingPanel, ChainPanel, JoinPanel, DailiesPanel, ComparePanel)

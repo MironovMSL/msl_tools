@@ -110,7 +110,8 @@ class OptionPanel(qt.QtWidgets.QFrame):
         accepts(sources) — is this action offered for these sources
         set_sources(sources) — new sources were loaded
         job(source, output) / combined_job(sources, output) — may raise MediaError
-        output_for(source, folder, taken) — the default name of a result
+        output_for(source, folder, taken, template) — the default name of a result (`template`:
+                  the page's name template, core/media/names.py; "" = "<name><TAG>")
         settings() / apply_settings(dict) — what is remembered and what a preset holds
 
     `tools` (given by the page) is a callable returning the FfmpegTools in
@@ -149,7 +150,8 @@ class OptionPanel(qt.QtWidgets.QFrame):
     def _add_row(self, caption: str, *widgets, hint: str = "") -> int:
         """Adds a row: the caption, then the widgets left to right. A line
         edit without a fixed width (or a label that wraps) takes the room
-        that is left; otherwise the row ends empty. Returns the row's index
+        that is left (so does any widget with the property grows=True);
+        otherwise the row ends empty. Returns the row's index
         for _set_row_visible()."""
         row = self._form.rowCount()
         label = qt.QtWidgets.QLabel(caption)
@@ -161,7 +163,8 @@ class OptionPanel(qt.QtWidgets.QFrame):
         stretches = False
         for widget in widgets:
             grows = (isinstance(widget, (qt.QtWidgets.QLineEdit, RangeStrip, ChipBar, CropPicker))
-                     and widget.maximumWidth() > 1000)                 or (isinstance(widget, qt.QtWidgets.QLabel) and widget.wordWrap())
+                     and widget.maximumWidth() > 1000) \
+                or (isinstance(widget, qt.QtWidgets.QLabel) and widget.wordWrap()) or bool(widget.property("grows"))
             stretches = stretches or grows
             line.addWidget(widget, 1 if grows else 0)
         if hint:
@@ -276,8 +279,9 @@ class OptionPanel(qt.QtWidgets.QFrame):
     TAG = ""  # what is added to the source's name for the result
     INTO_FOLDER = False  # the result is a FOLDER of files (frames), not one file
 
-    def output_for(self, source: MediaSource, folder=None, taken=()) -> Path:
-        return default_output(source.sequence or source.path, self.TAG, self.suffix(source), folder=folder, taken=taken)
+    def output_for(self, source: MediaSource, folder=None, taken=(), template: str = "") -> Path:
+        return default_output(source.sequence or source.path, self.TAG, self.suffix(source), folder=folder, taken=taken,
+                              template=template)
 
     def settings(self) -> dict:
         return {}

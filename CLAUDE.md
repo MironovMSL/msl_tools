@@ -223,7 +223,7 @@ msl_tools/                 (repo root)
     named by what the icon IS, not the gesture (`drag_handle`, not
     `dragAndDrop`). Categories: `window/` (chrome: close/maximize/...),
     `actions/` (row/toolbar actions: `drag_handle`, `copy`, `delete`,
-    `browse`, `folder_add`, `file_video`, `bookmark`, `bookmark_add`, `save`, `file_add`, `chevron_right`, `eye`, `folder_into`, `compress`, `scissors`, `repeat`, `text_frame`, `volume`, `gif`, `image_stack`, `clapper`, `crop`, `merge`, `split_view`, `film` (the Media actions), `clear`, `arrow_right`, `chevron_down`, `add`, `check`, `select_all`, `more`, `report`, `code`, `restart`, `power`, `play`, `edit`, `scene`, `stop`; add new action icons here),
+    `browse`, `folder_add`, `file_video`, `bookmark`, `bookmark_add`, `save`, `file_add`, `chevron_right`, `eye`, `folder_into`, `compress`, `scissors`, `repeat`, `text_frame`, `volume`, `gif`, `image_stack`, `clapper`, `crop`, `merge`, `split_view`, `film`, `timeline`, `folder_watch`, `pause`, `bell` (the Media actions and its queue), `clear`, `arrow_right`, `chevron_down`, `add`, `check`, `select_all`, `more`, `report`, `code`, `restart`, `power`, `play`, `edit`, `scene`, `stop`; add new action icons here),
     `apps/` (third-party application logos: `maya`; later houdini, blender...
     — named after the app, not the tool that uses it, so several tools can
     share one), `tools/` (sidebar icons of our OWN hub tools, one-color like
@@ -274,6 +274,14 @@ msl_tools/                 (repo root)
   owner must then NOT write over it (`JsonConfig.read_only`, the stores'
   `_locked`). Before 0.1.8 a broken or locked config.json was silently
   replaced by the defaults.
+- **Background work** in a widget: `ui/workers/result_worker.py:run_in_background(target,
+  on_done, on_failed, keep=<list or set>, parent=)` — never a hand-made ResultWorker + list
+  bookkeeping (there were eight copies of that). Hub pages pass `parent=self` and their own list;
+  the Playblast panel / RunEnding keep a CLASS-level set and no parent (a panel inside Maya can be
+  deleted any moment).
+- **ctypes**: our own `ctypes.WinDLL("user32")` etc. whenever argtypes / restype are set —
+  never on `ctypes.windll.X`: that object is shared by the whole process (inside Maya: Maya's
+  and every other tool's calls), and our argtypes would change how theirs are passed.
 - **Unit tests**: `tests/` (stdlib `unittest`, nothing to install; run
   from the repo root: `py -3 -m unittest discover -s tests -t .`).
   Qt-free logic gets a test there; tests write only into temporary folders.
@@ -1483,8 +1491,51 @@ frames · For editing · Adjust · Join (2+ videos) · Compare (exactly 2).
   offered another name; `idle`), `JobList` / `_JobRow` (state dot, progress bar
   while running, then size + time; Copy / Show, Cancel while it runs).
 - Config `configs/desktop/media/config.json`: `settings` (ffmpeg_path,
-  output_folder, action — the last picked one), `panels.<key>` (each
-  panel's remembered choices), `presets.<key>`.
+  output_folder, action — the last picked one, name_template, when_done,
+  watch_folder), `panels.<key>` (each panel's remembered choices), `presets.<key>`.
+- The farm round (2026-10-05, items 10-13 of the user's list):
+  - NAMES from a template (`core/media/names.py`): {name} {action} (the
+    panel's TAG without "_") {date} {time} {n} (001, one past the highest
+    of that name in the folder AND among queued outputs); "" = the classic
+    `<name><TAG>` (`default_output(template=)`, `OptionPanel.output_for(...,
+    template)`). `settings.name_template`, set in the folder button's menu
+    ("Names: …") through `name_dialog.py` NameTemplateDialog (ready ones as
+    chips, a live example, unknown tokens refused).
+  - The QUEUE like a farm's (`JobQueue.pause()` / `resume()` /
+    `move(id, steps)` / `run_next` / `run_last`; a waiting row's menu:
+    Run next · Sooner · Later · Run last). Pause FREEZES the running ffmpeg
+    (`FfmpegRunner.pause()` -> `core/environment/processes.py:
+    suspend_process` = NtSuspendProcess; measured: the progress stands
+    still, the job finishes fine after resume; its paused time isn't
+    counted) and starts nothing; a pause doesn't outlive its batch (idle
+    unpauses). "When the jobs are done" (`page_queue.py` _QueueMixin, the
+    bell in the jobs header; "paused · then shut down" beside it): Nothing
+    / Play a sound (`system_actions.chime`, remembered) / Shut the computer
+    down — NOT remembered, armed for the queue of now, disarmed once fired:
+    `shutdown /s /t 120` and a warning bar with the countdown + "Cancel the
+    shutdown" (`shutdown /a`). Only if something ran (all cancelled = no).
+    Tests replace `system_actions.schedule_shutdown` / `cancel_shutdown` —
+    a test must never reach the real one.
+  - A WATCHED render folder (`core/media/watch.py` FolderWatch +
+    `page_watch.py` _WatchMixin; the folder menu's "Watch a render
+    folder…", a bar over the jobs with Stop): every 3 s the folder and its
+    sub-folders one level down are listed on a worker; what is there at the
+    start is the baseline; a sequence that grew and then stayed quiet for
+    SETTLE_SECONDS (8) is read (load_source) and queued with To video's
+    settings (`SequencePanel.job(use_sound=False)`) under the name template;
+    a re-render replaces the video the watch made of it. Not kept across
+    restarts (a forgotten watch would fill a disk); the last folder is.
+  - DAILIES (`panels/combine.py` DailiesPanel, `recipes.dailies`): videos
+    in one reel — fitted into the first clip's size / rate like Join —,
+    each with its caption burnt in top left ("{n}  ·  {name}" pattern, a
+    clip's own caption typed over it), "2 / 5" top right, a black slate
+    before each (Off / 1 s / 2 s; silent `anullsrc` under it when every clip
+    has sound; every clip's sound `aformat`ted to 48 kHz stereo for the
+    concat). The order is set in the panel (↑ ↓ per clip). Checked on 8.0:
+    lengths add up exactly (3.27 + 5 + 3.27 + 3 x 1 s = 14.53 s).
+    `_add_row` lets any widget with the property grows=True take the row.
+  Verified offscreen against real ffmpeg 8.0 (`sandbox/`): every one of
+  these end to end, with screenshots in the styled hub.
 - The result never replaces its own source; an existing file is asked
   about (ConfirmDialog); "Save as" suggests a free name next to the source
   (`default_output`) unless the user typed one.

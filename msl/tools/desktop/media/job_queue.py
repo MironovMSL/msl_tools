@@ -42,6 +42,7 @@ class QueueItem:
         gone: A result from an earlier run of the hub whose file isn't there any more.
         thumbnail: A small picture of the result, once it was made (None: not yet, or it has none).
         recipe: What made it — {"action", "settings", "sources"} — so it can be set up again ({} = unknown).
+        paused: A running job frozen by JobQueue.pause().
     """
 
     id: int
@@ -59,6 +60,7 @@ class QueueItem:
     gone: bool = False
     thumbnail: Path | None = None
     recipe: dict = field(default_factory=dict)
+    paused: bool = False
 
 
 class JobQueue(qt.QtCore.QObject):
@@ -73,6 +75,10 @@ class JobQueue(qt.QtCore.QObject):
     Results of earlier runs of the hub come back through restore() as
     finished items; results() is what there is to keep for the next run.
 
+    Like a render farm's queue it can be PAUSED (pause(): the running ffmpeg
+    is frozen where it is, nothing else starts; resume() goes on) and its
+    waiting jobs reordered (run_next / move / run_last).
+
     Every finished result gets a small picture (QueueItem.thumbnail), made
     one after another on a worker thread; `changed` follows when one is
     there. refresh_thumbnails() makes the ones still owed — call it when
@@ -82,6 +88,7 @@ class JobQueue(qt.QtCore.QObject):
         added(object) / changed(object) — a QueueItem appeared / moved on.
         removed(int) — the item with this id is gone from the queue.
         idle() — the last job of the line is over (nothing waits or runs).
+        paused_changed(bool) — the queue was paused (True) or goes on again.
     """
 
     added = qt.QtCore.Signal(object)
@@ -89,6 +96,7 @@ class JobQueue(qt.QtCore.QObject):
     removed = qt.QtCore.Signal(int)
     moved = qt.QtCore.Signal()   # the order of the jobs changed
     idle = qt.QtCore.Signal()
+    paused_changed = qt.QtCore.Signal(bool)
 
     def __init__(self, tools, parent=None):
         super().__init__(parent)
@@ -97,6 +105,8 @@ class JobQueue(qt.QtCore.QObject):
         self._next_id = 1
         self._current: QueueItem | None = None
         self._started = 0.0
+        self._paused = False
+        self._paused_at = 0.0      # when the running job was paused (its time doesn't count)
         self._batch: list[QueueItem] = []
         self._last_batch: list[QueueItem] = []
         self._thumbnails_owed: list[QueueItem] = []
@@ -188,15 +198,66 @@ class JobQueue(qt.QtCore.QObject):
 
     def run_next(self, item_id: int) -> None:
         """A waiting job goes to the front of the line: it starts as soon as the running one is over."""
+        waiting = self.waiting()
+        if any(item.id == item_id for item in waiting):
+            self.move(item_id, -len(waiting))
+
+    def run_last(self, item_id: int) -> None:
+        """A waiting job goes to the end of the line."""
+        waiting = self.waiting()
+        if any(item.id == item_id for item in waiting):
+            self.move(item_id, len(waiting))
+
+    def waiting(self) -> list[QueueItem]:
+        """The jobs still to run, in the order they will."""
+        return [item for item in self._items if item.state == WAITING]
+
+    def move(self, item_id: int, steps: int) -> None:
+        """Moves a waiting job `steps` places among the WAITING ones (negative = sooner)."""
+        waiting = self.waiting()
         item = self._find(item_id)
-        if item is None or item.state != WAITING:
+        if item not in waiting or not steps:
             return
-        first = next((other for other in self._items if other.state == WAITING), None)
-        if first is item:
+        place = min(max(waiting.index(item) + steps, 0), len(waiting) - 1)
+        if waiting[place] is item:
             return
-        self._items.remove(item)
-        self._items.insert(self._items.index(first), item)
+        others = [other for other in waiting if other is not item]
+        others.insert(place, item)
+        # the waiting jobs take the same slots of the list, in their new order
+        slots = [index for index, other in enumerate(self._items) if other.state == WAITING]
+        for index, other in zip(slots, others):
+            self._items[index] = other
         self.moved.emit()
+
+    def is_paused(self) -> bool:
+        return self._paused
+
+    def pause(self) -> None:
+        """Holds the line: the running job is frozen where it is (if the system lets it be — else it
+        finishes), nothing else starts until resume()."""
+        if self._paused:
+            return
+        self._paused = True
+        if self._current is not None and self._runner.pause():
+            self._paused_at = time.time()
+            self._current.paused = True
+            self.changed.emit(self._current)
+        self.paused_changed.emit(True)
+
+    def resume(self) -> None:
+        if not self._paused:
+            return
+        self._paused = False
+        if self._paused_at:
+            self._started += time.time() - self._paused_at  # the pause isn't the job's time
+            self._paused_at = 0.0
+        self._runner.resume()
+        if self._current is not None and self._current.paused:
+            self._current.paused = False
+            self.changed.emit(self._current)
+        self.paused_changed.emit(False)
+        self._start_next()
+        self._check_idle()  # every job may have failed at once (no ffmpeg): the batch is over then
 
     def overall(self) -> float:
         """How far the current batch is, 0..1 (1 when nothing waits or runs)."""
@@ -242,7 +303,7 @@ class JobQueue(qt.QtCore.QObject):
         return next((item for item in self._items if item.id == item_id), None)
 
     def _start_next(self) -> None:
-        if self._current is not None:
+        if self._current is not None or self._paused:
             return
         item = next((item for item in self._items if item.state == WAITING), None)
         if item is None:
@@ -266,7 +327,11 @@ class JobQueue(qt.QtCore.QObject):
 
     def _on_finished(self, ok: bool, message: str) -> None:
         item, self._current = self._current, None
+        if self._paused_at:  # it ended while paused (cancelled)
+            self._started += time.time() - self._paused_at
+            self._paused_at = 0.0
         if item is not None:
+            item.paused = False
             item.finished = time.time()
             item.seconds = item.finished - self._started
             if ok:
@@ -293,6 +358,9 @@ class JobQueue(qt.QtCore.QObject):
         """The batch is over once nothing of it waits or runs."""
         if self._batch and self._current is None and all(item.state != WAITING for item in self._batch):
             self._last_batch, self._batch = self._batch, []
+            if self._paused:  # nothing left to hold: a job added later must not wait for a forgotten pause
+                self._paused = False
+                self.paused_changed.emit(False)
             self.idle.emit()
 
 
@@ -384,6 +452,8 @@ class _JobRow(qt.QtWidgets.QFrame):
     remove_requested = qt.QtCore.Signal(int)
     again_requested = qt.QtCore.Signal(int)
     run_next_requested = qt.QtCore.Signal(int)
+    move_requested = qt.QtCore.Signal(int, int)   # item id, places to move (negative = sooner)
+    run_last_requested = qt.QtCore.Signal(int)
     show_requested = qt.QtCore.Signal(int)
     open_requested = qt.QtCore.Signal(int)
     command_requested = qt.QtCore.Signal(int)
@@ -536,6 +606,8 @@ class _JobRow(qt.QtWidgets.QFrame):
             self.update()
         if state == WAITING:
             text = "waiting"
+        elif running and item.paused:
+            text = (f"paused at {int(item.fraction * 100)}%" if item.fraction >= 0 else "paused")
         elif running:
             text = (f"{int(item.fraction * 100)}%" if item.fraction >= 0 else "working")
             if item.speed:
@@ -589,6 +661,9 @@ class _JobRow(qt.QtWidgets.QFrame):
             menu.addAction("Command").triggered.connect(lambda: self.command_requested.emit(self.item_id))
         if self._state == WAITING:
             menu.addAction("Run next").triggered.connect(lambda: self.run_next_requested.emit(self.item_id))
+            menu.addAction("Sooner").triggered.connect(lambda: self.move_requested.emit(self.item_id, -1))
+            menu.addAction("Later").triggered.connect(lambda: self.move_requested.emit(self.item_id, 1))
+            menu.addAction("Run last").triggered.connect(lambda: self.run_last_requested.emit(self.item_id))
         if self._has_recipe and self._state in (DONE, FAILED, CANCELLED):
             menu.addAction("Set up again").triggered.connect(lambda: self.again_requested.emit(self.item_id))
         if self._state in (WAITING, RUNNING):
@@ -656,6 +731,8 @@ class JobList(qt.QtWidgets.QWidget):
         row.command_requested.connect(lambda item_id: self._forward(self.command_requested, item_id))
         row.again_requested.connect(lambda item_id: self._forward(self.again_requested, item_id))
         row.run_next_requested.connect(self._queue.run_next)
+        row.move_requested.connect(self._queue.move)
+        row.run_last_requested.connect(self._queue.run_last)
         self._rows[item.id] = row
         self._list.insertWidget(0, row)  # newest on top
         self._empty.hide()

@@ -201,3 +201,20 @@ MediaPage QLabel#mediaJobDot[state="cancelled"] {
     background-color: transparent;
     border: 1px solid var(--text-secondary);
 }
+
+/* The queue's state beside the jobs' header: "paused · then shut down" (warning while a shutdown is armed). */
+MediaPage QLabel#mediaWhenDone                   { color: var(--text-secondary); font-size: 11px; }
+MediaPage QLabel#mediaWhenDone[state="shutdown"] { color: var(--warning); }
+/* "The computer shuts down in 1:52 — Cancel the shutdown" and the watched render folder. */
+MediaPage QFrame#mediaShutdown {
+    background-color: alpha(var(--warning), 12%);
+    border: 1px solid alpha(var(--warning), 40%);
+    border-radius: 6px;
+}
+MediaPage QLabel#mediaShutdownText { color: var(--text-primary); }
+MediaPage QFrame#mediaWatch {
+    background-color: alpha(var(--accent), 8%);
+    border: 1px solid alpha(var(--accent), 35%);
+    border-radius: 6px;
+}
+MediaPage QLabel#mediaWatchText { color: var(--text-primary); }

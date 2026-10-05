@@ -102,8 +102,10 @@ class SequencePanel(_OverlayRows, OptionPanel):
     def suffix(self, source: MediaSource) -> str:
         return FORMATS[VIDEO_FORMATS[self._format.current()]][2]
 
-    def job(self, source: MediaSource, output: Path) -> Job:
-        sound = self._sound.text().strip()
+    def job(self, source: MediaSource, output: Path, use_sound: bool = True) -> Job:
+        """`use_sound` False: without the sound field's file (a watched folder's renders aren't the
+        sequence that sound was picked for)."""
+        sound = self._sound.text().strip() if use_sound else ""
         if sound and not Path(sound).is_file():
             raise MediaError(f"The sound file isn’t there: {sound}")
         try:

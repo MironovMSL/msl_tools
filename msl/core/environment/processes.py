@@ -93,3 +93,43 @@ def process_memory(pid: int) -> int | None:
         return int(counters.WorkingSetSize)
     finally:
         kernel.CloseHandle(handle)
+
+
+def suspend_process(pid: int) -> bool:
+    """Freezes process `pid` where it is (every thread of it) until resume_process(). True if it
+    worked. A frozen process holds its memory and files; ending it while frozen is fine."""
+    return _suspend_or_resume(pid, True)
+
+
+def resume_process(pid: int) -> bool:
+    """Lets a process frozen by suspend_process() go on. True if it worked."""
+    return _suspend_or_resume(pid, False)
+
+
+def _suspend_or_resume(pid: int, suspend: bool) -> bool:
+    if pid <= 0:
+        return False
+    if sys.platform == "win32":
+        import ctypes
+        from ctypes import wintypes
+        kernel = ctypes.WinDLL("kernel32")
+        ntdll = ctypes.WinDLL("ntdll")
+        kernel.OpenProcess.restype = wintypes.HANDLE
+        kernel.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+        kernel.CloseHandle.argtypes = (wintypes.HANDLE,)
+        call = ntdll.NtSuspendProcess if suspend else ntdll.NtResumeProcess
+        call.argtypes = (wintypes.HANDLE,)
+        call.restype = ctypes.c_long
+        handle = kernel.OpenProcess(0x0800, False, int(pid))  # PROCESS_SUSPEND_RESUME
+        if not handle:
+            return False
+        try:
+            return call(handle) == 0  # STATUS_SUCCESS
+        finally:
+            kernel.CloseHandle(handle)
+    import signal
+    try:
+        os.kill(pid, signal.SIGSTOP if suspend else signal.SIGCONT)
+    except OSError:
+        return False
+    return True
