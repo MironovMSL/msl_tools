@@ -1,0 +1,104 @@
+/*
+ * Batch tool styles (template) — registered with StylesheetBuilder.register_template() by
+ * page.py, appended after ui/theme/base.qss + widgets.qss. Same var()/alpha() syntax.
+ */
+
+BatchPage QFrame#batchCard {
+    background-color: var(--surface-raised);
+    border: 1px solid var(--border);
+    border-radius: 9px;
+}
+BatchPage QLabel#batchCardTitle {
+    color: var(--text-primary);
+    font-size: 11px;
+    font-weight: 700;
+}
+BatchPage TintedIcon#batchCardIcon {
+    qproperty-iconColor: var(--accent);
+}
+BatchPage QLabel#batchHint,
+BatchPage QLabel#batchSubtitle,
+BatchPage QLabel#batchCaption {
+    color: var(--text-secondary);
+}
+BatchPage QLabel#batchHint {
+    font-size: 11px;
+}
+BatchPage QLabel#batchNow {
+    color: var(--text-primary);
+    font-weight: 600;
+}
+BatchPage QLabel#batchPicture {
+    background-color: alpha(var(--text-primary), 8%);
+    color: var(--text-secondary);
+    border-radius: 5px;
+    font-size: 11px;
+}
+BatchPage QFrame#batchDivider {
+    background-color: alpha(var(--border), 70%);
+    border: none;
+}
+BatchPage GlyphButton#batchAction {
+    qproperty-glyphColor:       var(--accent);
+    qproperty-activeGlyphColor: var(--accent);
+    qproperty-highlightColor:   alpha(var(--accent), 16%);
+}
+BatchPage QLabel#batchMessage                { color: var(--text-secondary); }
+BatchPage QLabel#batchMessage[state="error"] { color: var(--error); }
+
+/* A job of the queue: a click picks it; while it renders the row fills from the left. */
+BatchPage QFrame#batchJob {
+    qproperty-progressColor: alpha(var(--accent), 16%);
+    qproperty-selectedColor: alpha(var(--accent), 9%);
+    qproperty-hoverColor:    alpha(var(--text-primary), 4%);
+    border: none;
+    border-bottom: 1px solid alpha(var(--border), 45%);
+}
+BatchPage QLabel#batchJobName {
+    color: var(--text-primary);
+    font-weight: 600;
+}
+BatchPage QLabel#batchJobLine {
+    color: var(--text-secondary);
+    font-size: 11px;
+}
+BatchPage QLabel#batchJobStatus {
+    color: var(--text-secondary);
+    font-size: 11px;
+}
+BatchPage QLabel#batchJobStatus[tone="running"] { color: var(--accent); }
+BatchPage QLabel#batchJobStatus[tone="done"]    { color: var(--success); }
+BatchPage QLabel#batchJobStatus[tone="warning"] { color: var(--warning); }
+BatchPage QLabel#batchJobStatus[tone="error"]   { color: var(--error); }
+/* Small pills: the renderer and how Maya runs. */
+BatchPage QLabel#batchPill {
+    color: var(--text-secondary);
+    background-color: alpha(var(--text-primary), 7%);
+    border-radius: 8px;
+    padding: 1px 8px;
+    font-size: 11px;
+}
+BatchPage QLabel#batchPill[tone="accent"] {
+    color: var(--accent);
+    background-color: alpha(var(--accent), 14%);
+}
+/* The check of the picked job: one line per finding. */
+BatchPage QLabel#batchIssue                 { color: var(--text-primary); }
+BatchPage QLabel#batchIssue[level="error"]   { color: var(--error); }
+BatchPage QLabel#batchIssue[level="warning"] { color: var(--warning); }
+BatchPage QLabel#batchIssue[level="ok"]      { color: var(--success); }
+BatchPage StableScrollArea#batchJobs {
+    background-color: transparent;
+    border: none;
+}
+/* "The computer shuts down in 1:52". */
+BatchPage QFrame#batchShutdown {
+    background-color: alpha(var(--warning), 12%);
+    border: 1px solid alpha(var(--warning), 40%);
+    border-radius: 6px;
+}
+BatchPage QPushButton#batchLink {
+    color: var(--accent);
+    padding: 2px 6px;
+    font-size: 11px;
+}

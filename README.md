@@ -11,6 +11,9 @@ One shortcut opens **MSL Tools**: a window with a sidebar of tools.
   you close, restart or recover one after a crash.
 - **Media** — video and image sequences without knowing ffmpeg: sequence to video, make
   smaller, trim, loop, burn-ins, sound, GIF, frames, contact sheet, compare, join and more.
+- **Batch** — Maya scenes rendered one after another without opening Maya: drop scenes in, each
+  is read and checked first (renderer, lights, camera, missing caches and textures), then
+  rendered with Arnold or the viewport renderer, frame by frame, and turned into a video.
 - **Playblast** (inside Maya 2025+, *MSL* menu) — playblasts through our own ffmpeg chain, with a
   shot mask drawn in the viewport, versions, several cameras at once and presets.
 

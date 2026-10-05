@@ -263,6 +263,17 @@ BarStrip {
     qproperty-mutedColor:  alpha(var(--text-secondary), 70%);
 }
 
+/* RingGauge: how far something is, as a ring (Batch's frames / jobs). */
+RingGauge {
+    qproperty-trackColor:   alpha(var(--text-primary), 10%);
+    qproperty-fillColor:    var(--accent);
+    qproperty-textColor:    var(--text-primary);
+    qproperty-captionColor: var(--text-secondary);
+}
+RingGauge#ringDone {
+    qproperty-fillColor:    var(--success);
+}
+
 /* --- LogView: log entries colored by level ------------------------------------------- */
 
 LogView {

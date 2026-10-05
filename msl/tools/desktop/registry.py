@@ -8,11 +8,12 @@ only in a developer's git checkout: an installed copy shows real tools only.
 """
 from pathlib import Path
 
-from msl_tools.msl.tools.desktop import maya_gate, media
+from msl_tools.msl.tools.desktop import batch, maya_gate, media
 
 TOOLS = [
     maya_gate.TOOL_DESCRIPTOR,
     media.TOOL_DESCRIPTOR,
+    batch.TOOL_DESCRIPTOR,
 ]
 
 if (Path(__file__).resolve().parents[3] / ".git").exists():

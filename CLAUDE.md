@@ -56,9 +56,10 @@ msl_tools/                 (repo root)
             desktop/            NEW: tools that run as part of the desktop hub
                 maya_gate/        fully ported Maya Gate tool (see below)
                 media/            Media: video and image sequences through ffmpeg (see "Media tool")
+                batch/            Batch: Maya scenes rendered one after another, Maya closed (see "Batch tool")
                 installer/        InstallerView — the setup window (not a hub tool, not in the registry)
                 stub_a/, stub_b/  placeholder tools used to test hub navigation
-            maya/               Maya-side tools (the MSL menu, hub_link, launch_report)
+            maya/               Maya-side tools (the MSL menu, hub_link, launch_report, batch_runner)
                 playblast/        Playblast: a dockable panel inside Maya 2025+ (see "Playblast tool")
 ```
 
@@ -227,7 +228,7 @@ msl_tools/                 (repo root)
     `apps/` (third-party application logos: `maya`; later houdini, blender...
     — named after the app, not the tool that uses it, so several tools can
     share one), `tools/` (sidebar icons of our OWN hub tools, one-color like
-    action icons: `cube`, `layers` — the stub tools' placeholders), `plugins/`
+    action icons: `media`, `batch`; `cube`, `layers` — the stub tools' placeholders), `plugins/`
     (Maya plug-in families on the Boost start tab, our own neutral glyphs —
     NOT the vendors' logos: `plugin` (any), `bifrost`, `arnold`, `xgen`,
     `mash`, `usd`, `bullet`, `redshift`, `flow`, `lookdevx`; the file name is
@@ -985,6 +986,7 @@ atoms/buttons/icon_tile_button.py         IconTileButton (QToolButton tile: QSS-
 atoms/icons/tinted_icon.py                TintedIcon (passive one-color icon tinted from QSS: qproperty-iconColor; dimmed when disabled)
 atoms/buttons/glyph_button.py             GlyphButton (custom-painted small icon button; QPushButton's QSS padding leaves no room for a glyph at ~20px)
 atoms/comboboxes/base_combo_box.py        BaseComboBox (was QCustomComboBox)
+atoms/charts/ring_gauge.py                RingGauge (how far something is as a ring filling clockwise, a value in the middle, a caption under it; animated; qproperty trackColor / fillColor / textColor / captionColor; #ringDone = the success tone)
 atoms/charts/bar_strip.py                 BarStrip (a handful of measurements as thin bars in two tones, each with a tooltip; scaled from zero; qproperty accentColor / mutedColor)
 atoms/layouts/flow_layout.py              FlowLayout (items left to right, wrapping like words; height-for-width; hidden widgets take no room)
 atoms/editors/token_line_edit.py          TokenLineEdit (a line edit whose text may hold {tokens}: a right click lists them and the picked one goes in WHERE THE CLICK WAS; Cut / Copy / Paste stay in that menu; insert_token() for a button beside it; token_inserted(str), focused())
@@ -1941,6 +1943,74 @@ came from: CLAUDE.local.md). Step 1 of 4 is built (2026-10-03):
   result into the hub's Media jobs; the rest of the idea list given to
   the user on 2026-10-03 (compare with the previous one, repeat the
   last on a hotkey, an estimate, a light copy for a messenger...).
+
+## Batch tool
+
+`msl/tools/desktop/batch/` (hub sidebar "Batch", icon `tools/batch`; built 2026-10-05 after a
+spike, see below) — Maya scenes rendered one after another without the user opening Maya. Look
+after the user's reference (a Blender "Batch Render Creator" video): a summary card (two
+`RingGauge`s — frames, scenes done —, the job / frame at work + s per frame, "about N min left ·
+done around HH:MM", the last frame written, a click opens it), Add scenes / Start-Stop / Pause /
+the bell ("when done": nothing / a sound / shut down — once, like Media), the QUEUE (`JobRow`:
+on/off, the last frame as a picture, scene, camera · frames · size, renderer pill ("Arnold ·
+auto"), "with Maya" / "no window", status, a "more" menu — read again, render again, duplicate,
+show frames / video / scene, sooner / later, remove; a running row fills from the left), and the
+picked job's CHECK + SETTINGS (`JobDetails`: Maya, renderer, camera, frames, size 100/50/25 %,
+"Maya runs" With Maya / No window, folder, "then make a video"). Scenes are dropped anywhere on
+the page (.ma / .mb). The queue lives in `configs/desktop/batch/queue.json` (`BatchStore`, safe_json);
+a job interrupted by the hub closing waits and goes on from its first missing frame.
+
+- `core/batch/` (Qt-free): `frames.py` parse_frames / format_frames ("1-120, 200", "1 20 78",
+  "1-100x5", "1..10"); `job.py` BatchJob (settings — empty = the scene's — + state, probe, done,
+  seconds, last_file, video) / BatchStore; `checks.py` check(job) -> Issues ERROR (won't render: the
+  renderer isn't installed, no light for Arnold / Redshift, an animation cache or a reference
+  missing, the camera gone, bad frames) / WARNING (missing textures, plug-ins the scene asks for,
+  Arnold AA > 7) / OK; `choose_renderer` (AUTO = the scene's; "mayaSoftware" + an unknown
+  redshift4maya = REDSHIFT; else Arnold); `commands.py` pick_maya (the job's; else the version the
+  scene was saved with if installed — read from its first 64 KB —; else the oldest installed one
+  newer; else the newest), clean_environment (drops the hub's PYTHONPATH / PYTHONHOME / venv / Qt
+  variables, MAYA_DISABLE_CIP / CER), write_task, command, missing_runs, read_progress.
+- `tools/maya/batch_runner.py` — runs INSIDE Maya, SELF-CONTAINED (stdlib + maya), PLAIN ASCII and
+  PYTHON-2.7-VALID (a 2018 scene picks Maya 2020 here: the first version of the runner failed
+  there on a non-ASCII docstring). Modes from a task JSON: "probe" (renderer, renderers available,
+  unknown plug-ins, cameras + renderable, resolution, playback / render range, time unit, lights of
+  every family incl. Arnold / Redshift, textures (UDIM / 1001 tiles count as there), Alembic
+  caches, references, render setup layers -> probe.json) and "render" (Arnold, frame by frame;
+  what it changes — the renderable camera, png driver, prefix, animation on, size, the images
+  file rule — is changed IN MEMORY, the scene is never saved; frames already on disk skipped).
+  Events go as JSON lines to a progress file the hub tails (and to stdout with "@@MSL ").
+- THREE ROADS (`commands.command`), all measured with Maya 2024 (test scene, 3 frames 640x360:
+  whole runs 13-25 s incl. Maya's start):
+  1. Arnold, no window: `mayapy batch_runner.py task.json` + `cmds.arnoldRender(batch=True,
+     seq=str(f), camera=...)` per frame. WATERMARKED ("arnold" across the frame) without a BATCH
+     Arnold licence — the user's licence is interactive only (Arnold's log: "[clm.v2] entitlement
+     not found"). The same is true of `Render.exe -r arnold`.
+  2. Arnold, WITH MAYA (the default): `maya.exe -command` exec()s the runner (MSL_BATCH_TASK =
+     the task); it minimizes Maya's window, renders each frame interactively (`arnoldRender(width,
+     height, camera)`) and saves the Render View (`renderWindowEditor -writeImage`): CLEAN frames
+     (the interactive licence), then quits Maya. Needs `mtoa.core.createOptions()` first — a
+     windowed Maya has no defaultArnoldDriver until Arnold is first used.
+  3. Viewport (Hardware 2.0) and Redshift: `Render.exe -r hw2|redshift -cam -rd -im -of png -pad 4
+     -fnc 3 -s -e -x -y` — one Render.exe per run of missing frames (hw2 takes no `-seq` list:
+     "Invalid flag"); progress = the frame files appearing. NOT `-ehl true`: Maya 2024's
+     removeRenderLayerAdjustmentAndUnlock.mel fails ("No object matches name:
+     .enableHighQualityLighting") and nothing renders. Redshift isn't installed here: untried.
+- `runner.py` BatchRunner (Qt): one render Maya at a time + one probe Maya (scenes are read as soon
+  as they are added, also while a render runs); a scene with an ERROR isn't rendered; the
+  watchdog kills a Maya silent for STALL_S (15 min; +5 min before the first frame) and tries again
+  once (from the first missing frame); pause = suspend_process (as Media); after a job,
+  `make_video` -> `<frames folder>.mp4` beside the folder (sequence_to_video, gaps held, fps from
+  the scene's time unit; ffmpeg = Media's configured one, else found); the hub quitting kills the
+  queue's Mayas (aboutToQuit -> shutdown()).
+- The spike (2026-10-05): the user's horse scene had NO lights at all (black frames, both files
+  checked as text), no renderable camera, render range 1.25-12.5 with animation off, EXR, a 24 vs
+  30 fps reference — the check exists because of it. Their 4 GB 2018 scene (`ch_march...`) was
+  read in 50 s by Maya 2020: Redshift not installed, 2 Alembic caches and all 10 textures
+  missing — 2 problems, won't render.
+- Verified offscreen in the styled hub with real Maya 2024 (prefs COPY via
+  `runner.environment["MAYA_APP_DIR"]`): add -> probe (10 s) -> three jobs of the same scene
+  (headless Arnold, with Maya, Viewport), 3 frames each, all done, a video each. NOT tried: a long
+  real render, pause / the watchdog on a real hang, Redshift, a drop from the real Explorer.
 
 ## Maya module
 
