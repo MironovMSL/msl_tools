@@ -225,7 +225,7 @@ msl_tools/                 (repo root)
     named by what the icon IS, not the gesture (`drag_handle`, not
     `dragAndDrop`). Categories: `window/` (chrome: close/maximize/...),
     `actions/` (row/toolbar actions: `drag_handle`, `copy`, `delete`,
-    `browse`, `folder_add`, `file_video`, `bookmark`, `bookmark_add`, `save`, `file_add`, `chevron_right`, `eye`, `folder_into`, `compress`, `scissors`, `repeat`, `text_frame`, `volume`, `gif`, `image_stack`, `clapper`, `crop`, `merge`, `split_view`, `film`, `timeline`, `folder_watch`, `pause`, `bell` (the Media actions and its queue), `clear`, `arrow_right`, `chevron_down`, `add`, `check`, `select_all`, `more`, `report`, `code`, `restart`, `power`, `play`, `edit`, `scene`, `stop`, `lock`, `search`, `rename`, and the Rename tool's quick buttons: `case_upper`, `case_capital`, `case_lower`, `case_snake` (a snake), `case_camel` (a camel's humps), `cut_prefix`, `cut_suffix`, `cut_number`, `cut_digits`, `cut_first`, `cut_last`, `namespace_out`, `magic_fix`, `mirror_sides`, `shape_name`; add new action icons here),
+    `browse`, `folder_add`, `file_video`, `bookmark`, `bookmark_add`, `save`, `file_add`, `chevron_right`, `eye`, `folder_into`, `compress`, `scissors`, `repeat`, `text_frame`, `volume`, `gif`, `image_stack`, `clapper`, `crop`, `merge`, `split_view`, `film`, `timeline`, `folder_watch`, `pause`, `bell` (the Media actions and its queue), `clear`, `arrow_right`, `chevron_down`, `add`, `check`, `select_all`, `more`, `report`, `code`, `restart`, `power`, `play`, `edit`, `scene`, `stop`, `lock`, `search`, `rename`, and the Rename tool's quick buttons: `case_upper`, `case_capital`, `case_lower`, `case_snake` (a snake), `case_camel` (a camel's humps), `cut_prefix`, `cut_suffix`, `cut_number`, `cut_digits`, `cut_first`, `cut_last`, `namespace_out`, `magic_fix`, `sweep`, `mirror_sides`, `shape_name`, `warning`, `error`; add new action icons here),
     `apps/` (third-party application logos: `maya`; later houdini, blender...
     — named after the app, not the tool that uses it, so several tools can
     share one), `tools/` (sidebar icons of our OWN hub tools, one-color like
@@ -2111,6 +2111,25 @@ window's checks, written anew for this framework). Hotkeys: MSLRename, MSLRename
   ("Find in the list", a plain QLineEdit — no completion there, the user's call) narrows the list — renames act on what is shown ("2 of 7").
   Every signal that rebuilds the list (tick, lock, typed name, hover buttons, drop) is sent on the
   next turn of the event loop (see the TRAP above).
+- Clean-up round (2026-10-07, the user's 1 / 2 / 3 / 5 / 7 / 9): FIX by the convention
+  (`rules.convention_fix`: an old side word and a kind suffix taken off, the side where it stands
+  + its kind's suffix put on, a number kept for {#}; None when it can't be worked out — {A}, no
+  number; the OBJECTS convention row's "Fix"). CLEAN — quick button `actions/sweep`
+  (`rules.clean_import`: "pasted__" in front, a number glued to a known suffix arm_jnt1, "__");
+  `rules.notice` also marks Maya's own names (pCube3, group7, pasted__…) for "Bad names". MAKE
+  UNIQUE (`rules.unique_names` + `scene.all_short_names`: every repeated short name -> _01, _02…,
+  none of them taken; on the not-unique ones of the selection + below / the scene). Tokens
+  {parent} {root} (`Node.parent` / `.root`, short, no namespace; the OLD names when a parent is
+  renamed in the same go). NAME RELATED (`scene.related`: shading group <base>_SG, material
+  <base>_mtl, skinCluster _skin, blendShape _bs, constraints under an object _<kind suffix>; base =
+  the name without its kind suffix; a shading group / material used by several objects and Maya's
+  defaults are left alone — the reasons follow the status). Their buttons are HoverButtons: the
+  list shows what they would do while hovered. RECIPES (`recipes.py` RecipeStore over the
+  library node — the root JsonConfig has no get(): template + start / step / digits / order /
+  end; built-in Fingers / Spine / Controls / Offset groups / Numbered until changed; a ChipBar
+  under the name field: click = put it in (then Rename), the bookmark = save the current, the
+  matching one outlined, right click: save over / remove / back to the built-in ones).
+  Checked in windowed Maya 2025, every one end to end.
   Type icons: `buttons.maya_type_icon(kind)` = the Outliner's `:/out_<type>.png` (every built-in
   kind of the suffix list has one, Maya 2025); a type without one borrows the nearest one it
   derives from (`nodeType(kind, inherited=True, isTypeName=True)`: baseLattice, hikIKEffector

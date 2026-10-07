@@ -19,10 +19,11 @@ import difflib
 import re
 from dataclasses import dataclass, field
 
-TOKENS = ("{name}", "{#}", "{A}", "{a}", "{side}", "{type}")
+TOKENS = ("{name}", "{#}", "{A}", "{a}", "{side}", "{type}", "{parent}", "{root}")
 TOKEN_HELP = {"{name}": "the object's current name", "{#}": "a number: start, step and digits are set below",
               "{A}": "a letter: A, B, C ... Z, AA", "{a}": "a small letter: a, b, c",
-              "{side}": "lf / rt / mid — from where the object stands", "{type}": "a suffix from its kind: geo, jnt, grp"}
+              "{side}": "lf / rt / mid — from where the object stands", "{type}": "a suffix from its kind: geo, jnt, grp",
+              "{parent}": "the name of the object it sits under", "{root}": "the name of the top of its hierarchy"}
 _TOKEN = re.compile(r"\{[^{}]*\}")
 _VALID = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -62,6 +63,8 @@ class Node:
     locked: str = ""               # why it can't be renamed ("" = it can): referenced, locked, read-only
     uuid: str = ""
     siblings: tuple = ()           # names of the other objects under the same parent
+    parent: str = ""               # the parent's short name, without namespace ("" = at the top)
+    root: str = ""                 # the top of its hierarchy's short name, without namespace
 
     @property
     def kind(self) -> str:
@@ -189,7 +192,7 @@ def expand(template: str, node: Node, position: int, numbering: Numbering, sides
     number = "end" if last and numbering.end_last else number_text(value, numbering.padding)
     replacements = {"{name}": node.name, "{#}": number,
                     "{A}": letters(letter), "{a}": letters(letter, upper=False),
-                    "{side}": side, "{type}": kind}
+                    "{side}": side, "{type}": kind, "{parent}": node.parent, "{root}": node.root}
     text = _TOKEN.sub(lambda match: replacements.get(match.group(0), match.group(0)), template)
     return tidy(text)
 
@@ -446,8 +449,18 @@ def problem(name: str) -> str:
     return ""
 
 
+# Names Maya gives by itself: a name nobody chose.
+_MAYA_DEFAULT = re.compile(r"^(?:p(?:Cube|Sphere|Cylinder|Cone|Plane|Torus|Pipe|Prism|Pyramid|Helix|SolidBody)|"
+                           r"polySurface|nurbs(?:Circle|Sphere|Cube|Plane|Cylinder|Cone|Torus|Square)|curve|"
+                           r"group|null|transform|locator|joint|camera|pasted__\w*)\d*$")
+
+
 def notice(name: str) -> str:
     """Not wrong, but worth a look ("" = nothing)."""
+    if name.startswith("pasted__"):
+        return "pasted__ left from an import"
+    if _MAYA_DEFAULT.match(name):
+        return "a name Maya gave by itself"
     if "__" in name:
         return "double underscore"
     if name.endswith("_") or name.startswith("_"):
@@ -535,7 +548,7 @@ def _convention_regex(pattern: str, sides: Sides, suffixes: dict):
             pieces.append("[A-Z]+")
         elif token == "{a}":
             pieces.append("[a-z]+")
-        elif token == "{name}":
+        elif token in ("{name}", "{parent}", "{root}"):
             pieces.append(r"[A-Za-z0-9]+(?:_[A-Za-z0-9]+)*?")
         else:
             pieces.append(re.escape(token))
@@ -566,3 +579,74 @@ def convention_problem(node: Node, pattern: str, sides: Sides, suffixes: dict) -
         if expected and groups["type"] != expected:
             return f"ends with {groups['type']}, a {node.kind} gets {expected}"
     return ""
+
+
+def convention_fix(node: Node, pattern: str, sides: Sides, suffixes: dict) -> "str | None":
+    """The name `node` would have under the convention: its side and its kind's suffix put right,
+    what it says in between kept ("lf_arm_grp" of a mesh on the right -> "rt_arm_geo"). The name as
+    it is when it already follows; None when it can't be worked out (the convention numbers or
+    letters and the name has none, a letter token)."""
+    pattern = pattern.strip()
+    if not pattern or not convention_problem(node, pattern, sides, suffixes):
+        return node.name
+    if "{A}" in pattern or "{a}" in pattern:
+        return None
+    parts = [part for part in node.name.split("_") if part]
+    side_words = {text.lower() for text in KNOWN_SIDES} | {text.lower() for text in sides.prefixes.values() if text}
+    type_words = {text for text in suffixes.values() if text}
+    if len(parts) > 1 and parts[0].lower() in side_words:
+        parts = parts[1:]
+    number = ""
+    if "{#}" in pattern:
+        if len(parts) > 1 and (parts[-1].isdigit() or parts[-1] == "end"):
+            number = parts.pop()
+        elif len(parts) > 1 and parts[-2:-1] and (parts[-2].isdigit() or parts[-2] == "end") and parts[-1] in type_words:
+            number = parts.pop(-2)
+        else:
+            found = re.search(r"\d+$", parts[-1]) if parts else None
+            if found is None:
+                return None
+            number = found.group(0)
+            parts[-1] = parts[-1][:found.start()] or parts[-1]
+    if len(parts) > 1 and parts[-1] in type_words:
+        parts = parts[:-1]
+    base = "_".join(parts) or node.name
+    values = {"{name}": base, "{side}": sides.text(node.position), "{type}": suffixes.get(node.kind, ""),
+              "{#}": number, "{parent}": node.parent, "{root}": node.root}
+    result = tidy(_TOKEN.sub(lambda match: values.get(match.group(0), match.group(0)), pattern))
+    fixed = Node(path=node.path, name=result, type=node.type, shape_type=node.shape_type, position=node.position,
+                 parent=node.parent, root=node.root)
+    return result if not convention_problem(fixed, pattern, sides, suffixes) else None
+
+
+def clean_import(name: str, suffixes: "dict | None" = None) -> str:
+    """What an import or a Duplicate leaves, taken off: "pasted__" in front (however many), a
+    number glued to a known suffix ("arm_jnt1" -> "arm_jnt"), "__", "_" at the ends."""
+    text = re.sub(r"^(?:pasted__)+", "", name)
+    words = sorted({text for text in (suffixes or DEFAULT_TYPE_SUFFIXES).values() if text}, key=len, reverse=True)
+    if words:
+        text = re.sub(r"(_(?:%s))\d+$" % "|".join(map(re.escape, words)), r"\1", text)
+    text = tidy(text)
+    return text or name
+
+
+def unique_names(nodes: list[Node], taken: set) -> list[str]:
+    """New names for objects whose short name occurs more than once (among `nodes` or in `taken`,
+    the scene's other names): each gets "_01", "_02"... — the first number not taken. The rest keep
+    their names."""
+    counts: dict = {}
+    for node in nodes:
+        counts[node.name] = counts.get(node.name, 0) + 1
+    used = set(taken) | {node.name for node in nodes}
+    result = []
+    for node in nodes:
+        if counts[node.name] < 2 and node.name not in taken:
+            result.append(node.name)
+            continue
+        index = 1
+        while f"{node.name}_{index:02d}" in used:
+            index += 1
+        new = f"{node.name}_{index:02d}"
+        used.add(new)
+        result.append(new)
+    return result

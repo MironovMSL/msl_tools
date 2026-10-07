@@ -40,6 +40,24 @@ class _ObjectsMixin:
         for button in (self._check_same, self._check_bad, self._check_skin, self._check_other):
             row.addWidget(button)
         row.addStretch(1)
+        from msl_tools.msl.tools.maya.rename.buttons import HoverButton
+        clean_caption = qt.QtWidgets.QLabel("CLEAN UP — the list shows what a button does while the pointer is on it")
+        clean_caption.setObjectName("renameSubtitle")
+        clean_caption.setWordWrap(True)
+        clean = qt.QtWidgets.QWidget()
+        cleans = qt.QtWidgets.QHBoxLayout(clean)
+        cleans.setContentsMargins(0, 0, 0, 0)
+        cleans.setSpacing(4)
+        self._make_unique = HoverButton("Make unique", "Names another object of the scene has too get _01, _02… "
+                                                       "(in the selection and under it, nothing selected: the scene)")
+        self._name_related = HoverButton("Name related", "Name what belongs to the listed objects after them: "
+                                                         "shading group body_SG, material body_mtl, body_skin, "
+                                                         "body_bs, constraints arm_parCon…\n"
+                                                         "A shading group or material used by several objects is left alone")
+        for button in (self._make_unique, self._name_related):
+            cleans.addWidget(button)
+        cleans.addStretch(1)
+        self._clean_row = (clean_caption, clean)
         lock_caption = qt.QtWidgets.QLabel("LOCK — a locked node can't be renamed, deleted or re-parented "
                                            "(Maya shows it nowhere; here it has a lock in the list)")
         lock_caption.setObjectName("renameSubtitle")
@@ -74,12 +92,15 @@ class _ObjectsMixin:
         convention.setSpacing(4)
         convention.addWidget(self._convention, 1)
         convention.addWidget(self._check_convention)
+        self._fix_convention = HoverButton("Fix", "Put the listed names right by the convention: the side where the "
+                                                  "object stands, its kind's suffix — what it says in between stays")
+        convention.addWidget(self._fix_convention)
         sets_caption = qt.QtWidgets.QLabel("SETS — for this Maya session")
         sets_caption.setObjectName("renameSubtitle")
         self._sets = ChipBar(add_text="+ set of the selection", name_placeholder="Set name, then Enter",
                              custom_menu=True)
         self._sets.setToolTip("Click: select it · right click: add / take out the selection, a Maya set")
-        for widget in (checks_caption, checks, lock_caption, lock_row, convention_caption):
+        for widget in (checks_caption, checks) + self._clean_row + (lock_caption, lock_row, convention_caption):
             card.body_layout.addWidget(widget)
         card.body_layout.addLayout(convention)
         for widget in (sets_caption, self._sets):
@@ -98,6 +119,10 @@ class _ObjectsMixin:
         self._convention.textEdited.connect(self._on_convention_edited)
         self._convention.token_inserted.connect(self._on_convention_edited)
         self._check_convention.clicked.connect(self._on_check_convention)
+        for button, operation in ((self._make_unique, self._unique_operation), (self._name_related, self._related_operation),
+                                  (self._fix_convention, self._fix_operation)):
+            button.clicked.connect(lambda _checked=False, operation=operation: self._run_cleanup(operation))
+            button.hovered.connect(lambda on, operation=operation: self._set_hover(operation() if on else None))
         self._sets.clicked.connect(self._on_set)
         self._sets.add_requested.connect(self._on_add_set)
         self._sets.menu_requested.connect(self._on_set_menu)
@@ -155,6 +180,58 @@ class _ObjectsMixin:
     def _on_find_locked(self) -> None:
         found = scene.locked_ones(scene.look_in())
         self._select_found(found, "locked", "Nothing is locked")
+
+    # ------------------------------------------------------------------ clean up
+
+    def _unique_operation(self):
+        from msl_tools.msl.tools.maya.rename.operations import Operation
+        taken: set = set()
+
+        def found():
+            listed = scene.nodes(scene.not_unique(scene.look_in()))
+            taken.clear()
+            taken.update(scene.all_short_names())
+            return listed
+        return Operation("Make unique", lambda nodes: rules.unique_names(nodes, taken), nodes=found)
+
+    def _related_operation(self):
+        from msl_tools.msl.tools.maya.rename.operations import Operation
+        expected: dict = {}
+        notes: list = []
+        suffixes = self._suffixes()
+
+        def found():
+            related, names, left = scene.related(self._nodes, suffixes)
+            expected.clear()
+            expected.update({node.uuid: name for node, name in zip(related, names)})
+            notes[:] = left
+            return related
+        operation = Operation("Name related", lambda nodes: [expected.get(node.uuid, node.name) for node in nodes],
+                              nodes=found)
+        operation.notes = notes
+        return operation
+
+    def _fix_operation(self):
+        from msl_tools.msl.tools.maya.rename.operations import Operation
+        pattern = self._convention_pattern()
+        sides, suffixes = self._sides(), self._suffixes()
+        return Operation("Fix by the convention",
+                         lambda nodes: [rules.convention_fix(node, pattern, sides, suffixes) or node.name for node in nodes])
+
+    def _run_cleanup(self, make) -> None:
+        operation = make()
+        if operation.label == "Fix by the convention" and not self._convention_pattern():
+            self._say("Type the convention first, e.g. {side}_{name}_{type}", "error")
+            return
+        if operation.nodes is not None and not operation.nodes():
+            self._say({"Make unique": "Every name is unique already",
+                       "Name related": "Nothing belongs to the listed objects that could be named after them"}
+                      .get(operation.label, "Nothing to do"), "done")
+            return
+        self._run(operation)
+        left = getattr(operation, "notes", [])
+        if left:
+            self._say(self._status.text() + " · " + "; ".join(left[:2]), "done")
 
     def _on_check_other(self) -> None:
         nodes = scene.nodes(scene.selection())

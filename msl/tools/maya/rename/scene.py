@@ -141,8 +141,10 @@ def _node(path: str, referenced_ok: bool, children: dict) -> "Node | None":
     elif cmds.ls(path, readOnly=True):
         locked = "read-only"
     uuid = (cmds.ls(path, uuid=True) or [""])[0]
+    parent_name = path.rpartition("|")[0].rpartition("|")[2].rpartition(":")[2] if "|" in path else ""
+    root_name = path.split("|")[1].rpartition(":")[2] if path.startswith("|") else ""
     return Node(path=path, name=name, namespace=namespace, type=node_type, shape_type=shape_type,
-                position=position, locked=locked, uuid=uuid, siblings=siblings)
+                position=position, locked=locked, uuid=uuid, siblings=siblings, parent=parent_name, root=root_name)
 
 
 def selection_uuids() -> set:
@@ -324,3 +326,67 @@ def named(short_names: list[str]) -> list[str]:
         except RuntimeError:
             pass
     return _unique(found)
+
+
+def all_short_names() -> set:
+    """Every DAG object's short name in the scene, without namespaces — the names a new one
+    must not repeat."""
+    return {path.rpartition("|")[2].rpartition(":")[2] for path in cmds.ls(dag=True, long=True) or []}
+
+
+def related(items: list[Node], suffixes: dict) -> tuple[list[Node], list[str], list[str]]:
+    """The nodes that belong to `items` and are named after them: the shading group + material of
+    a mesh ("body_SG", "body_mtl"), its skinCluster ("body_skin"), its blendShape ("body_bs"), the
+    constraints under an object ("arm_parCon"...). The object's kind suffix is taken off first
+    (body_geo -> body). A shading group / material that other objects use too is left alone (no
+    one object's name fits it), Maya's own (initialShadingGroup, lambert1...) as well.
+    Returns (nodes, their new names, notes of what was left alone)."""
+    defaults = set(cmds.ls(defaultNodes=True) or []) | {"initialShadingGroup", "initialParticleSE", "lambert1",
+                                                         "standardSurface1", "particleCloud1"}
+    words = {text for text in suffixes.values() if text} | {"ctrl", "drv", "offset"}  # roles a base leaves too
+    found, names, notes, seen = [], [], [], set()
+
+    def add(node_name: str, new: str) -> None:
+        if node_name in seen or node_name in defaults or not cmds.objExists(node_name):
+            return
+        seen.add(node_name)
+        made = nodes([(cmds.ls(node_name, long=True) or [node_name])[0]])
+        if made:
+            found.append(made[0])
+            names.append(new)
+
+    for item in items:
+        path = current(item)
+        if not path or "|" not in path:
+            continue
+        name = path.rpartition("|")[2].rpartition(":")[2]
+        head, sep, tail = name.rpartition("_")
+        base = head if sep and head and tail in words else name
+        shapes = cmds.listRelatives(path, shapes=True, fullPath=True, noIntermediate=True) or []
+        for shape in shapes:
+            for group in dict.fromkeys(cmds.listConnections(shape, type="shadingEngine") or []):
+                if group in defaults:
+                    continue
+                members = {(cmds.listRelatives(member, parent=True, fullPath=True) or [member])[0].split(".")[0]
+                           if cmds.objectType(member.split(".")[0], isAType="shape") else member.split(".")[0]
+                           for member in (cmds.sets(group, query=True) or [])}
+                members = {(cmds.ls(member, long=True) or [member])[0] for member in members}
+                if len(members) > 1:
+                    notes.append(f"{group}: used by {len(members)} objects — left alone")
+                    continue
+                add(group, f"{base}_SG")
+                for material in cmds.listConnections(group + ".surfaceShader", source=True, destination=False) or []:
+                    users = set(cmds.listConnections(material, type="shadingEngine") or [])
+                    if len(users) > 1:
+                        notes.append(f"{material}: used by {len(users)} shading groups — left alone")
+                    else:
+                        add(material, f"{base}_mtl")
+            history = cmds.listHistory(shape, pruneDagObjects=True) or []
+            for cluster in cmds.ls(history, type="skinCluster") or []:
+                add(cluster, f"{base}_skin")
+            for blend in cmds.ls(history, type="blendShape") or []:
+                add(blend, f"{base}_bs")
+        for constraint in cmds.listRelatives(path, type="constraint", fullPath=True) or []:
+            kind = cmds.nodeType(constraint)
+            add(constraint.rpartition("|")[2], f"{base}_{suffixes.get(kind) or kind}")
+    return found, names, list(dict.fromkeys(notes))  # a shared group is met once per object using it

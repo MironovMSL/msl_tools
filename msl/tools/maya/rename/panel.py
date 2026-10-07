@@ -7,6 +7,7 @@ from msl_tools.msl.tools.maya.rename import rules, scene
 from msl_tools.msl.tools.maya.rename.buttons import HoverButton, KindButton, QuickButton, SideButton, ToggleIconButton
 from msl_tools.msl.tools.maya.rename.dialogs import NumberField, SidesDialog, SuffixesDialog
 from msl_tools.msl.tools.maya.rename.library import NameLibrary
+from msl_tools.msl.tools.maya.rename.recipes import RecipeStore
 from msl_tools.msl.tools.maya.rename.operations import Operation as _Operation, each as _each
 from msl_tools.msl.tools.maya.rename.panel_find import _FindMixin
 from msl_tools.msl.tools.maya.rename.panel_objects import _ObjectsMixin
@@ -42,6 +43,8 @@ QUICK = (
     ("", "", ""),
     ("namespace_off", "ns:", "Out of its namespace (ns:arm → arm)"),
     ("fix", "fix", "Make the name one Maya takes: Cyrillic spelled in Latin, spaces and other signs → “_”"),
+    ("clean", "clean", "Clean what an import or a Duplicate leaves: pasted__ in front, a number glued to a "
+                       "suffix (arm_jnt1 → arm_jnt), “__”"),
     ("", "", ""),
     ("mirror", "L↔R", "The other side's name: lf_ ↔ rt_, _L ↔ _R, left ↔ right (lf_arm → rt_arm)"),
     ("shapes", "Shape", "Name the SHAPES after their transforms: pCubeShape3 under “body” → bodyShape"),
@@ -53,7 +56,7 @@ QUICK_ICONS = {
     "upper": "case_upper", "capitalize": "case_capital", "lower": "case_lower", "snake": "case_snake",
     "camel": "case_camel", "prefix_off": "cut_prefix", "suffix_off": "cut_suffix", "number_off": "cut_number",
     "digits_off": "cut_digits", "first_off": "cut_first", "last_off": "cut_last", "namespace_off": "namespace_out",
-    "fix": "magic_fix", "mirror": "mirror_sides", "shapes": "shape_name",
+    "fix": "magic_fix", "clean": "sweep", "mirror": "mirror_sides", "shapes": "shape_name",
 }
 _EACH = {
     "upper": lambda node: node.name.upper(), "lower": lambda node: node.name.lower(),
@@ -100,6 +103,7 @@ class RenamePanel(_WordsMixin, _FindMixin, _ObjectsMixin, qt.QtWidgets.QWidget):
         self._config = config
         self._settings = config["settings"]
         self.library = NameLibrary(config["library"])
+        self.recipes = RecipeStore(config["library"])  # beside the words (a ConfigNode: a JsonConfig has no get())
         self._nodes: list = []
         self._locked: list | None = None         # uuids the list is held on (the lock)
         self._kind_filter: set = set()           # kinds the list shows ("" none = all)
@@ -189,6 +193,11 @@ class RenamePanel(_WordsMixin, _FindMixin, _ObjectsMixin, qt.QtWidgets.QWidget):
         self._side = SideButton()
         self._kind = KindButton()
 
+        self._recipes = ChipBar(add_text="Save these settings (the name, its numbering and order) as a recipe",
+                                add_icon=icons.get_icon("bookmark_add", sub_folder="actions"),
+                                name_placeholder="Recipe name, then Enter", custom_menu=True)
+        self._recipes.setObjectName("renameRecipes")
+        self._recipes.setToolTip("Recipes: a click puts that way of naming in — then Rename")
         self._list_source = SegmentedControl(list(self.LIST_SOURCES), "Selected")
         self._list_source.setToolTip("Selected: what is selected · Hierarchy: it and everything under it\n"
                                      "(shapes stay out — Maya renames them with their transforms)")
@@ -261,6 +270,7 @@ class RenamePanel(_WordsMixin, _FindMixin, _ObjectsMixin, qt.QtWidgets.QWidget):
         column.setSpacing(6)
         column.addWidget(self._quick)
         column.addLayout(name_row)
+        column.addWidget(self._recipes)
         column.addWidget(self._number_row)
         column.addLayout(affix)
         column.addWidget(self._favorites_bar())
@@ -315,6 +325,9 @@ class RenamePanel(_WordsMixin, _FindMixin, _ObjectsMixin, qt.QtWidgets.QWidget):
         self._kind.hovered.connect(lambda on: self._set_hover(self._kind_operation() if on else None))
         self._kind.menu_requested.connect(self._on_suffix_settings)
         self._lock.toggled.connect(self._on_lock)
+        self._recipes.clicked.connect(self._on_recipe)
+        self._recipes.add_requested.connect(self._on_save_recipe)
+        self._recipes.menu_requested.connect(self._on_recipe_menu)
         self._list_source.current_changed.connect(self._on_list_source)
         self._kinds.clicked.connect(self._on_kind_chip)
         self._select_listed.clicked.connect(self._on_select_listed)
@@ -359,6 +372,7 @@ class RenamePanel(_WordsMixin, _FindMixin, _ObjectsMixin, qt.QtWidgets.QWidget):
         self._apply_objects_settings()
         self._loading = False
         self._sync_number_row()
+        self._refresh_recipes()
 
     def _save_settings(self, *_args) -> None:
         if self._loading:
@@ -372,6 +386,62 @@ class RenamePanel(_WordsMixin, _FindMixin, _ObjectsMixin, qt.QtWidgets.QWidget):
         for key, value in values.items():
             if self._settings.get(key) != value:
                 self._settings[key] = value
+        self._mark_recipes()
+
+    # ------------------------------------------------------------------ recipes
+
+    def _recipe_values(self) -> dict:
+        return {"template": self._field.text().strip(), "start": self._start.value(1), "step": self._step.value(1),
+                "padding": self._padding.value(2), "order": self._order.currentText(),
+                "end_last": self._end_last.isChecked()}
+
+    def _refresh_recipes(self) -> None:
+        recipes = self.recipes.all()
+        self._recipes.set_chips([(name, name, values.get("template", "")) for name, values in recipes.items()])
+        self._mark_recipes()
+
+    def _mark_recipes(self) -> None:
+        if hasattr(self, "_recipes"):
+            self._recipes.set_marked(self.recipes.matching(self._recipe_values()))
+
+    def _on_recipe(self, name: str) -> None:
+        recipe = self.recipes.all().get(name)
+        if not recipe:
+            return
+        self._loading = True
+        self._field.setText(recipe.get("template", ""))
+        self._start.set_value(recipe.get("start", 1))
+        self._step.set_value(recipe.get("step", 1))
+        self._padding.set_value(recipe.get("padding", 2))
+        index = self._order.findText(recipe.get("order", rules.ORDER_SELECTION))
+        self._order.setCurrentIndex(max(index, 0))
+        self._end_last.setChecked(bool(recipe.get("end_last", False)))
+        self._loading = False
+        self._set_source("template")
+        self._sync_number_row()
+        self._save_settings()
+        self._update_preview()
+        self._field.setFocus()
+        self._say(f"Recipe “{name}” — the list shows what it does · Rename (Enter) to apply")
+
+    def _on_save_recipe(self, name: str) -> None:
+        if not self._field.text().strip():
+            self._say("Type the name first — a recipe keeps the name with its numbering", "error")
+            return
+        self.recipes.save(name, self._recipe_values())
+        self._refresh_recipes()
+        self._say(f"Saved the recipe “{name}”", "done")
+
+    def _on_recipe_menu(self, name: str, position) -> None:
+        from msl_tools.msl.ui.theme.qss import make_rounded_popup
+        menu = make_rounded_popup(qt.QtWidgets.QMenu(self))
+        menu.addAction("Use it", lambda: self._on_recipe(name))
+        menu.addAction("Save the current settings over it",
+                       lambda: (self.recipes.save(name, self._recipe_values()), self._refresh_recipes()))
+        menu.addAction("Remove", lambda: (self.recipes.remove(name), self._refresh_recipes()))
+        menu.addSeparator()
+        menu.addAction("Back to the built-in recipes", lambda: (self.recipes.reset(), self._refresh_recipes()))
+        menu.exec(position)
 
     def _sides(self) -> rules.Sides:
         return rules.Sides.from_settings(self._settings.get("sides"))
@@ -585,6 +655,9 @@ class RenamePanel(_WordsMixin, _FindMixin, _ObjectsMixin, qt.QtWidgets.QWidget):
             return _Operation(label, _each(lambda node: rules.mirror(node.name, sides)))
         if key == "shapes":
             return self._shapes_operation()
+        if key == "clean":
+            suffixes = self._suffixes()
+            return _Operation(label, _each(lambda node: rules.clean_import(node.name, suffixes)))
         return _Operation(label, _each(_EACH[key]), drop_namespace=key == "namespace_off")
 
     def _shapes_operation(self) -> _Operation:

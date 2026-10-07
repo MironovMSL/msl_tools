@@ -209,5 +209,49 @@ class Convention(unittest.TestCase):
         self.assertEqual(rules.convention_problem(node("finger_A_end"), "finger_{A}_{#}", Sides(), SUFFIXES), "")
 
 
+class Cleanup(unittest.TestCase):
+    def test_fix_by_the_convention(self):
+        pattern = "{side}_{name}_{type}"
+        self.assertEqual(rules.convention_fix(node("lf_arm_grp", shape_type="mesh", position=(-3, 0, 0)), pattern,
+                                              Sides(), SUFFIXES), "rt_arm_geo")
+        self.assertEqual(rules.convention_fix(node("arm", type="joint", position=(2, 0, 0)), pattern, Sides(), SUFFIXES),
+                         "lf_arm_jnt")
+        good = node("rt_leg_jnt", type="joint", position=(-1, 0, 0))
+        self.assertEqual(rules.convention_fix(good, pattern, Sides(), SUFFIXES), "rt_leg_jnt")
+        self.assertIsNone(rules.convention_fix(node("arm", type="joint"), "{name}_{A}", Sides(), SUFFIXES))
+
+    def test_what_an_import_leaves(self):
+        self.assertEqual(rules.clean_import("pasted__pasted__arm_jnt1"), "arm_jnt")
+        self.assertEqual(rules.clean_import("leg__geo2"), "leg_geo")
+        self.assertEqual(rules.clean_import("arm_01"), "arm_01")          # a number of its own stays
+        self.assertTrue(rules.notice("pCube3"))
+        self.assertTrue(rules.notice("pasted__body"))
+
+    def test_unique_names(self):
+        names = rules.unique_names([node("ctrl"), node("ctrl"), node("arm")], {"ctrl_01"})
+        self.assertEqual(names, ["ctrl_02", "ctrl_03", "arm"])
+
+    def test_parent_and_root_tokens(self):
+        nodes = [node("a", path="|rig|arm|a", parent="arm", root="rig")]
+        self.assertEqual(rules.from_template(nodes, "{root}_{parent}_ctrl", Numbering(), Sides(), SUFFIXES),
+                         ["rig_arm_ctrl"])
+
+
+class Recipes(unittest.TestCase):
+    def test_built_in_until_changed_and_matching(self):
+        from msl_tools.msl.tools.maya.rename.recipes import DEFAULT_RECIPES, RecipeStore
+        store = {}
+        recipes = RecipeStore(store)
+        self.assertIn("Fingers", recipes.all())
+        fingers = dict(DEFAULT_RECIPES["Fingers"])
+        self.assertEqual(recipes.matching(fingers), ["Fingers"])
+        recipes.save("Toes", dict(fingers, template="{side}_toe_{A}_{#}_jnt"))
+        self.assertIn("Toes", store["recipes"])
+        recipes.remove("Fingers")
+        self.assertNotIn("Fingers", recipes.all())
+        recipes.reset()
+        self.assertIn("Fingers", recipes.all())
+
+
 if __name__ == "__main__":
     unittest.main()
