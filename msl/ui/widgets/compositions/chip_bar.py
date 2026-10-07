@@ -102,7 +102,8 @@ class ChipBar(qt.QtWidgets.QWidget):
     # --- chips ------------------------------------------------------------------------
 
     def set_chips(self, chips: list, removable=()) -> None:
-        """`chips`: (key, text, tooltip) tuples, shown in that order; `removable`: keys with a "Remove" menu."""
+        """`chips`: (key, text, tooltip) tuples — or (key, text, tooltip, icon): a QIcon shown before the
+        text as it is (not tinted) —, shown in that order; `removable`: keys with a "Remove" menu."""
         for chip in self._chips.values():
             self._layout.removeWidget(chip)
             chip.hide()
@@ -111,8 +112,12 @@ class ChipBar(qt.QtWidgets.QWidget):
         self._removable = set(removable)
         for widget in (self._add_button, self._name_field):
             self._layout.removeWidget(widget)
-        for key, text, tooltip in chips:
+        for entry in chips:
+            key, text, tooltip = entry[:3]
             chip = qt.QtWidgets.QPushButton(text, self)
+            if len(entry) > 3 and entry[3] is not None and not entry[3].isNull():
+                chip.setIcon(entry[3])
+                chip.setIconSize(qt.QtCore.QSize(13, 13))
             chip.setObjectName("chip")
             chip.setToolTip(tooltip)
             chip.setCheckable(self._checkable or self._multiple)

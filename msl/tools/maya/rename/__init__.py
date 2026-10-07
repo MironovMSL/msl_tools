@@ -26,3 +26,10 @@ def repeat_last():
     window = launcher_entry_point()
     window.panel.repeat_last()
     return window
+
+
+def quick():
+    """A small field at the mouse pointer: type a name, Enter renames the selection — for a hotkey,
+    without the window."""
+    from msl_tools.msl.tools.maya.rename.quick_popup import QuickRename
+    return QuickRename.open()

@@ -20,9 +20,6 @@ class _ObjectsMixin:
     def _objects_card(self) -> FoldingCard:
         icons = UiResources().iconManager
         card = self._objects = FoldingCard("OBJECTS", icons.get_icon("select_all", sub_folder="actions"))
-        kinds_caption = qt.QtWidgets.QLabel("KINDS IN THE LIST — a click selects that kind")
-        kinds_caption.setObjectName("renameSubtitle")
-        self._kinds = ChipBar()
         checks_caption = qt.QtWidgets.QLabel("CHECK — in the selection and under it (nothing selected: the scene)")
         checks_caption.setObjectName("renameSubtitle")
         checks_caption.setWordWrap(True)
@@ -38,24 +35,69 @@ class _ObjectsMixin:
                                    "— then “fix” on top cleans them")
         self._check_skin = qt.QtWidgets.QPushButton("Skin joints")
         self._check_skin.setToolTip("Select the joints the selected meshes are skinned to")
-        for button in (self._check_same, self._check_bad, self._check_skin):
+        self._check_other = qt.QtWidgets.QPushButton("Other side")
+        self._check_other.setToolTip("Select the same objects on the other side: lf_arm → rt_arm, arm_L → arm_R")
+        for button in (self._check_same, self._check_bad, self._check_skin, self._check_other):
             row.addWidget(button)
         row.addStretch(1)
+        lock_caption = qt.QtWidgets.QLabel("LOCK — a locked node can't be renamed, deleted or re-parented "
+                                           "(Maya shows it nowhere; here it has a lock in the list)")
+        lock_caption.setObjectName("renameSubtitle")
+        lock_caption.setWordWrap(True)
+        lock_row = qt.QtWidgets.QWidget()
+        locks = qt.QtWidgets.QHBoxLayout(lock_row)
+        locks.setContentsMargins(0, 0, 0, 0)
+        locks.setSpacing(4)
+        self._lock_selected = qt.QtWidgets.QPushButton("Lock")
+        self._lock_selected.setToolTip("Lock the selected objects (one undo step)")
+        self._unlock_selected = qt.QtWidgets.QPushButton("Unlock")
+        self._unlock_selected.setToolTip("Unlock the selected objects (one undo step)")
+        self._find_locked = qt.QtWidgets.QPushButton("Locked")
+        self._find_locked.setToolTip("Select the locked nodes — in the selection and under it, nothing selected: the scene")
+        for button in (self._lock_selected, self._unlock_selected, self._find_locked):
+            locks.addWidget(button)
+        locks.addStretch(1)
+        convention_caption = qt.QtWidgets.QLabel("CONVENTION — names that don't follow it are marked in the list")
+        convention_caption.setObjectName("renameSubtitle")
+        convention_caption.setWordWrap(True)
+        from msl_tools.msl.tools.maya.rename.panel import CONVENTION_PLACEHOLDER, TemplateField
+        self._convention = TemplateField()
+        self._convention.setPlaceholderText(CONVENTION_PLACEHOLDER)
+        self._convention.setClearButtonEnabled(True)
+        self._convention.setToolTip("The shape every name should have, with the tokens of the name field.\n"
+                                    "{side} must be where the object stands, {type} its kind's suffix.\n"
+                                    "Empty: no convention")
+        self._check_convention = qt.QtWidgets.QPushButton("Check")
+        self._check_convention.setToolTip("Select what doesn't follow it — in the selection and under it, "
+                                          "nothing selected: the scene")
+        convention = qt.QtWidgets.QHBoxLayout()
+        convention.setSpacing(4)
+        convention.addWidget(self._convention, 1)
+        convention.addWidget(self._check_convention)
         sets_caption = qt.QtWidgets.QLabel("SETS — for this Maya session")
         sets_caption.setObjectName("renameSubtitle")
         self._sets = ChipBar(add_text="+ set of the selection", name_placeholder="Set name, then Enter",
                              custom_menu=True)
         self._sets.setToolTip("Click: select it · right click: add / take out the selection, a Maya set")
-        for widget in (kinds_caption, self._kinds, checks_caption, checks, sets_caption, self._sets):
+        for widget in (checks_caption, checks, lock_caption, lock_row, convention_caption):
+            card.body_layout.addWidget(widget)
+        card.body_layout.addLayout(convention)
+        for widget in (sets_caption, self._sets):
             card.body_layout.addWidget(widget)
         return card
 
     def _connect_objects(self) -> None:
         self._objects.toggled.connect(lambda opened: (self._save_folded("objects", opened), self._refresh_objects()))
-        self._kinds.clicked.connect(self._on_kind_chip)
         self._check_same.clicked.connect(self._on_check_same)
         self._check_bad.clicked.connect(self._on_check_bad)
         self._check_skin.clicked.connect(self._on_check_skin)
+        self._check_other.clicked.connect(self._on_check_other)
+        self._lock_selected.clicked.connect(lambda: self._lock_selection(True))
+        self._unlock_selected.clicked.connect(lambda: self._lock_selection(False))
+        self._find_locked.clicked.connect(self._on_find_locked)
+        self._convention.textEdited.connect(self._on_convention_edited)
+        self._convention.token_inserted.connect(self._on_convention_edited)
+        self._check_convention.clicked.connect(self._on_check_convention)
         self._sets.clicked.connect(self._on_set)
         self._sets.add_requested.connect(self._on_add_set)
         self._sets.menu_requested.connect(self._on_set_menu)
@@ -63,27 +105,16 @@ class _ObjectsMixin:
     def _apply_objects_settings(self) -> None:
         folded = dict(self._settings.get("folded") or {})
         self._objects.set_open(not folded.get("objects", True))
+        self._convention.setText(self._settings.get("convention", ""))
         self._refresh_sets()
 
     def _refresh_objects(self) -> None:
-        counts: dict = {}
-        for node in self._nodes:
-            counts[node.kind] = counts.get(node.kind, 0) + 1
-        ranked = sorted(counts.items(), key=lambda pair: (-pair[1], pair[0]))
-        if self._objects.is_open():
-            self._kinds.set_chips([(kind, f"{kind} {count}", f"Select the {count} {kind} in the list")
-                                   for kind, count in ranked])
-        parts = [f"{kind} {count}" for kind, count in ranked[:3]]
+        parts = []
         if self._quick_sets:
             parts.append(f"{len(self._quick_sets)} sets")
         self._objects.set_summary(" · ".join(parts))
 
     # ------------------------------------------------------------------ kinds and checks
-
-    def _on_kind_chip(self, kind: str) -> None:
-        nodes = [node for node in self._nodes if node.kind == kind]
-        scene.select_nodes(nodes)
-        self._say(f"Selected {len(nodes)} {kind}")
 
     def _on_check_same(self) -> None:
         found = scene.not_unique(scene.look_in())
@@ -100,6 +131,69 @@ class _ObjectsMixin:
             return
         found = scene.skin_joints(scene.selection())
         self._select_found(found, "joints in the skin", "No skinCluster on what is selected")
+
+    def _lock_selection(self, locked: bool) -> None:
+        nodes = scene.nodes(scene.selection())
+        if not nodes:
+            self._say("Select the objects first", "error")
+            return
+        self._report_lock(*scene.set_locked(nodes, locked), locked)
+
+    def _on_lock_one(self, uuid: str, locked: bool) -> None:
+        node = next((node for node in self._shown_nodes() if node.uuid == uuid), None)
+        if node is not None:
+            self._report_lock(*scene.set_locked([node], locked), locked)
+
+    def _report_lock(self, changed: int, skipped: int, locked: bool) -> None:
+        verb = "Locked" if locked else "Unlocked"
+        text = f"{verb} {changed}" if changed else f"Nothing to {verb.lower()[:-2]}"
+        if skipped:
+            text += f" · {skipped} left alone (referenced)"
+        self._say(text + (" · Ctrl+Z undoes it" if changed else ""), "done" if changed else "")
+        self.refresh()
+
+    def _on_find_locked(self) -> None:
+        found = scene.locked_ones(scene.look_in())
+        self._select_found(found, "locked", "Nothing is locked")
+
+    def _on_check_other(self) -> None:
+        nodes = scene.nodes(scene.selection())
+        if not nodes:
+            self._say("Select objects of one side first", "error")
+            return
+        sides = self._sides()
+        wanted = [node.namespace + rules.mirror(node.name, sides) for node in nodes]
+        wanted = [name for name, node in zip(wanted, nodes) if name != node.namespace + node.name]
+        found = scene.named(wanted)
+        self._select_found(found, "on the other side", "No other side found: the names say no side, or it isn't there")
+
+    def _convention_pattern(self) -> str:
+        return self._convention.text().strip()
+
+    def _on_convention_edited(self, *_args) -> None:
+        if self._settings.get("convention", "") != self._convention.text():
+            self._settings["convention"] = self._convention.text()
+        self._update_preview()
+
+    def _on_check_convention(self) -> None:
+        pattern = self._convention_pattern()
+        if not pattern:
+            self._say("Type the convention first, e.g. {side}_{name}_{type}", "error")
+            self._convention.setFocus()
+            return
+        unknown = rules.unknown_tokens(pattern)
+        if unknown:
+            self._say(f"Unknown token {unknown[0]}", "error")
+            return
+        sides, suffixes = self._sides(), self._suffixes()
+        nodes = scene.nodes(scene.look_in()[:self.MAX_OBJECTS])
+        found = [(node, rules.convention_problem(node, pattern, sides, suffixes)) for node in nodes]
+        found = [(node, why) for node, why in found if why]
+        if not found:
+            self._say(f"All {len(nodes)} follow {pattern}", "done")
+            return
+        scene.select_nodes([node for node, _why in found])
+        self._say(f"{len(found)} of {len(nodes)} don't follow {pattern} — the list says why", "error")
 
     def _select_found(self, found: list, what: str, none: str) -> None:
         if not found:

@@ -40,8 +40,7 @@ def paths(scope: str = SCOPE_SELECTED) -> list[str]:
         found = []
         for path in selection():
             found.append(path)
-            below = cmds.listRelatives(path, allDescendents=True, fullPath=True) or []
-            found.extend(reversed(below))  # listRelatives gives the deepest first
+            found.extend(_below(path))
     else:
         found = selection()
     return _without_followers(_unique(_transforms_of_shapes(found)))
@@ -59,6 +58,15 @@ def _transforms_of_shapes(items: list[str]) -> list[str]:
             pass
         result.append(path)
     return result
+
+
+def _below(path: str) -> list[str]:
+    """Everything under `path` in the Outliner's order: each child, then what is under it."""
+    found = []
+    for child in cmds.listRelatives(path, children=True, fullPath=True) or []:
+        found.append(child)
+        found.extend(_below(child))
+    return found
 
 
 def _unique(items: list[str]) -> list[str]:
@@ -90,9 +98,10 @@ def nodes(items: list[str]) -> list[Node]:
     """A Node for each long name (in that order)."""
     result = []
     referenced_ok = hasattr(cmds, "referenceQuery")
+    children: dict = {}  # parent -> its children, asked once (a hierarchy has many siblings)
     for path in items:
         try:
-            node = _node(path, referenced_ok)
+            node = _node(path, referenced_ok, children)
         except RuntimeError:
             continue  # gone, or a name Maya can't address itself
         if node is not None:
@@ -100,7 +109,7 @@ def nodes(items: list[str]) -> list[Node]:
     return result
 
 
-def _node(path: str, referenced_ok: bool) -> "Node | None":
+def _node(path: str, referenced_ok: bool, children: dict) -> "Node | None":
     if not cmds.objExists(path):
         return None
     short = path.rpartition("|")[2]
@@ -117,7 +126,10 @@ def _node(path: str, referenced_ok: bool) -> "Node | None":
         except RuntimeError:
             pass  # a shape or a node without a pivot
         parent = path.rpartition("|")[0]
-        others = (cmds.listRelatives(parent, children=True) if parent else cmds.ls(assemblies=True)) or []
+        if parent not in children:
+            children[parent] = (cmds.listRelatives(parent, children=True) if parent
+                                else cmds.ls(assemblies=True)) or []
+        others = children[parent]
         siblings = tuple(other.rpartition(":")[2] for other in others
                          if other.rpartition("|")[2] != short
                          and (other.rpartition(":")[0] + ":" if ":" in other else "") == namespace)
@@ -131,6 +143,12 @@ def _node(path: str, referenced_ok: bool) -> "Node | None":
     uuid = (cmds.ls(path, uuid=True) or [""])[0]
     return Node(path=path, name=name, namespace=namespace, type=node_type, shape_type=shape_type,
                 position=position, locked=locked, uuid=uuid, siblings=siblings)
+
+
+def selection_uuids() -> set:
+    """The uuids of what is selected (cheap: one call) — to tell whether the selection is still the
+    one the tool made itself."""
+    return set(cmds.ls(selection=True, uuid=True) or [])
 
 
 def current(node: Node) -> str:
@@ -166,6 +184,41 @@ def apply(changes: list[Change], drop_namespace: bool = False) -> list[tuple[Cha
     return done
 
 
+def set_locked(items: list[Node], locked: bool) -> tuple[int, int]:
+    """Locks (or unlocks) the nodes — a locked node can't be renamed, deleted or re-parented,
+    and Maya shows that nowhere. One undo step. Referenced nodes are left alone (their file
+    decides). Returns (changed, skipped)."""
+    changed = skipped = 0
+    cmds.undoInfo(openChunk=True, chunkName="MSL Lock" if locked else "MSL Unlock")
+    try:
+        for item in items:
+            path = current(item)
+            if not path or cmds.referenceQuery(path, isNodeReferenced=True):
+                skipped += 1
+                continue
+            try:
+                if bool((cmds.lockNode(path, query=True, lock=True) or [False])[0]) != locked:
+                    cmds.lockNode(path, lock=locked)
+                    changed += 1
+            except RuntimeError:
+                skipped += 1
+    finally:
+        cmds.undoInfo(closeChunk=True)
+    return changed, skipped
+
+
+def locked_ones(items: list[str]) -> list[str]:
+    """Those of `items` that are locked nodes."""
+    found = []
+    for path in items:
+        try:
+            if (cmds.lockNode(path, query=True, lock=True) or [False])[0]:
+                found.append(path)
+        except RuntimeError:
+            pass
+    return found
+
+
 def select(items: list[str], add: bool = False) -> None:
     existing = [item for item in items if cmds.objExists(item)]
     if existing:
@@ -176,6 +229,26 @@ def select(items: list[str], add: bool = False) -> None:
 
 def select_nodes(items: list[Node]) -> None:
     select([path for path in (current(node) for node in items) if path])
+
+
+def show(item: Node) -> None:
+    """Selects the object and frames it in the viewport under the pointer / the active one (as F)."""
+    path = current(item)
+    if not path:
+        return
+    cmds.select(path, replace=True)
+    try:
+        cmds.viewFit(animate=True)
+    except RuntimeError:
+        pass  # no viewport (a batch Maya)
+
+
+def frame_selection() -> None:
+    """Frames what is selected in the viewport (as F)."""
+    try:
+        cmds.viewFit(animate=True)
+    except RuntimeError:
+        pass  # no viewport (a batch Maya)
 
 
 def skin_joints(items: list[str]) -> list[str]:
@@ -214,4 +287,40 @@ def look_in() -> list[str]:
         return paths(SCOPE_HIERARCHY)
     found = _without_followers(cmds.ls(dag=True, long=True) or [])
     skip = set(cmds.ls(defaultNodes=True, long=True) or [])
-    return [path for path in found if path not in skip]
+    return [path for path in found if path not in skip and not _startup_camera(path)]
+
+
+def _startup_camera(path: str) -> bool:
+    """persp / top / front / side: Maya's own, not the user's to name."""
+    try:
+        cameras = cmds.listRelatives(path, shapes=True, type="camera", fullPath=True) or []
+        return bool(cameras) and bool(cmds.camera(cameras[0], query=True, startupCamera=True))
+    except RuntimeError:
+        return False
+
+
+def shapes_of(items: list[Node]) -> tuple[list[Node], list[str]]:
+    """The (non-intermediate) shapes of `items` and the name each should have: "<transform>Shape",
+    the second "<transform>Shape1" (Maya's way). In the transforms' order."""
+    from msl_tools.msl.tools.maya.rename.rules import shape_name
+    found, names = [], []
+    for item in items:
+        path = current(item)
+        if not path or "|" not in path:
+            continue
+        shapes = cmds.listRelatives(path, shapes=True, fullPath=True, noIntermediate=True) or []
+        for index, shape in enumerate(nodes(shapes)):
+            found.append(shape)
+            names.append(shape_name(path.rpartition("|")[2].rpartition(":")[2], index))
+    return found, names
+
+
+def named(short_names: list[str]) -> list[str]:
+    """Long names of the objects with these short names (each may match several)."""
+    found = []
+    for name in short_names:
+        try:
+            found.extend(cmds.ls(name, long=True) or [])
+        except RuntimeError:
+            pass
+    return _unique(found)

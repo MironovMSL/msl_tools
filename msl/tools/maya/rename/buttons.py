@@ -5,6 +5,7 @@ import msl_tools.msl.ui.qt_bindings as qt
 from msl_tools.msl.core.theme.theme_registry import ThemeRegistry
 from msl_tools.msl.tools.maya.rename import rules
 from msl_tools.msl.ui.theme.qss import color_property
+from msl_tools.msl.ui.widgets.atoms.buttons.icon_push_button import IconPushButton
 
 
 _ICON_CACHE: dict = {}
@@ -70,6 +71,50 @@ class HoverButton(qt.QtWidgets.QPushButton):
             event.accept()
             return
         super().mousePressEvent(event)
+
+
+class QuickButton(IconPushButton):
+    """A quick button of the rename tool: a one-color icon tinted from QSS (rename.qss:
+    qproperty-iconColor), its name in the tooltip — and, like HoverButton, it says when the
+    pointer is over it, so the list can show what a click would do. Without its icon file it
+    shows `text`."""
+
+    hovered = qt.QtCore.Signal(bool)
+
+    def __init__(self, icon, text: str, tooltip: str, parent=None):
+        super().__init__(icon, tooltip, icon_size=qt.QtCore.QSize(15, 15), fallback_text=text, parent=parent)
+        self.setFocusPolicy(qt.QtCore.Qt.FocusPolicy.NoFocus)
+        self.setCursor(qt.QtCore.Qt.CursorShape.PointingHandCursor)
+
+    def enterEvent(self, event) -> None:
+        super().enterEvent(event)
+        self.hovered.emit(True)
+
+    def leaveEvent(self, event) -> None:
+        super().leaveEvent(event)
+        self.hovered.emit(False)
+
+
+class ToggleIconButton(QuickButton):
+    """An on / off choice as a small icon button that SHOWS its state: on = the accent fill and an
+    accent icon (rename.qss: `[on="true"]` — qproperty-iconColor can't come from :checked, so the
+    widget mirrors it into the dynamic property `on`). The tooltip says the state in its first
+    line: `title` + " — on" / " — off"."""
+
+    def __init__(self, icon, title: str, tooltip: str, parent=None):
+        super().__init__(icon, title, tooltip, parent)
+        self._title, self._tooltip = title, tooltip
+        self.setCheckable(True)
+        self.toggled.connect(self._follow)
+        self._follow()
+
+    def _follow(self, *_args) -> None:
+        from msl_tools.msl.ui.theme.qss import repolish
+        on = self.isChecked()
+        self.setToolTip(f"{self._title} — {'ON' if on else 'off'}\n{self._tooltip}")
+        if bool(self.property("on")) != on:
+            self.setProperty("on", on)
+            repolish(self)
 
 
 class SideButton(HoverButton):

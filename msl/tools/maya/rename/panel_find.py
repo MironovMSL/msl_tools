@@ -8,17 +8,10 @@ import msl_tools.msl.ui.qt_bindings as qt
 from msl_tools.msl.tools.maya.rename import rules, scene
 from msl_tools.msl.tools.maya.rename.buttons import HoverButton
 from msl_tools.msl.tools.maya.rename.operations import Operation
+from msl_tools.msl.tools.maya.rename.word_fields import WordField
 from msl_tools.msl.ui.ui_resources import UiResources
 from msl_tools.msl.ui.widgets.atoms.segmented.segmented_control import SegmentedControl
 from msl_tools.msl.ui.widgets.compositions.folding_card import FoldingCard
-
-
-class _FocusLineEdit(qt.QtWidgets.QLineEdit):
-    focused = qt.QtCore.Signal()
-
-    def focusInEvent(self, event) -> None:
-        super().focusInEvent(event)
-        self.focused.emit()
 
 
 class _FindMixin:
@@ -35,10 +28,10 @@ class _FindMixin:
             toggle.setCheckable(True)
         card = self._find = FoldingCard("FIND & REPLACE", icons.get_icon("search", sub_folder="actions"),
                                         extras=[self._case, self._regex])
-        self._find_text = _FocusLineEdit()
+        self._find_text = WordField()
         self._find_text.setPlaceholderText("Find")
         self._find_text.setClearButtonEnabled(True)
-        self._replace_text = _FocusLineEdit()
+        self._replace_text = WordField()
         self._replace_text.setPlaceholderText("Replace with (empty: take it out)")
         self._scope = SegmentedControl(list(scene.SCOPES), scene.SCOPE_SELECTED)
         self._scope.setToolTip("Where to look: the selection · the selection and everything under it · the whole scene")

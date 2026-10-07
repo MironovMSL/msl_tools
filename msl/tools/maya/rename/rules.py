@@ -15,6 +15,7 @@ The template (the rename field) takes tokens:
 """
 from __future__ import annotations
 
+import difflib
 import re
 from dataclasses import dataclass, field
 
@@ -29,7 +30,8 @@ _VALID = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 ORDER_SELECTION = "Selection"
 ORDER_NAME = "Name"
 ORDER_X, ORDER_Y, ORDER_Z = "Position X", "Position Y", "Position Z"
-ORDERS = (ORDER_SELECTION, ORDER_NAME, ORDER_X, ORDER_Y, ORDER_Z)
+ORDER_CHAINS = "Chains"   # numbers restart in each chain (parent -> child), letters count the chains
+ORDERS = (ORDER_SELECTION, ORDER_CHAINS, ORDER_NAME, ORDER_X, ORDER_Y, ORDER_Z)
 
 LEFT, RIGHT, CENTER = "left", "right", "center"
 MIRROR_AXES = ("X", "Y", "Z")
@@ -73,6 +75,7 @@ class Numbering:
     step: int = 1
     padding: int = 2
     order: str = ORDER_SELECTION
+    end_last: bool = False        # Chains: the last link of a chain gets "end" instead of its number
 
 
 @dataclass
@@ -92,6 +95,19 @@ class Sides:
 
     def text(self, position) -> str:
         return self.prefixes.get(self.of(position), "")
+
+    @classmethod
+    def from_settings(cls, saved) -> "Sides":
+        """From the tool's stored settings ({axis, tolerance, left, right, center}); anything
+        missing or unreadable falls back to the defaults."""
+        saved = dict(saved or {})
+        prefixes = {side: str(saved.get(side, DEFAULT_SIDES[side])) for side in DEFAULT_SIDES}
+        try:
+            tolerance = float(saved.get("tolerance", 0.001))
+        except (TypeError, ValueError):
+            tolerance = 0.001
+        axis = saved.get("axis", "X")
+        return cls(axis=axis if axis in MIRROR_AXES else "X", tolerance=tolerance, prefixes=prefixes)
 
 
 # ---------------------------------------------------------------------------- tokens and the template
@@ -136,14 +152,43 @@ def natural_key(text: str):
     return [int(part) if part.isdigit() else part.lower() for part in re.split(r"(\d+)", text)]
 
 
+def chains(nodes: list[Node]) -> list[list[int]]:
+    """The nodes as chains (indexes): a node whose parent is listed too — and is that parent's only
+    listed child — continues the parent's chain; any other starts one. Chains come in the order
+    their first-selected link was selected; inside a chain, from the root down."""
+    index_of = {node.path: index for index, node in enumerate(nodes)}
+    children: dict = {}
+    for index, node in enumerate(nodes):
+        parent = node.path.rpartition("|")[0]
+        if parent in index_of:
+            children.setdefault(index_of[parent], []).append(index)
+    continues = {kids[0] for kids in children.values() if len(kids) == 1}
+    result = []
+    for index in range(len(nodes)):
+        if index in continues:
+            continue
+        chain = [index]
+        while True:
+            kids = children.get(chain[-1], [])
+            if len(kids) != 1:
+                break
+            chain.append(kids[0])
+        result.append(chain)
+    result.sort(key=min)
+    return result
+
+
 def expand(template: str, node: Node, position: int, numbering: Numbering, sides: Sides,
-           suffixes: dict) -> str:
-    """The new name of `node` from the template; `position` = its place in the numbering order."""
+           suffixes: dict, letter: "int | None" = None, last: bool = False) -> str:
+    """The new name of `node` from the template; `position` = its place in the numbering order,
+    `letter` = which letter it gets (default: the same place), `last` = the end of a chain."""
     value = numbering.start + position * numbering.step
+    letter = position if letter is None else letter
     side = sides.text(node.position)
     kind = suffixes.get(node.kind, "")
-    replacements = {"{name}": node.name, "{#}": number_text(value, numbering.padding),
-                    "{A}": letters(position), "{a}": letters(position, upper=False),
+    number = "end" if last and numbering.end_last else number_text(value, numbering.padding)
+    replacements = {"{name}": node.name, "{#}": number,
+                    "{A}": letters(letter), "{a}": letters(letter, upper=False),
                     "{side}": side, "{type}": kind}
     text = _TOKEN.sub(lambda match: replacements.get(match.group(0), match.group(0)), template)
     return tidy(text)
@@ -162,12 +207,38 @@ def from_template(nodes: list[Node], template: str, numbering: Numbering, sides:
     """Every node's new name from the template (in the nodes' own order)."""
     template = template.replace(" ", "_")
     result = [""] * len(nodes)
+    if numbering.order == ORDER_CHAINS:
+        for letter, chain in enumerate(chains(nodes)):
+            for position, index in enumerate(chain):
+                last = len(chain) > 1 and position == len(chain) - 1
+                result[index] = expand(template, nodes[index], position, numbering, sides, suffixes, letter, last)
+        return result
     for position, index in enumerate(order_nodes(nodes, numbering.order)):
         result[index] = expand(template, nodes[index], position, numbering, sides, suffixes)
     return result
 
 
 # ---------------------------------------------------------------------------- one-name operations
+
+def name_parts(old: str, new: str) -> list:
+    """The new name cut into (text, changed) pieces against the old one: what stays as it was, what
+    is new or replaced ("lf_arm_jnt" -> "lf_leg_jnt": [("lf_", False), ("leg", True), ("_jnt", False)]).
+    A name that changed nearly all through is one changed piece, and a single letter that happens to
+    match inside a change counts as changed — chance matches only made it read speckled."""
+    matcher = difflib.SequenceMatcher(None, old, new, autojunk=False)
+    if not new or matcher.ratio() < 0.5:
+        return [(new, True)] if new else []
+    parts = []
+    for tag, _i1, _i2, j1, j2 in matcher.get_opcodes():
+        if j2 <= j1:
+            continue
+        changed = tag != "equal" or (j2 - j1 < 2 and 0 < j1 and j2 < len(new))
+        if parts and parts[-1][1] == changed:
+            parts[-1] = (parts[-1][0] + new[j1:j2], changed)
+        else:
+            parts.append((new[j1:j2], changed))
+    return parts
+
 
 def capitalize(name: str) -> str:
     """"arm" -> "Arm", "armIK" -> "ArmIK" (the rest stays), "ARM" -> "Arm" (an all-caps name isn't
@@ -261,6 +332,50 @@ def type_suffix(name: str, kind: str, suffixes: dict) -> str:
     if sep and rest and tail != suffix and tail in set(suffixes.values()):
         name = rest
     return name if name.endswith("_" + suffix) or name == suffix else f"{name}_{suffix}"
+
+
+SIDE_PAIRS = (("lf", "rt"), ("l", "r"), ("left", "right"), ("lft", "rgt"))
+
+
+def _same_case(word: str, model: str) -> str:
+    if model.isupper():
+        return word.upper()
+    if model[:1].isupper():
+        return word[:1].upper() + word[1:].lower()
+    return word.lower()
+
+
+def mirror(name: str, sides: "Sides | None" = None) -> str:
+    """The name of the same thing on the other side: lf_arm -> rt_arm, arm_L -> arm_R,
+    leftArm -> rightArm (case kept). Whole "_" parts are swapped; a name without such a part gets
+    a camelCase Left / Right swapped. A name with no side stays as it is."""
+    pairs = list(SIDE_PAIRS)
+    if sides is not None:
+        left, right = sides.prefixes.get(LEFT, ""), sides.prefixes.get(RIGHT, "")
+        if left and right:
+            pairs.insert(0, (left.lower(), right.lower()))
+    swap = {}
+    for one, other in pairs:
+        swap.setdefault(one, other)
+        swap.setdefault(other, one)
+    parts = name.split("_")
+    changed = False
+    for index, part in enumerate(parts):
+        other = swap.get(part.lower())
+        if other is not None:
+            parts[index] = _same_case(other, part)
+            changed = True
+    if changed:
+        return "_".join(parts)
+    # camelCase: "leftArm", "armLeft", "LeftArm"
+    pattern = r"(?:^(left|right|Left|Right)(?=[A-Z0-9]|$))|(?:(?<=[a-z0-9])(Left|Right)(?=[A-Z0-9]|$))"
+    return re.sub(pattern, lambda match: _same_case(swap[(match.group(1) or match.group(2)).lower()],
+                                                    match.group(1) or match.group(2)), name)
+
+
+def shape_name(transform: str, index: int = 0) -> str:
+    """What a transform's shape should be called: armShape, the second one armShape1 (Maya's way)."""
+    return f"{transform}Shape" + (str(index) if index else "")
 
 
 def replace(name: str, find: str, new: str, case: bool = True, regex: bool = False) -> str:
@@ -358,7 +473,7 @@ class Change:
 
     @property
     def changes(self) -> bool:
-        return self.state not in ("same", "locked", "error")
+        return self.state not in ("same", "locked", "error", "idle", "nonconform", "skipped")
 
 
 def plan(nodes: list[Node], new_names: list[str], drop_namespace: bool = False) -> list[Change]:
@@ -396,3 +511,58 @@ def plan(nodes: list[Node], new_names: list[str], drop_namespace: bool = False) 
             if (parent, change.new) not in leaving:
                 change.state, change.note = "clash", f"“{change.new}” is taken under the same parent — Maya adds a number"
     return changes
+
+
+# ---------------------------------------------------------------------------- a naming convention
+
+def _convention_regex(pattern: str, sides: Sides, suffixes: dict):
+    side_words = sorted({text for text in sides.prefixes.values() if text}, key=len, reverse=True)
+    type_words = sorted({text for text in suffixes.values() if text}, key=len, reverse=True)
+    pieces, used = [], set()
+    position = 0
+    for match in _TOKEN.finditer(pattern):
+        pieces.append(re.escape(pattern[position:match.start()]))
+        token = match.group(0)
+        if token in ("{side}", "{type}"):
+            key = token.strip("{}")
+            words = side_words if key == "side" else type_words
+            body = "|".join(map(re.escape, words)) or "(?!)"
+            pieces.append(f"(?P<{key}>{body})" if key not in used else f"(?:{body})")
+            used.add(key)
+        elif token == "{#}":
+            pieces.append(r"(?:\d+|end)")
+        elif token == "{A}":
+            pieces.append("[A-Z]+")
+        elif token == "{a}":
+            pieces.append("[a-z]+")
+        elif token == "{name}":
+            pieces.append(r"[A-Za-z0-9]+(?:_[A-Za-z0-9]+)*?")
+        else:
+            pieces.append(re.escape(token))
+        position = match.end()
+    pieces.append(re.escape(pattern[position:]))
+    return re.compile("".join(pieces))
+
+
+_WHERE = {LEFT: "on the left", RIGHT: "on the right", CENTER: "in the middle"}
+
+
+def convention_problem(node: Node, pattern: str, sides: Sides, suffixes: dict) -> str:
+    """Why `node`'s name doesn't follow the convention `pattern` (a template: "{side}_{name}_{type}")
+    — "" = it does. Beyond the shape of the name: a side that isn't where the object stands, a
+    suffix that isn't its kind's."""
+    if not pattern.strip():
+        return ""
+    match = _convention_regex(pattern.strip(), sides, suffixes).fullmatch(node.name)
+    if match is None:
+        return f"isn't {pattern.strip()}"
+    groups = match.groupdict()
+    if groups.get("side"):
+        expected = sides.text(node.position)
+        if expected and groups["side"] != expected:
+            return f"says {groups['side']}, stands {_WHERE[sides.of(node.position)]}"
+    if groups.get("type"):
+        expected = suffixes.get(node.kind, "")
+        if expected and groups["type"] != expected:
+            return f"ends with {groups['type']}, a {node.kind} gets {expected}"
+    return ""

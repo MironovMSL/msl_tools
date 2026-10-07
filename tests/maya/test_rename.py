@@ -79,6 +79,11 @@ class Operations(unittest.TestCase):
         self.assertEqual(rules.type_suffix("arm_geo", "mesh", SUFFIXES), "arm_geo")
         self.assertEqual(rules.type_suffix("arm_upper", "joint", SUFFIXES), "arm_upper_jnt")
 
+    def test_what_changes_in_a_name(self):
+        self.assertEqual(rules.name_parts("lf_arm_jnt", "lf_leg_jnt"), [("lf_", False), ("leg", True), ("_jnt", False)])
+        self.assertEqual(rules.name_parts("arm", "lf_arm"), [("lf_", True), ("arm", False)])
+        self.assertEqual(rules.name_parts("lf_elbow_jnt", "bone_03"), [("bone_03", True)])   # not speckled
+
     def test_replace(self):
         self.assertEqual(rules.replace("l_arm_l", "l", "r"), "r_arm_r")             # every one
         self.assertEqual(rules.replace("arm_old", "_old", ""), "arm")              # out
@@ -147,6 +152,61 @@ class Library(unittest.TestCase):
         self.assertEqual(len(recent), 20)
         self.library.forget()
         self.assertEqual(self.library.recent(), [])
+
+
+class Chains(unittest.TestCase):
+    def fingers(self):
+        # a hand with two fingers of three joints, picked finger by finger (the hand too, last)
+        nodes = []
+        for finger in ("a", "b"):
+            path = "|hand"
+            for joint in range(3):
+                path += f"|{finger}{joint}"
+                nodes.append(node(f"{finger}{joint}", path=path))
+        nodes.append(node("hand", path="|hand"))
+        return nodes
+
+    def test_numbers_restart_per_chain_and_letters_count_chains(self):
+        nodes = self.fingers()
+        numbering = Numbering(start=1, padding=2, order=rules.ORDER_CHAINS)
+        names = rules.from_template(nodes, "finger_{A}_{#}", numbering, Sides(), SUFFIXES)
+        self.assertEqual(names[:6], ["finger_A_01", "finger_A_02", "finger_A_03",
+                                     "finger_B_01", "finger_B_02", "finger_B_03"])
+        self.assertEqual(names[6], "finger_C_01")      # the hand: two listed children = a chain of its own
+
+    def test_the_last_link_can_be_the_end(self):
+        numbering = Numbering(padding=2, order=rules.ORDER_CHAINS, end_last=True)
+        names = rules.from_template(self.fingers()[:3], "a_{#}", numbering, Sides(), SUFFIXES)
+        self.assertEqual(names, ["a_01", "a_02", "a_end"])
+
+
+class Mirror(unittest.TestCase):
+    def test_sides_swap_with_their_case(self):
+        self.assertEqual(rules.mirror("lf_arm_jnt"), "rt_arm_jnt")
+        self.assertEqual(rules.mirror("arm_L"), "arm_R")
+        self.assertEqual(rules.mirror("Left_arm"), "Right_arm")
+        self.assertEqual(rules.mirror("leftArmIK"), "rightArmIK")
+        self.assertEqual(rules.mirror("armRight"), "armLeft")
+        self.assertEqual(rules.mirror("spine_01"), "spine_01")
+        self.assertEqual(rules.mirror("links_arm", Sides(prefixes={"left": "links", "right": "rechts", "center": ""})),
+                         "rechts_arm")
+
+    def test_shape_names(self):
+        self.assertEqual(rules.shape_name("body"), "bodyShape")
+        self.assertEqual(rules.shape_name("body", 1), "bodyShape1")
+
+
+class Convention(unittest.TestCase):
+    def test_shape_side_and_kind(self):
+        pattern = "{side}_{name}_{type}"
+        ok = node("lf_upper_arm_jnt", type="joint", position=(3, 0, 0))
+        self.assertEqual(rules.convention_problem(ok, pattern, Sides(), SUFFIXES), "")
+        wrong_side = node("lf_arm_jnt", type="joint", position=(-3, 0, 0))
+        self.assertIn("on the right", rules.convention_problem(wrong_side, pattern, Sides(), SUFFIXES))
+        wrong_kind = node("lf_arm_grp", shape_type="mesh", position=(3, 0, 0))
+        self.assertIn("gets geo", rules.convention_problem(wrong_kind, pattern, Sides(), SUFFIXES))
+        self.assertTrue(rules.convention_problem(node("pCube1"), pattern, Sides(), SUFFIXES))
+        self.assertEqual(rules.convention_problem(node("finger_A_end"), "finger_{A}_{#}", Sides(), SUFFIXES), "")
 
 
 if __name__ == "__main__":

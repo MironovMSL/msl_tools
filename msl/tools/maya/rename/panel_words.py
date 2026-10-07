@@ -46,11 +46,11 @@ class _WordsMixin:
         self._favorites = ChipBar(add_text="+", name_placeholder="A word, then Enter", custom_menu=True, draggable=True)
         self._favorites.setObjectName("renameFavorites")
         self._favorites.setToolTip(WORD_HINT)
-        self._into = GlyphButton("", "Words, prefix and suffix go INTO THE NAME FIELD instead of renaming at once\n"
-                                     "(build the name, then Rename)", size=qt.QtCore.QSize(22, 20))
-        self._into.setObjectName("renameInto")
-        self._into.set_icon(icons.get_icon("text_frame", sub_folder="actions"))
-        self._into.setCheckable(True)
+        from msl_tools.msl.tools.maya.rename.buttons import ToggleIconButton
+        self._into = ToggleIconButton(icons.get_icon("text_frame", sub_folder="actions"), "Words into the name field",
+                                      "On: a click on a word puts it into the name field (build the name, then Rename)\n"
+                                      "Off: a click on a word renames the objects at once")
+        self._into.setObjectName("renameToggleIcon")
         row = qt.QtWidgets.QWidget()
         line = qt.QtWidgets.QHBoxLayout(row)
         line.setContentsMargins(0, 0, 0, 0)
@@ -136,7 +136,10 @@ class _WordsMixin:
         favorites = set(library.favorites())
         self._words_bar.set_chips([(word, word, "★ a favorite" if word in favorites else "") for word in words])
         self._words.set_summary(f"{current} · {len(words)} words" if current else "")
-        self._field.set_words(library.words())
+        pairs = [(word, name) for name, words in categories.items() for word in words]
+        pairs += [(word, "favorite") for word in library.favorites()]
+        for field in (self._field, self._prefix, self._suffix, self._find_text, self._replace_text):
+            field.set_words(pairs)
 
     def _refresh_recent_words(self) -> None:
         recent = self.library.recent()

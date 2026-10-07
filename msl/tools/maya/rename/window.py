@@ -17,7 +17,8 @@ class RenameWindow(FramelessDialog):
     OBJECT_NAME = "mslRenameWindow"
 
     def __init__(self, parent=None):
-        super().__init__(title="MSL Rename", width=400, height=600,
+        # fully opaque when Maya has the focus: the list is read while working in the viewport
+        super().__init__(title="MSL Rename", width=400, height=600, fade_when_inactive=False,
                          show_minimize_button=False, show_maximize_button=False, parent=parent)
         self.setObjectName(self.OBJECT_NAME)
         self.setAttribute(qt.QtCore.Qt.WidgetAttribute.WA_DeleteOnClose, True)

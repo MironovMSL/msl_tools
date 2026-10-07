@@ -225,7 +225,7 @@ msl_tools/                 (repo root)
     named by what the icon IS, not the gesture (`drag_handle`, not
     `dragAndDrop`). Categories: `window/` (chrome: close/maximize/...),
     `actions/` (row/toolbar actions: `drag_handle`, `copy`, `delete`,
-    `browse`, `folder_add`, `file_video`, `bookmark`, `bookmark_add`, `save`, `file_add`, `chevron_right`, `eye`, `folder_into`, `compress`, `scissors`, `repeat`, `text_frame`, `volume`, `gif`, `image_stack`, `clapper`, `crop`, `merge`, `split_view`, `film`, `timeline`, `folder_watch`, `pause`, `bell` (the Media actions and its queue), `clear`, `arrow_right`, `chevron_down`, `add`, `check`, `select_all`, `more`, `report`, `code`, `restart`, `power`, `play`, `edit`, `scene`, `stop`, `lock`, `search`, `rename` (the Rename tool); add new action icons here),
+    `browse`, `folder_add`, `file_video`, `bookmark`, `bookmark_add`, `save`, `file_add`, `chevron_right`, `eye`, `folder_into`, `compress`, `scissors`, `repeat`, `text_frame`, `volume`, `gif`, `image_stack`, `clapper`, `crop`, `merge`, `split_view`, `film`, `timeline`, `folder_watch`, `pause`, `bell` (the Media actions and its queue), `clear`, `arrow_right`, `chevron_down`, `add`, `check`, `select_all`, `more`, `report`, `code`, `restart`, `power`, `play`, `edit`, `scene`, `stop`, `lock`, `search`, `rename`, and the Rename tool's quick buttons: `case_upper`, `case_capital`, `case_lower`, `case_snake` (a snake), `case_camel` (a camel's humps), `cut_prefix`, `cut_suffix`, `cut_number`, `cut_digits`, `cut_first`, `cut_last`, `namespace_out`, `magic_fix`, `mirror_sides`, `shape_name`; add new action icons here),
     `apps/` (third-party application logos: `maya`; later houdini, blender...
     — named after the app, not the tool that uses it, so several tools can
     share one), `tools/` (sidebar icons of our OWN hub tools, one-color like
@@ -1084,6 +1084,19 @@ not every commit. The notes are the release's description on GitHub:
 - Releasing: bump `msl/__init__.py:__version_tuple__`, commit, push, then
   publish a GitHub release tagged `v<version>` with the notes. No `gh` CLI
   on this machine — the release is created in the browser.
+- Which number (Semantic Versioning, MAJOR.MINOR.PATCH — agreed with the
+  user 2026-10-07; propose the number by these rules before a release):
+  - PATCH (0.2.0 -> 0.2.1): only fixes and small improvements, nothing
+    new to learn.
+  - MINOR (0.2.x -> 0.3.0, PATCH back to 0): a new tool or a big new
+    capability (Media, Batch, Rename, Playblast were such).
+  - MAJOR stays 0 while the project is in active development (anything
+    may still change). 1.0.0 once, when the user calls it stable (e.g. a
+    team uses it). After that MAJOR grows only for BREAKING changes — the
+    user has to act: old settings no longer read / reset, another Python
+    needed, a Maya version dropped.
+  - Each part is its own number, no carrying at 9: 0.1.9 -> 0.1.10 is
+    fine (`Version` compares numbers, so 0.1.10 > 0.1.9 for "Update now").
 
 ## Media foundation (ffmpeg)
 
@@ -1978,14 +1991,18 @@ window's checks, written anew for this framework). Hotkeys: MSLRename, MSLRename
 - `panel.py` RenamePanel (+ panel_words / panel_find / panel_objects mixins, preview.py
   PreviewList, buttons.py HoverButton / SideButton (dots of the sides the selection stands on,
   qproperty colors) / KindButton (Maya's own icon of the kind), dialogs.py
-  SidesDialog / SuffixesDialog / NumberField), window.py RenameWindow (FramelessDialog, 400x600,
-  min ~346 wide). Top: quick buttons (AA Aa aa a_b aB | x_ _x _1 123 ‹ › | ns: fix) — a click
+  SidesDialog / SuffixesDialog / NumberField), window.py RenameWindow (FramelessDialog, 400x600, `fade_when_inactive=False` — the user's ask: no see-through while Maya has the focus,
+  min ~346 wide). Top: quick buttons (`QuickButton`, an IconPushButton with hovered(); icons by
+  `panel.QUICK_ICONS`, 20 px wide so all 15 fit in ONE row at the default width; the name is the
+  tooltip's first line; case · parts · ns / fix · L↔R / Shape) — a click
   renames at once, HOVERED the list shows what it would do; the name field (TemplateField:
   TokenLineEdit + completion of the word after the last "_" from the library, Tab takes it;
   Enter = Rename; right click on Rename = names used last); "01" puts / takes "_{#}"; the number
   row shows only while the template numbers; prefix + / side / kind / suffix +; favorites
   (ChipBar: click "_word", Alt+click without "_", drag into a field); the "into the field" toggle
-  sends words / prefix / suffix into the template instead. The list "before -> after"
+  sends WORDS into the template instead (since 2026-10-07 prefix / suffix + always rename the objects —
+  the user's call). On / off icon buttons (that toggle, the list's lock) are `ToggleIconButton`
+  (buttons.py): `on` property -> rename.qss accent fill + accent icon; the tooltip starts with ON / off. The list "before -> after"
   (selection; a lock holds it on its objects by uuid; double click a new name = rename that one;
   right click: use the name in the field, select only it). Cards (FoldingCard, folded by
   default): WORDS (categories, words, used last; editing through right-click menus with a field
@@ -1996,6 +2013,104 @@ window's checks, written anew for this framework). Hotkeys: MSLRename, MSLRename
   MEventMessage callbacks (SelectionChanged, NameChanged, Undo, Redo, scene opened), removed
   when the window hides; `selectPref(trackSelectionOrder=True)` so numbers follow the picking order.
   Config: configsMayaMng "rename" (`settings`, `library`, `type_suffixes`, `window`).
+- Second round (2026-10-07, the user's picks 1 / 5 / 6 / 10 / 12 of an idea list):
+  CHAINS — order "Chains" (`rules.chains`): a listed node continues its parent's chain when it is
+  that parent's ONLY listed child, else starts one; numbers restart per chain, {A} counts chains,
+  "end" toggle = the last link's {#} becomes "end" (finger_A_01, finger_A_02, finger_A_end).
+  MIRROR — quick button "L↔R" (`rules.mirror`: whole "_" parts lf/rt, l/r, left/right, lft/rgt +
+  the user's own side prefixes, case kept; else camelCase Left/Right) and OBJECTS "Other side"
+  (selects the mirrored names). SHAPES — quick button "Shape" (`scene.shapes_of`: each
+  non-intermediate shape -> "<transform>Shape", the second "...Shape1"; its own Operation with
+  nodes = the shapes). CONVENTION — a template in OBJECTS (`settings.convention`,
+  `rules.convention_problem`: the name's shape, {side} vs where it stands, {type} vs its kind's
+  suffix); while nothing else is shown the list marks breaking names "✗ why" (state
+  "nonconform"); "Check" selects them in the selection + below / the scene (startup cameras
+  skipped). QUICK — `quick_popup.QuickRename` (hotkey MSLRenameQuick, `rename.quick()`): a Qt.Popup
+  at the pointer with a TemplateField, 4 lines of before -> after, Enter renames (settings of the
+  window: numbering, sides, suffixes), Up / Down = names used last, one object = its name
+  prefilled and selected, then a Maya inViewMessage. Checked in windowed Maya 2025.
+- Third round (2026-10-07, the user's asks): the one-letter buttons sit at the ENDS of the name
+  field (`panel.EDGE`: ‹ left of it, › right of it); their icons: the backspace key pointing
+  RIGHT takes the FIRST letter (it leaves the queue first — the user's reading), pointing left
+  the last. The list shows each object's type icon (column 0) and a lock (column 1, tinted
+  qproperty lockedColor) on every locked node whatever else the row says; idle rows of locked
+  nodes read "locked node". LOCK row in OBJECTS: Lock / Unlock the selection, Locked = select
+  the locked nodes (`scene.set_locked` — one undo step, referenced nodes left alone —,
+  `scene.locked_ones`); the list's right click: "Unlock it" / "Lock it". Maya itself shows a
+  node's lock NOWHERE (not the Outliner, not the Attribute Editor) — only a refused rename /
+  delete tells. QuickRename moves when its frame (anywhere but the field) is dragged. A Qt.Popup holds the
+  mouse, so a cursor SET on its frame shows over the whole screen (the user saw it): the move
+  cursor is switched by a 40 ms look at where the pointer is (`_update_cursor`, `_over_frame`).
+- Fourth round (2026-10-07, after the user's old "Selected" window): the list's head has
+  Selected | Hierarchy (`settings.list_source`; Hierarchy = the selection + everything under it,
+  shapes out) and the KINDS in the list as chips with Maya's icons (`_kinds`, ChipBar(multiple)
+  — ChipBar chips may carry an icon now, a 4th tuple element): "all N", then by count; a click =
+  only that kind in the list AND selected in Maya, Ctrl+click = several, "all" = everything.
+  While a kind filter is on, the list holds on the whole list's uuids (`_filter_base`) as long
+  as Maya's selection is the one the filter made (`_filter_selection`, `scene.selection_uuids`)
+  — a rename keeps it; a selection made by hand lets it go. The count reads "3 of 7" /
+  "7 in the hierarchy". (The OBJECTS card's kind chips moved here.) `scene.nodes` asks each
+  parent for its children once (a hierarchy has many siblings).
+- Completion (2026-10-07): `word_fields.py` — `_WordCompletion` (the word after the last "_" /
+  "}" / ":" completed from (word, category) pairs: from the FIRST letter, words that start with it
+  first, then those that contain it — "der" -> shoulder —, 12 at most, the category drawn quietly
+  on the right by `_WordDelegate`; Tab / Enter takes the highlighted one) in `TemplateField` (the
+  name field + the quick popup) and `WordField` (prefix, suffix, find, replace). The words: every
+  category's + the favorites (`_refresh_words`). Its list is `QListView#wordCompleter` (rename.qss:
+  our drop-down lists' look). NOT make_rounded_popup there: a translucent QListView popup paints no
+  ground — only its text showed (measured, Maya 2025); square corners it is.
+- The list's height: `preview.HeightGrip` under it (drag = taller / shorter, double click = as tall
+  as its rows; qproperty gripColor) -> `PreviewList.set_user_height`, kept in `settings.list_height`
+  (0 = automatic). Kind chips are ICON-ONLY (kind · count in the tooltip; a kind without a Maya icon
+  keeps its word). Hierarchy lists in the Outliner's order (`scene._below`: each child, then what
+  is under it) — `allDescendents` came reversed (joint10 before joint1).
+- Rows of the list (2026-10-07): a TICK in column 0 (ItemIsUserCheckable; rename.qss
+  `PreviewList::indicator` = base.qss's check box look; a TICKED box is drawn only under the pointer —
+  `::indicator:checked` transparent, `:checked:hover` the box — its room stays, names don't move;
+  an unticked one always shows) — unticked = "left out" (state "skipped"):
+  `RenamePanel._left_out` (uuids, kept by the CLASS for the session) and `_plan()` name only the
+  kept ones, so the numbers have no gaps; a name typed for one row overrides it
+  (`Operation.respect_left_out = False`); the row menu has "Include every one again". Column 2 =
+  the LOCK, 24 px at the right edge (`setStretchLastSection(False)`): strong when locked, faint
+  when not; a click toggles it (referenced / read-only rows are not ours). The vertical bar is
+  ScrollBarAlwaysOn — SlimScrollBar draws nothing while nothing scrolls, so the columns never jump.
+  TRAP, met: a tick / lock click rebuilds the list, and `clear()` while Qt is still inside the
+  item's setData / the click CRASHED Maya — both are passed on with `QTimer.singleShot(0, bound
+  method)` (`_emit_included`, `_emit_lock`).
+- The list, fifth round (2026-10-07, the user's "all of them"): WHAT CHANGES in a new name is
+  drawn in the accent, bold (`rules.name_parts` — difflib; a name changed nearly all through
+  (ratio < 0.5) is one piece, a lone matching letter inside a change counts as changed — chance
+  matches read speckled; `preview._NewNameDelegate`, qproperty changedColor). A clash / a refused
+  name has a mark in column 1 (`actions/warning`, `actions/error`, tinted clash / error color).
+  The hovered row shows `_RowActions` at the end of its name (copy — flashes a check —, into the
+  name field). A CLICK on a row = select that object at once (`row_clicked` -> `_on_row_clicked`, the
+  list holds) and frame it FRAME_DELAY_MS (250 ms — the user's pick; the system's double-click time was ~0.5 s) later (`frame_requested` -> `scene.frame_selection`)
+  unless it was a double click (that edits the new name; its release's extra click is ignored —
+  `_after_double`); a click on the tick or the lock selects nothing (`_tick_clicked`: itemChanged
+  comes before itemClicked). The menu keeps "Show it in the scene"; TRAP, met with the REAL mouse
+  (synthetic events passed): the click's selection rebuilt the list between the two clicks, and
+  Qt's mouseDoubleClickEvent compares with the first press's index — clear() had invalidated it,
+  so no double click. `set_changes` now keeps the items when nothing shown changed (`_signature`).
+  Test clicks with real input (user32 SetCursorPos + mouse_event) when timing matters;
+  PICKING ROWS (the user's option 1 of 2): a click picks a row, Ctrl+click adds / takes away,
+  Shift+click the span from the row clicked last (`PreviewList._pick`, highlighted as Qt
+  selection, `set_picked` — the PANEL decides, `RenamePanel._picked`); picked objects are
+  selected in Maya (the list holds) and ONLY THEY are renamed — the rest read "not picked"
+  (state "skipped" with that note; unticked rows keep "left out"); a click on an empty spot /
+  the menu's "Pick none" = the whole list; a kind chip, Selected / Hierarchy and a selection made
+  by hand clear the pick. `set_changes` UPDATES rows in place when they are the same objects in
+  the same order (`_fill`) — picking changes the other rows' states, and a rebuild between the
+  two clicks of a double click would break it again.
+  Checked with real input in Maya 2025: click, Shift / Ctrl+click, rename of the picked only,
+  empty click, double click. "show" = `scene.show` (select + `viewFit(animate=True)`) while
+  `_hold_list` keeps the list (the kind filter's hold: released by a selection made by hand).
+  ROWS DRAG (by the name column) into an order of their own: a drop line (qproperty dropColor),
+  `order_changed(uuids)` -> `RenamePanel._manual_order` for exactly that list (`_manual_set`;
+  another list drops it), numbers / letters follow it (the order combo goes to Selection if it was
+  Name / Position); the menu: "Back to the order they came in". A search field beside the kinds
+  ("Find in the list", a plain QLineEdit — no completion there, the user's call) narrows the list — renames act on what is shown ("2 of 7").
+  Every signal that rebuilds the list (tick, lock, typed name, hover buttons, drop) is sent on the
+  next turn of the event loop (see the TRAP above).
   Type icons: `buttons.maya_type_icon(kind)` = the Outliner's `:/out_<type>.png` (every built-in
   kind of the suffix list has one, Maya 2025); a type without one borrows the nearest one it
   derives from (`nodeType(kind, inherited=True, isTypeName=True)`: baseLattice, hikIKEffector

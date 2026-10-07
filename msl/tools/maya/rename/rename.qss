@@ -12,15 +12,19 @@ RenamePanel StableScrollArea#renameScroll {
 }
 
 /* The quick buttons: small, quiet, text — what they do is the tooltip. */
+RenamePanel QuickButton#renameQuick {
+    qproperty-iconColor: var(--text-primary);
+}
 RenamePanel QPushButton#renameQuick {
     color: var(--text-primary);
     background: alpha(var(--text-primary), 5%);
     border: 1px solid alpha(var(--border), 70%);
     border-radius: 5px;
-    padding: 0px 4px;
-    min-width: 12px;
-    min-height: 20px;
-    max-height: 20px;
+    padding: 0px;
+    min-width: 20px;
+    max-width: 20px;
+    min-height: 22px;
+    max-height: 22px;
     font-size: 11px;
     font-weight: 600;
 }
@@ -103,11 +107,55 @@ RenamePanel QFrame#renameRule {
     background-color: alpha(var(--border), 70%);
     border: none;
 }
+/* On / off icon buttons (ToggleIconButton): off = quiet, on = the accent, clearly. */
+RenamePanel ToggleIconButton#renameToggleIcon {
+    qproperty-iconColor: var(--text-secondary);
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 5px;
+    padding: 0px;
+    min-width: 22px;
+    max-width: 22px;
+    min-height: 20px;
+    max-height: 20px;
+}
+RenamePanel ToggleIconButton#renameToggleIcon:hover {
+    border: 1px solid alpha(var(--accent), 60%);
+}
+RenamePanel ToggleIconButton#renameToggleIcon[on="true"] {
+    qproperty-iconColor: var(--accent);
+    background: alpha(var(--accent), 20%);
+    border: 1px solid alpha(var(--accent), 70%);
+}
 RenamePanel GlyphButton#renameLock,
 RenamePanel GlyphButton#renameInto {
     qproperty-glyphColor:       var(--text-secondary);
     qproperty-activeGlyphColor: var(--accent);
     qproperty-highlightColor:   alpha(var(--accent), 16%);
+}
+
+/* The hovered row's buttons (copy / into the field / show): a pill on the list's ground. */
+RenamePanel QFrame#renameRowActions {
+    background-color: var(--surface-raised);
+    border: 1px solid alpha(var(--border), 80%);
+    border-radius: 6px;
+}
+RenamePanel GlyphButton#renameRowAction {
+    qproperty-glyphColor:       var(--text-secondary);
+    qproperty-activeGlyphColor: var(--accent);
+    qproperty-highlightColor:   alpha(var(--accent), 16%);
+}
+RenamePanel QLineEdit#renameListSearch {
+    font-size: 11px;
+}
+
+/* The grip under the list: drag it to resize the list. */
+RenamePanel HeightGrip {
+    qproperty-gripColor: alpha(var(--text-secondary), 55%);
+}
+/* The kinds above the list: icon-only chips, the kind and count in the tooltip. */
+RenamePanel ChipBar#renameKinds QPushButton#chip[text=""] {
+    padding: 2px 7px;
 }
 
 /* Before -> after. */
@@ -118,15 +166,45 @@ RenamePanel PreviewList {
     qproperty-clashColor:  var(--warning);
     qproperty-errorColor:  var(--error);
     qproperty-lockedColor: alpha(var(--text-secondary), 70%);
+    qproperty-changedColor: var(--accent);
+    qproperty-dropColor:    var(--accent);
     background-color: var(--field);
     border: 1px solid alpha(var(--border), 80%);
     border-radius: 6px;
     padding: 1px;
     font-size: 11px;
 }
+/* The tick of a row: renamed or left out (as the check boxes of base.qss). */
+RenamePanel PreviewList::indicator {
+    width: 12px;
+    height: 12px;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+    background-color: linear-gradient(to bottom, var(--field-top), var(--field) 45%);
+}
+RenamePanel PreviewList::indicator:hover {
+    border: 1px solid alpha(var(--accent), 55%);
+}
+/* A ticked row's tick shows only under the pointer (fewer marks in the list); an UNticked one
+   always shows — what is left out must be seen. The room stays, so the names don't move. */
+RenamePanel PreviewList::indicator:checked {
+    background-color: transparent;
+    border: 1px solid transparent;
+    image: none;
+}
+RenamePanel PreviewList::indicator:checked:hover {
+    background-color: linear-gradient(to bottom, var(--primary-top), var(--primary-bottom));
+    border: 1px solid var(--primary-bottom);
+    image: icon(actions/check, var(--on-accent));
+}
 RenamePanel PreviewList::item {
     padding: 1px 4px;
     border: none;
+}
+/* Rows picked in the list (a click, Ctrl / Shift+click): only they are renamed. */
+RenamePanel PreviewList::item:selected {
+    background: alpha(var(--accent), 20%);
+    color: var(--text-primary);
 }
 RenamePanel PreviewList::item:hover {
     background: alpha(var(--accent), 8%);
@@ -135,3 +213,45 @@ RenamePanel PreviewList::item:hover {
 RenamePanel QLabel#renameStatus                { color: var(--text-secondary); font-size: 11px; }
 RenamePanel QLabel#renameStatus[state="done"]  { color: var(--success); }
 RenamePanel QLabel#renameStatus[state="error"] { color: var(--error); }
+
+/* QuickRename (quick_popup.py): the small field at the mouse pointer — a popup window of its own. */
+QFrame#quickRenameFrame {
+    background-color: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+}
+QLabel#quickRenameTitle {
+    color: var(--text-secondary);
+    font-size: 10px;
+    font-weight: 700;
+}
+QLabel#quickRenamePreview {
+    color: var(--text-primary);
+    font-size: 11px;
+}
+QLabel#quickRenameHint {
+    color: var(--text-secondary);
+    font-size: 10px;
+}
+
+/* The word completion's list (word_fields.py): like our drop-down lists — our ground, rows tinted
+   with the accent; a popup window of its own (adopted under its field), so square corners. */
+QListView#wordCompleter {
+    background-color: var(--surface-raised);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    padding: 3px;
+    outline: 0;
+}
+QListView#wordCompleter::item {
+    min-height: 20px;
+    padding: 0px 6px;
+    border-radius: 5px;
+}
+QListView#wordCompleter::item:hover {
+    background-color: alpha(var(--accent), 12%);
+}
+QListView#wordCompleter::item:selected {
+    background-color: alpha(var(--accent), 24%);
+    color: var(--text-primary);
+}
