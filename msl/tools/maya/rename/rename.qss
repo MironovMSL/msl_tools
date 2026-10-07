@@ -1,0 +1,137 @@
+/*
+ * Rename tool styles (template) — registered with StylesheetBuilder.register_template() by
+ * panel.py and appended after ui/theme/base.qss + widgets.qss. Same var()/alpha() syntax.
+ */
+
+TintedIcon#renameTitleIcon {
+    qproperty-iconColor: var(--accent);
+}
+RenamePanel StableScrollArea#renameScroll {
+    background-color: transparent;
+    border: none;
+}
+
+/* The quick buttons: small, quiet, text — what they do is the tooltip. */
+RenamePanel QPushButton#renameQuick {
+    color: var(--text-primary);
+    background: alpha(var(--text-primary), 5%);
+    border: 1px solid alpha(var(--border), 70%);
+    border-radius: 5px;
+    padding: 0px 4px;
+    min-width: 12px;
+    min-height: 20px;
+    max-height: 20px;
+    font-size: 11px;
+    font-weight: 600;
+}
+RenamePanel QPushButton#renameQuick:hover {
+    border: 1px solid var(--accent);
+    background: alpha(var(--accent), 12%);
+}
+RenamePanel QPushButton#renameQuick:pressed {
+    background: alpha(var(--accent), 25%);
+}
+
+/* Yes / no choices written as text (01, Aa, .*): switched on = the accent. */
+RenamePanel QPushButton#renameToggle {
+    color: var(--text-secondary);
+    background: alpha(var(--text-primary), 5%);
+    border: 1px solid alpha(var(--border), 70%);
+    border-radius: 5px;
+    padding: 0px 6px;
+    min-height: 20px;
+    max-height: 20px;
+    font-size: 11px;
+    font-weight: 700;
+}
+RenamePanel QPushButton#renameToggle:hover {
+    border: 1px solid alpha(var(--accent), 60%);
+}
+RenamePanel QPushButton#renameToggle:checked {
+    color: var(--accent);
+    background: alpha(var(--accent), 18%);
+    border: 1px solid alpha(var(--accent), 65%);
+}
+
+/* "+" beside the prefix / suffix fields, the side and kind buttons: framed like the fields. */
+RenamePanel QPushButton#renameAdd,
+RenamePanel QPushButton#renameKind,
+RenamePanel QPushButton#renameSide {
+    padding: 0px;
+    min-height: 20px;
+    max-height: 20px;
+    font-size: 11px;
+}
+RenamePanel QPushButton#renameAdd {
+    min-width: 22px;
+    max-width: 22px;
+    font-size: 14px;
+    font-weight: 600;
+}
+RenamePanel QPushButton#renameKind {
+    color: var(--text-secondary);
+}
+/* The sides the selection stands on, in Maya's colors for sides. */
+RenamePanel SideButton {
+    qproperty-leftColor:   var(--accent);
+    qproperty-centerColor: var(--warning);
+    qproperty-rightColor:  var(--error);
+    qproperty-emptyColor:  alpha(var(--text-secondary), 30%);
+}
+
+RenamePanel QLineEdit#renameField {
+    font-size: 12px;
+}
+RenamePanel QLabel#renameCaption {
+    color: var(--text-secondary);
+    font-size: 11px;
+}
+RenamePanel QLabel#renameCount {
+    color: var(--text-secondary);
+    font-size: 11px;
+}
+RenamePanel QLabel#renameSubtitle {
+    color: var(--text-secondary);
+    font-size: 9px;
+    font-weight: 700;
+}
+RenamePanel QLabel#renameHint {
+    color: var(--text-secondary);
+    font-size: 10px;
+}
+RenamePanel QFrame#renameRule {
+    background-color: alpha(var(--border), 70%);
+    border: none;
+}
+RenamePanel GlyphButton#renameLock,
+RenamePanel GlyphButton#renameInto {
+    qproperty-glyphColor:       var(--text-secondary);
+    qproperty-activeGlyphColor: var(--accent);
+    qproperty-highlightColor:   alpha(var(--accent), 16%);
+}
+
+/* Before -> after. */
+RenamePanel PreviewList {
+    qproperty-newColor:    var(--text-primary);
+    qproperty-sameColor:   alpha(var(--text-secondary), 70%);
+    qproperty-oldColor:    var(--text-secondary);
+    qproperty-clashColor:  var(--warning);
+    qproperty-errorColor:  var(--error);
+    qproperty-lockedColor: alpha(var(--text-secondary), 70%);
+    background-color: var(--field);
+    border: 1px solid alpha(var(--border), 80%);
+    border-radius: 6px;
+    padding: 1px;
+    font-size: 11px;
+}
+RenamePanel PreviewList::item {
+    padding: 1px 4px;
+    border: none;
+}
+RenamePanel PreviewList::item:hover {
+    background: alpha(var(--accent), 8%);
+}
+
+RenamePanel QLabel#renameStatus                { color: var(--text-secondary); font-size: 11px; }
+RenamePanel QLabel#renameStatus[state="done"]  { color: var(--success); }
+RenamePanel QLabel#renameStatus[state="error"] { color: var(--error); }

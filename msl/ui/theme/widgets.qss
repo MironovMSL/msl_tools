@@ -697,3 +697,25 @@ ColorSwatchButton {
     qproperty-borderColor:      var(--border);
     qproperty-hoverBorderColor: var(--accent);
 }
+
+/* FoldingCard (compositions/folding_card.py): a card of settings whose heading folds it. */
+QFrame#foldingCard {
+    background-color: var(--surface-raised);
+    border: 1px solid var(--border);
+    border-radius: 9px;
+}
+QLabel#foldingCardTitle {
+    color: var(--text-secondary);
+    font-size: 10px;
+    font-weight: 700;
+}
+QLabel#foldingCardSummary {
+    color: var(--text-secondary);
+    font-size: 11px;
+}
+TintedIcon#foldingCardIcon {
+    qproperty-iconColor: var(--accent);
+}
+TintedIcon#foldingCardChevron {
+    qproperty-iconColor: var(--text-secondary);
+}

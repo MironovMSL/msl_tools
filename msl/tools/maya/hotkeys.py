@@ -17,6 +17,10 @@ COMMANDS = {
                            "from msl_tools.msl.tools.maya.playblast import repeat_last; repeat_last()"),
     "MSLShotMaskToggle": ("Show or hide the MSL shot mask in the viewport",
                           "from msl_tools.msl.tools.maya.playblast import toggle_mask; toggle_mask()"),
+    "MSLRename": ("Open the MSL Rename window",
+                  "from msl_tools.msl.tools.maya.rename import launcher_entry_point; launcher_entry_point()"),
+    "MSLRenameRepeat": ("Rename again: the last rename on what is selected now (opens the window if it is closed)",
+                        "from msl_tools.msl.tools.maya.rename import repeat_last; repeat_last()"),
 }
 
 

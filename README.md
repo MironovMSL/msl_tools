@@ -16,6 +16,9 @@ One shortcut opens **MSL Tools**: a window with a sidebar of tools.
   rendered with Arnold or the viewport renderer, frame by frame, and turned into a video.
 - **Playblast** (inside Maya 2025+, *MSL* menu) — playblasts through our own ffmpeg chain, with a
   shot mask drawn in the viewport, versions, several cameras at once and presets.
+- **Rename** (inside Maya 2025+, *MSL* menu) — quick naming of the selected objects: a name with
+  numbers, letters, sides and kinds (`{side}_arm_{#}_{type}`), prefix / suffix, case, find &
+  replace, a library of words — every change shown as *before → after* first, one undo step.
 
 The hub updates itself: the version at the bottom of the sidebar opens *What's new*, with
 **Update now** for a newer release and **Install this version** to go back.

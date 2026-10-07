@@ -61,6 +61,7 @@ msl_tools/                 (repo root)
                 stub_a/, stub_b/  placeholder tools used to test hub navigation
             maya/               Maya-side tools (the MSL menu, hub_link, launch_report, batch_runner)
                 playblast/        Playblast: a dockable panel inside Maya 2025+ (see "Playblast tool")
+                rename/           Rename: quick naming of Maya objects, a window inside Maya 2025+ (see "Rename tool")
 ```
 
 ## Hard conventions (violate these and it won't match the rest of the codebase)
@@ -224,7 +225,7 @@ msl_tools/                 (repo root)
     named by what the icon IS, not the gesture (`drag_handle`, not
     `dragAndDrop`). Categories: `window/` (chrome: close/maximize/...),
     `actions/` (row/toolbar actions: `drag_handle`, `copy`, `delete`,
-    `browse`, `folder_add`, `file_video`, `bookmark`, `bookmark_add`, `save`, `file_add`, `chevron_right`, `eye`, `folder_into`, `compress`, `scissors`, `repeat`, `text_frame`, `volume`, `gif`, `image_stack`, `clapper`, `crop`, `merge`, `split_view`, `film`, `timeline`, `folder_watch`, `pause`, `bell` (the Media actions and its queue), `clear`, `arrow_right`, `chevron_down`, `add`, `check`, `select_all`, `more`, `report`, `code`, `restart`, `power`, `play`, `edit`, `scene`, `stop`; add new action icons here),
+    `browse`, `folder_add`, `file_video`, `bookmark`, `bookmark_add`, `save`, `file_add`, `chevron_right`, `eye`, `folder_into`, `compress`, `scissors`, `repeat`, `text_frame`, `volume`, `gif`, `image_stack`, `clapper`, `crop`, `merge`, `split_view`, `film`, `timeline`, `folder_watch`, `pause`, `bell` (the Media actions and its queue), `clear`, `arrow_right`, `chevron_down`, `add`, `check`, `select_all`, `more`, `report`, `code`, `restart`, `power`, `play`, `edit`, `scene`, `stop`, `lock`, `search`, `rename` (the Rename tool); add new action icons here),
     `apps/` (third-party application logos: `maya`; later houdini, blender...
     — named after the app, not the tool that uses it, so several tools can
     share one), `tools/` (sidebar icons of our OWN hub tools, one-color like
@@ -1006,7 +1007,8 @@ atoms/buttons/motion_icon_button.py       MotionIconButton (a QPushButton whose 
 compositions/action_strip.py              ActionStrip (a strip of icon-only buttons of which one is picked — what a tool can DO, as opposed to settings; set_items([(key, title, description, icon, group)]), current() / set_current(key, animate=), clicked(str); wraps. The strip PAINTS: the accent pill under the picked button — it slides to a new one —, a hairline where the group changes, and the hovered button's name + description in the free room after the buttons, at once, so the icons get learned)
 compositions/fact_tiles.py                FactTiles (a row of small tiles, each a VALUE over what it is — data that is read, not clicked; set_pairs([(value, caption)]); clipped in a narrow window, never widens it; QFrame#factTile in widgets.qss. Media's source facts and estimate, the Playblast panel's scene)
 compositions/drop_area.py                 DropArea (where files are dropped: a painted dashed frame, an icon + a line saying what to drop, a quiet second line, a pill of round icon buttons — add_button(); set_dragging() lights it up, set_busy() shows "Reading…"; it only shows the target, the owner takes the drop)
-compositions/chip_bar.py                  ChipBar (pills that wrap: a checkable picker, or a shelf of saved things with an in-place "+ …" name field and "Remove")
+compositions/chip_bar.py                  ChipBar (pills that wrap: a checkable picker, or a shelf of saved things with an in-place "+ …" name field and "Remove"; hovered(key / ""), custom_menu=True -> menu_requested(key, global pos) instead of "Remove", draggable=True -> a chip dragged away carries its key as text)
+compositions/folding_card.py              FoldingCard (a card of settings whose heading folds it: chevron, icon, CAPS title, extras at its end; folded, set_summary() says what is set; QFrame#foldingCard in widgets.qss — the Rename tool's cards; Playblast still has its own _Card)
 compositions/range_strip.py               RangeStrip (pictures side by side with a range picked by two handles; range_changed / range_released; Left / Right move the handle touched last by set_step())
 themed_widget_playground_dialog.py        ThemedWidgetPlaygroundDialog
 windows/confirm_dialog.py                 ConfirmDialog (themed rounded question window; ask() -> choice key or None)
@@ -1944,6 +1946,66 @@ came from: CLAUDE.local.md). Step 1 of 4 is built (2026-10-03):
   result into the hub's Media jobs; the rest of the idea list given to
   the user on 2026-10-03 (compare with the previous one, repeat the
   last on a hotkey, an estimate, a light copy for a messenger...).
+
+## Rename tool (inside Maya)
+
+`msl/tools/maya/rename/` (MSL menu > Rename; Maya 2025+, PySide6 like Playblast; built
+2026-10-06 from the user's own two old rename scripts — their ideas, lists and the "Selected"
+window's checks, written anew for this framework). Hotkeys: MSLRename, MSLRenameRepeat
+(`repeat_last()`: the last operation on what is selected now).
+- `rules.py` (no Qt, no Maya): everything works on `Node`s (path, name WITHOUT namespace,
+  namespace, type, shape_type -> `kind`, position = world rotate pivot, locked reason, uuid,
+  sibling names) and returns new names. The template (the name field) takes {name} {#} {A} {a}
+  {side} {type}; `Numbering` (start, step, padding, order: selection / name / position X Y Z),
+  `Sides` (+ on the mirror axis = left, within `tolerance` of 0 = mid; an old side prefix —
+  lf / rt / mid / l / r / c ... — is taken off first), suffix by kind (a suffix of ANOTHER kind is
+  replaced: arm_grp of a mesh -> arm_geo). One-name operations: smart capitalize (armIK -> ArmIK),
+  camel <-> snake, remove prefix / suffix / end number / digits / first / last, replace (EVERY
+  occurrence, empty = take out, case, regex), sanitize (Cyrillic transliterated, signs -> "_").
+  `plan(nodes, names)` -> `Change`s with a state: "" / warning / same / locked / error (Maya
+  refuses it) / clash (two get one name under one parent, or a sibling that stays has it — Maya
+  would number it).
+- `library.py` NameLibrary (no Qt): categories of words (built-in = the old tool's Postfixes /
+  Base / Limbs / Face / Other, in code; in the config once changed), favorites, the last 20
+  templates renamed with. `operations.py` Operation = what a click would do, as a value.
+- `scene.py` (maya.cmds): objects carried by UUID (a rename changes the long names below it);
+  `apply()` = ONE undo chunk ("MSL Rename"); the target always carries the namespace explicitly —
+  measured (Maya 2025): `rename("ns:box", "crate")` puts it in the ROOT namespace. A selected
+  shape stands for its transform (Maya renames the shape with it: "armShape"); a shape whose
+  transform is listed too is dropped. Names Maya can't address (non-Latin letters from an import)
+  are skipped, not raised. Maya REFUSES a rename to Cyrillic ("New name has invalid characters").
+  Also `not_unique`, `look_in` (selection + below, else the scene), `skin_joints`, `make_set`.
+- `panel.py` RenamePanel (+ panel_words / panel_find / panel_objects mixins, preview.py
+  PreviewList, buttons.py HoverButton / SideButton (dots of the sides the selection stands on,
+  qproperty colors) / KindButton (Maya's own icon of the kind), dialogs.py
+  SidesDialog / SuffixesDialog / NumberField), window.py RenameWindow (FramelessDialog, 400x600,
+  min ~346 wide). Top: quick buttons (AA Aa aa a_b aB | x_ _x _1 123 ‹ › | ns: fix) — a click
+  renames at once, HOVERED the list shows what it would do; the name field (TemplateField:
+  TokenLineEdit + completion of the word after the last "_" from the library, Tab takes it;
+  Enter = Rename; right click on Rename = names used last); "01" puts / takes "_{#}"; the number
+  row shows only while the template numbers; prefix + / side / kind / suffix +; favorites
+  (ChipBar: click "_word", Alt+click without "_", drag into a field); the "into the field" toggle
+  sends words / prefix / suffix into the template instead. The list "before -> after"
+  (selection; a lock holds it on its objects by uuid; double click a new name = rename that one;
+  right click: use the name in the field, select only it). Cards (FoldingCard, folded by
+  default): WORDS (categories, words, used last; editing through right-click menus with a field
+  inside the menu), FIND & REPLACE (scope Selected / Hierarchy / All; while its fields are worked
+  in, the list shows the matches and their new names), OBJECTS (kinds in the list — a click
+  selects one kind; checks: same names in the scene, bad names, skin joints; quick sets kept by
+  the CLASS for the session, by uuid, "Make a Maya set"). Selection is followed through
+  MEventMessage callbacks (SelectionChanged, NameChanged, Undo, Redo, scene opened), removed
+  when the window hides; `selectPref(trackSelectionOrder=True)` so numbers follow the picking order.
+  Config: configsMayaMng "rename" (`settings`, `library`, `type_suffixes`, `window`).
+  Type icons: `buttons.maya_type_icon(kind)` = the Outliner's `:/out_<type>.png` (every built-in
+  kind of the suffix list has one, Maya 2025); a type without one borrows the nearest one it
+  derives from (`nodeType(kind, inherited=True, isTypeName=True)`: baseLattice, hikIKEffector
+  found one); cached. Used by KindButton and SuffixesDialog's rows (icon, then the name).
+- Tests: `tests/maya/test_rename.py` (rules + library). Checked in real windowed Maya 2025 (a
+  fresh MAYA_APP_DIR; mayapy standalone can't host widgets — it makes a QGuiApplication, and a
+  QApplication made before it crashes Maya's initialize): menu + hotkeys registered, window
+  parented to Maya, the list following the selection, lock, template with side / number / kind,
+  one undo step, replace in the whole scene, out of a namespace, a word, letters, one name typed
+  in the list, selected shapes, light theme, closing with callbacks gone.
 
 ## Batch tool
 

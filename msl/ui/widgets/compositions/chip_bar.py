@@ -43,21 +43,33 @@ class ChipBar(qt.QtWidgets.QWidget):
     The bar only shows and reports; what a chip means is the owner's.
     Looks: ui/theme/widgets.qss (`ChipBar QPushButton#chip`, `#chipAdd`).
 
+    `custom_menu=True`: a right click on ANY chip emits menu_requested instead of the bar's own
+    "Remove" menu — the owner builds the menu. `draggable=True`: a chip dragged away carries its
+    key as text (drop it into a line edit).
+
     Signals:
         clicked(str) — a chip's key.
         add_requested(str) — the name typed after the "+ …" link.
         remove_requested(str) — "Remove" was picked for that chip's key.
+        hovered(str) — the pointer came over a chip (its key) / left it ("").
+        menu_requested(str, QPoint) — a right click on a chip (custom_menu=True), global position.
     """
 
     clicked = qt.QtCore.Signal(str)
     add_requested = qt.QtCore.Signal(str)
     remove_requested = qt.QtCore.Signal(str)
+    hovered = qt.QtCore.Signal(str)
+    menu_requested = qt.QtCore.Signal(str, qt.QtCore.QPoint)
 
     ADD_ICON_SIZE = qt.QtCore.QSize(24, 20)
 
     def __init__(self, add_text: str = "", name_placeholder: str = "", checkable: bool = False,
-                 add_icon: "qt.QtGui.QIcon | None" = None, multiple: bool = False, parent=None):
+                 add_icon: "qt.QtGui.QIcon | None" = None, multiple: bool = False, custom_menu: bool = False,
+                 draggable: bool = False, parent=None):
         super().__init__(parent)
+        self._custom_menu = custom_menu
+        self._draggable = draggable
+        self._press_at = None
         self._checkable = checkable
         self._multiple = multiple
         self._marked: set[str] = set()
@@ -109,7 +121,13 @@ class ChipBar(qt.QtWidgets.QWidget):
             chip.setCursor(qt.QtCore.Qt.CursorShape.PointingHandCursor)
             chip.setFocusPolicy(qt.QtCore.Qt.FocusPolicy.NoFocus)
             chip.clicked.connect(lambda _checked=False, key=key: self._on_chip(key))
-            if key in self._removable:
+            chip.setProperty("chipKey", key)
+            chip.installEventFilter(self)
+            if self._custom_menu:
+                chip.setContextMenuPolicy(qt.QtCore.Qt.ContextMenuPolicy.CustomContextMenu)
+                chip.customContextMenuRequested.connect(
+                    lambda position, key=key, chip=chip: self.menu_requested.emit(key, chip.mapToGlobal(position)))
+            elif key in self._removable:
                 chip.setContextMenuPolicy(qt.QtCore.Qt.ContextMenuPolicy.CustomContextMenu)
                 chip.customContextMenuRequested.connect(
                     lambda position, key=key, chip=chip: self._on_chip_menu(key, chip.mapToGlobal(position)))
@@ -164,6 +182,33 @@ class ChipBar(qt.QtWidgets.QWidget):
             self._current = key
             self._sync_checked()
         self.clicked.emit(key)
+
+    def eventFilter(self, watched, event) -> bool:
+        key = watched.property("chipKey") if isinstance(watched, qt.QtWidgets.QPushButton) else None
+        if key is not None:
+            kind = event.type()
+            if kind == qt.QtCore.QEvent.Type.Enter:
+                self.hovered.emit(key)
+            elif kind == qt.QtCore.QEvent.Type.Leave:
+                self.hovered.emit("")
+            elif self._draggable and kind == qt.QtCore.QEvent.Type.MouseButtonPress                     and event.button() == qt.QtCore.Qt.MouseButton.LeftButton:
+                self._press_at = event.position().toPoint()
+            elif (self._draggable and kind == qt.QtCore.QEvent.Type.MouseMove and self._press_at is not None
+                  and event.buttons() & qt.QtCore.Qt.MouseButton.LeftButton
+                  and (event.position().toPoint() - self._press_at).manhattanLength()
+                  >= qt.QtWidgets.QApplication.startDragDistance()):
+                self._press_at = None
+                watched.setDown(False)
+                drag = qt.QtGui.QDrag(watched)
+                data = qt.QtCore.QMimeData()
+                data.setText(key)
+                drag.setMimeData(data)
+                drag.setPixmap(watched.grab())
+                drag.exec(qt.QtCore.Qt.DropAction.CopyAction)
+                return True
+            elif kind == qt.QtCore.QEvent.Type.MouseButtonRelease:
+                self._press_at = None
+        return super().eventFilter(watched, event)
 
     def _on_chip_menu(self, key: str, position) -> None:
         menu = make_rounded_popup(qt.QtWidgets.QMenu(self))
