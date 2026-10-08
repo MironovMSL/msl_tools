@@ -225,7 +225,7 @@ msl_tools/                 (repo root)
     named by what the icon IS, not the gesture (`drag_handle`, not
     `dragAndDrop`). Categories: `window/` (chrome: close/maximize/...),
     `actions/` (row/toolbar actions: `drag_handle`, `copy`, `delete`,
-    `browse`, `folder_add`, `file_video`, `bookmark`, `bookmark_add`, `save`, `file_add`, `chevron_right`, `eye`, `folder_into`, `compress`, `scissors`, `repeat`, `text_frame`, `volume`, `gif`, `image_stack`, `clapper`, `crop`, `merge`, `split_view`, `film`, `timeline`, `folder_watch`, `pause`, `bell` (the Media actions and its queue), `clear`, `arrow_right`, `chevron_down`, `add`, `check`, `select_all`, `more`, `report`, `code`, `restart`, `power`, `play`, `edit`, `scene`, `stop`, `lock`, `search`, `rename`, and the Rename tool's quick buttons: `case_upper`, `case_capital`, `case_lower`, `case_snake` (a snake), `case_camel` (a camel's humps), `cut_prefix`, `cut_suffix`, `cut_number`, `cut_digits`, `cut_first`, `cut_last`, `namespace_out`, `magic_fix`, `sweep`, `mirror_sides`, `shape_name`, `warning`, `error`; add new action icons here),
+    `browse`, `folder_add`, `file_video`, `bookmark`, `bookmark_add`, `save`, `file_add`, `chevron_right`, `eye`, `folder_into`, `compress`, `scissors`, `repeat`, `text_frame`, `volume`, `gif`, `image_stack`, `clapper`, `crop`, `merge`, `split_view`, `film`, `timeline`, `folder_watch`, `pause`, `bell` (the Media actions and its queue), `clear`, `arrow_right`, `chevron_down`, `add`, `check`, `select_all`, `more`, `report`, `code`, `restart`, `power`, `play`, `edit`, `scene`, `stop`, `lock`, `search`, `rename`, and the Rename tool's quick buttons: `case_upper`, `case_capital`, `case_lower`, `case_snake` (a snake), `case_camel` (a camel's humps), `cut_prefix`, `cut_suffix`, `cut_number`, `cut_digits`, `cut_first`, `cut_last`, `namespace_out`, `magic_fix`, `sweep`, `mirror_sides`, `shape_name`, `warning`, `error`, `keyboard` (Maya Gate's EN), and the Rename strip's `names_same`, `name_bad`, `skin_joints`, `side_other`, `lock_find`, `convention_check`, `names_unique`, `name_related`, `convention_fix`, `unlock`, `sets`, `star`, `sliders`, `book`, `replace`, `skin_mesh` (the grey cube under `skin_joints`), `branch`; add new action icons here),
     `apps/` (third-party application logos: `maya`; later houdini, blender...
     — named after the app, not the tool that uses it, so several tools can
     share one), `tools/` (sidebar icons of our OWN hub tools, one-color like
@@ -905,6 +905,25 @@ What changed vs. the original (all deliberate, not oversights):
   to check before a launch") is there only while there is something,
   its tooltip lists them, a click opens them in a TextDialog. It never
   stops a launch.
+- English in Maya (2026-10-08, the user's ask): the toolbar's "EN" toggle (`MayaGateToolbar.english_toggle`,
+  an IconPushButton with `actions/keyboard`, `on` property -> maya_gate.qss accent) is per environment
+  (config `"keyboard": {"<env>": bool}`, on unless switched off — `_keeps_english`); a launch with it
+  carries `MSL_GATE_KEEP_ENGLISH=1` (core/link/variables.KEEP_ENGLISH). Inside Maya `hub_link.start()`
+  first calls `tools/maya/keyboard_keeper.start()` (PySide2 / 6, Python-3.9-valid, its own WinDLL;
+  owned by the QApplication, replaced on "Reload code"): Maya becomes the active application -> its
+  window gets an INSTALLED English layout (WM_INPUTLANGCHANGEREQUEST; one that isn't installed is
+  never added); Maya stops being active -> if Maya still has that English (not switched by hand) and
+  the next window has it too (Windows' one-layout-for-all default), that window gets the old layout
+  back after 60 ms; with Windows' per-window layouts nothing outside Maya is touched. Checked in
+  windowed Maya 2025 with Notepad as "the other window": RU -> EN in Maya, RU back in Notepad, EN
+  again on return, a hand-made RU kept.
+  A right click on "EN" offers a third mode, "English only" (the user's ask; config value "only",
+  the variable `=only`, a lock icon on the button; an older hub reads "only" as on): while Maya is
+  active its layout is checked every HOLD_INTERVAL_MS (120) and anything not English is switched
+  back — no other layout can be used inside Maya; leaving it still restores the next window's.
+  Not done by swallowing WM_INPUTLANGCHANGEREQUEST in a native event filter (Python on every
+  message Maya gets; Win+Space doesn't always send it). Checked in Maya 2025: three RU switches by
+  hand bounced back, Notepad got RU back and kept a RU of its own.
 - Every launch tells Maya what it is: `MSL_GATE_ENVIRONMENT` (the
   environment) and `MSL_GATE_VARIABLES` (names of the variables this launch
   set). The MSL menu's Dev > "Print Launch Report"
@@ -2130,6 +2149,97 @@ window's checks, written anew for this framework). Hotkeys: MSLRename, MSLRename
   under the name field: click = put it in (then Rename), the bookmark = save the current, the
   matching one outlined, right click: save over / remove / back to the built-in ones).
   Checked in windowed Maya 2025, every one end to end.
+- The STRIP (2026-10-08, the user's ask: the OBJECTS card is gone): a column of icon buttons LEFT of
+  the list (`panel_objects.py` `_ObjectsMixin.STRIP`, `buttons.StripButton`), in groups ruled off
+  by hairlines — FIND (Same names, Bad names, Skin joints, Other side, Check by the convention),
+  FIX (Make unique, Name related, Fix by the convention; hovered = the list previews), LOCK (Locked =
+  select the locked ones, Lock, Unlock), SETS (a menu: select one, "Change" submenus, a field for a new one). The icon's
+  COLOR says what it does: the `tone` property -> rename.qss qproperty-iconColor from the palette
+  hues `--warning` / `--error` / `--violet` / `--teal` / `--orange` / `--accent` / `--success`
+  (violet / teal / orange added to both palettes for it). Badges (`set_badge`, qproperty
+  badgeColor): how many of the LIST's objects the find would hit — same names, bad names, locked,
+  off the convention — counted 300 ms after a refresh (`_refresh_badges`). The convention is typed
+  in the right click menu of Check / Fix (`_on_convention_menu`, `settings.convention`); with none
+  set, a click opens that menu. The list is never shorter than the strip (`PreviewList.set_floor`,
+  ~350 px with 12 buttons). Checked in windowed Maya 2025, both themes.
+  The LIST FOLDS: a chevron at the start of its head row (`_list_fold`, `_set_list_open`) hides the
+  kinds + search, the strip, the list and its grip; the head (Selected / Hierarchy, the count) stays;
+  kept in `settings.folded.list`.
+- Quick buttons redrawn (2026-10-08, the user's pick): case as the RESULT in stroked letters (AB, Ab, ab,
+  a_b, aB); taking a part off as the name in blocks with the part crossed out (prefix / suffix), the
+  digits struck through (01 at the end, a1b); namespace = a dashed block lifting off a colon; clean =
+  leftovers swept off a block; shape = a cube + S. 17 px (`panel.QUICK_ICON_SIZE`; QuickButton's
+  icon_size, 15 elsewhere) and colored by group (`panel.QUICK_TONES` -> rename.qss `tone`): case
+  blue, cutting orange (the edge buttons too), cleaning green, sides / shapes teal — the strip's palette.
+- Recipes moved off their chip row (2026-10-08, the user's ask): ONE framed bookmark button right of
+  Rename (`self._recipes`, a QuickButton#renameRecipe; `on` = the accent while the settings on screen
+  are a recipe — `RecipeStore.matching()` returns a LIST). A click = `_on_recipes_menu`: every recipe
+  with its template right-aligned (the "\t" of a menu item), the matching ones ticked; "Change" >
+  <recipe> > save over / remove; a field to save the current settings as one; the built-in ones back.
+- Compact round (2026-10-08, the user's 1 / 2 / 3 / 4 / 6):
+  HEADER (`RenamePanel.header_widgets()`, put in by RenameWindow before the theme toggle): Words
+  (`actions/book`) and Find & Replace (`search`) ToggleIconButtons#renameHeaderToggle SHOW / HIDE their
+  card altogether (`_show_card`; a click on the card's heading folds = hides it, the button follows;
+  `settings.folded.words / .find`, hidden by default); a settings button (`actions/sliders`,
+  GlyphButton#renameHeaderGear): Sides…, Suffixes by kind…, Naming convention…, "Words go into the
+  name field". STATUS in the header: `_say` emits `status_changed(text, state)`; the window shows it as
+  the header's subtitle ("MSL Rename › Renamed 5"), elided to the room (the header's spacer gives its
+  stretch to the leading part), `QLabel#headerSubtitle[state=done|error]` colored in rename.qss; the
+  panel's own status label is never shown any more (it made everything under it jump). EMPTY LIST
+  (`_show_empty`, from refresh: nothing listed): the list, its grip and search hide, the strip LIES DOWN
+  as one row (`_lay_strip`: QBoxLayout direction; its hairlines are sized in code, not QSS), and a line
+  + the names used last (ChipBar, click = into the name field) take their place. FAVORITES: the chip row
+  is gone — a star button right of the suffix's "+" (`_favorites`, QuickButton#renameRecipe, lit while
+  words go into the name field) opens a menu: the words (hovered = previewed), "Change" (move / take
+  out), a field for a new one, "Words go into the name field" (the old T toggle; `_into_on`).
+- Quick GROUPS (2026-10-08, the user's pick of a mock-up: "one uses only one of each"): the 14 quick
+  buttons became four `buttons.GroupButton`s (`panel.QUICK_GROUPS`: Case / Take a part off / Clean /
+  Sides & shapes; 17 px icons in a 22 px high button like the rest — the user found bigger ones
+  stood out too much —, tinted by `tone`, a small corner triangle). A group shows the action used
+  LAST (`settings.quick_last`, its first one until then); a click repeats it, hovered = the list
+  previews it; the corner, a right click or holding it (HOLD_MS) opens the group's menu
+  (`_on_group_menu`: icon + name per action, hovered = previewed, "last" marked) — a pick runs it and
+  becomes the button. The row now also holds 01 / Rename / recipes on its right; the name field
+  under it is as wide as the window (the one-letter buttons stay at its ends).
+- Height round (2026-10-08, the user's 1 / 2 / 3): the STRIP is a ROW over the list, always
+  (`_lay_strip(True)` at build) — as a column it held the list at ~350 px even for one row; the list is
+  as tall as its rows again (`PreviewList.set_floor` is no longer called). A list_height saved while the
+  floor held (349 here) keeps the list that tall: double click the grip. SEARCH: an icon in the list's
+  head (`_search_button`, Ctrl+F) opens the field there in place of the count (`_open_search`); Esc,
+  or leaving it empty, closes it (`_close_search`, the panel's eventFilter). Find & Replace's icon is
+  now `actions/replace` (two lookups side by side read the same). The WINDOW FITS ITS HEIGHT to the
+  content (`RenameWindow._fit_height`, on the scroll body's LayoutRequest, 40 ms debounce:
+  `RenamePanel.content_height_change()` = body sizeHint - viewport; clamped to the screen) while
+  `settings.fit_height` (default on); a height dragged by hand (a resize with the mouse button down)
+  turns it off, the settings menu turns it back on. Measured: one object 311 px (was 595), ten 406,
+  Find & Replace shown +101.
+  TWO-TONE icon (the user: "grey like a mesh"): `StripButton.set_under_icon()` lays a second shape
+  under the icon in qproperty underColor (`--text-secondary`) — Skin joints = violet joints over a grey
+  cube (`skin_mesh`). Still one-color SVGs, the colors from QSS; no transparency in the SVG.
+- The list, eight more (2026-10-08, the user's "all of them"): column 0 is painted by
+  `preview._NameDelegate` (the item stays flat — every loop over topLevelItem keeps working):
+  TREE on "Hierarchy" in the Outliner's order (`RenamePanel._tree_view()`; `set_changes(tree=)`): a row
+  is under the nearest listed row its long name starts with (`_shape_tree`: depth / parent / kids),
+  indented INDENT per level, a fold arrow (a press on it folds, ← / → too, the menu: fold / unfold every
+  branch); FOLDING ONLY HIDES (`_apply_fold`, `setHidden`) — folded rows are still renamed. The
+  delegate shifts the item's rect (paint AND editorEvent, so the tick still takes clicks).
+  PROBLEM DOTS after the name (`set_marks(sides, issues)`, from `_refresh_marks` in the badges'
+  300 ms pass — the "same" count of the strip comes from it, one scene walk): same name (warning),
+  bad / Maya's own name (error), off the convention (accent), a shape not named after its transform
+  (teal; `scene.shape_mismatches`). Qproperty sameDotColor / badDotColor / conventionDotColor /
+  shapeDotColor. A press on a dot (`_dot_hits`, kept by the paint) = `fix_requested` -> `_on_fix_menu`:
+  that ROW's fixes, for that object only (`_run_one`: unique, fix the signs, clean, by the convention,
+  name its shape). SIDE: a dot on the icon's corner, Maya's left blue / right red / middle yellow (qproperty
+  leftColor / rightColor / midColor = `--yellow`, added to both palettes; groundColor rings it). NAMESPACE drawn faint before
+  the name (`_NS`). PASTE NAMES: the menu's "Paste names — N from the clipboard" (hovered = previewed,
+  `paste_hovered`) or Ctrl+V in the list; `preview.paste_lines` (lines, else tab / comma / ; on one
+  line), one per row in the list's order, rows without a name keep theirs. ROW BUTTONS (hovered row):
+  edit (as a double click), other side's name for this one (`_on_mirror_one`), select it + everything
+  under it (`scene.select_branch`, `actions/branch`), copy, into the field. KEYS (the list takes focus
+  on a click now): ↑ / ↓ pick + select + frame (Shift extends), F2 / Enter type a name, space ticks /
+  unticks the picked rows, Esc picks none. Checked in windowed Maya 2025 on a left hand (tree, fold,
+  dots incl. a shape and Maya's group7, side dots, ns faint, the shape fixed from its dot, keys,
+  mirror one, paste 3 names).
   Type icons: `buttons.maya_type_icon(kind)` = the Outliner's `:/out_<type>.png` (every built-in
   kind of the suffix list has one, Maya 2025); a type without one borrows the nearest one it
   derives from (`nodeType(kind, inherited=True, isTypeName=True)`: baseLattice, hikIKEffector

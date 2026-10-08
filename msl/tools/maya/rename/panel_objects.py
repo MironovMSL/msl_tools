@@ -1,14 +1,14 @@
 # tools/maya/rename/panel_objects.py
-"""The rename panel's OBJECTS card: what is selected by kind (a click selects one kind), checks
-of names (the same short name twice in the scene, names Maya would refuse), the joints a mesh is
-skinned to, and quick sets of objects for this session. Methods of RenamePanel, kept apart by
-concern."""
+"""The rename panel's strip beside the list (it was the OBJECTS card): icon buttons, colored by
+what they do — FIND (select: the same short name twice, bad names, skin joints, the other side,
+locked nodes, names off the convention; how many of the list's objects each would find is a badge),
+FIX (make unique, name related, fix by the convention — previewed in the list while hovered),
+LOCK / UNLOCK, and quick SETS of objects for this session (a menu). The convention is typed in the
+right click menu of its two buttons. Methods of RenamePanel, kept apart by concern."""
 import msl_tools.msl.ui.qt_bindings as qt
 from msl_tools.msl.tools.maya.rename import rules, scene
 from msl_tools.msl.ui.theme.qss import make_rounded_popup
 from msl_tools.msl.ui.ui_resources import UiResources
-from msl_tools.msl.ui.widgets.compositions.chip_bar import ChipBar
-from msl_tools.msl.ui.widgets.compositions.folding_card import FoldingCard
 
 
 class _ObjectsMixin:
@@ -17,127 +17,169 @@ class _ObjectsMixin:
     # and opened again); never saved — a uuid means nothing in another scene.
     _quick_sets: dict = {}
 
-    def _objects_card(self) -> FoldingCard:
+    # (key, icon, title, what it does, tone, group): the strip, top to bottom. The tone is the
+    # icon's color (rename.qss): find = the hue of what it finds, fix = green, lock = orange.
+    STRIP = (
+        ("same", "names_same", "Same names",
+         "Select objects whose short name another object of the scene has too\n"
+         "(“More than one object matches name”)", "amber", "find"),
+        ("bad", "name_bad", "Bad names",
+         "Select names with Cyrillic letters, spaces, other signs, a digit first, “__”, Maya's own (pCube3)\n"
+         "— then the quick buttons “fix” / “clean” put them right", "red", "find"),
+        ("skin", "skin_joints", "Skin joints", "Select the joints the selected meshes are skinned to",
+         "violet", "find"),
+        ("other", "side_other", "Other side",
+         "Select the same objects on the other side: lf_arm → rt_arm, arm_L → arm_R", "teal", "find"),
+        ("check", "convention_check", "Check by the convention",
+         "Select what doesn't follow the naming convention — the list says why", "blue", "find"),
+        ("unique", "names_unique", "Make unique",
+         "Names another object of the scene has too get _01, _02…\n"
+         "In the selection and under it — nothing selected: the scene", "green", "fix"),
+        ("related", "name_related", "Name related",
+         "Name what belongs to the listed objects after them: shading group body_SG, material body_mtl,\n"
+         "body_skin, body_bs, constraints arm_parCon… A shading group or material used by several\n"
+         "objects is left alone", "green", "fix"),
+        ("fix", "convention_fix", "Fix by the convention",
+         "Put the listed names right by the convention: the side where the object stands, its kind's\n"
+         "suffix — what it says in between stays", "green", "fix"),
+        ("locked", "lock_find", "Locked", "Select the locked nodes", "orange", "lock"),
+        ("lock", "lock", "Lock",
+         "Lock the selected objects (one undo step) — a locked node can't be renamed, deleted or\n"
+         "re-parented; Maya shows that nowhere, the list has a lock", "orange", "lock"),
+        ("unlock", "unlock", "Unlock", "Unlock the selected objects (one undo step)", "green", "lock"),
+        ("sets", "sets", "Sets", "Quick sets of objects for this Maya session", "blue", "sets"),
+    )
+    WHERE = "\nIn the selection and under it — nothing selected: the scene"
+    BADGES = {"same": "{} in the list have a name another object has too",
+              "bad": "{} in the list have a name to fix",
+              "locked": "{} in the list are locked",
+              "check": "{} in the list don't follow it"}
+
+    def _objects_strip(self) -> qt.QtWidgets.QFrame:
+        """The strip of icon buttons beside the list."""
+        from msl_tools.msl.tools.maya.rename.buttons import StripButton
         icons = UiResources().iconManager
-        card = self._objects = FoldingCard("OBJECTS", icons.get_icon("select_all", sub_folder="actions"))
-        checks_caption = qt.QtWidgets.QLabel("CHECK — in the selection and under it (nothing selected: the scene)")
-        checks_caption.setObjectName("renameSubtitle")
-        checks_caption.setWordWrap(True)
-        checks = qt.QtWidgets.QWidget()
-        row = qt.QtWidgets.QHBoxLayout(checks)
-        row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(4)
-        self._check_same = qt.QtWidgets.QPushButton("Same names")
-        self._check_same.setToolTip("Select objects whose short name another object of the scene has too\n"
-                                    "(“More than one object matches name”)")
-        self._check_bad = qt.QtWidgets.QPushButton("Bad names")
-        self._check_bad.setToolTip("Select names with Cyrillic letters, spaces, other signs, a digit first, “__”\n"
-                                   "— then “fix” on top cleans them")
-        self._check_skin = qt.QtWidgets.QPushButton("Skin joints")
-        self._check_skin.setToolTip("Select the joints the selected meshes are skinned to")
-        self._check_other = qt.QtWidgets.QPushButton("Other side")
-        self._check_other.setToolTip("Select the same objects on the other side: lf_arm → rt_arm, arm_L → arm_R")
-        for button in (self._check_same, self._check_bad, self._check_skin, self._check_other):
-            row.addWidget(button)
-        row.addStretch(1)
-        from msl_tools.msl.tools.maya.rename.buttons import HoverButton
-        clean_caption = qt.QtWidgets.QLabel("CLEAN UP — the list shows what a button does while the pointer is on it")
-        clean_caption.setObjectName("renameSubtitle")
-        clean_caption.setWordWrap(True)
-        clean = qt.QtWidgets.QWidget()
-        cleans = qt.QtWidgets.QHBoxLayout(clean)
-        cleans.setContentsMargins(0, 0, 0, 0)
-        cleans.setSpacing(4)
-        self._make_unique = HoverButton("Make unique", "Names another object of the scene has too get _01, _02… "
-                                                       "(in the selection and under it, nothing selected: the scene)")
-        self._name_related = HoverButton("Name related", "Name what belongs to the listed objects after them: "
-                                                         "shading group body_SG, material body_mtl, body_skin, "
-                                                         "body_bs, constraints arm_parCon…\n"
-                                                         "A shading group or material used by several objects is left alone")
-        for button in (self._make_unique, self._name_related):
-            cleans.addWidget(button)
-        cleans.addStretch(1)
-        self._clean_row = (clean_caption, clean)
-        lock_caption = qt.QtWidgets.QLabel("LOCK — a locked node can't be renamed, deleted or re-parented "
-                                           "(Maya shows it nowhere; here it has a lock in the list)")
-        lock_caption.setObjectName("renameSubtitle")
-        lock_caption.setWordWrap(True)
-        lock_row = qt.QtWidgets.QWidget()
-        locks = qt.QtWidgets.QHBoxLayout(lock_row)
-        locks.setContentsMargins(0, 0, 0, 0)
-        locks.setSpacing(4)
-        self._lock_selected = qt.QtWidgets.QPushButton("Lock")
-        self._lock_selected.setToolTip("Lock the selected objects (one undo step)")
-        self._unlock_selected = qt.QtWidgets.QPushButton("Unlock")
-        self._unlock_selected.setToolTip("Unlock the selected objects (one undo step)")
-        self._find_locked = qt.QtWidgets.QPushButton("Locked")
-        self._find_locked.setToolTip("Select the locked nodes — in the selection and under it, nothing selected: the scene")
-        for button in (self._lock_selected, self._unlock_selected, self._find_locked):
-            locks.addWidget(button)
-        locks.addStretch(1)
-        convention_caption = qt.QtWidgets.QLabel("CONVENTION — names that don't follow it are marked in the list")
-        convention_caption.setObjectName("renameSubtitle")
-        convention_caption.setWordWrap(True)
-        from msl_tools.msl.tools.maya.rename.panel import CONVENTION_PLACEHOLDER, TemplateField
-        self._convention = TemplateField()
-        self._convention.setPlaceholderText(CONVENTION_PLACEHOLDER)
-        self._convention.setClearButtonEnabled(True)
-        self._convention.setToolTip("The shape every name should have, with the tokens of the name field.\n"
-                                    "{side} must be where the object stands, {type} its kind's suffix.\n"
-                                    "Empty: no convention")
-        self._check_convention = qt.QtWidgets.QPushButton("Check")
-        self._check_convention.setToolTip("Select what doesn't follow it — in the selection and under it, "
-                                          "nothing selected: the scene")
-        convention = qt.QtWidgets.QHBoxLayout()
-        convention.setSpacing(4)
-        convention.addWidget(self._convention, 1)
-        convention.addWidget(self._check_convention)
-        self._fix_convention = HoverButton("Fix", "Put the listed names right by the convention: the side where the "
-                                                  "object stands, its kind's suffix — what it says in between stays")
-        convention.addWidget(self._fix_convention)
-        sets_caption = qt.QtWidgets.QLabel("SETS — for this Maya session")
-        sets_caption.setObjectName("renameSubtitle")
-        self._sets = ChipBar(add_text="+ set of the selection", name_placeholder="Set name, then Enter",
-                             custom_menu=True)
-        self._sets.setToolTip("Click: select it · right click: add / take out the selection, a Maya set")
-        for widget in (checks_caption, checks) + self._clean_row + (lock_caption, lock_row, convention_caption):
-            card.body_layout.addWidget(widget)
-        card.body_layout.addLayout(convention)
-        for widget in (sets_caption, self._sets):
-            card.body_layout.addWidget(widget)
-        return card
+        frame = qt.QtWidgets.QFrame()
+        frame.setObjectName("renameStripFrame")
+        column = self._strip_layout = qt.QtWidgets.QVBoxLayout(frame)
+        column.setContentsMargins(2, 3, 2, 3)
+        column.setSpacing(1)
+        self._strip_lines: list = []
+        self._strip: dict = {}
+        self._strip_tips: dict = {}
+        group = None
+        for key, icon, title, text, tone, kind in self.STRIP:
+            if group is not None and kind != group:
+                line = qt.QtWidgets.QFrame()
+                line.setObjectName("renameStripLine")
+                line.setFixedHeight(1)
+                self._strip_lines.append(line)
+                column.addSpacing(2)
+                column.addWidget(line)
+                column.addSpacing(2)
+            group = kind
+            where = self.WHERE if key in ("same", "bad", "check", "locked") else ""
+            hover = "\nThe list shows what it does while the pointer is on it" if kind == "fix" else ""
+            self._strip_tips[key] = f"{title}\n{text}{where}{hover}"
+            button = StripButton(icons.get_icon(icon, sub_folder="actions"), title[:2], self._strip_tips[key], tone)
+            self._strip[key] = button
+            if key == "skin":  # the joints over a grey mesh
+                button.set_under_icon(icons.get_icon("skin_mesh", sub_folder="actions"))
+            column.addWidget(button, 0, qt.QtCore.Qt.AlignmentFlag.AlignHCenter)
+        column.addStretch(1)
+        self._badge_timer = qt.QtCore.QTimer(self)
+        self._badge_timer.setSingleShot(True)
+        self._badge_timer.setInterval(300)
+        self._badge_timer.timeout.connect(self._refresh_badges)
+        self._convention_text = ""
+        return frame
+
+    def _lay_strip(self, flat: bool) -> None:
+        """The strip as a column beside the list, or as one ROW while the list is empty."""
+        direction = qt.QtWidgets.QBoxLayout.Direction
+        self._strip_layout.setDirection(direction.LeftToRight if flat else direction.TopToBottom)
+        for line in self._strip_lines:
+            if flat:
+                line.setFixedSize(1, 18)
+            else:
+                line.setMinimumWidth(0)
+                line.setMaximumWidth(16777215)
+                line.setFixedHeight(1)
 
     def _connect_objects(self) -> None:
-        self._objects.toggled.connect(lambda opened: (self._save_folded("objects", opened), self._refresh_objects()))
-        self._check_same.clicked.connect(self._on_check_same)
-        self._check_bad.clicked.connect(self._on_check_bad)
-        self._check_skin.clicked.connect(self._on_check_skin)
-        self._check_other.clicked.connect(self._on_check_other)
-        self._lock_selected.clicked.connect(lambda: self._lock_selection(True))
-        self._unlock_selected.clicked.connect(lambda: self._lock_selection(False))
-        self._find_locked.clicked.connect(self._on_find_locked)
-        self._convention.textEdited.connect(self._on_convention_edited)
-        self._convention.token_inserted.connect(self._on_convention_edited)
-        self._check_convention.clicked.connect(self._on_check_convention)
-        for button, operation in ((self._make_unique, self._unique_operation), (self._name_related, self._related_operation),
-                                  (self._fix_convention, self._fix_operation)):
-            button.clicked.connect(lambda _checked=False, operation=operation: self._run_cleanup(operation))
-            button.hovered.connect(lambda on, operation=operation: self._set_hover(operation() if on else None))
-        self._sets.clicked.connect(self._on_set)
-        self._sets.add_requested.connect(self._on_add_set)
-        self._sets.menu_requested.connect(self._on_set_menu)
+        strip = self._strip
+        strip["same"].clicked.connect(self._on_check_same)
+        strip["bad"].clicked.connect(self._on_check_bad)
+        strip["skin"].clicked.connect(self._on_check_skin)
+        strip["other"].clicked.connect(self._on_check_other)
+        strip["locked"].clicked.connect(self._on_find_locked)
+        strip["check"].clicked.connect(self._on_check_convention)
+        strip["check"].menu_requested.connect(self._on_convention_menu)
+        strip["fix"].menu_requested.connect(self._on_convention_menu)
+        strip["lock"].clicked.connect(lambda: self._lock_selection(True))
+        strip["unlock"].clicked.connect(lambda: self._lock_selection(False))
+        strip["sets"].clicked.connect(self._on_sets_menu)
+        strip["sets"].menu_requested.connect(self._on_sets_menu)
+        for key, operation in (("unique", self._unique_operation), ("related", self._related_operation),
+                               ("fix", self._fix_operation)):
+            strip[key].clicked.connect(lambda _checked=False, operation=operation: self._run_cleanup(operation))
+            strip[key].hovered.connect(lambda on, operation=operation: self._set_hover(operation() if on else None))
 
     def _apply_objects_settings(self) -> None:
-        folded = dict(self._settings.get("folded") or {})
-        self._objects.set_open(not folded.get("objects", True))
-        self._convention.setText(self._settings.get("convention", ""))
+        self._convention_text = self._settings.get("convention", "")
+        self._show_convention()
         self._refresh_sets()
 
     def _refresh_objects(self) -> None:
-        parts = []
-        if self._quick_sets:
-            parts.append(f"{len(self._quick_sets)} sets")
-        self._objects.set_summary(" · ".join(parts))
+        """The badges follow the list — counted a moment later (the scene's names are read)."""
+        self._badge_timer.start()
+
+    def _refresh_badges(self) -> None:
+        try:
+            nodes = list(getattr(self, "_all_nodes", None) or [])
+            counts = {"bad": sum(1 for node in nodes if rules.problem(node.name) or rules.notice(node.name)),
+                      "locked": sum(1 for node in nodes if node.locked == "locked node"),
+                      "check": 0}
+            pattern = self._convention_pattern()
+            if pattern and nodes and not rules.unknown_tokens(pattern):
+                sides, suffixes = self._sides(), self._suffixes()
+                counts["check"] = sum(1 for node in nodes if rules.convention_problem(node, pattern, sides, suffixes))
+            issues = self._refresh_marks(nodes, pattern)
+            counts["same"] = sum(1 for found in issues.values() if any(kind == "same" for kind, _why in found))
+            for key, count in counts.items():
+                self._strip[key].set_badge(count)
+                self._strip[key].setToolTip(self._strip_tips[key] +
+                                            ("\n\n" + self.BADGES[key].format(count) if count else ""))
+        except RuntimeError:
+            pass  # the panel is gone
+
+    def _refresh_marks(self, nodes, pattern: str) -> None:
+        """The list's marks: the side each object stands on, and its problems as dots."""
+        sides, suffixes = self._sides(), self._suffixes()
+        side_of = {node.uuid: sides.of(node.position) for node in nodes
+                   if node.uuid and "|" in node.path}  # DAG objects: a material stands nowhere
+        same = set(scene.not_unique([node.path for node in nodes if node.path])) if nodes else set()
+        shapes = scene.shape_mismatches(nodes[:400]) if nodes else {}
+        known_pattern = bool(pattern) and not rules.unknown_tokens(pattern)
+        issues = {}
+        for node in nodes:
+            found = []
+            if node.path in same:
+                found.append(("same", "Another object of the scene has this name"))
+            why = rules.problem(node.name) or rules.notice(node.name)
+            if why:
+                found.append(("bad", why))
+            if known_pattern:
+                why = rules.convention_problem(node, pattern, sides, suffixes)
+                if why:
+                    found.append(("convention", f"Convention: {why}"))
+            if node.uuid in shapes:
+                found.append(("shape", "Shape: " + ", ".join(f"{shape.name} → {wanted}"
+                                                             for shape, wanted in shapes[node.uuid])))
+            if found:
+                issues[node.uuid] = found
+        self._preview.set_marks(side_of, issues)
+        return issues
 
     # ------------------------------------------------------------------ kinds and checks
 
@@ -148,7 +190,7 @@ class _ObjectsMixin:
     def _on_check_bad(self) -> None:
         found = [path for path in scene.look_in()
                  if (lambda name: rules.problem(name) or rules.notice(name))(path.rpartition("|")[2].rpartition(":")[2])]
-        self._select_found(found, "with a name to fix — “fix” on top cleans them", "Every name is fine")
+        self._select_found(found, "with a name to fix — “fix” / “clean” on top put them right", "Every name is fine")
 
     def _on_check_skin(self) -> None:
         if not scene.selection():
@@ -221,7 +263,7 @@ class _ObjectsMixin:
     def _run_cleanup(self, make) -> None:
         operation = make()
         if operation.label == "Fix by the convention" and not self._convention_pattern():
-            self._say("Type the convention first, e.g. {side}_{name}_{type}", "error")
+            self._on_convention_menu()
             return
         if operation.nodes is not None and not operation.nodes():
             self._say({"Make unique": "Every name is unique already",
@@ -244,19 +286,53 @@ class _ObjectsMixin:
         found = scene.named(wanted)
         self._select_found(found, "on the other side", "No other side found: the names say no side, or it isn't there")
 
-    def _convention_pattern(self) -> str:
-        return self._convention.text().strip()
+    # ------------------------------------------------------------------ the convention
 
-    def _on_convention_edited(self, *_args) -> None:
-        if self._settings.get("convention", "") != self._convention.text():
-            self._settings["convention"] = self._convention.text()
+    def _convention_pattern(self) -> str:
+        return (getattr(self, "_convention_text", "") or "").strip()
+
+    def _show_convention(self) -> None:
+        pattern = self._convention_pattern()
+        said = f"Convention: {pattern}" if pattern else "No convention yet"
+        for key in ("check", "fix"):
+            title, rest = self._strip_tips[key].split("\n", 1)
+            self._strip_tips[key] = f"{title}\n{said} — right click to change it\n" + \
+                                    (rest.split("\n", 1)[1] if rest.startswith(("Convention:", "No convention")) else rest)
+            self._strip[key].setToolTip(self._strip_tips[key])
+
+    def _on_convention_menu(self) -> None:
+        from msl_tools.msl.tools.maya.rename.panel import CONVENTION_PLACEHOLDER
+        from msl_tools.msl.tools.maya.rename.panel_words import _field_action
+        menu = make_rounded_popup(qt.QtWidgets.QMenu(self))
+        title = menu.addAction("The shape every name should have — Enter takes it")
+        title.setEnabled(False)
+        _field_action(menu, self._convention_pattern(), CONVENTION_PLACEHOLDER, self._set_convention)
+        hint = menu.addAction("{side}: where it stands · {type}: its kind's suffix · {name} {#} {A}")
+        hint.setEnabled(False)
+        if self._convention_pattern():
+            menu.addSeparator()
+            menu.addAction("No convention", lambda: self._set_convention(""))
+        menu.exec(qt.QtGui.QCursor.pos())
+
+    def _set_convention(self, text: str) -> None:
+        text = text.strip()
+        unknown = rules.unknown_tokens(text) if text else []
+        if unknown:
+            self._say(f"Unknown token {unknown[0]}", "error")
+            return
+        self._convention_text = text
+        if self._settings.get("convention", "") != text:
+            self._settings["convention"] = text
+        self._show_convention()
+        self._say(f"Convention: {text} — names that don't follow it are marked in the list" if text
+                  else "No convention", "done")
         self._update_preview()
+        self._refresh_objects()
 
     def _on_check_convention(self) -> None:
         pattern = self._convention_pattern()
         if not pattern:
-            self._say("Type the convention first, e.g. {side}_{name}_{type}", "error")
-            self._convention.setFocus()
+            self._on_convention_menu()
             return
         unknown = rules.unknown_tokens(pattern)
         if unknown:
@@ -282,11 +358,33 @@ class _ObjectsMixin:
     # ------------------------------------------------------------------ sets
 
     def _refresh_sets(self) -> None:
-        self._sets.set_chips([(name, f"{name} {len(uuids)}", f"{len(uuids)} objects") for name, uuids in
-                              self._quick_sets.items()])
+        names = "\n".join(f"{name} · {len(uuids)}" for name, uuids in self._quick_sets.items())
+        self._strip["sets"].setToolTip(self._strip_tips["sets"] + " — a click: the sets\n"
+                                       + (names if names else "None yet"))
 
     def _set_nodes(self, name: str) -> list:
         return [rules.Node(path="", name="", uuid=uuid) for uuid in self._quick_sets.get(name, [])]
+
+    def _on_sets_menu(self) -> None:
+        """Every set (a click selects it, "Change" alters one) and a field for a new one."""
+        from msl_tools.msl.tools.maya.rename.panel_words import _field_action
+        menu = make_rounded_popup(qt.QtWidgets.QMenu(self))
+        for name, uuids in self._quick_sets.items():
+            menu.addAction(f"{name}  ·  {len(uuids)}", lambda name=name: self._on_set(name))
+        if self._quick_sets:
+            change = make_rounded_popup(menu.addMenu("Change"))
+            for name in self._quick_sets:
+                one = make_rounded_popup(change.addMenu(name))
+                one.addAction("Add the selection", lambda name=name: self._change_set(name, add=True))
+                one.addAction("Take the selection out", lambda name=name: self._change_set(name, add=False))
+                one.addSeparator()
+                one.addAction("Make a Maya set of it", lambda name=name: self._make_maya_set(name))
+                one.addAction("Remove", lambda name=name: self._remove_set(name))
+            menu.addSeparator()
+        title = menu.addAction("A new set of the selection — its name, then Enter")
+        title.setEnabled(False)
+        _field_action(menu, "", "Set name", self._on_add_set)
+        menu.exec(qt.QtGui.QCursor.pos())
 
     def _on_set(self, name: str) -> None:
         nodes = self._set_nodes(name)
@@ -301,18 +399,11 @@ class _ObjectsMixin:
             return
         type(self)._quick_sets[name] = uuids
         self._refresh_sets()
-        self._refresh_objects()
+        self._say(f"Set “{name}”: {len(uuids)} objects", "done")
 
-    def _on_set_menu(self, name: str, position) -> None:
-        menu = make_rounded_popup(qt.QtWidgets.QMenu(self))
-        menu.addAction("Select", lambda: self._on_set(name))
-        menu.addAction("Add the selection", lambda: self._change_set(name, add=True))
-        menu.addAction("Take the selection out", lambda: self._change_set(name, add=False))
-        menu.addSeparator()
-        menu.addAction("Make a Maya set of it", lambda: self._make_maya_set(name))
-        menu.addAction("Remove", lambda: (type(self)._quick_sets.pop(name, None), self._refresh_sets(),
-                                          self._refresh_objects()))
-        menu.exec(position)
+    def _remove_set(self, name: str) -> None:
+        type(self)._quick_sets.pop(name, None)
+        self._refresh_sets()
 
     def _change_set(self, name: str, add: bool) -> None:
         selected = [node.uuid for node in scene.nodes(scene.selection()) if node.uuid]

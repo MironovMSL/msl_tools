@@ -54,6 +54,11 @@
     --success:           #4caf50;
     --warning:           #ff9800;
     --error:             #f44336;
+    /* more hues for icons that say what they do by their color (Rename's strip) */
+    --violet:            #7e57c2;
+    --teal:              #00897b;
+    --orange:            #e8710a;
+    --yellow:            #c9a400;
 
     /* hub sidebar entries: vertical gradients for volume (widgets.qss).
        Selected = lit from above and fading into the page card (--surface);

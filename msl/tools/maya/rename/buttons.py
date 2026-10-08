@@ -81,8 +81,9 @@ class QuickButton(IconPushButton):
 
     hovered = qt.QtCore.Signal(bool)
 
-    def __init__(self, icon, text: str, tooltip: str, parent=None):
-        super().__init__(icon, tooltip, icon_size=qt.QtCore.QSize(15, 15), fallback_text=text, parent=parent)
+    def __init__(self, icon, text: str, tooltip: str, parent=None, icon_size: int = 15):
+        super().__init__(icon, tooltip, icon_size=qt.QtCore.QSize(icon_size, icon_size), fallback_text=text,
+                         parent=parent)
         self.setFocusPolicy(qt.QtCore.Qt.FocusPolicy.NoFocus)
         self.setCursor(qt.QtCore.Qt.CursorShape.PointingHandCursor)
 
@@ -93,6 +94,148 @@ class QuickButton(IconPushButton):
     def leaveEvent(self, event) -> None:
         super().leaveEvent(event)
         self.hovered.emit(False)
+
+
+class GroupButton(QuickButton):
+    """One button for a GROUP of quick actions: it shows the one used last and a click repeats it
+    (hovered, the list shows what it would do — `hovered`); the corner triangle, a right click or
+    holding the button down opens the whole group (`menu_requested`). Colors from rename.qss:
+    qproperty-iconColor by the `tone` property, the triangle in the same color."""
+
+    menu_requested = qt.QtCore.Signal()
+    run_requested = qt.QtCore.Signal()
+
+    CORNER = 10      # px of the right edge that open the group
+    HOLD_MS = 380    # held this long = the group opens
+
+    def __init__(self, tone: str, parent=None, icon_size: int = 17):
+        super().__init__(None, "", "", parent, icon_size=icon_size)
+        self.setObjectName("renameGroup")
+        self.setProperty("tone", tone)
+        self._held = False
+        self._hold = qt.QtCore.QTimer(self)
+        self._hold.setSingleShot(True)
+        self._hold.setInterval(self.HOLD_MS)
+        self._hold.timeout.connect(self._on_hold)
+        self.clicked.connect(self._on_clicked)
+
+    def _on_hold(self) -> None:
+        self._held = True
+        self.setDown(False)
+        self.menu_requested.emit()
+
+    def _on_clicked(self) -> None:
+        if self._held:
+            self._held = False
+            return
+        self.run_requested.emit()
+
+    def mousePressEvent(self, event) -> None:
+        self._held = False
+        if event.button() == qt.QtCore.Qt.MouseButton.RightButton or \
+                (event.button() == qt.QtCore.Qt.MouseButton.LeftButton and
+                 event.position().x() >= self.width() - self.CORNER):
+            event.accept()
+            self.menu_requested.emit()
+            return
+        if event.button() == qt.QtCore.Qt.MouseButton.LeftButton:
+            self._hold.start()
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        self._hold.stop()
+        super().mouseReleaseEvent(event)
+
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+        painter = qt.QtGui.QPainter(self)
+        painter.setRenderHint(qt.QtGui.QPainter.RenderHint.Antialiasing)
+        painter.setPen(qt.QtCore.Qt.PenStyle.NoPen)
+        painter.setBrush(self._icon_color)
+        right, bottom = self.width() - 2.5, self.height() - 2.5
+        painter.drawPolygon(qt.QtGui.QPolygonF([qt.QtCore.QPointF(right, bottom - 4), qt.QtCore.QPointF(right, bottom),
+                                                qt.QtCore.QPointF(right - 4, bottom)]))
+
+
+class StripButton(QuickButton):
+    """A button of the strip beside the list (find / fix / lock): a one-color icon whose COLOR says
+    what it does — the dynamic property `tone` picks it in rename.qss (qproperty-iconColor) —, a
+    small count in its corner (`set_badge`; 0 = none; qproperty badgeColor / badgeTextColor) and a
+    right click (`menu_requested`) for what it can be set to."""
+
+    menu_requested = qt.QtCore.Signal()
+
+    badgeColor = color_property("_badge_color")
+    badgeTextColor = color_property("_badge_text_color")
+    underColor = color_property("_under_color", "_retint")  # the second layer's color (set_under_icon)
+
+    def set_under_icon(self, icon) -> None:
+        """A second one-color shape UNDER the icon, in underColor (Skin joints: a grey mesh behind
+        violet joints); the icon is drawn over it."""
+        self._under_icon = icon if icon is not None and not icon.isNull() else None
+        self._retint()
+
+    def _retint(self) -> None:
+        super()._retint()
+        under, source = getattr(self, "_under_icon", None), getattr(self, "_source_icon", None)
+        if under is None or source is None:
+            return
+        from msl_tools.msl.ui.icon_manager import tint_icon
+        side, ratio = self.iconSize().width(), self.devicePixelRatioF()
+        top = tint_icon(source, side, ratio, self._icon_color)
+        image = tint_icon(under, side, ratio, getattr(self, "_under_color", self._icon_color)).toImage()
+        painter = qt.QtGui.QPainter(image)
+        painter.setCompositionMode(qt.QtGui.QPainter.CompositionMode.CompositionMode_DestinationOut)
+        painter.drawPixmap(0, 0, top)   # the icon's own pixels are its alone (no mixed edges)
+        painter.setCompositionMode(qt.QtGui.QPainter.CompositionMode.CompositionMode_SourceOver)
+        painter.drawPixmap(0, 0, top)
+        painter.end()
+        pixmap = qt.QtGui.QPixmap.fromImage(image)
+        pixmap.setDevicePixelRatio(ratio)
+        self.setIcon(qt.QtGui.QIcon(pixmap))
+
+    def __init__(self, icon, text: str, tooltip: str, tone: str, parent=None):
+        super().__init__(icon, text, tooltip, parent)
+        self.setObjectName("renameStrip")
+        self.setProperty("tone", tone)
+        self.setIconSize(qt.QtCore.QSize(16, 16))
+        self._badge = 0
+        fallback = ThemeRegistry.fallback()
+        self._badge_color = qt.QtGui.QColor(fallback.accent)
+        self._badge_text_color = qt.QtGui.QColor("white")
+        self._under_color = qt.QtGui.QColor(fallback.text_secondary)
+
+    def set_badge(self, count: int) -> None:
+        count = max(0, int(count or 0))
+        if count != self._badge:
+            self._badge = count
+            self.update()
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == qt.QtCore.Qt.MouseButton.RightButton:
+            self.menu_requested.emit()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+        if not self._badge:
+            return
+        painter = qt.QtGui.QPainter(self)
+        painter.setRenderHint(qt.QtGui.QPainter.RenderHint.Antialiasing)
+        text = str(self._badge) if self._badge < 100 else "99+"
+        font = painter.font()
+        font.setPixelSize(8)
+        font.setBold(True)
+        painter.setFont(font)
+        width = max(11, painter.fontMetrics().horizontalAdvance(text) + 5)
+        rect = qt.QtCore.QRectF(self.width() - width, 0, width, 11)
+        painter.setPen(qt.QtCore.Qt.PenStyle.NoPen)
+        painter.setBrush(self._badge_color)
+        painter.drawRoundedRect(rect, 5.5, 5.5)
+        painter.setPen(self._badge_text_color)
+        painter.drawText(rect, qt.QtCore.Qt.AlignmentFlag.AlignCenter, text)
 
 
 class ToggleIconButton(QuickButton):

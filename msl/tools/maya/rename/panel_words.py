@@ -1,6 +1,7 @@
 # tools/maya/rename/panel_words.py
-"""The rename panel's words: the favorites row under the name field and the WORDS card (the name
-library by category, the names used last). Methods of RenamePanel, kept apart by concern."""
+"""The rename panel's words: the favorites (a star button right of the suffix — its menu holds them;
+they were a row of chips) and the WORDS card (the name library by category, the names used last).
+Methods of RenamePanel, kept apart by concern."""
 import msl_tools.msl.ui.qt_bindings as qt
 from msl_tools.msl.tools.maya.rename import rules
 from msl_tools.msl.ui.theme.qss import make_rounded_popup
@@ -41,23 +42,62 @@ def _field_action(menu, text: str, placeholder: str, on_done) -> None:
 
 class _WordsMixin:
 
-    def _favorites_bar(self) -> qt.QtWidgets.QWidget:
-        icons = UiResources().iconManager
-        self._favorites = ChipBar(add_text="+", name_placeholder="A word, then Enter", custom_menu=True, draggable=True)
-        self._favorites.setObjectName("renameFavorites")
-        self._favorites.setToolTip(WORD_HINT)
-        from msl_tools.msl.tools.maya.rename.buttons import ToggleIconButton
-        self._into = ToggleIconButton(icons.get_icon("text_frame", sub_folder="actions"), "Words into the name field",
-                                      "On: a click on a word puts it into the name field (build the name, then Rename)\n"
-                                      "Off: a click on a word renames the objects at once")
-        self._into.setObjectName("renameToggleIcon")
-        row = qt.QtWidgets.QWidget()
-        line = qt.QtWidgets.QHBoxLayout(row)
-        line.setContentsMargins(0, 0, 0, 0)
-        line.setSpacing(4)
-        line.addWidget(self._favorites, 1)
-        line.addWidget(self._into, 0, qt.QtCore.Qt.AlignmentFlag.AlignTop)
-        return row
+    def _favorites_button(self) -> qt.QtWidgets.QPushButton:
+        """A star button: its menu holds the favorite words (lit while words go into the name field)."""
+        from msl_tools.msl.tools.maya.rename.buttons import QuickButton
+        self._into_on = False
+        self._favorites = QuickButton(UiResources().iconManager.get_icon("star", sub_folder="actions"), "*", "")
+        self._favorites.setObjectName("renameRecipe")  # framed like the recipes' button
+        self._show_into()
+        return self._favorites
+
+    def _show_into(self) -> None:
+        from msl_tools.msl.ui.theme.qss import repolish
+        self._favorites.setToolTip("Favorite words — a click: the list of them\n" +
+                                   ("Words go into the name field (build the name, then Rename)" if self._into_on else
+                                    "A word renames the objects at once: adds “_word” (Alt: without “_”)"))
+        if bool(self._favorites.property("on")) != self._into_on:
+            self._favorites.setProperty("on", self._into_on)
+            repolish(self._favorites)
+
+    def _set_into(self, on: bool) -> None:
+        self._into_on = bool(on)
+        self._show_into()
+        self._save_settings()
+
+    def _on_favorites_menu(self) -> None:
+        """The favorite words (hovered = the list shows what it does; a click uses it), "Change"
+        (move / take out), a field for a new one, and where words go."""
+        menu = make_rounded_popup(qt.QtWidgets.QMenu(self))
+        favorites = self.library.favorites()
+        for word in favorites:
+            action = menu.addAction(word, lambda word=word: self._on_word(word))
+            action.hovered.connect(lambda word=word: self._on_word_hovered(word))
+        if not favorites:
+            none = menu.addAction("No favorites yet")
+            none.setEnabled(False)
+        else:
+            change = make_rounded_popup(menu.addMenu("Change"))
+            for index, word in enumerate(favorites):
+                one = make_rounded_popup(change.addMenu(word))
+                up = one.addAction("Move up", lambda word=word: self._move_favorite(word, -1))
+                up.setEnabled(index > 0)
+                down = one.addAction("Move down", lambda word=word: self._move_favorite(word, 1))
+                down.setEnabled(index < len(favorites) - 1)
+                one.addSeparator()
+                one.addAction("Take out of the favorites",
+                              lambda word=word: (self.library.remove_favorite(word), self._refresh_words()))
+        menu.addSeparator()
+        title = menu.addAction("A new favorite:")
+        title.setEnabled(False)
+        _field_action(menu, "", "A word, then Enter", self._on_add_favorite)
+        menu.addSeparator()
+        into = menu.addAction("Words go into the name field")
+        into.setCheckable(True)
+        into.setChecked(self._into_on)
+        into.triggered.connect(self._set_into)
+        menu.aboutToHide.connect(lambda: self._on_word_hovered(""))
+        menu.exec(self._favorites.mapToGlobal(qt.QtCore.QPoint(0, self._favorites.height())))
 
     def _words_card(self) -> FoldingCard:
         icons = UiResources().iconManager
@@ -65,7 +105,7 @@ class _WordsMixin:
         more.setObjectName("renameLock")
         more.set_icon(icons.get_icon("more", sub_folder="actions"))
         more.clicked.connect(lambda: self._on_words_more(more))
-        card = self._words = FoldingCard("WORDS", icons.get_icon("bookmark", sub_folder="actions"), extras=[more])
+        card = self._words = FoldingCard("WORDS", icons.get_icon("book", sub_folder="actions"), extras=[more])
         self._categories = ChipBar(checkable=True, add_text="+ category", name_placeholder="Category, then Enter",
                                    custom_menu=True)
         self._words_bar = ChipBar(add_text="+ word", name_placeholder="A word, then Enter", custom_menu=True,
@@ -86,12 +126,8 @@ class _WordsMixin:
         return card
 
     def _connect_words(self) -> None:
-        self._favorites.clicked.connect(self._on_word)
-        self._favorites.hovered.connect(self._on_word_hovered)
-        self._favorites.add_requested.connect(self._on_add_favorite)
-        self._favorites.menu_requested.connect(self._on_favorite_menu)
-        self._into.toggled.connect(self._save_settings)
-        self._words.toggled.connect(lambda opened: self._save_folded("words", opened))
+        self._favorites.clicked.connect(self._on_favorites_menu)
+        self._words.toggled.connect(lambda opened: self._on_card_toggled("words", opened))
         self._categories.clicked.connect(self._on_category)
         self._categories.add_requested.connect(self._on_add_category)
         self._categories.menu_requested.connect(self._on_category_menu)
@@ -103,15 +139,13 @@ class _WordsMixin:
         self._recent_words.menu_requested.connect(self._on_recent_word_menu)
 
     def _apply_words_settings(self) -> None:
-        self._into.setChecked(bool(self._settings.get("into_field", False)))
-        folded = dict(self._settings.get("folded") or {})
-        for key, card in (("words", self._words),):
-            card.set_open(not folded.get(key, True))
+        self._into_on = bool(self._settings.get("into_field", False))
+        self._show_into()
         self._refresh_words()
         self._refresh_recent_words()
 
     def _words_settings(self) -> dict:
-        return {"into_field": self._into.isChecked(), "category": self._categories.current()}
+        return {"into_field": self._into_on, "category": self._categories.current()}
 
     def _save_folded(self, key: str, opened: bool) -> None:
         folded = dict(self._settings.get("folded") or {})
@@ -119,13 +153,12 @@ class _WordsMixin:
         self._settings["folded"] = folded
 
     def _into_field(self) -> bool:
-        return self._into.isChecked()
+        return self._into_on
 
     # ------------------------------------------------------------------ filling
 
     def _refresh_words(self) -> None:
         library = self.library
-        self._favorites.set_chips([(word, word, "") for word in library.favorites()])
         categories = library.categories()
         wanted = self._categories.current() or self._settings.get("category", "")
         self._categories.set_chips([(name, name, f"{len(words)} words") for name, words in categories.items()])
@@ -202,19 +235,6 @@ class _WordsMixin:
             if name != category:
                 move.addAction(name, lambda name=name: (self.library.move_word(category, word, name), self._refresh_words()))
         menu.addAction("Remove", lambda: (self.library.remove_word(category, word), self._refresh_words()))
-        menu.exec(position)
-
-    def _on_favorite_menu(self, word: str, position) -> None:
-        favorites = self.library.favorites()
-        index = favorites.index(word) if word in favorites else -1
-        menu = make_rounded_popup(qt.QtWidgets.QMenu(self))
-        menu.addAction("Into the name field", lambda: self._use_name(word))
-        left = menu.addAction("Move left", lambda: self._move_favorite(word, -1))
-        left.setEnabled(index > 0)
-        right = menu.addAction("Move right", lambda: self._move_favorite(word, 1))
-        right.setEnabled(0 <= index < len(favorites) - 1)
-        menu.addSeparator()
-        menu.addAction("Take out of the favorites", lambda: (self.library.remove_favorite(word), self._refresh_words()))
         menu.exec(position)
 
     def _move_favorite(self, word: str, steps: int) -> None:

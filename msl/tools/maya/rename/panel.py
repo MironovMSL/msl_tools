@@ -67,6 +67,23 @@ _EACH = {
     "first_off": lambda node: rules.remove_first(node.name), "last_off": lambda node: rules.remove_last(node.name),
     "namespace_off": lambda node: node.name, "fix": lambda node: rules.sanitize(node.name),
 }
+# The quick buttons sit in four GROUPS (a GroupButton each: shows the action used last, a click
+# repeats it, its corner opens the rest): (key, title, tone, actions).
+QUICK_GROUPS = (
+    ("case", "Case", "blue", ("upper", "capitalize", "lower", "snake", "camel")),
+    ("cut", "Take a part off", "orange", ("prefix_off", "suffix_off", "number_off", "digits_off")),
+    ("clean", "Clean", "green", ("namespace_off", "fix", "clean")),
+    ("sides", "Sides & shapes", "teal", ("mirror", "shapes")),
+)
+# The quick buttons' colors by group (rename.qss `tone`): case = blue, taking a part off = orange,
+# cleaning = green, sides / shapes = teal — the strip beside the list speaks the same palette.
+QUICK_TONES = {
+    **dict.fromkeys(("upper", "capitalize", "lower", "snake", "camel"), "blue"),
+    **dict.fromkeys(("prefix_off", "suffix_off", "number_off", "digits_off", "first_off", "last_off"), "orange"),
+    **dict.fromkeys(("namespace_off", "fix", "clean"), "green"),
+    **dict.fromkeys(("mirror", "shapes"), "teal"),
+}
+QUICK_ICON_SIZE = 17
 # The two one-letter buttons sit at the ends of the name field (the end they work on).
 EDGE = (("first_off", "‹", "Take the first letter off"), ("last_off", "›", "Take the last letter off"))
 CONVENTION_PLACEHOLDER = "Convention, e.g. {side}_{name}_{type}"
@@ -85,6 +102,9 @@ class RenamePanel(_WordsMixin, _FindMixin, _ObjectsMixin, qt.QtWidgets.QWidget):
     One click = one undo step. The list follows Maya's selection (a lock keeps it on the objects
     it holds). Settings and the library: configsMayaMng "rename".
     """
+
+    # what the panel says (text, state "" / "done" / "error"): the window shows it in its header
+    status_changed = qt.QtCore.Signal(str, str)
 
     TOOL_NAME = "rename"
     DEFAULTS = {"template": "", "start": 1, "step": 1, "padding": 2, "order": rules.ORDER_SELECTION,
@@ -132,25 +152,18 @@ class RenamePanel(_WordsMixin, _FindMixin, _ObjectsMixin, qt.QtWidgets.QWidget):
 
     def _build_widgets(self) -> None:
         icons = UiResources().iconManager
-        self._quick = qt.QtWidgets.QWidget()
-        quick = FlowLayout(self._quick, spacing=1)
+        from msl_tools.msl.tools.maya.rename.buttons import GroupButton
         self._quick_buttons = {}
-        for key, text, tooltip in QUICK:
-            if not key:
-                gap = qt.QtWidgets.QWidget()
-                gap.setFixedSize(3, 22)
-                quick.addWidget(gap)
-                continue
-            icon = icons.get_icon(QUICK_ICONS.get(key, ""), sub_folder="actions")
-            button = QuickButton(icon, text, f"{text} — {tooltip}\nThe list shows what it does while the pointer is here")
-            button.setObjectName("renameQuick")
-            self._quick_buttons[key] = button
-            quick.addWidget(button)
+        self._groups = {}
+        for group, _title, tone, _keys in QUICK_GROUPS:
+            self._groups[group] = GroupButton(tone, icon_size=QUICK_ICON_SIZE)
 
         for key, text, tooltip in EDGE:
             icon = icons.get_icon(QUICK_ICONS[key], sub_folder="actions")
-            button = QuickButton(icon, text, f"{tooltip}\nThe list shows what it does while the pointer is here")
+            button = QuickButton(icon, text, f"{tooltip}\nThe list shows what it does while the pointer is here",
+                                 icon_size=QUICK_ICON_SIZE)
             button.setObjectName("renameQuick")
+            button.setProperty("tone", QUICK_TONES.get(key, ""))
             self._quick_buttons[key] = button
 
         self._field = TemplateField()
@@ -193,11 +206,9 @@ class RenamePanel(_WordsMixin, _FindMixin, _ObjectsMixin, qt.QtWidgets.QWidget):
         self._side = SideButton()
         self._kind = KindButton()
 
-        self._recipes = ChipBar(add_text="Save these settings (the name, its numbering and order) as a recipe",
-                                add_icon=icons.get_icon("bookmark_add", sub_folder="actions"),
-                                name_placeholder="Recipe name, then Enter", custom_menu=True)
-        self._recipes.setObjectName("renameRecipes")
-        self._recipes.setToolTip("Recipes: a click puts that way of naming in — then Rename")
+        # Recipes: one button right of Rename, its menu holds them (a row of chips took a whole line)
+        self._recipes = QuickButton(icons.get_icon("bookmark", sub_folder="actions"), "R", "")
+        self._recipes.setObjectName("renameRecipe")
         self._list_source = SegmentedControl(list(self.LIST_SOURCES), "Selected")
         self._list_source.setToolTip("Selected: what is selected · Hierarchy: it and everything under it\n"
                                      "(shapes stay out — Maya renames them with their transforms)")
@@ -205,7 +216,12 @@ class RenamePanel(_WordsMixin, _FindMixin, _ObjectsMixin, qt.QtWidgets.QWidget):
         self._list_search.setObjectName("renameListSearch")
         self._list_search.setPlaceholderText("Find in the list")
         self._list_search.setClearButtonEnabled(True)
-        self._list_search.setFixedWidth(130)
+        self._list_search.setMinimumWidth(80)
+        self._list_search.hide()
+        self._list_search.installEventFilter(self)
+        self._search_button = GlyphButton("", "Find in the list (Ctrl+F)", size=qt.QtCore.QSize(22, 20))
+        self._search_button.setObjectName("renameLock")
+        self._search_button.set_icon(icons.get_icon("search", sub_folder="actions"))
         self._list_search.setToolTip("Only the rows whose name holds this — renames act on them only")
         self._kinds = ChipBar(multiple=True)
         self._kinds.setObjectName("renameKinds")
@@ -215,6 +231,9 @@ class RenamePanel(_WordsMixin, _FindMixin, _ObjectsMixin, qt.QtWidgets.QWidget):
         self._lock = ToggleIconButton(icons.get_icon("lock", sub_folder="actions"), "Hold the list",
                                       "The list stays on these objects — selecting others doesn't change it")
         self._lock.setObjectName("renameToggleIcon")
+        self._list_fold = GlyphButton("", "Fold the list", size=qt.QtCore.QSize(16, 20))
+        self._list_fold.setObjectName("renameLock")
+        self._list_fold.set_icon(icons.get_icon("chevron_down", sub_folder="actions"))
         self._select_listed = GlyphButton("", "Select the objects in the list", size=qt.QtCore.QSize(22, 20))
         self._select_listed.setObjectName("renameLock")
         self._select_listed.set_icon(icons.get_icon("select_all", sub_folder="actions"))
@@ -227,13 +246,22 @@ class RenamePanel(_WordsMixin, _FindMixin, _ObjectsMixin, qt.QtWidgets.QWidget):
         self._status.hide()
 
     def _build_layout(self) -> None:
+        # the quick groups with Rename on one row, the name field under it, as wide as the window
+        self._quick = qt.QtWidgets.QWidget()
+        quick = qt.QtWidgets.QHBoxLayout(self._quick)
+        quick.setContentsMargins(0, 0, 0, 0)
+        quick.setSpacing(3)
+        for button in self._groups.values():
+            quick.addWidget(button)
+        quick.addStretch(1)
+        quick.addWidget(self._number_toggle)
+        quick.addWidget(self._rename)
+        quick.addWidget(self._recipes)
         name_row = qt.QtWidgets.QHBoxLayout()
         name_row.setSpacing(4)
         name_row.addWidget(self._quick_buttons["first_off"])
         name_row.addWidget(self._field, 1)
         name_row.addWidget(self._quick_buttons["last_off"])
-        name_row.addWidget(self._number_toggle)
-        name_row.addWidget(self._rename)
 
         self._number_row = qt.QtWidgets.QWidget()
         numbers = qt.QtWidgets.QHBoxLayout(self._number_row)
@@ -256,11 +284,15 @@ class RenamePanel(_WordsMixin, _FindMixin, _ObjectsMixin, qt.QtWidgets.QWidget):
         affix.addWidget(self._kind)
         affix.addWidget(self._suffix, 1)
         affix.addWidget(self._suffix_add)
+        affix.addWidget(self._favorites_button())
 
         list_head = qt.QtWidgets.QHBoxLayout()
         list_head.setSpacing(6)
+        list_head.addWidget(self._list_fold)
         list_head.addWidget(self._list_source)
         list_head.addWidget(self._count, 1)
+        list_head.addWidget(self._list_search, 1)
+        list_head.addWidget(self._search_button)
         list_head.addWidget(self._select_listed)
         list_head.addWidget(self._lock)
 
@@ -270,22 +302,25 @@ class RenamePanel(_WordsMixin, _FindMixin, _ObjectsMixin, qt.QtWidgets.QWidget):
         column.setSpacing(6)
         column.addWidget(self._quick)
         column.addLayout(name_row)
-        column.addWidget(self._recipes)
         column.addWidget(self._number_row)
         column.addLayout(affix)
-        column.addWidget(self._favorites_bar())
         column.addLayout(list_head)
-        kinds_row = qt.QtWidgets.QHBoxLayout()
-        kinds_row.setSpacing(6)
-        kinds_row.addWidget(self._kinds, 1)
-        kinds_row.addWidget(self._list_search, 0, qt.QtCore.Qt.AlignmentFlag.AlignTop | qt.QtCore.Qt.AlignmentFlag.AlignRight)
-        column.addLayout(kinds_row)
-        column.addWidget(self._preview)
-        column.addWidget(self._list_grip)
+        # what folds with the list's chevron: kinds + search, the strip + the list, its grip
+        self._list_body = qt.QtWidgets.QWidget()
+        list_body = qt.QtWidgets.QVBoxLayout(self._list_body)
+        list_body.setContentsMargins(0, 0, 0, 0)
+        list_body.setSpacing(6)
+        list_body.addWidget(self._kinds)
+        self._strip_frame = self._objects_strip()
+        self._lay_strip(True)   # a row over the list: the list keeps the height of its rows
+        list_body.addWidget(self._strip_frame)
+        list_body.addWidget(self._preview)
+        list_body.addWidget(self._list_grip)
+        list_body.addWidget(self._empty_hint())
+        column.addWidget(self._list_body)
         column.addWidget(self._status)
         column.addWidget(self._words_card())
         column.addWidget(self._find_card())
-        column.addWidget(self._objects_card())
         column.addStretch(1)
         scroll = StableScrollArea()
         scroll.setObjectName("renameScroll")
@@ -298,6 +333,11 @@ class RenamePanel(_WordsMixin, _FindMixin, _ObjectsMixin, qt.QtWidgets.QWidget):
         for key, button in self._quick_buttons.items():
             button.clicked.connect(lambda _checked=False, key=key: self._run(self._quick_operation(key)))
             button.hovered.connect(lambda on, key=key: self._set_hover(self._quick_operation(key) if on else None))
+        for group, button in self._groups.items():
+            button.run_requested.connect(lambda group=group: self._run(self._quick_operation(self._group_last(group))))
+            button.hovered.connect(lambda on, group=group:
+                                   self._set_hover(self._quick_operation(self._group_last(group)) if on else None))
+            button.menu_requested.connect(lambda group=group: self._on_group_menu(group))
         self._field.textEdited.connect(self._on_template_edited)
         self._field.token_inserted.connect(self._on_template_edited)
         self._field.textChanged.connect(self._on_template_changed)
@@ -325,9 +365,7 @@ class RenamePanel(_WordsMixin, _FindMixin, _ObjectsMixin, qt.QtWidgets.QWidget):
         self._kind.hovered.connect(lambda on: self._set_hover(self._kind_operation() if on else None))
         self._kind.menu_requested.connect(self._on_suffix_settings)
         self._lock.toggled.connect(self._on_lock)
-        self._recipes.clicked.connect(self._on_recipe)
-        self._recipes.add_requested.connect(self._on_save_recipe)
-        self._recipes.menu_requested.connect(self._on_recipe_menu)
+        self._recipes.clicked.connect(self._on_recipes_menu)
         self._list_source.current_changed.connect(self._on_list_source)
         self._kinds.clicked.connect(self._on_kind_chip)
         self._select_listed.clicked.connect(self._on_select_listed)
@@ -345,7 +383,17 @@ class RenamePanel(_WordsMixin, _FindMixin, _ObjectsMixin, qt.QtWidgets.QWidget):
         self._preview.frame_requested.connect(lambda _uuid: scene.frame_selection())
         self._preview.order_changed.connect(self._on_order_changed)
         self._preview.order_reset.connect(self._on_order_reset)
+        self._preview.mirror_requested.connect(self._on_mirror_one)
+        self._preview.branch_requested.connect(self._on_branch)
+        self._preview.fix_requested.connect(self._on_fix_menu)
+        self._preview.paste_requested.connect(self._on_paste_names)
+        self._preview.paste_hovered.connect(lambda on: self._set_hover(self._paste_operation() if on else None))
         self._list_search.textChanged.connect(self._on_list_search)
+        self._list_fold.clicked.connect(lambda: self._set_list_open(self._list_body.isHidden()))
+        self._search_button.clicked.connect(self._open_search)
+        find = qt.QtGui.QShortcut(qt.QtGui.QKeySequence("Ctrl+F"), self)
+        find.setContext(qt.QtCore.Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        find.activated.connect(self._open_search)
         self._connect_words()
         self._connect_find()
         self._connect_objects()
@@ -370,6 +418,12 @@ class RenamePanel(_WordsMixin, _FindMixin, _ObjectsMixin, qt.QtWidgets.QWidget):
         self._apply_words_settings()
         self._apply_find_settings()
         self._apply_objects_settings()
+        for group in self._groups:
+            self._show_group(group)
+        folded = dict(settings.get("folded") or {})
+        for key in ("words", "find"):
+            self._show_card(key, not folded.get(key, True), save=False)
+        self._set_list_open(not dict(settings.get("folded") or {}).get("list", False), save=False)
         self._loading = False
         self._sync_number_row()
         self._refresh_recipes()
@@ -396,13 +450,48 @@ class RenamePanel(_WordsMixin, _FindMixin, _ObjectsMixin, qt.QtWidgets.QWidget):
                 "end_last": self._end_last.isChecked()}
 
     def _refresh_recipes(self) -> None:
-        recipes = self.recipes.all()
-        self._recipes.set_chips([(name, name, values.get("template", "")) for name, values in recipes.items()])
         self._mark_recipes()
 
     def _mark_recipes(self) -> None:
-        if hasattr(self, "_recipes"):
-            self._recipes.set_marked(self.recipes.matching(self._recipe_values()))
+        """The button is lit (the accent) while the settings on screen are one of the recipes."""
+        if not hasattr(self, "_recipes"):
+            return
+        matching = self.recipes.matching(self._recipe_values())
+        self._recipes.setToolTip(("Recipe: " + ", ".join(matching) if matching else "Recipes") +
+                                 "\nA click: the recipes — a way of naming (the name, its numbering and order)"
+                                 "\nto put in, then Rename; save the current one, change or remove one")
+        on = bool(matching)
+        if bool(self._recipes.property("on")) != on:
+            self._recipes.setProperty("on", on)
+            repolish(self._recipes)
+
+    def _on_recipes_menu(self) -> None:
+        """Every recipe (its name, its template on the right; the matching one ticked), "Change"
+        submenus, a field to save the current settings as one, and the built-in ones back."""
+        from msl_tools.msl.ui.theme.qss import make_rounded_popup
+        from msl_tools.msl.tools.maya.rename.panel_words import _field_action
+        menu = make_rounded_popup(qt.QtWidgets.QMenu(self))
+        recipes = self.recipes.all()
+        matching = self.recipes.matching(self._recipe_values())
+        for name, values in recipes.items():
+            action = menu.addAction(f"{name}\t{values.get('template', '')}", lambda name=name: self._on_recipe(name))
+            action.setCheckable(True)
+            action.setChecked(name in matching)
+        if recipes:
+            change = make_rounded_popup(menu.addMenu("Change"))
+            for name in recipes:
+                one = make_rounded_popup(change.addMenu(name))
+                one.addAction("Save the current settings over it",
+                              lambda name=name: (self.recipes.save(name, self._recipe_values()),
+                                                 self._refresh_recipes(), self._say(f"Saved over “{name}”", "done")))
+                one.addAction("Remove", lambda name=name: (self.recipes.remove(name), self._refresh_recipes()))
+            menu.addSeparator()
+        title = menu.addAction("Save the current as a recipe:")
+        title.setEnabled(False)
+        _field_action(menu, "", "Recipe name", self._on_save_recipe)
+        menu.addSeparator()
+        menu.addAction("Back to the built-in recipes", lambda: (self.recipes.reset(), self._refresh_recipes()))
+        menu.exec(self._recipes.mapToGlobal(qt.QtCore.QPoint(0, self._recipes.height())))
 
     def _on_recipe(self, name: str) -> None:
         recipe = self.recipes.all().get(name)
@@ -431,17 +520,6 @@ class RenamePanel(_WordsMixin, _FindMixin, _ObjectsMixin, qt.QtWidgets.QWidget):
         self.recipes.save(name, self._recipe_values())
         self._refresh_recipes()
         self._say(f"Saved the recipe “{name}”", "done")
-
-    def _on_recipe_menu(self, name: str, position) -> None:
-        from msl_tools.msl.ui.theme.qss import make_rounded_popup
-        menu = make_rounded_popup(qt.QtWidgets.QMenu(self))
-        menu.addAction("Use it", lambda: self._on_recipe(name))
-        menu.addAction("Save the current settings over it",
-                       lambda: (self.recipes.save(name, self._recipe_values()), self._refresh_recipes()))
-        menu.addAction("Remove", lambda: (self.recipes.remove(name), self._refresh_recipes()))
-        menu.addSeparator()
-        menu.addAction("Back to the built-in recipes", lambda: (self.recipes.reset(), self._refresh_recipes()))
-        menu.exec(position)
 
     def _sides(self) -> rules.Sides:
         return rules.Sides.from_settings(self._settings.get("sides"))
@@ -527,6 +605,7 @@ class RenamePanel(_WordsMixin, _FindMixin, _ObjectsMixin, qt.QtWidgets.QWidget):
         self._nodes = [node for node in self._all_nodes
                        if (not self._kind_filter or node.kind in self._kind_filter)
                        and (not needle or needle in (node.namespace + node.name).lower())]
+        self._show_empty(not self._all_nodes)
         self._refresh_kinds()
         self._side.set_sides({self._sides().of(node.position) for node in self._nodes if node.uuid})
         self._kind.set_kind(self._nodes[0].kind if self._nodes else "")
@@ -561,17 +640,17 @@ class RenamePanel(_WordsMixin, _FindMixin, _ObjectsMixin, qt.QtWidgets.QWidget):
         nodes = operation.nodes() if operation is not None and operation.nodes is not None else self._nodes
         if operation is None:
             changes = self._convention_marks(nodes)
-            self._preview.set_changes(changes, bool(self._manual_order))
+            self._preview.set_changes(changes, bool(self._manual_order), self._tree_view())
             self._preview.set_picked(self._picked)
             self._show_count(nodes, None, marked=sum(1 for change in changes if change.state == "nonconform"))
             return
         try:
             changes = self._plan(operation, nodes)
         except ValueError as error:  # a broken regular expression
-            self._preview.set_changes([rules.Change(node, node.name, "idle") for node in nodes])
+            self._preview.set_changes([rules.Change(node, node.name, "idle") for node in nodes], bool(self._manual_order), self._tree_view())
             self._say(str(error), "error")
             return
-        self._preview.set_changes(changes, bool(self._manual_order))
+        self._preview.set_changes(changes, bool(self._manual_order), self._tree_view())
         self._preview.set_picked(self._picked)
         self._show_count(nodes, changes, operation)
 
@@ -947,6 +1026,43 @@ class RenamePanel(_WordsMixin, _FindMixin, _ObjectsMixin, qt.QtWidgets.QWidget):
         self._manual_order, self._manual_set = [], frozenset()
         self.refresh()
 
+    def _set_list_open(self, opened: bool, save: bool = True) -> None:
+        """Folds / unfolds the list (kinds, search, the strip, the list): the head row stays."""
+        if opened:
+            self._list_body.show()
+        else:
+            self._list_body.hide()
+        self._list_fold.set_icon(UiResources().iconManager.get_icon(
+            "chevron_down" if opened else "chevron_right", sub_folder="actions"))
+        self._list_fold.setToolTip("Fold the list" if opened else "Unfold the list")
+        if save:
+            self._save_folded("list", opened)
+
+    def _open_search(self) -> None:
+        """The search field opens in the list's head (in place of the count)."""
+        if self._list_body.isHidden():
+            self._set_list_open(True)
+        self._count.hide()
+        self._list_search.show()
+        self._list_search.setFocus()
+        self._list_search.selectAll()
+
+    def _close_search(self) -> None:
+        self._list_search.clear()
+        self._list_search.hide()
+        self._count.show()
+
+    def eventFilter(self, watched, event) -> bool:
+        if watched is self._list_search:
+            kind = event.type()
+            if kind == qt.QtCore.QEvent.Type.KeyPress and event.key() == qt.QtCore.Qt.Key.Key_Escape:
+                self._close_search()
+                self._field.setFocus()
+                return True
+            if kind == qt.QtCore.QEvent.Type.FocusOut and not self._list_search.text():
+                qt.QtCore.QTimer.singleShot(0, self._close_search)
+        return super().eventFilter(watched, event)
+
     def _on_list_search(self, text: str) -> None:
         self._name_filter = text.strip()
         self.refresh()
@@ -959,6 +1075,93 @@ class RenamePanel(_WordsMixin, _FindMixin, _ObjectsMixin, qt.QtWidgets.QWidget):
     def _shown_nodes(self) -> list:
         operation = self._current_operation()
         return operation.nodes() if operation is not None and operation.nodes is not None else self._nodes
+
+    def _tree_view(self) -> bool:
+        """The list as a tree: on "Hierarchy", in the Outliner's order (not one dragged by hand)."""
+        return self._list_source.current() == "Hierarchy" and not self._manual_order
+
+    # ------------------------------------------------------------------ one row's actions
+
+    def _one(self, uuid: str):
+        return next((node for node in self._shown_nodes() if node.uuid == uuid), None)
+
+    def _run_one(self, node, label: str, name: str) -> None:
+        operation = _Operation(label, lambda nodes: [name], nodes=lambda: [node])
+        operation.respect_left_out = False
+        self._run(operation, remember=False)
+
+    def _on_mirror_one(self, uuid: str) -> None:
+        node = self._one(uuid)
+        if node is None:
+            return
+        name = rules.mirror(node.name, self._sides())
+        if name == node.name:
+            self._say(f"“{node.name}” says no side to swap (lf_ / rt_, _L / _R, left / right)", "error")
+            return
+        self._run_one(node, "Other side", name)
+
+    def _on_branch(self, uuid: str) -> None:
+        node = self._one(uuid)
+        if node is not None:
+            count = scene.select_branch(node)
+            self._say(f"Selected {node.name} and everything under it: {count}")
+
+    def _on_fix_menu(self, uuid: str, position) -> None:
+        """A problem dot clicked: the fixes for that row's problems, for this one object only."""
+        from msl_tools.msl.ui.theme.qss import make_rounded_popup
+        node = self._one(uuid)
+        if node is None:
+            return
+        issues = dict(self._preview._row_issues.get(uuid, []))
+        menu = make_rounded_popup(qt.QtWidgets.QMenu(self))
+        suffixes = self._suffixes()
+        if "same" in issues:
+            def unique():
+                taken = set(scene.all_short_names())
+                self._run_one(node, "Make unique", rules.unique_names([node], taken)[0])
+            menu.addAction("Make it unique (_01, _02…)", unique)
+        if "bad" in issues:
+            fixed, cleaned = rules.sanitize(node.name), rules.clean_import(node.name, suffixes)
+            if fixed != node.name:
+                menu.addAction(f"Fix the signs → {fixed}", lambda: self._run_one(node, "Fix", fixed))
+            if cleaned != node.name:
+                menu.addAction(f"Clean the leftovers → {cleaned}", lambda: self._run_one(node, "Clean", cleaned))
+        if "convention" in issues:
+            fixed = rules.convention_fix(node, self._convention_pattern(), self._sides(), suffixes)
+            if fixed and fixed != node.name:
+                menu.addAction(f"By the convention → {fixed}", lambda: self._run_one(node, "Fix by the convention", fixed))
+            else:
+                hint = menu.addAction("The convention can't be worked out for this name")
+                hint.setEnabled(False)
+        if "shape" in issues:
+            wrong = scene.shape_mismatches([node]).get(uuid, [])
+            for shape, wanted in wrong:
+                menu.addAction(f"Name its shape → {wanted}",
+                               lambda shape=shape, wanted=wanted: self._run_one(shape, "Shape", wanted))
+        if menu.isEmpty():
+            return
+        menu.exec(position)
+
+    def _paste_operation(self) -> "_Operation | None":
+        from msl_tools.msl.tools.maya.rename.preview import paste_lines
+        names = paste_lines(qt.QtWidgets.QApplication.clipboard().text())
+        if not names:
+            return None
+        return _Operation("Paste names", lambda nodes: [names[index] if index < len(names) else node.name
+                                                         for index, node in enumerate(nodes)])
+
+    def _on_paste_names(self) -> None:
+        from msl_tools.msl.tools.maya.rename.preview import paste_lines
+        operation = self._paste_operation()
+        if operation is None:
+            self._say("Copy a column of names first — one per line", "error")
+            return
+        self._set_hover(None)
+        count = len(paste_lines(qt.QtWidgets.QApplication.clipboard().text()))
+        renamed = self._run(operation)
+        rows = len(self._nodes)
+        if renamed and count != rows:
+            self._say(self._status.text() + f" · {count} names for {rows} rows", "done")
 
     def _on_one_renamed(self, uuid: str, text: str) -> None:
         node = next((node for node in self._shown_nodes() if node.uuid == uuid), None)
@@ -987,15 +1190,178 @@ class RenamePanel(_WordsMixin, _FindMixin, _ObjectsMixin, qt.QtWidgets.QWidget):
         menu.exec(self._rename.mapToGlobal(position))
 
     def _say(self, text: str, state: str = "") -> None:
+        """What the panel has to say goes to the window's header (status_changed); the label only
+        keeps the text (never shown: a line of its own made everything under it jump)."""
         self._status.setText(text)
-        if bool(text) != self._status.isVisibleTo(self):
-            if text:
-                self._status.show()
-            else:
-                self._status.hide()
-        if (self._status.property("state") or "") != state:
-            self._status.setProperty("state", state)
-            repolish(self._status)
+        self.status_changed.emit(text, state)
+
+    # ------------------------------------------------------------------ the quick groups
+
+    def _group_last(self, group: str) -> str:
+        """The action of `group` used last (its first one until then)."""
+        keys = next(keys for key, _title, _tone, keys in QUICK_GROUPS if key == group)
+        last = dict(self._settings.get("quick_last") or {}).get(group, "")
+        return last if last in keys else keys[0]
+
+    def _show_group(self, group: str) -> None:
+        key = self._group_last(group)
+        text, tooltip = next((text, tooltip) for k, text, tooltip in QUICK if k == key)
+        title = next(title for g, title, _tone, _keys in QUICK_GROUPS if g == group)
+        button = self._groups[group]
+        button.set_source_icon(UiResources().iconManager.get_icon(QUICK_ICONS[key], sub_folder="actions"))
+        button.setToolTip(f"{tooltip}\nClick: do it · the corner, a right click or holding it: all of “{title}”\n"
+                          "The list shows what it does while the pointer is here")
+
+    def _on_group_menu(self, group: str) -> None:
+        """Every action of the group with its icon and name: hovered = the list shows it, a click
+        does it and makes it the group's button."""
+        from msl_tools.msl.ui.icon_manager import tinted_menu_icon
+        from msl_tools.msl.ui.theme.qss import make_rounded_popup
+        button = self._groups[group]
+        button.setDown(False)
+        keys = next(keys for g, _title, _tone, keys in QUICK_GROUPS if g == group)
+        last = self._group_last(group)
+        icons = UiResources().iconManager
+        menu = make_rounded_popup(qt.QtWidgets.QMenu(self))
+        for key in keys:
+            text, tooltip = next((text, tooltip) for k, text, tooltip in QUICK if k == key)
+            name = tooltip.split(" — ")[0].split(" (")[0]
+            icon = tinted_menu_icon(icons.get_icon(QUICK_ICONS[key], sub_folder="actions"), button._icon_color,
+                                    self.devicePixelRatioF(), side=18)
+            action = menu.addAction(icon, name + ("\tlast" if key == last else ""),
+                                    lambda key=key: self._use_group_action(group, key))
+            action.setToolTip(tooltip)
+            action.hovered.connect(lambda key=key: self._set_hover(self._quick_operation(key)))
+        menu.setToolTipsVisible(True)
+        menu.aboutToHide.connect(lambda: self._set_hover(None))
+        menu.exec(button.mapToGlobal(qt.QtCore.QPoint(0, button.height() + 2)))
+
+    def _use_group_action(self, group: str, key: str) -> None:
+        last = dict(self._settings.get("quick_last") or {})
+        last[group] = key
+        self._settings["quick_last"] = last
+        self._show_group(group)
+        self._run(self._quick_operation(key))
+
+    # ------------------------------------------------------------------ the header's buttons
+
+    def header_widgets(self) -> list:
+        """Buttons for the window's header: WORDS and FIND & REPLACE shown / hidden, the settings."""
+        icons = UiResources().iconManager
+        self._card_toggles = {}
+        for key, icon, title, text in (("words", "book", "Words", "The name library by category, the names used last"),
+                                       ("find", "replace", "Find & Replace", "Find a part of the names and replace it")):
+            button = ToggleIconButton(icons.get_icon(icon, sub_folder="actions"), title, text)
+            button.setObjectName("renameHeaderToggle")
+            button.setChecked(not self._words.isHidden() if key == "words" else not self._find.isHidden())
+            button.toggled.connect(lambda on, key=key: self._show_card(key, on))
+            self._card_toggles[key] = button
+        gear = GlyphButton("", "Settings: sides, suffixes by kind, the convention, where words go",
+                           size=qt.QtCore.QSize(24, 22))
+        gear.setObjectName("renameHeaderGear")
+        gear.set_icon(icons.get_icon("sliders", sub_folder="actions"))
+        gear.clicked.connect(lambda: self._on_settings_menu(gear))
+        return [self._card_toggles["words"], self._card_toggles["find"], gear]
+
+    def _show_card(self, key: str, on: bool, save: bool = True) -> None:
+        """Shows a card open, or hides it altogether (its header button follows)."""
+        card = self._words if key == "words" else self._find
+        card.set_open(bool(on))
+        if on:
+            card.show()
+        else:
+            card.hide()
+            if key == "find" and save:
+                self._on_find_folded(False)
+        toggle = getattr(self, "_card_toggles", {}).get(key)
+        if toggle is not None and toggle.isChecked() != bool(on):
+            toggle.blockSignals(True)
+            toggle.setChecked(bool(on))
+            toggle._follow()
+            toggle.blockSignals(False)
+        if save:
+            self._save_folded(key, bool(on))
+        if on and save:
+            qt.QtCore.QTimer.singleShot(0, self._reveal_cards)
+
+    def _reveal_cards(self) -> None:
+        scroll = self.findChild(StableScrollArea, "renameScroll")
+        if scroll is not None:
+            scroll.verticalScrollBar().setValue(scroll.verticalScrollBar().maximum())
+
+    def _on_card_toggled(self, key: str, opened: bool) -> None:
+        """A click on a card's heading: folding it hides it (the header's button brings it back)."""
+        self._show_card(key, opened)
+
+    def _on_settings_menu(self, button) -> None:
+        from msl_tools.msl.ui.theme.qss import make_rounded_popup
+        menu = make_rounded_popup(qt.QtWidgets.QMenu(self))
+        menu.addAction("Sides (left / right / middle)…", self._on_sides_settings)
+        menu.addAction("Suffixes by kind…", self._on_suffix_settings)
+        menu.addAction("Naming convention…", self._on_convention_menu)
+        menu.addSeparator()
+        into = menu.addAction("Words go into the name field")
+        into.setCheckable(True)
+        into.setChecked(self._into_on)
+        into.triggered.connect(self._set_into)
+        fit = menu.addAction("The window fits its height to what it shows")
+        fit.setCheckable(True)
+        fit.setChecked(self.fits_height())
+        fit.triggered.connect(self.set_fits_height)
+        menu.exec(button.mapToGlobal(qt.QtCore.QPoint(0, button.height())))
+
+    # the window asks these (RenameWindow): on unless the user set a height by hand
+    fit_changed = qt.QtCore.Signal(bool)
+
+    def fits_height(self) -> bool:
+        return bool(self._settings.get("fit_height", True))
+
+    def set_fits_height(self, on: bool) -> None:
+        self._settings["fit_height"] = bool(on)
+        self.fit_changed.emit(bool(on))
+
+    def content_height_change(self) -> int:
+        """How much taller (+) or shorter (-) the panel wants to be to show everything without
+        scrolling and without empty room under it."""
+        scroll = self.findChild(StableScrollArea, "renameScroll")
+        if scroll is None or scroll.widget() is None:
+            return 0
+        body = scroll.widget()
+        return body.sizeHint().height() - scroll.viewport().height()
+
+    # ------------------------------------------------------------------ an empty list
+
+    def _empty_hint(self) -> qt.QtWidgets.QWidget:
+        """What shows instead of an empty list: a line, and the names used last to start from."""
+        self._empty = qt.QtWidgets.QWidget()
+        self._empty.hide()
+        box = qt.QtWidgets.QVBoxLayout(self._empty)
+        box.setContentsMargins(2, 2, 2, 2)
+        box.setSpacing(4)
+        line = qt.QtWidgets.QLabel("Select objects in Maya to rename them · the checks above look at the whole "
+                                   "scene while nothing is selected")
+        line.setObjectName("renameHint")
+        line.setWordWrap(True)
+        self._empty_recent = ChipBar()
+        self._empty_recent.setToolTip("Names used last — a click puts one into the name field")
+        self._empty_recent.clicked.connect(self._use_name)
+        box.addWidget(line)
+        box.addWidget(self._empty_recent)
+        self._is_empty = None
+        return self._empty
+
+    def _show_empty(self, empty: bool) -> None:
+        if empty:
+            recent = self.library.recent()[:6]
+            self._empty_recent.set_chips([(text, text, "") for text in recent])
+            if bool(recent) == self._empty_recent.isHidden():
+                self._empty_recent.setVisible(bool(recent))
+        if empty == self._is_empty:
+            return
+        self._is_empty = empty
+        for widget in (self._preview, self._list_grip):
+            widget.setVisible(not empty)
+        self._empty.setVisible(empty)
 
     def focus_field(self) -> None:
         self._field.setFocus()

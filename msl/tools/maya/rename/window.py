@@ -29,7 +29,89 @@ class RenameWindow(FramelessDialog):
         icon.setObjectName("renameTitleIcon")  # rename.qss: the accent
         icon.setAttribute(qt.QtCore.Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self.header.leading_layout.insertWidget(0, icon)
+        for index, widget in enumerate(self.panel.header_widgets()):
+            self.header.trailing_layout.insertWidget(index, widget)
+        # what the panel says shows in the header ("MSL Rename › Renamed 5"), cut to the room there is
+        self._status = ("", "")
+        label = self.header.subtitle_label
+        label.setSizePolicy(qt.QtWidgets.QSizePolicy.Policy.Ignored, qt.QtWidgets.QSizePolicy.Policy.Preferred)
+        label.setMinimumWidth(0)
+        label.installEventFilter(self)
+        self.header.leading_layout.setStretchFactor(label, 1)
+        main = self.header.main_layout  # the room between the title and the buttons goes to the status
+        main.setStretch(main.indexOf(self.header.leading_layout), 1)
+        main.setStretch(main.indexOf(self.header.leading_layout) + 1, 0)
+        self.panel.status_changed.connect(self._show_status)
+        # the height follows the content (a list of 2 rows, cards hidden: a short window) until the
+        # user drags the height themselves; the settings menu turns it back on
+        self._fitting = False
+        self._fit_timer = qt.QtCore.QTimer(self)
+        self._fit_timer.setSingleShot(True)
+        self._fit_timer.setInterval(40)
+        self._fit_timer.timeout.connect(self._fit_height)
+        body = self.panel.findChild(qt.QtWidgets.QScrollArea, "renameScroll").widget()
+        body.installEventFilter(self)
+        self._body = body
+        self.panel.fit_changed.connect(lambda on: self._fit_timer.start() if on else None)
         self.finished.connect(self._remember_geometry)
+
+    def _show_status(self, text: str, state: str = "") -> None:
+        from msl_tools.msl.ui.theme.qss import repolish
+        self._status = (text, state)
+        label = self.header.subtitle_label
+        if not text:
+            label.hide()
+            return
+        label.show()
+        if (label.property("state") or "") != state:
+            label.setProperty("state", state)
+            repolish(label)
+        self._fit_status()
+
+    def _fit_status(self) -> None:
+        label = self.header.subtitle_label
+        text = self._status[0]
+        if text:
+            width = max(20, label.width() - label.fontMetrics().horizontalAdvance("\u203a  ") - 4)
+            label.setText("\u203a  " + label.fontMetrics().elidedText(text, qt.QtCore.Qt.TextElideMode.ElideRight, width))
+
+    def eventFilter(self, watched, event) -> bool:
+        if watched is self.header.subtitle_label and event.type() == qt.QtCore.QEvent.Type.Resize:
+            self._fit_status()
+        elif watched is getattr(self, "_body", None) and event.type() == qt.QtCore.QEvent.Type.LayoutRequest:
+            if self.panel.fits_height():
+                self._fit_timer.start()
+        return super().eventFilter(watched, event)
+
+    def _fit_height(self) -> None:
+        if not self.isVisible() or self.isMaximized() or not self.panel.fits_height():
+            return
+        change = self.panel.content_height_change()
+        if abs(change) < 2:
+            return
+        screen = self.screen().availableGeometry() if self.screen() is not None else None
+        top = self.geometry().top()
+        wanted = self.height() + change
+        if screen is not None:
+            wanted = min(wanted, screen.bottom() - top + 1)
+        wanted = max(wanted, self.minimumHeight())
+        if wanted != self.height():
+            self._fitting = True
+            self.resize(self.width(), wanted)
+            self._fitting = False
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._fit_timer.start()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        # a height dragged by hand: the window keeps it (the settings menu brings the fitting back)
+        if not getattr(self, "_fitting", True) and self.isVisible() and event.oldSize().isValid() \
+                and event.oldSize().height() != event.size().height() \
+                and qt.QtWidgets.QApplication.mouseButtons() & qt.QtCore.Qt.MouseButton.LeftButton \
+                and self.panel.fits_height():
+            self.panel.set_fits_height(False)
 
     @classmethod
     def find(cls) -> "RenameWindow | None":

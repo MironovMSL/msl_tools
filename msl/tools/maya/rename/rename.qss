@@ -28,6 +28,34 @@ RenamePanel QPushButton#renameQuick {
     font-size: 11px;
     font-weight: 600;
 }
+/* A quick GROUP (GroupButton): the action used last + a corner triangle that opens the rest. */
+RenamePanel GroupButton#renameGroup {
+    qproperty-iconColor: var(--text-primary);
+    background: alpha(var(--text-primary), 5%);
+    border: 1px solid alpha(var(--border), 70%);
+    border-radius: 5px;
+    padding: 0px 5px 0px 0px;
+    min-width: 25px;
+    max-width: 25px;
+    min-height: 20px;
+    max-height: 20px;
+}
+RenamePanel GroupButton#renameGroup:hover {
+    border: 1px solid var(--accent);
+    background: alpha(var(--accent), 12%);
+}
+RenamePanel GroupButton#renameGroup:pressed {
+    background: alpha(var(--accent), 25%);
+}
+RenamePanel GroupButton#renameGroup[tone="blue"]   { qproperty-iconColor: var(--accent); }
+RenamePanel GroupButton#renameGroup[tone="orange"] { qproperty-iconColor: var(--orange); }
+RenamePanel GroupButton#renameGroup[tone="green"]  { qproperty-iconColor: var(--success); }
+RenamePanel GroupButton#renameGroup[tone="teal"]   { qproperty-iconColor: var(--teal); }
+/* Colored by group (panel.QUICK_TONES), the same hues as the strip beside the list. */
+RenamePanel QuickButton#renameQuick[tone="blue"]   { qproperty-iconColor: var(--accent); }
+RenamePanel QuickButton#renameQuick[tone="orange"] { qproperty-iconColor: var(--orange); }
+RenamePanel QuickButton#renameQuick[tone="green"]  { qproperty-iconColor: var(--success); }
+RenamePanel QuickButton#renameQuick[tone="teal"]   { qproperty-iconColor: var(--teal); }
 RenamePanel QPushButton#renameQuick:hover {
     border: 1px solid var(--accent);
     background: alpha(var(--accent), 12%);
@@ -107,6 +135,26 @@ RenamePanel QFrame#renameRule {
     background-color: alpha(var(--border), 70%);
     border: none;
 }
+/* Recipes: a framed icon button right of Rename; lit while the settings are one of them. */
+RenamePanel QuickButton#renameRecipe {
+    qproperty-iconColor: var(--text-secondary);
+    background: alpha(var(--text-primary), 5%);
+    border: 1px solid alpha(var(--border), 70%);
+    border-radius: 5px;
+    padding: 0px;
+    min-width: 24px;
+    max-width: 24px;
+    min-height: 20px;
+    max-height: 20px;
+}
+RenamePanel QuickButton#renameRecipe:hover {
+    border: 1px solid alpha(var(--accent), 60%);
+}
+RenamePanel QuickButton#renameRecipe[on="true"] {
+    qproperty-iconColor: var(--accent);
+    background: alpha(var(--accent), 18%);
+    border: 1px solid alpha(var(--accent), 65%);
+}
 /* On / off icon buttons (ToggleIconButton): off = quiet, on = the accent, clearly. */
 RenamePanel ToggleIconButton#renameToggleIcon {
     qproperty-iconColor: var(--text-secondary);
@@ -168,6 +216,14 @@ RenamePanel PreviewList {
     qproperty-lockedColor: alpha(var(--text-secondary), 70%);
     qproperty-changedColor: var(--accent);
     qproperty-dropColor:    var(--accent);
+    qproperty-leftColor:    var(--accent);
+    qproperty-rightColor:   var(--error);
+    qproperty-midColor:     var(--yellow);
+    qproperty-groundColor:  var(--field);
+    qproperty-sameDotColor:       var(--warning);
+    qproperty-badDotColor:        var(--error);
+    qproperty-conventionDotColor: var(--accent);
+    qproperty-shapeDotColor:      var(--teal);
     background-color: var(--field);
     border: 1px solid alpha(var(--border), 80%);
     border-radius: 6px;
@@ -254,4 +310,76 @@ QListView#wordCompleter::item:hover {
 QListView#wordCompleter::item:selected {
     background-color: alpha(var(--accent), 24%);
     color: var(--text-primary);
+}
+
+/* The strip beside the list: what to find, fix, lock. Each icon's COLOR says what it does
+   (the `tone` property): find = the hue of what it finds, fix = success, lock = orange. */
+RenamePanel QFrame#renameStripFrame {
+    background: alpha(var(--text-primary), 3%);
+    border: 1px solid alpha(var(--border), 60%);
+    border-radius: 6px;
+}
+RenamePanel QFrame#renameStripLine {
+    background: alpha(var(--border), 90%);
+    border: none;   /* its size is set in code: a row while the list is empty */
+}
+RenamePanel StripButton#renameStrip {
+    qproperty-iconColor: var(--text-primary);
+    qproperty-badgeColor: var(--error);
+    qproperty-badgeTextColor: var(--on-danger);
+    qproperty-underColor: var(--text-secondary);
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 5px;
+    padding: 0px;
+    min-width: 24px;
+    max-width: 24px;
+    min-height: 24px;
+    max-height: 24px;
+}
+RenamePanel StripButton#renameStrip:hover {
+    background: alpha(var(--text-primary), 9%);
+    border: 1px solid alpha(var(--border), 90%);
+}
+RenamePanel StripButton#renameStrip:pressed {
+    background: alpha(var(--text-primary), 16%);
+}
+RenamePanel StripButton#renameStrip[tone="amber"]   { qproperty-iconColor: var(--warning); qproperty-badgeColor: var(--warning); }
+RenamePanel StripButton#renameStrip[tone="red"]     { qproperty-iconColor: var(--error); }
+RenamePanel StripButton#renameStrip[tone="violet"]  { qproperty-iconColor: var(--violet); }
+RenamePanel StripButton#renameStrip[tone="teal"]    { qproperty-iconColor: var(--teal); }
+RenamePanel StripButton#renameStrip[tone="orange"]  { qproperty-iconColor: var(--orange); qproperty-badgeColor: var(--orange); }
+RenamePanel StripButton#renameStrip[tone="blue"]    { qproperty-iconColor: var(--accent); qproperty-badgeColor: var(--accent); }
+RenamePanel StripButton#renameStrip[tone="green"]   { qproperty-iconColor: var(--success); }
+
+/* The header: WORDS / FIND & REPLACE shown or hidden, the settings; what the panel says. */
+RenameWindow ToggleIconButton#renameHeaderToggle {
+    qproperty-iconColor: var(--text-secondary);
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 5px;
+    padding: 0px;
+    min-width: 24px;
+    max-width: 24px;
+    min-height: 22px;
+    max-height: 22px;
+}
+RenameWindow ToggleIconButton#renameHeaderToggle:hover {
+    background: alpha(var(--text-primary), 8%);
+}
+RenameWindow ToggleIconButton#renameHeaderToggle[on="true"] {
+    qproperty-iconColor: var(--accent);
+    background: alpha(var(--accent), 18%);
+    border: 1px solid alpha(var(--accent), 55%);
+}
+RenameWindow GlyphButton#renameHeaderGear {
+    qproperty-glyphColor:       var(--text-secondary);
+    qproperty-activeGlyphColor: var(--accent);
+    qproperty-highlightColor:   alpha(var(--accent), 16%);
+}
+RenameWindow QLabel#headerSubtitle[state="done"] {
+    color: var(--success);
+}
+RenameWindow QLabel#headerSubtitle[state="error"] {
+    color: var(--error);
 }

@@ -317,6 +317,36 @@ def shapes_of(items: list[Node]) -> tuple[list[Node], list[str]]:
     return found, names
 
 
+def shape_mismatches(items: list[Node]) -> dict:
+    """{transform uuid: [(shape Node, the name it should have)]} for the transforms among `items`
+    whose shapes aren't named after them ("pCubeShape3" under "body")."""
+    from msl_tools.msl.tools.maya.rename.rules import shape_name
+    found: dict = {}
+    for item in items:
+        path = current(item)
+        if not path or "|" not in path:
+            continue
+        shapes = cmds.listRelatives(path, shapes=True, fullPath=True, noIntermediate=True) or []
+        wrong = []
+        for index, shape in enumerate(nodes(shapes)):
+            wanted = shape_name(path.rpartition("|")[2].rpartition(":")[2], index)
+            if shape.name != wanted:
+                wrong.append((shape, wanted))
+        if wrong:
+            found[item.uuid] = wrong
+    return found
+
+
+def select_branch(item: Node) -> int:
+    """Selects `item` and every transform under it (shapes stay out); how many."""
+    path = current(item)
+    if not path:
+        return 0
+    below = cmds.listRelatives(path, allDescendents=True, type="transform", fullPath=True) or []
+    cmds.select([path] + list(reversed(below)), replace=True)
+    return 1 + len(below)
+
+
 def named(short_names: list[str]) -> list[str]:
     """Long names of the objects with these short names (each may match several)."""
     found = []

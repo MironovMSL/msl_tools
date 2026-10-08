@@ -26,7 +26,7 @@ class _FindMixin:
         for toggle in (self._case, self._regex):
             toggle.setObjectName("renameToggle")
             toggle.setCheckable(True)
-        card = self._find = FoldingCard("FIND & REPLACE", icons.get_icon("search", sub_folder="actions"),
+        card = self._find = FoldingCard("FIND & REPLACE", icons.get_icon("replace", sub_folder="actions"),
                                         extras=[self._case, self._regex])
         self._find_text = WordField()
         self._find_text.setPlaceholderText("Find")
@@ -66,7 +66,7 @@ class _FindMixin:
             toggle.toggled.connect(self._on_find_changed)
         self._find_select.clicked.connect(self._on_find_select)
         self._find_replace.clicked.connect(self._on_replace)
-        self._find.toggled.connect(self._on_find_folded)
+        self._find.toggled.connect(lambda opened: self._on_card_toggled("find", opened))
 
     def _apply_find_settings(self) -> None:
         settings = self._settings
@@ -75,8 +75,6 @@ class _FindMixin:
         self._scope.set_current(settings.get("scope", scene.SCOPE_SELECTED), animate=False)
         self._case.setChecked(bool(settings.get("case", True)))
         self._regex.setChecked(bool(settings.get("regex", False)))
-        folded = dict(settings.get("folded") or {})
-        self._find.set_open(not folded.get("find", True))
         self._sum_up_find()
 
     def _find_settings(self) -> dict:
@@ -126,7 +124,6 @@ class _FindMixin:
             self._update_preview()
 
     def _on_find_folded(self, opened: bool) -> None:
-        self._save_folded("find", opened)
         if not opened and self._source == "find":
             self._set_source("template")
 

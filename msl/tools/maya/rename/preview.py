@@ -12,6 +12,15 @@ from msl_tools.msl.ui.widgets.atoms.scrollbars.slim_scroll_bar import SlimScroll
 _ROLE = qt.QtCore.Qt.ItemDataRole.UserRole
 _LOCKED = qt.QtCore.Qt.ItemDataRole.UserRole + 1
 _PARTS = qt.QtCore.Qt.ItemDataRole.UserRole + 2     # the new name as [(text, changed)]
+_DEPTH = qt.QtCore.Qt.ItemDataRole.UserRole + 3     # how deep under other listed rows (the tree)
+_KIDS = qt.QtCore.Qt.ItemDataRole.UserRole + 4      # it has listed rows under it
+_PARENT = qt.QtCore.Qt.ItemDataRole.UserRole + 5    # the uuid of the listed row it is under
+_NS = qt.QtCore.Qt.ItemDataRole.UserRole + 6        # its namespace ("ns:"), drawn faint before the name
+INDENT = 12        # px per level of the tree
+ARROW = 12         # px of the fold arrow in front of a row (in the tree)
+DOT, DOT_GAP = 6, 9    # the problem dots after a name
+# what a problem dot means, in the order they are drawn (the colors: qproperty, rename.qss)
+DOT_KINDS = ("same", "bad", "convention", "shape")
 _ROW_MIME = "application/x-msl-rename-row"
 FRAME_DELAY_MS = 250   # a click on a row frames its object this much later (unless a double click came)
 _CHANGING = ("", "warning", "clash")                # states whose new name is drawn with its changes
@@ -52,6 +61,100 @@ class _NewNameDelegate(qt.QtWidgets.QStyledItemDelegate):
         painter.restore()
 
 
+class _NameDelegate(qt.QtWidgets.QStyledItemDelegate):
+    """The first column: the tree's indent and fold arrow, the tick, Maya's icon of the kind with
+    a dot of the side it stands on, the namespace faint before the name, and the problem dots
+    after it (their places are kept for clicks: PreviewList._dot_hits)."""
+
+    def __init__(self, owner):
+        super().__init__(owner)
+        self._owner = owner
+
+    def _shifted(self, option, index):
+        shifted = qt.QtWidgets.QStyleOptionViewItem(option)
+        shifted.rect = option.rect.adjusted(self._owner.indent_of(index), 0, 0, 0)
+        return shifted
+
+    def editorEvent(self, event, model, option, index) -> bool:
+        return super().editorEvent(event, model, self._shifted(option, index), index)
+
+    def paint(self, painter, option, index) -> None:
+        owner = self._owner
+        view = qt.QtWidgets.QStyleOptionViewItem(option)
+        self.initStyleOption(view, index)
+        text = view.text
+        view.text = ""
+        widget = view.widget
+        style = widget.style() if widget is not None else qt.QtWidgets.QApplication.style()
+        shifted = self._shifted(view, index)
+        indent = shifted.rect.left() - view.rect.left()
+        if indent > 0:   # the row's ground under the indent (the rest comes with the item itself)
+            painter.save()
+            painter.setClipRect(qt.QtCore.QRect(view.rect.left(), view.rect.top(), indent, view.rect.height()))
+            style.drawPrimitive(qt.QtWidgets.QStyle.PrimitiveElement.PE_PanelItemViewItem, view, painter, widget)
+            painter.restore()
+        style.drawControl(qt.QtWidgets.QStyle.ControlElement.CE_ItemViewItem, shifted, painter, widget)
+        uuid = index.data(_ROLE) or ""
+        painter.save()
+        painter.setRenderHint(qt.QtGui.QPainter.RenderHint.Antialiasing)
+        # the fold arrow
+        if owner.tree_shown() and index.data(_KIDS):
+            x = option.rect.left() + (index.data(_DEPTH) or 0) * INDENT + 3
+            y = option.rect.center().y()
+            pen = qt.QtGui.QPen(owner._old_color, 1.6)
+            pen.setCapStyle(qt.QtCore.Qt.PenCapStyle.RoundCap)
+            pen.setJoinStyle(qt.QtCore.Qt.PenJoinStyle.RoundJoin)
+            painter.setPen(pen)
+            if uuid in owner._folded:
+                points = [qt.QtCore.QPointF(x + 1.5, y - 3.5), qt.QtCore.QPointF(x + 5, y), qt.QtCore.QPointF(x + 1.5, y + 3.5)]
+            else:
+                points = [qt.QtCore.QPointF(x - 0.5, y - 1.5), qt.QtCore.QPointF(x + 3, y + 2), qt.QtCore.QPointF(x + 6.5, y - 1.5)]
+            painter.drawPolyline(qt.QtGui.QPolygonF(points))
+        # the side it stands on: a dot on the icon's corner
+        side = owner._row_sides.get(uuid)
+        if side:
+            icon_rect = style.subElementRect(qt.QtWidgets.QStyle.SubElement.SE_ItemViewItemDecoration, shifted, widget)
+            color = {"left": owner._left_color, "right": owner._right_color}.get(side, owner._mid_color)
+            painter.setPen(qt.QtGui.QPen(owner._ground_color, 1.2))
+            painter.setBrush(color)
+            painter.drawEllipse(qt.QtCore.QPointF(icon_rect.right() - 0.5, icon_rect.bottom() - 0.5), 3, 3)
+        # the namespace (faint), the name, then the dots
+        rect = style.subElementRect(qt.QtWidgets.QStyle.SubElement.SE_ItemViewItemText, shifted, widget)
+        namespace = index.data(_NS) or ""
+        name = text[len(namespace):] if namespace and text.startswith(namespace) else text
+        issues = owner._row_issues.get(uuid, [])
+        room = rect.width() - 4 - (len(issues) * DOT_GAP + 6 if issues else 0)
+        metrics = qt.QtGui.QFontMetrics(view.font)
+        painter.setFont(view.font)
+        x = rect.left() + 2
+        if namespace:
+            faint = qt.QtGui.QColor(owner._old_color)
+            faint.setAlpha(120)
+            painter.setPen(faint)
+            shown = metrics.elidedText(namespace, qt.QtCore.Qt.TextElideMode.ElideMiddle, max(0, room // 2))
+            painter.drawText(qt.QtCore.QRect(x, rect.top(), metrics.horizontalAdvance(shown) + 2, rect.height()),
+                             int(qt.QtCore.Qt.AlignmentFlag.AlignVCenter | qt.QtCore.Qt.AlignmentFlag.AlignLeft), shown)
+            x += metrics.horizontalAdvance(shown)
+            room -= metrics.horizontalAdvance(shown)
+        base = index.data(qt.QtCore.Qt.ItemDataRole.ForegroundRole)
+        painter.setPen(base.color() if isinstance(base, qt.QtGui.QBrush) else owner._old_color)
+        shown = metrics.elidedText(name, qt.QtCore.Qt.TextElideMode.ElideRight, max(0, room))
+        width = metrics.horizontalAdvance(shown)
+        painter.drawText(qt.QtCore.QRect(x, rect.top(), width + 2, rect.height()),
+                         int(qt.QtCore.Qt.AlignmentFlag.AlignVCenter | qt.QtCore.Qt.AlignmentFlag.AlignLeft), shown)
+        hits = []
+        x += width + 7
+        painter.setPen(qt.QtCore.Qt.PenStyle.NoPen)
+        for kind, _why in issues:
+            painter.setBrush(owner.dot_color(kind))
+            center = qt.QtCore.QPointF(x + DOT / 2, rect.center().y() + 0.5)
+            painter.drawEllipse(center, DOT / 2, DOT / 2)
+            hits.append((qt.QtCore.QRect(int(x) - 2, rect.top(), DOT_GAP + 1, rect.height()), kind))
+            x += DOT_GAP
+        owner._dot_hits[uuid] = hits
+        painter.restore()
+
+
 class _RowActions(qt.QtWidgets.QFrame):
     """The small buttons that appear at the end of the hovered row's name: copy it, put it into
     the name field, show the object in the scene. A pill of the list's own ground, so it covers
@@ -65,7 +168,10 @@ class _RowActions(qt.QtWidgets.QFrame):
         line.setContentsMargins(2, 0, 2, 0)
         line.setSpacing(0)
         self.buttons = {}
-        for key, icon, tip in (("copy", "copy", "Copy the name"),
+        for key, icon, tip in (("edit", "edit", "Type a name for this one (F2 / double click)"),
+                               ("mirror", "mirror_sides", "Rename this one to the other side's name (lf_ ↔ rt_)"),
+                               ("branch", "branch", "Select it and everything under it"),
+                               ("copy", "copy", "Copy the name"),
                                ("field", "text_frame", "Put the name into the name field")):
             button = GlyphButton("", tip, size=qt.QtCore.QSize(20, 18))
             button.setObjectName("renameRowAction")
@@ -111,6 +217,11 @@ class PreviewList(qt.QtWidgets.QTreeWidget):
     include_all = qt.QtCore.Signal()
     order_changed = qt.QtCore.Signal(list)
     order_reset = qt.QtCore.Signal()
+    mirror_requested = qt.QtCore.Signal(str)        # rename that one to the other side's name
+    branch_requested = qt.QtCore.Signal(str)        # select it and everything under it
+    fix_requested = qt.QtCore.Signal(str, qt.QtCore.QPoint)   # a problem dot clicked: the row's fixes
+    paste_requested = qt.QtCore.Signal()            # names from the clipboard, one per row
+    paste_hovered = qt.QtCore.Signal(bool)          # ...the menu item is under the pointer
 
     LOCK_COLUMN = 2
     MIN_ROWS, MAX_ROWS = 3, 8
@@ -124,6 +235,14 @@ class PreviewList(qt.QtWidgets.QTreeWidget):
     lockedColor = color_property("_locked_color", "_recolor")
     changedColor = color_property("_changed_color", "_repaint")   # what changes in a new name
     dropColor = color_property("_drop_color", "_repaint")         # where a dragged row lands
+    leftColor = color_property("_left_color", "_repaint")         # the side dot: Maya's left (blue)
+    rightColor = color_property("_right_color", "_repaint")       # ...right (red)
+    midColor = color_property("_mid_color", "_repaint")           # ...the middle (yellow)
+    groundColor = color_property("_ground_color", "_repaint")     # the ring around a side dot
+    sameDotColor = color_property("_same_dot", "_repaint")        # problem dots, as the strip's buttons
+    badDotColor = color_property("_bad_dot", "_repaint")
+    conventionDotColor = color_property("_convention_dot", "_repaint")
+    shapeDotColor = color_property("_shape_dot", "_repaint")
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -133,6 +252,16 @@ class PreviewList(qt.QtWidgets.QTreeWidget):
         self._clash_color = qt.QtGui.QColor(fallback.warning)
         self._error_color = qt.QtGui.QColor(fallback.error)
         self._changed_color = self._drop_color = qt.QtGui.QColor(fallback.accent)
+        self._left_color = self._convention_dot = qt.QtGui.QColor(fallback.accent)
+        self._right_color = self._bad_dot = qt.QtGui.QColor(fallback.error)
+        self._same_dot = self._mid_color = qt.QtGui.QColor(fallback.warning)
+        self._shape_dot = qt.QtGui.QColor(fallback.text_secondary)
+        self._ground_color = qt.QtGui.QColor(fallback.surface)
+        self._tree = False             # rows drawn as a tree (indent + fold arrows)
+        self._folded: set = set()      # uuids whose rows under them are hidden
+        self._row_sides: dict = {}     # uuid -> "left" / "right"
+        self._row_issues: dict = {}    # uuid -> [(kind, why)]
+        self._dot_hits: dict = {}      # uuid -> [(rect, kind)] where its dots were drawn
         self._editing = False
         self._ordered = False          # the user dragged the rows into an order of their own
         icons = UiResources().iconManager
@@ -148,7 +277,7 @@ class PreviewList(qt.QtWidgets.QTreeWidget):
         self.setIndentation(0)
         self.setSelectionMode(qt.QtWidgets.QAbstractItemView.SelectionMode.NoSelection)
         self.setEditTriggers(qt.QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.setFocusPolicy(qt.QtCore.Qt.FocusPolicy.NoFocus)
+        self.setFocusPolicy(qt.QtCore.Qt.FocusPolicy.ClickFocus)  # the keys: up / down, F2, space
         self.setVerticalScrollBar(SlimScrollBar(qt.QtCore.Qt.Orientation.Vertical, self))
         self.setHorizontalScrollBarPolicy(qt.QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         # the bar's column is always there (SlimScrollBar draws nothing while nothing scrolls), so the
@@ -159,6 +288,7 @@ class PreviewList(qt.QtWidgets.QTreeWidget):
         self.header().setSectionResizeMode(1, qt.QtWidgets.QHeaderView.ResizeMode.Stretch)
         self.header().setSectionResizeMode(self.LOCK_COLUMN, qt.QtWidgets.QHeaderView.ResizeMode.Fixed)
         self.header().resizeSection(self.LOCK_COLUMN, 24)
+        self.setItemDelegateForColumn(0, _NameDelegate(self))
         self.setItemDelegateForColumn(1, _NewNameDelegate(self))
         self.itemClicked.connect(self._on_clicked)
         self.setContextMenuPolicy(qt.QtCore.Qt.ContextMenuPolicy.CustomContextMenu)
@@ -170,6 +300,9 @@ class PreviewList(qt.QtWidgets.QTreeWidget):
         self._hover_uuid = ""
         self._actions.buttons["copy"].clicked.connect(self._on_copy)
         self._actions.buttons["field"].clicked.connect(lambda: self._emit_for_hover(self.use_name, name=True))
+        self._actions.buttons["mirror"].clicked.connect(lambda: self._emit_for_hover(self.mirror_requested))
+        self._actions.buttons["branch"].clicked.connect(lambda: self._emit_for_hover(self.branch_requested))
+        self._actions.buttons["edit"].clicked.connect(self._edit_hovered)
         self.viewport().setMouseTracking(True)
         self.viewport().installEventFilter(self)
         self.setAcceptDrops(True)
@@ -193,7 +326,7 @@ class PreviewList(qt.QtWidgets.QTreeWidget):
 
     # ------------------------------------------------------------------ filling
 
-    def set_changes(self, changes: list, ordered: bool = False) -> None:
+    def set_changes(self, changes: list, ordered: bool = False, tree: bool = False) -> None:
         """Shows `changes` (rules.Change) — unless a name is being typed in the list right now.
         `ordered`: the rows are in an order the user dragged them into (the menu offers it back).
 
@@ -203,10 +336,13 @@ class PreviewList(qt.QtWidgets.QTreeWidget):
         first one's index, which clear() invalidates (met with the real mouse)."""
         if self._editing:
             return
-        signature = (ordered, tuple((change.node.uuid, change.node.namespace, change.node.name, change.node.kind,
-                                     change.node.locked, change.new, change.state, change.note) for change in changes))
+        signature = (ordered, tree, tuple((change.node.uuid, change.node.path, change.node.namespace, change.node.name,
+                                           change.node.kind, change.node.locked, change.new, change.state, change.note)
+                                          for change in changes))
         self._changes = list(changes)
         self._ordered = ordered
+        self._tree = bool(tree)
+        self._shape_tree(changes)
         if signature == getattr(self, "_signature", None) and self.topLevelItemCount():
             return
         self._signature = signature
@@ -225,11 +361,97 @@ class PreviewList(qt.QtWidgets.QTreeWidget):
         self.blockSignals(False)
         self._recolor()
         self._apply_picked()
-        self._fit_height(min(len(changes), self.MAX_SHOWN))
+        self._apply_fold()
         self._place_actions(self._hover_uuid)
+
+    def _shape_tree(self, changes) -> None:
+        """Depth, parent and "has rows under it" of each row, from the long names: a row is under
+        the nearest listed row its path starts with (the list in the Outliner's order)."""
+        self._depth, self._parent, self._kids = {}, {}, set()
+        by_path = {}
+        for change in changes:
+            path = change.node.path
+            parent, cut = "", path
+            while "|" in cut and self._tree:
+                cut = cut.rpartition("|")[0]
+                if cut in by_path:
+                    parent = by_path[cut]
+                    break
+            self._parent[change.node.uuid] = parent
+            self._depth[change.node.uuid] = self._depth.get(parent, -1) + 1 if parent else 0
+            if parent:
+                self._kids.add(parent)
+            by_path[path] = change.node.uuid
+
+    def tree_shown(self) -> bool:
+        return self._tree and bool(getattr(self, "_kids", None))
+
+    def indent_of(self, index) -> int:
+        """How far the first column's content moves right (the tree's depth + the arrow's room)."""
+        if not self.tree_shown():
+            return 0
+        return (index.data(_DEPTH) or 0) * INDENT + ARROW
+
+    def dot_color(self, kind: str) -> "qt.QtGui.QColor":
+        return {"same": self._same_dot, "bad": self._bad_dot, "convention": self._convention_dot,
+                "shape": self._shape_dot}.get(kind, self._shape_dot)
+
+    def set_marks(self, sides: dict, issues: dict) -> None:
+        """The side each object stands on ({uuid: "left" / "right" / "center"}) and its problems
+        ({uuid: [(kind, why)]}, kinds DOT_KINDS): a dot on the icon, dots after the name."""
+        if sides == self._row_sides and issues == self._row_issues:
+            return
+        self._row_sides, self._row_issues = dict(sides), dict(issues)
+        for index in range(self.topLevelItemCount()):
+            item = self.topLevelItem(index)
+            self._tip(item, self._change_of(item))
+        self.viewport().update()
+
+    def _apply_fold(self) -> None:
+        """Rows under a folded row are hidden (they are still renamed: folding only hides)."""
+        hidden: dict = {}
+        shown = 0
+        for index in range(self.topLevelItemCount()):
+            item = self.topLevelItem(index)
+            uuid = item.data(0, _ROLE)
+            parent = self._parent.get(uuid, "") if self._tree else ""
+            hide = bool(parent) and (parent in self._folded or hidden.get(parent, False))
+            hidden[uuid] = hide
+            if item.isHidden() != hide:
+                item.setHidden(hide)
+            shown += not hide
+        self._fit_height(min(shown, self.MAX_SHOWN))
+
+    def _toggle_fold(self, uuid: str) -> None:
+        if uuid in self._folded:
+            self._folded.discard(uuid)
+        else:
+            self._folded.add(uuid)
+        self._apply_fold()
+        self.viewport().update()
+
+    def _tip(self, item, change) -> None:
+        if change is None:
+            return
+        tip = change.node.path
+        if change.note:
+            tip += "\n" + change.note
+        side = self._row_sides.get(change.node.uuid)
+        if side:
+            tip += ("\nStands in the middle (the dot on its icon)" if side == "center" else
+                    f"\nStands on the {side} (the dot on its icon)")
+        for kind, why in self._row_issues.get(change.node.uuid, []):
+            tip += f"\n● {why}"
+        if self._row_issues.get(change.node.uuid):
+            tip += "\nA click on a dot: put it right"
+        item.setToolTip(0, tip + "\nClick: pick it (select + frame) · Ctrl / Shift+click: several · drag: the order "
+                                "of the numbers\nKeys: ↑ ↓ pick · F2 type a name · space tick · ← → fold")
 
     def _fill(self, item, change) -> None:
         item.setText(0, change.node.namespace + change.node.name)
+        item.setData(0, _NS, change.node.namespace)
+        item.setData(0, _DEPTH, self._depth.get(change.node.uuid, 0))
+        item.setData(0, _KIDS, change.node.uuid in self._kids)
         item.setText(1, self._new_text(change))
         item.setData(0, _ROLE, change.node.uuid)
         item.setIcon(0, maya_type_icon(change.node.kind))  # what it is, as in the Outliner
@@ -237,10 +459,7 @@ class PreviewList(qt.QtWidgets.QTreeWidget):
         item.setData(1, _LOCKED, bool(change.node.locked))
         item.setData(1, _PARTS, name_parts(change.node.name, change.new)
                      if change.state in _CHANGING and change.new != change.node.name else None)
-        tip = change.node.path
-        if change.note:
-            tip += "\n" + change.note
-        item.setToolTip(0, tip + "\nClick: pick it (select + frame) · Ctrl / Shift+click: several · drag: the order of the numbers")
+        self._tip(item, change)
         item.setToolTip(1, (change.note or "Double click to type a name for this one"))
         item.setFlags(item.flags() | qt.QtCore.Qt.ItemFlag.ItemIsEditable | qt.QtCore.Qt.ItemFlag.ItemIsUserCheckable)
         item.setCheckState(0, qt.QtCore.Qt.CheckState.Unchecked if change.state == "skipped" and change.note == "left out"
@@ -342,12 +561,17 @@ class PreviewList(qt.QtWidgets.QTreeWidget):
 
     def _fit_height(self, rows: int) -> None:
         self._rows = rows
-        least = self._row_height() * self.MIN_ROWS + 2 * self.frameWidth() + 4
+        least = max(self._row_height() * self.MIN_ROWS + 2 * self.frameWidth() + 4, getattr(self, "_floor", 0))
         if self._user_height:
             self.setFixedHeight(max(least, self._user_height))  # the height the user dragged it to
             return
         shown = max(self.MIN_ROWS, min(self.MAX_ROWS, rows))
-        self.setFixedHeight(self._row_height() * shown + 2 * self.frameWidth() + 4)
+        self.setFixedHeight(max(least, self._row_height() * shown + 2 * self.frameWidth() + 4))
+
+    def set_floor(self, height: int) -> None:
+        """The least height whatever the rows (the panel: as tall as the strip of buttons beside it)."""
+        self._floor = int(height or 0)
+        self._fit_height(getattr(self, "_rows", 0))
 
     def set_user_height(self, height: "int | None") -> None:
         """A height the user picked by dragging the grip under the list (None = as tall as its rows)."""
@@ -413,6 +637,9 @@ class PreviewList(qt.QtWidgets.QTreeWidget):
             elif kind == qt.QtCore.QEvent.Type.Leave:
                 if not self._actions.geometry().contains(self.viewport().mapFromGlobal(qt.QtGui.QCursor.pos())):
                     self._hover("")
+            elif kind in (qt.QtCore.QEvent.Type.MouseButtonPress, qt.QtCore.QEvent.Type.MouseButtonDblClick) \
+                    and event.button() == qt.QtCore.Qt.MouseButton.LeftButton and self._hit_extra(event):
+                return True   # the fold arrow / a problem dot: not a pick
             elif kind == qt.QtCore.QEvent.Type.MouseButtonPress and event.button() == qt.QtCore.Qt.MouseButton.LeftButton:
                 item = self.itemAt(event.position().toPoint())
                 self._press = (event.position().toPoint(), item.data(0, _ROLE)) if item is not None else None
@@ -424,9 +651,91 @@ class PreviewList(qt.QtWidgets.QTreeWidget):
                 self._press = None
         return super().eventFilter(watched, event)
 
+    def _hit_extra(self, event) -> bool:
+        """A press on a row's fold arrow folds it; on a problem dot asks for its fixes."""
+        point = event.position().toPoint()
+        item = self.itemAt(point)
+        if item is None or self.header().logicalIndexAt(point.x()) != 0:
+            return False
+        uuid = item.data(0, _ROLE)
+        if self.tree_shown() and item.data(0, _KIDS):
+            left = self.visualItemRect(item).left() + (item.data(0, _DEPTH) or 0) * INDENT
+            if left - 2 <= point.x() <= left + ARROW:
+                if event.type() == qt.QtCore.QEvent.Type.MouseButtonPress:
+                    self._toggle_fold(uuid)
+                return True
+        for rect, kind in self._dot_hits.get(uuid, []):
+            if rect.contains(point):
+                if event.type() == qt.QtCore.QEvent.Type.MouseButtonPress:
+                    self._pending_fix = (uuid, self.viewport().mapToGlobal(point))
+                    qt.QtCore.QTimer.singleShot(0, self._emit_fix)
+                return True
+        return False
+
+    def _emit_fix(self) -> None:
+        pending, self._pending_fix = getattr(self, "_pending_fix", None), None
+        if pending is not None:
+            self.fix_requested.emit(*pending)
+
     def leaveEvent(self, event) -> None:
         super().leaveEvent(event)
         self._hover("")
+
+    # ------------------------------------------------------------------ the keys
+
+    def _visible_uuids(self) -> list:
+        return [self.topLevelItem(index).data(0, _ROLE) for index in range(self.topLevelItemCount())
+                if not self.topLevelItem(index).isHidden()]
+
+    def keyPressEvent(self, event) -> None:
+        key = event.key()
+        keys = qt.QtCore.Qt.Key
+        rows = self._visible_uuids()
+        current = getattr(self, "_anchor", "")
+        if key in (keys.Key_Up, keys.Key_Down) and rows:
+            if current in rows:
+                at = rows.index(current) + (1 if key == keys.Key_Down else -1)
+                at = max(0, min(len(rows) - 1, at))
+            else:
+                at = 0 if key == keys.Key_Down else len(rows) - 1
+            uuid = rows[at]
+            self._pick(uuid)
+            item = self._item_of(uuid)
+            if item is not None:
+                self.scrollToItem(item)
+            self._frame_uuid = uuid
+            self._frame_timer.start()
+            return
+        if key in (keys.Key_Left, keys.Key_Right) and self.tree_shown() and current in self._kids:
+            if (key == keys.Key_Left) != (current in self._folded):
+                self._toggle_fold(current)
+            return
+        if key in (keys.Key_F2, keys.Key_Return, keys.Key_Enter) and current:
+            item = self._item_of(current)
+            if item is not None:
+                self._edit(item)
+            return
+        if key == keys.Key_Space:
+            picked = [uuid for uuid in getattr(self, "_picked", []) if uuid in rows] or ([current] if current else [])
+            changes = [change for change in self._changes if change.node.uuid in picked]
+            if changes:
+                tick = any(change.state == "skipped" and change.note == "left out" for change in changes)
+                self._pending_includes = [(change.node.uuid, tick) for change in changes]
+                qt.QtCore.QTimer.singleShot(0, self._emit_includes)
+            return
+        if key == keys.Key_Escape and getattr(self, "_picked", []):
+            self.set_picked([])
+            self.rows_picked.emit([])
+            return
+        if event.matches(qt.QtGui.QKeySequence.StandardKey.Paste):
+            self.paste_requested.emit()
+            return
+        super().keyPressEvent(event)
+
+    def _emit_includes(self) -> None:
+        pending, self._pending_includes = getattr(self, "_pending_includes", None), None
+        for uuid, ticked in pending or []:
+            self.included_changed.emit(uuid, ticked)
 
     # ------------------------------------------------------------------ dragging rows into an order
 
@@ -517,6 +826,16 @@ class PreviewList(qt.QtWidgets.QTreeWidget):
         painter.end()
 
     # ------------------------------------------------------------------ editing one name
+
+    def _edit_hovered(self) -> None:
+        item = self._item_of(self._hover_uuid)
+        if item is not None:
+            self._edit(item)
+
+    def _edit(self, item) -> None:
+        """Types a name for one row (F2, Enter, the pencil): as a double click, minus its click."""
+        self._on_double_click(item, 1)
+        self._after_double = False
 
     def _on_double_click(self, item, column) -> None:
         self._frame_timer.stop()     # it was a double click: edit, don't frame
@@ -621,6 +940,18 @@ class PreviewList(qt.QtWidgets.QTreeWidget):
         menu.addAction("Copy the name", lambda: qt.QtWidgets.QApplication.clipboard().setText(name))
         if change.state in _CHANGING:
             menu.addAction("Copy the new name", lambda: qt.QtWidgets.QApplication.clipboard().setText(change.new))
+        lines = paste_lines(qt.QtWidgets.QApplication.clipboard().text())
+        paste = menu.addAction(f"Paste names — {len(lines)} from the clipboard, one per row (Ctrl+V)"
+                               if lines else "Paste names — copy a column of names first")
+        paste.setEnabled(bool(lines))
+        paste.triggered.connect(self.paste_requested.emit)
+        paste.hovered.connect(lambda: self.paste_hovered.emit(True))
+        menu.aboutToHide.connect(lambda: self.paste_hovered.emit(False))
+        if self.tree_shown():
+            menu.addAction("Fold every branch", lambda: (self._folded.update(self._kids), self._apply_fold(),
+                                                         self.viewport().update()))
+            menu.addAction("Unfold every branch", lambda: (self._folded.clear(), self._apply_fold(),
+                                                           self.viewport().update()))
         if any(each.state == "skipped" for each in self._changes):
             menu.addAction("Include every one again", self.include_all.emit)
         if self._ordered:
@@ -634,6 +965,16 @@ class PreviewList(qt.QtWidgets.QTreeWidget):
             menu.addAction("Lock it — no rename, delete or re-parent",
                            lambda: self.lock_requested.emit(change.node.uuid, True))
         menu.exec(self.viewport().mapToGlobal(position))
+
+
+def paste_lines(text: str) -> list:
+    """Names from copied text: one per line (a table's column), else separated by commas / tabs."""
+    lines = [line.strip() for line in (text or "").splitlines() if line.strip()]
+    if len(lines) == 1:
+        for separator in ("\t", ",", ";"):
+            if separator in lines[0]:
+                return [part.strip() for part in lines[0].split(separator) if part.strip()]
+    return lines
 
 
 class HeightGrip(qt.QtWidgets.QWidget):
