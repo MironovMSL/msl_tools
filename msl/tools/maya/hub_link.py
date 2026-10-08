@@ -547,6 +547,11 @@ def start() -> bool:
     """Connects this Maya to the hub named by the environment variables.
     Safe to call again (a previous link is replaced). Returns False when
     this Maya wasn't started from the hub, or isn't an interactive one."""
+    try:  # English while Maya is active, if this launch's environment asks for it (keyboard_keeper.py)
+        from msl_tools.msl.tools.maya import keyboard_keeper
+        keyboard_keeper.start()
+    except Exception:
+        pass
     port, token = os.environ.get(PORT_VARIABLE, ""), os.environ.get(TOKEN_VARIABLE, "")
     application = QtWidgets.QApplication.instance()
     if not port.isdigit() or not token or application is None:

@@ -95,6 +95,7 @@ class ApplicationButton(qt.QtWidgets.QWidget):
     def _build_widgets(self) -> None:
         self._label = qt.QtWidgets.QLabel(self.name)
         self._label.setObjectName("appName")
+        self._label.setAlignment(qt.QtCore.Qt.AlignmentFlag.AlignCenter)
 
         self._button = qt.QtWidgets.QToolButton()
         self._button.setFixedSize(self.BUTTON_SIZE)
@@ -237,6 +238,25 @@ class ApplicationButton(qt.QtWidgets.QWidget):
             icon = self._button.geometry()
             self._badge.move(icon.right() - self._badge.width() + 5, icon.top() - 1)
 
+    def _fit_label(self) -> None:
+        """The name's room is the wider of its two texts (the name, "Starting…"), so switching
+        between them never changes the tile's width — the row of tiles used to shift for the five
+        busy seconds."""
+        self._label.ensurePolished()  # the bold weight comes from QSS
+        metrics = self._label.fontMetrics()
+        width = max(metrics.horizontalAdvance(self.name), metrics.horizontalAdvance(self.BUSY_TEXT)) + 2
+        if self._label.minimumWidth() != width:
+            self._label.setMinimumWidth(width)
+
+    def changeEvent(self, event) -> None:
+        super().changeEvent(event)
+        if event.type() in (qt.QtCore.QEvent.Type.StyleChange, qt.QtCore.QEvent.Type.FontChange):
+            self._fit_label()  # the font comes from the window's QSS (bold): measured once it is there
+
+    def showEvent(self, event) -> None:
+        self._fit_label()
+        super().showEvent(event)
+
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         self._place_badge()
@@ -272,9 +292,9 @@ class ApplicationButton(qt.QtWidgets.QWidget):
     # --- click pulse -----------------------------------------------------
 
     def _apply_button_size(self, size: qt.QtCore.QSize) -> None:
-        size = qt.QtCore.QSize(int(size.width()), int(size.height()))
-        self._button.setFixedSize(size)
-        self._button.setIconSize(size)
+        # Only the PICTURE shrinks: the button keeps its size, so the tile's layout (and the row of
+        # tiles beside it) doesn't move — resizing the button made the icons jump on a click.
+        self._button.setIconSize(qt.QtCore.QSize(int(size.width()), int(size.height())))
 
     def _on_clicked(self) -> None:
         if self._begin():
@@ -299,6 +319,7 @@ class ApplicationButton(qt.QtWidgets.QWidget):
 
     def _set_busy(self, busy: bool) -> None:
         self._busy = busy
+        self._fit_label()
         self._label.setText(self.BUSY_TEXT if busy else self.name)
         self._label.setProperty("busy", busy)
         repolish(self._label)

@@ -97,6 +97,10 @@ class MayaGatePage(qt.QtWidgets.QWidget):
     CUSTOM_KEY = "custom"
     UI_SECTION = "_ui"
     BOOST_KEY = "boost"   # {"<env>": {"enabled": bool, "skip": [plug-in, ...]}} - see BoostTab
+    # {"<env>": true | false | "only"}: English keyboard while that environment's Maya is active (on
+    # unless switched off); "only" = no other layout inside Maya (an older hub reads it as true)
+    KEYBOARD_KEY = "keyboard"
+    KEEP_ENGLISH_VARIABLE = variables.KEEP_ENGLISH
     # Tells the launched Maya which environment it is (read by the MSL menu's "Print Launch Report").
     ENVIRONMENT_VARIABLE = variables.ENVIRONMENT
     VARIABLES_VARIABLE = variables.VARIABLES   # names of the variables this launch sets (os.pathsep-joined)
@@ -159,6 +163,7 @@ class MayaGatePage(qt.QtWidgets.QWidget):
             environments=self.ENVIRONMENTS,
             current_environment=self._environment,
         )
+        self._toolbar.set_english(self._english_mode(self._environment))
 
         # What is wrong with the environment before a launch (launch_check.py): a quiet link under
         # the versions, there only while there is something to say; a click lists it.
@@ -252,6 +257,7 @@ class MayaGatePage(qt.QtWidgets.QWidget):
         self._toolbar.year_changed.connect(self._version_row.on_min_year_changed)
         self._toolbar.year_changed.connect(lambda year: self._save_ui("year", year))
         self._toolbar.environment_changed.connect(self._on_environment_changed)
+        self._toolbar.english_changed.connect(self._on_english_changed)
         self._tabs.currentChanged.connect(lambda index: self._save_ui("tab", self.TAB_KEYS[index]))
         self._version_row.clicked.connect(self._launch)
         self._problems_found.connect(self._on_problems_found)
@@ -333,7 +339,21 @@ class MayaGatePage(qt.QtWidgets.QWidget):
         self._custom_group.set_section(environment)
         self._user_setup_tab.set_environment(environment)
         self._boost_tab.set_environment(environment)
+        self._toolbar.set_english(self._english_mode(environment))
         self._check_environment()
+
+    def _english_mode(self, environment: str) -> str:
+        """`environment`'s "English in Maya": MayaGateToolbar.ENGLISH_OFF / _ON (the default) / _ONLY."""
+        stored = self._config[self.KEYBOARD_KEY].get(environment)
+        if stored == MayaGateToolbar.ENGLISH_ONLY:
+            return MayaGateToolbar.ENGLISH_ONLY
+        if stored is None or (stored is not False and bool(stored)):
+            return MayaGateToolbar.ENGLISH_ON
+        return MayaGateToolbar.ENGLISH_OFF
+
+    def _on_english_changed(self, mode: str) -> None:
+        stored = mode if mode == MayaGateToolbar.ENGLISH_ONLY else mode == MayaGateToolbar.ENGLISH_ON
+        self._config[self.KEYBOARD_KEY][self._environment] = stored
 
     # --- the environment, checked before a launch ----------------------------------
 
@@ -466,6 +486,9 @@ class MayaGatePage(qt.QtWidgets.QWidget):
         environment_vars[self.VARIABLES_VARIABLE] = os.pathsep.join(set_here)
         if environment in self.CONSOLE_ENVIRONMENTS:
             environment_vars[self.CONSOLE_VARIABLE] = "1"
+        english = self._english_mode(environment)
+        if english != MayaGateToolbar.ENGLISH_OFF:
+            environment_vars[self.KEEP_ENGLISH_VARIABLE] = "only" if english == MayaGateToolbar.ENGLISH_ONLY else "1"
 
         if environment == self._environment and not preview:
             self._user_setup_tab.save()  # launch with what's on screen, not the last autosave

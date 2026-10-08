@@ -5,6 +5,27 @@
  */
 
 /* Toolbar captions ("Environment", "From"): dimmed, the controls carry the weight. */
+/* "EN" — English in Maya, per environment: on = the accent (the `on` property: qproperty-* can't
+   come from :checked). */
+MayaGateToolbar IconPushButton#gateEnglish {
+    qproperty-iconColor: var(--text-secondary);
+    color: var(--text-secondary);
+    background: alpha(var(--text-primary), 5%);
+    border: 1px solid alpha(var(--border), 70%);
+    border-radius: 6px;
+    padding: 0px 8px 0px 6px;
+    font-size: 11px;
+    font-weight: 600;
+}
+MayaGateToolbar IconPushButton#gateEnglish:hover {
+    border: 1px solid alpha(var(--accent), 60%);
+}
+MayaGateToolbar IconPushButton#gateEnglish[on="true"] {
+    qproperty-iconColor: var(--accent);
+    color: var(--accent);
+    background: alpha(var(--accent), 16%);
+    border: 1px solid alpha(var(--accent), 65%);
+}
 MayaGateToolbar QLabel#toolbarCaption {
     color: var(--text-secondary);
 }

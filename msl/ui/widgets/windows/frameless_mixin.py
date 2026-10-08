@@ -384,6 +384,10 @@ class FramelessWindowMixin:
 
         self.header = WindowHeader(title=title)
         self.header.set_corner_radius(self._corner_radius)
+        # The SYSTEM title too: the header only draws it. Without one Windows names the window after
+        # the program — "pythonw" in Alt+Tab and on the taskbar button (seen in the installed hub).
+        if title:
+            self.setWindowTitle(title)
 
         if icon is not None:
             self.header.set_icon(icon)
@@ -442,6 +446,7 @@ class FramelessWindowMixin:
 
     def set_title(self, title: str) -> None:
         self.header.set_title(title)
+        self.setWindowTitle(title)
 
     # ------------------------------------------------------------------
     # Corner radius / outer margin
