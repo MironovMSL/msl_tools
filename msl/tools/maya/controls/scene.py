@@ -364,6 +364,132 @@ def drive_by_matrix(control: str, target: str) -> str:
     return ""
 
 
+# ------------------------------------------------------------------ driving with controls that exist
+
+def find_target(control: str) -> tuple:
+    """The object a control was made for, found by its NAME: lf_arm_ctrl -> the one transform called
+    lf_arm or lf_arm_<something> that is no control and no group of the control's own (a joint is
+    preferred when there are several). Returns (target or "", why not)."""
+    short = control.rpartition("|")[2]
+    namespace, sep, name = short.rpartition(":")
+    stem = name.rpartition("_")[0] or name
+    found = []
+    for pattern in (stem, stem + "_*"):
+        found += cmds.ls(namespace + sep + pattern, long=True, type="transform") or []
+    pool = []
+    for node in found:
+        if node == control or node in pool or is_ghost(node) or curve_shapes(node):
+            continue
+        if control.startswith(node + "|") or node.startswith(control + "|"):
+            continue                # its zero groups above it, what hangs under it
+        pool.append(node)
+    joints = [node for node in pool if cmds.objectType(node, isAType="joint")]
+    pool = joints or pool
+    if len(pool) == 1:
+        return pool[0], ""
+    return "", f"nothing is called {stem}_…" if not pool else f"{len(pool)} objects are called {stem}_…"
+
+
+def pair_up(selected: list) -> tuple:
+    """(control, object) pairs out of a selection, and what couldn't be paired (texts):
+    only controls selected -> each with the object found by its name (`find_target`);
+    controls AND objects -> by the order they were picked in: the 1st control with the 1st object…,
+    or ONE control with every object."""
+    controls = [node for node in selected if curve_shapes(node)]
+    objects = [node for node in selected if not curve_shapes(node)]
+    if not controls:
+        return [], ["select a control (its object is found by its name), or a control and its object"]
+    if not objects:
+        pairs, problems = [], []
+        for control in controls:
+            target, why = find_target(control)
+            if target:
+                pairs.append((control, target))
+            else:
+                problems.append(f"{control.rpartition('|')[2]}: {why}")
+        return pairs, problems
+    if len(controls) == 1:
+        return [(controls[0], target) for target in objects], []
+    if len(controls) != len(objects):
+        return [], [f"{len(controls)} controls and {len(objects)} objects: pick as many of each, or one control"]
+    return list(zip(controls, objects)), []
+
+
+def drive_pairs(pairs: list, mode: str, notes: "list | None" = None) -> int:
+    """Each object follows its control from now on — `mode` "constraint" or "matrix" — staying where
+    it is. One undo step; how many were tied. What couldn't be is named in `notes`."""
+    tie = drive_by_constraint if mode == "constraint" else drive_by_matrix
+    done = 0
+    with _Chunk():
+        for control, target in pairs:
+            problem = tie(control, target)
+            if problem:
+                if notes is not None:
+                    notes.append(f"{target.rpartition('|')[2]}: {problem}")
+            else:
+                done += 1
+    return done
+
+
+def _drivers(target: str) -> list:
+    """What ties `target` to controls: (the node to remove, the controls it reads) for its parent /
+    scale constraints and for a multMatrix into its offsetParentMatrix."""
+    found = []
+    for node in cmds.listRelatives(target, children=True, fullPath=True,
+                                   type=("parentConstraint", "scaleConstraint")) or []:
+        sources = cmds.listConnections(node + ".target", source=True, destination=False) or []
+        found.append((node, {each for each in cmds.ls(sources, long=True) if each != node}))
+    for node in cmds.listConnections(target + ".offsetParentMatrix", source=True, destination=False,
+                                     type="multMatrix") or []:
+        sources = cmds.listConnections(node + ".matrixIn", source=True, destination=False) or []
+        found.append((node, set(cmds.ls(sources, long=True))))
+    return found
+
+
+def driven_by(control: str) -> list:
+    """The objects this control drives (through a constraint or the matrix), long names."""
+    found = []
+    for node in set(cmds.listConnections(control, source=False, destination=True,
+                                         type="constraint") or []):
+        found += cmds.listRelatives(node, parent=True, fullPath=True) or []
+    for node in set(cmds.listConnections(control + ".worldMatrix", source=False, destination=True,
+                                         type="multMatrix") or []):
+        found += cmds.ls(cmds.listConnections(node + ".matrixSum", source=False, destination=True) or [], long=True)
+    return [node for index, node in enumerate(found) if node != control and node not in found[:index]]
+
+
+def _untie(target: str, control: "str | None" = None) -> int:
+    """Removes what ties `target` to `control` (to any control when None); it stays where it stands."""
+    removed = 0
+    for node, controls in _drivers(target):
+        if control is not None and control not in controls:
+            continue
+        if cmds.nodeType(node) == "multMatrix":
+            world = cmds.xform(target, query=True, worldSpace=True, matrix=True)
+            cmds.disconnectAttr(node + ".matrixSum", target + ".offsetParentMatrix")
+            cmds.setAttr(target + ".offsetParentMatrix", [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1], type="matrix")
+            cmds.xform(target, worldSpace=True, matrix=world)
+        if cmds.objExists(node):
+            cmds.delete(node)
+        removed += 1
+    return removed
+
+
+def undrive(selected: list) -> list:
+    """Unties what is selected, from either end: a selected OBJECT is freed of every control that
+    drives it; a selected CONTROL lets go of every object it drives. The objects stay where they
+    stand. One undo step; the objects that were freed (short names)."""
+    freed = []
+    with _Chunk():
+        for node in selected:
+            if _untie(node):
+                freed.append(node)
+            for target in driven_by(node):
+                if _untie(target, node) and target not in freed:
+                    freed.append(target)
+    return [node.rpartition("|")[2] for node in freed]
+
+
 def _chain(made: list) -> None:
     """Each control under the control of the nearest target above its own (an FK chain) — before
     the offsets are made, so they sit in that chain too."""

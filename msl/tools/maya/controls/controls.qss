@@ -71,6 +71,7 @@ ControlsPanel QuickButton#controlsTool[tone="teal"]   { qproperty-iconColor: var
 ControlsPanel QuickButton#controlsTool[tone="violet"] { qproperty-iconColor: var(--violet); }
 ControlsPanel QuickButton#controlsTool[tone="yellow"] { qproperty-iconColor: var(--yellow); }
 ControlsPanel QuickButton#controlsTool[tone="green"]  { qproperty-iconColor: var(--success); }
+ControlsPanel QuickButton#controlsTool[tone="pink"]   { qproperty-iconColor: var(--pink); }
 ControlsPanel TurnButton#controlsTool[axis="X"] { qproperty-axisColor: var(--error); }
 ControlsPanel TurnButton#controlsTool[axis="Y"] { qproperty-axisColor: var(--success); }
 ControlsPanel TurnButton#controlsTool[axis="Z"] { qproperty-axisColor: var(--accent); }

@@ -44,6 +44,7 @@
     --teal:              #3fc6c0;
     --orange:            #ff8a3d;
     --yellow:            #f2d04b;
+    --pink:              #ff7eb6;
 
     /* hub sidebar entries: vertical gradients for volume (widgets.qss).
        Selected = lit from above and fading into the page card (--surface);

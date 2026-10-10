@@ -300,6 +300,18 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
                                         "no group")
         self._matrix_back_button = tool("matrix_out", "violet", "Out of the matrix", "The other way: what the "
                                         "offsetParentMatrix holds back into the channels, the matrix empty")
+        # drive: tie a control that exists to its object, or let go (pink)
+        self._drive_constraint = tool("drive_constraint", "pink", "Drive with constraints", "The object follows "
+                                      "its control through parent + scale constraints, staying where it is\n"
+                                      "Select CONTROLS — each finds its object by its name (lf_arm_ctrl → "
+                                      "lf_arm_jnt) — or a control and its object(s): pairs by the order picked, "
+                                      "or one control for all")
+        self._drive_matrix = tool("drive_matrix", "pink", "Drive with the matrix", "The object follows its control "
+                                  "through its offsetParentMatrix: no constraint node, its channels read zero\n"
+                                  "Select controls (objects found by name), or a control and its object(s)")
+        self._drive_off = tool("drive_off", "pink", "Let go", "Untie, from either end: a selected OBJECT is freed "
+                               "of the control that drives it; a selected CONTROL lets go of what it drives. "
+                               "The objects stay where they stand")
         # show and select (yellow)
         self._on_top_button = tool("on_top", "yellow", "Always on top", "The selected controls' curves drawn "
                                                                         "through the geometry — on / off")
@@ -315,6 +327,7 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
                  (self._replace, self._add_shape, self._copy_shape, self._paste_shape, self._combine),
                  (self._mirror, self._mirror_update)),
                 ((self._zero_groups_button, self._zero_matrix_button, self._matrix_back_button),
+                 (self._drive_constraint, self._drive_matrix, self._drive_off),
                  (self._on_top_button, self._select_below, self._select_all),
                  (self._capture,)))
         for groups in rows:
@@ -371,6 +384,9 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
         self._zero_matrix_button.clicked.connect(self._zero_matrix)
         self._matrix_back_button.clicked.connect(self._matrix_back)
         self._on_top_button.clicked.connect(self._on_top)
+        self._drive_constraint.clicked.connect(lambda: self._drive_selected("constraint"))
+        self._drive_matrix.clicked.connect(lambda: self._drive_selected("matrix"))
+        self._drive_off.clicked.connect(self._undrive_selected)
         self._select_below.clicked.connect(lambda: self._select_controls(True))
         self._select_all.clicked.connect(lambda: self._select_controls(False))
         self._drive.current_changed.connect(self._save)
@@ -1036,6 +1052,34 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
                 return
             scene.matrix_to_channels(held)
             self._say(f"{len(held)} back in the channels, the offsetParentMatrix empty · Ctrl+Z undoes it", "done")
+
+    def _drive_selected(self, mode: str) -> None:
+        from msl_tools.msl.tools.maya.controls import scene
+        pairs, problems = scene.pair_up(scene.selected_transforms())
+        if not pairs:
+            self._say("Nothing to tie — " + (problems[0] if problems else "select controls"), "error")
+            return
+        notes = []
+        done = scene.drive_pairs(pairs, mode, notes)
+        how = "constraints" if mode == "constraint" else "the matrix"
+        text = f"{done} now follow{'s' if done == 1 else ''} {'its control' if done == 1 else 'their controls'} " \
+               f"through {how}"
+        for each in (notes + problems)[:1]:
+            text += f" · NOT tied — {each}" + (f" (+{len(notes + problems) - 1})" if len(notes + problems) > 1 else "")
+        self._say(text + (" · Ctrl+Z undoes it" if done else ""), "done" if done else "error")
+
+    def _undrive_selected(self) -> None:
+        from msl_tools.msl.tools.maya.controls import scene
+        selected = scene.selected_transforms()
+        if not selected:
+            self._say("Select the object to free, or the control that should let go", "error")
+            return
+        freed = scene.undrive(selected)
+        if not freed:
+            self._say("Nothing selected is tied to a control", "")
+            return
+        self._say(f"Let go of {len(freed)}: " + ", ".join(freed[:3]) + ("…" if len(freed) > 3 else "") +
+                  " · Ctrl+Z undoes it", "done")
 
     def _offset_suffixes(self) -> list:
         return [part.strip() for part in self._offset_names.text().replace(",", " ").split() if part.strip()] \

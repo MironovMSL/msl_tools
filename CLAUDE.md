@@ -226,7 +226,7 @@ msl_tools/                 (repo root)
     named by what the icon IS, not the gesture (`drag_handle`, not
     `dragAndDrop`). Categories: `window/` (chrome: close/maximize/...),
     `actions/` (row/toolbar actions: `drag_handle`, `copy`, `delete`,
-    `browse`, `folder_add`, `file_video`, `bookmark`, `bookmark_add`, `save`, `file_add`, `chevron_right`, `eye`, `folder_into`, `compress`, `scissors`, `repeat`, `text_frame`, `volume`, `gif`, `image_stack`, `clapper`, `crop`, `merge`, `split_view`, `film`, `timeline`, `folder_watch`, `pause`, `bell` (the Media actions and its queue), `clear`, `arrow_right`, `chevron_down`, `add`, `check`, `select_all`, `more`, `report`, `code`, `restart`, `power`, `play`, `edit`, `scene`, `stop`, `lock`, `search`, `rename`, and the Rename tool's quick buttons: `case_upper`, `case_capital`, `case_lower`, `case_snake` (a snake), `case_camel` (a camel's humps), `cut_prefix`, `cut_suffix`, `cut_number`, `cut_digits`, `cut_first`, `cut_last`, `namespace_out`, `magic_fix`, `sweep`, `mirror_sides`, `shape_name`, `warning`, `error`, `keyboard` (Maya Gate's EN), and the Rename strip's `names_same`, `name_bad`, `skin_joints`, `side_other`, `lock_find`, `convention_check`, `names_unique`, `name_related`, `convention_fix`, `unlock`, `sets`, `star`, `sliders`, `book`, `replace`, `skin_mesh` (the grey cube under `skin_joints`), `branch`, and the Controls tool's `controls`, `grow`, `shrink`, `outliner`, `color_pick`, `line_width`, `mirror_shape`, `mirror_update`, `zero_out`, `zero_matrix`, `matrix_out`, `on_top`, `cvs`, `paste`; add new action icons here),
+    `browse`, `folder_add`, `file_video`, `bookmark`, `bookmark_add`, `save`, `file_add`, `chevron_right`, `eye`, `folder_into`, `compress`, `scissors`, `repeat`, `text_frame`, `volume`, `gif`, `image_stack`, `clapper`, `crop`, `merge`, `split_view`, `film`, `timeline`, `folder_watch`, `pause`, `bell` (the Media actions and its queue), `clear`, `arrow_right`, `chevron_down`, `add`, `check`, `select_all`, `more`, `report`, `code`, `restart`, `power`, `play`, `edit`, `scene`, `stop`, `lock`, `search`, `rename`, and the Rename tool's quick buttons: `case_upper`, `case_capital`, `case_lower`, `case_snake` (a snake), `case_camel` (a camel's humps), `cut_prefix`, `cut_suffix`, `cut_number`, `cut_digits`, `cut_first`, `cut_last`, `namespace_out`, `magic_fix`, `sweep`, `mirror_sides`, `shape_name`, `warning`, `error`, `keyboard` (Maya Gate's EN), and the Rename strip's `names_same`, `name_bad`, `skin_joints`, `side_other`, `lock_find`, `convention_check`, `names_unique`, `name_related`, `convention_fix`, `unlock`, `sets`, `star`, `sliders`, `book`, `replace`, `skin_mesh` (the grey cube under `skin_joints`), `branch`, and the Controls tool's `controls`, `grow`, `shrink`, `outliner`, `color_pick`, `line_width`, `mirror_shape`, `mirror_update`, `zero_out`, `zero_matrix`, `matrix_out`, `on_top`, `cvs`, `paste`, `drive_constraint`, `drive_matrix`, `drive_off`; add new action icons here),
     `apps/` (third-party application logos: `maya`; later houdini, blender...
     — named after the app, not the tool that uses it, so several tools can
     share one), `tools/` (sidebar icons of our OWN hub tools, one-color like
@@ -2454,6 +2454,21 @@ axis (`flip`). ZERO THE SELECTED (`actions/zero_out`, in the Zero row): the mode
   WINDOWED TESTS of a Maya tool run from an ISOLATED COPY of `msl/` (a temp folder as the package root,
   so its own empty configs/ and logs/), never against the live checkout's configs/: on this day a test
   script that backed the live configs up and "restored" them while the hub ran wiped the hub's settings.
+- DRIVE for controls that EXIST (2026-10-10, the user's ask; a pink group in SELECTED's second row, the
+  `--pink` hue added to both palettes): Drive with constraints · Drive with the matrix · Let go.
+  `scene.pair_up(selection)` makes (control, object) pairs: only controls selected -> each finds its
+  object by its NAME (`find_target`: lf_arm_ctrl -> the one transform called lf_arm / lf_arm_<…> that is
+  no control and not above or under it, joints preferred; none or several = said in the status);
+  controls AND objects -> by the order picked (1st control with the 1st object…), or ONE control for every
+  object; other counts are refused with the reason. `drive_pairs` = the same `drive_by_constraint` /
+  `drive_by_matrix` Create uses. LET GO (`undrive`) works from EITHER end, by the connections in the scene,
+  never by names (the user: "I select the object and press untie — why select the control?"): a selected
+  object is freed of every control driving it (its parent / scale constraints, the multMatrix into its
+  offsetParentMatrix — it stays where it stands: the world matrix is read first and put back into the
+  channels), a selected control lets go of everything it drives (`driven_by`). One undo step each.
+  New icons: `actions/drive_constraint`, `drive_matrix`, `drive_off`. Checked in mayapy 2026 from an
+  isolated copy (26 checks: both modes by name and by order, follow, let go from both ends, stays in
+  place, undo, the refusals); the three buttons were not clicked in a windowed Maya.
 
 ## Batch tool
 
