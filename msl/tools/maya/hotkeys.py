@@ -19,6 +19,8 @@ COMMANDS = {
                           "from msl_tools.msl.tools.maya.playblast import toggle_mask; toggle_mask()"),
     "MSLRename": ("Open the MSL Rename window",
                   "from msl_tools.msl.tools.maya.rename import launcher_entry_point; launcher_entry_point()"),
+    "MSLControls": ("Controls: the window of control shapes and tools",
+                    "from msl_tools.msl.tools.maya.controls import launcher_entry_point; launcher_entry_point()"),
     "MSLRenameQuick": ("Rename at the mouse pointer: a small field, Enter renames the selection",
                        "from msl_tools.msl.tools.maya.rename import quick; quick()"),
     "MSLRenameRepeat": ("Rename again: the last rename on what is selected now (opens the window if it is closed)",

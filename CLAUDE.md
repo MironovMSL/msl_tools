@@ -62,6 +62,7 @@ msl_tools/                 (repo root)
             maya/               Maya-side tools (the MSL menu, hub_link, launch_report, batch_runner)
                 playblast/        Playblast: a dockable panel inside Maya 2025+ (see "Playblast tool")
                 rename/           Rename: quick naming of Maya objects, a window inside Maya 2025+ (see "Rename tool")
+                controls/         Controls: rig controls — shape library, create, offsets, shape tools; Maya 2025+ (see "Controls tool")
 ```
 
 ## Hard conventions (violate these and it won't match the rest of the codebase)
@@ -225,7 +226,7 @@ msl_tools/                 (repo root)
     named by what the icon IS, not the gesture (`drag_handle`, not
     `dragAndDrop`). Categories: `window/` (chrome: close/maximize/...),
     `actions/` (row/toolbar actions: `drag_handle`, `copy`, `delete`,
-    `browse`, `folder_add`, `file_video`, `bookmark`, `bookmark_add`, `save`, `file_add`, `chevron_right`, `eye`, `folder_into`, `compress`, `scissors`, `repeat`, `text_frame`, `volume`, `gif`, `image_stack`, `clapper`, `crop`, `merge`, `split_view`, `film`, `timeline`, `folder_watch`, `pause`, `bell` (the Media actions and its queue), `clear`, `arrow_right`, `chevron_down`, `add`, `check`, `select_all`, `more`, `report`, `code`, `restart`, `power`, `play`, `edit`, `scene`, `stop`, `lock`, `search`, `rename`, and the Rename tool's quick buttons: `case_upper`, `case_capital`, `case_lower`, `case_snake` (a snake), `case_camel` (a camel's humps), `cut_prefix`, `cut_suffix`, `cut_number`, `cut_digits`, `cut_first`, `cut_last`, `namespace_out`, `magic_fix`, `sweep`, `mirror_sides`, `shape_name`, `warning`, `error`, `keyboard` (Maya Gate's EN), and the Rename strip's `names_same`, `name_bad`, `skin_joints`, `side_other`, `lock_find`, `convention_check`, `names_unique`, `name_related`, `convention_fix`, `unlock`, `sets`, `star`, `sliders`, `book`, `replace`, `skin_mesh` (the grey cube under `skin_joints`), `branch`; add new action icons here),
+    `browse`, `folder_add`, `file_video`, `bookmark`, `bookmark_add`, `save`, `file_add`, `chevron_right`, `eye`, `folder_into`, `compress`, `scissors`, `repeat`, `text_frame`, `volume`, `gif`, `image_stack`, `clapper`, `crop`, `merge`, `split_view`, `film`, `timeline`, `folder_watch`, `pause`, `bell` (the Media actions and its queue), `clear`, `arrow_right`, `chevron_down`, `add`, `check`, `select_all`, `more`, `report`, `code`, `restart`, `power`, `play`, `edit`, `scene`, `stop`, `lock`, `search`, `rename`, and the Rename tool's quick buttons: `case_upper`, `case_capital`, `case_lower`, `case_snake` (a snake), `case_camel` (a camel's humps), `cut_prefix`, `cut_suffix`, `cut_number`, `cut_digits`, `cut_first`, `cut_last`, `namespace_out`, `magic_fix`, `sweep`, `mirror_sides`, `shape_name`, `warning`, `error`, `keyboard` (Maya Gate's EN), and the Rename strip's `names_same`, `name_bad`, `skin_joints`, `side_other`, `lock_find`, `convention_check`, `names_unique`, `name_related`, `convention_fix`, `unlock`, `sets`, `star`, `sliders`, `book`, `replace`, `skin_mesh` (the grey cube under `skin_joints`), `branch`, and the Controls tool's `controls`, `grow`, `shrink`, `outliner`, `color_pick`, `line_width`, `mirror_shape`, `mirror_update`, `zero_out`, `zero_matrix`, `matrix_out`, `on_top`, `cvs`, `paste`; add new action icons here),
     `apps/` (third-party application logos: `maya`; later houdini, blender...
     — named after the app, not the tool that uses it, so several tools can
     share one), `tools/` (sidebar icons of our OWN hub tools, one-color like
@@ -2250,6 +2251,209 @@ window's checks, written anew for this framework). Hotkeys: MSLRename, MSLRename
   parented to Maya, the list following the selection, lock, template with side / number / kind,
   one undo step, replace in the whole scene, out of a namespace, a word, letters, one name typed
   in the list, selected shapes, light theme, closing with callbacks gone.
+
+## Controls tool (inside Maya)
+
+`msl/tools/maya/controls/` (MSL menu > Controls, hotkey MSLControls; Maya 2025+, PySide6; started
+2026-10-09). A set of tools for rig controls, grown step by step with the user — their words: not
+like the hub (no sidebar of sections), everything as icons, intuitive; one window of CARDS that fold
+(like Rename's), the visuals improved as it grows; tabs only if a part really needs its own room;
+maybe one window with Rename later. Ideas only from other people's scripts, no code (see
+CLAUDE.local.md). Plan: CONTROL (built) · COLOR · ATTRIBUTES · TRANSFORMS · later with Rename.
+- `shapes.py` (no Qt, no Maya): `Shape` = name + `Curve`s (points, degree, closed — a closed curve
+  does NOT repeat its first CV) + category; points in a unit box measured on the DRAWN line
+  (`normalized` samples `polyline`: a smooth circle is as wide as a square), flat shapes in XZ facing
+  +Y like Maya's circle (`oriented` turns them to X / Z), the origin is the pivot. `BUILT_IN`: 32 shapes
+  drawn by code in Basic / Arrows / 3D / Symbols. `polyline()` = the B-spline as Maya draws it (de Boor;
+  periodic when closed, clamped when open) so Qt can paint it. `ShapeLibrary` over the config node
+  `shapes` (the user's, category "Mine"; a name never goes over another — `free_name`).
+- `naming.py` (no Qt, no Maya): `control_name(template, target, position, sides, index)` — {name} =
+  the target's base (no namespace, no old side word, no kind suffix — Rename's lists + ctrl / jnt /
+  bind…), {side} = Rename's Sides (lf / rt / mid by where it stands; the SAME sides setting as Rename:
+  read from configsMayaMng "rename"), {#}; an empty side leaves no "__". Default "{side}_{name}_ctrl".
+- `scene.py` (maya.cmds): `create(...)` = a control per selected transform (or one at the origin):
+  shapes built with `cmds.curve` (periodic: points + the first `degree` again, knots
+  range(-d+1, n+d)) and parented under one transform, named <ctrl>Shape, Shape1…; size × the
+  target's own when "fit" (`fit_size`: a joint's radius × 2, else 0.6 of the bounding box); matched to
+  the target (position + rotation, its rotateOrder); RGB side color on the shapes (`SIDE_COLORS` —
+  scene data, not the theme); CHAIN = each control under the control of the nearest selected target
+  above its own (done before the offsets, so they sit in the chain); ZERO = "groups" (`<ctrl>_<suffix>`
+  per word of the field, top first, each matched to the control, the control's t / r set to 0) or
+  "matrix" (`move_to_offset_matrix`: local × old offsetParentMatrix into the offsetParentMatrix, the
+  channels 0 / 1 — no group). Controls are carried by UUID (`_uuid` / `_path`): parenting changes long
+  names. Shape edits on the selected controls, object space: `turn` (90°, Shift −90°), `resize`,
+  `replace` (as big as the old shapes, color / line width copied from the old first shape),
+  `read_curves` (for "Save": a periodic curve without its overlapping CVs). Each action = ONE undo
+  chunk ("MSL Controls").
+- `preview.py` (Qt): `thumbnail()` — a shape drawn from its points, FITTED to the picture (a tall pin
+  isn't tiny), orthographic from above-aside (THUMB_YAW / PITCH); `ShapeView` — the picked shape big,
+  drag to turn, double click resets, ground grid + axes (the facing one longer), qproperty colors.
+- `panel.py` ControlsPanel (`status_changed` -> the window's header, like Rename) + `widgets.py`
+  DragNumberField (middle-mouse drag scrubs, wheel / Up / Down step, Shift ×10, double click = start
+  value) + `window.py` ControlsWindow (FramelessDialog, 460 × 390, remembers its place). CONTROL card:
+  category chips (All / Basic / Arrows / 3D / Symbols / Mine) + search, a `ShapeGrid` (QListWidget in
+  icon mode, thumbnails tinted by qproperty thumbColor; double click = Create; right click = create /
+  put on the selected / remove one of yours) + the ShapeView; "Selected:" ↻X ↻Y ↻Z, smaller, bigger,
+  replace, save (a name field in a menu); Name template, Size (+ fit toggle), Axis X / Y / Z; Zero
+  None / Groups / Matrix + the group suffixes, Chain, Side color, Create. Settings: configsMayaMng
+  "controls" (`settings`, `shapes`, `window`).
+- Checked in windowed Maya 2025 (a fresh MAYA_APP_DIR): a left arm chain -> three circles in a chain
+  with grp + offset groups, each matching its joint, t / r zero, blue, shapes named right, ONE undo;
+  matrix mode (t = 0, the offsetParentMatrix holds it), red on the right, fit to a mesh, turn, bigger,
+  replace (color kept), a shape saved to Mine, one control at the origin. Tests: tests/maya/test_controls.py.
+- COLOR card (2026-10-09, `panel_color.py` _ColorMixin; `colors.py` no Qt / no Maya): Maya's 32 index
+  colors (`scene.index_palette()` asks THIS Maya — `cmds.colorIndex`, the user may have edited it —,
+  `colors.INDEX_COLORS` outside Maya; index 0 = "none", back to default), your own color
+  (ColorSwatchButton; picking it colors the selection) + saved colors (`settings.saved_colors`, 20,
+  right click removes), both as `widgets.Swatches` (squares in rows, the colors are scene data, ring /
+  edge from qproperty). Where it goes: In the viewport (drawing override) and / or In the Outliner
+  (`useOutlinerColor` + `outlinerColor` lifted by gamma 2.2 — `colors.to_outliner` — so it reads like
+  the color-managed viewport), on the Shape (the curves; a joint / group without shapes takes it
+  itself) or the Transform. By side (left blue / right red / middle yellow by Rename's sides), Take
+  (the selected object's color -> your color: its first shape's override, else its own, else its
+  Outliner color), No color (overrides and Outliner color off), Line (lineWidth of the selected
+  curves, -1 = Maya's preference). Every click = ONE undo step; locked plugs are skipped (`scene._set`).
+  Checked in windowed Maya 2025: index 13 on shapes (transform clean) + undo, #ff8000 on a transform
+  + Outliner (1, 0.731, 0), by side incl. a joint, take, save, line width 3, reset.
+- For controls that EXIST (2026-10-09, the user's asks): MIRROR (`actions/mirror_shape`, in the
+  "Selected" tools) = `scene.mirror_controls`: a mirrored COPY on the other side (the user: "it makes the
+  shape itself and mirrors it — I don't need one to exist"), parents first: its name by Rename's
+  `rules.mirror` (lf_ <-> rt_, _L <-> _R), its zero groups (`_zero_stack`: the single-child parents named
+  <control>_…) made again, under the other side's twin of the nearest ancestor that has one, else the
+  first ancestor that says no side (a middle control), else the world — never under the same side
+  (`_mirrored_parent`); each transform mirrored with BEHAVIOR (`_behavior_mirror` = S·M·S: positive
+  scale, its own pivot and axes — not the old scripts' group-scale -1 + freeze, which leaves a frozen
+  transform at the world's center), the shape = the source's CVs with that axis negated in object
+  space, colored by side (if Side color) else like the source, an offsetParentMatrix zeroing repeated.
+  When the other side's control IS there, only its shape becomes the mirror (world CVs mirrored into
+  its object space, `_swap_shapes` keeps its look). Right click: across Y / Z, or FLIP in place across
+  the control's own
+axis (`flip`). ZERO THE SELECTED (`actions/zero_out`, in the Zero row): the mode on screen — Groups
+  (`zero_with_groups`, the suffix field) / Matrix (`zero_with_matrix`; a joint's jointOrient too);
+  right click: groups · into the matrix · OUT of the matrix back into the channels
+  (`matrix_to_channels`: local × offsetParentMatrix -> the channels, the matrix identity). Create
+  moved under the preview (the Zero row was too long); the suffix field keeps its room while hidden
+  (`setRetainSizeWhenHidden`) — the row jumped when the mode changed (the user saw it).
+  CVs are read / written with `xform(objectSpace=True)`, not getAttr / setAttr: a curve with
+  construction history (Maya's own circle) overwrote a setAttr on its CVs (flip did nothing).
+  `read_curves`: a periodic curve has `spans` CVs of its own (xform lists only those, getAttr all) —
+  cutting `degree` off xform's list dropped 3 real CVs of every circle.
+  Checked in windowed Maya 2025: a left arm chain (grp + offset) -> the right one, same hierarchy,
+  world CVs mirrored, scale 1, channels 0, red; again -> the other side's shape updated; an elbow alone
+  -> to the world; under a middle control -> stays under it; matrix-zeroed -> the copy too; a name
+  without a side -> said so; flip on a history circle; groups / matrix / back on existing controls with
+  their world matrix unchanged.
+- Library, drive, shape tools (2026-10-10, the user's ask: a control creator like the big ones, the best
+  solutions ours): the LIBRARY is 89 built-in shapes now, in Basic / Arrows / 3D / Rig / Symbols (+ Mine):
+  Rig = root, saddle, foot, hand, bone, pointer / pin / square on a stick, brow, lips, the stroke letters
+  L R IK FK; all still drawn by code and tested to build in Maya. A FLAT shape's thumbnail is seen
+  straight from above (a letter, a heart read as what they are), a 3D one from aside. The search field
+  sits in the card's heading (`FoldingCard(extras=)`, hidden while folded): the row under it is the
+  category chips' alone and fits one line at 460 px. `ShapeLibrary.export_file` / `import_file` (the
+  user's shapes as a JSON file for a teammate: a shape that is here already is skipped, a taken name is
+  numbered; the file read is never moved aside — it is not ours).
+  DRIVE row (`settings.drive`, `scene.create(drive=, notes=)`): what a new control does to the object it
+  is made for — None · Shape (`shapes_onto`: no new object, the curves become shapes of the target
+  itself, a joint picked by its curve; Zero / Chain / the name don't apply) · Constrain
+  (`drive_by_constraint`: parent + scale constraint, maintainOffset) · Matrix (`drive_by_matrix`: one
+  multMatrix = [what the target differs from the control by] × control.worldMatrix × the PARENT's
+  worldInverseMatrix -> the target's offsetParentMatrix; its channels, jointOrient, rotateAxis zeroed,
+  a joint's segmentScaleCompensate off). TRAP, measured in Maya 2025: the target's own
+  `parentInverseMatrix` already holds its offsetParentMatrix — wired in, the result feeds itself and the
+  target ignores the control; it must be the parent's inverse. A target whose channels are locked or
+  connected is not driven and is named in the status (`notes`). Chain and Side color moved to this row.
+  SHAPE TOOLS (the row under the grid; "Selected:" caption gone — the window's minimum is the default
+  460): one turn icon then X Y Z in the axis colors (`QPushButton#controlsTurn[axis]`; the "↻X" texts
+  were cramped in Maya's font), smaller / bigger, EDIT THE SHAPE (`scene.toggle_cvs`: the controls' CVs
+  selected in component mode, so Maya's own move / rotate / scale edit the shape and the channels stay;
+  again = back to the controls; every shape tool also takes selected CVs — `selected_transforms` strips
+  the component), replace, copy / paste the shape (`ControlsPanel._copied_shape`, kept by the CLASS;
+  `scene.set_curves`: as it is, each keeps its own color), mirror, shape to the other side, save, and a
+  "more" menu: add the picked shape beside what a control has (`add_shape`), combine the selected curves
+  into the LAST one (`combine`: in place in the world, colors kept, an emptied transform removed),
+  always on top on / off (`toggle_on_top`: nurbsCurve.alwaysDrawOnTop), select every control under the
+  selection / in the scene (`all_controls`), shapes to / from a file. New icons: `actions/cvs`, `paste`.
+  Checked: mayapy 2025 standalone (28 checks: every shape builds, constraint and matrix drive follow and
+  undo in one step, a scaled mesh stays put, CVs, paste, add, combine, on top) and windowed Maya 2025
+  through the panel's own handlers (fresh MAYA_APP_DIR, configs put back).
+- Layout round (2026-10-10, the user's asks, after a mock-up): what works on the SELECTED controls left
+  the CONTROL card for a card of its own ON TOP — `ControlsPanel._selected_tools()`, FoldingCard
+  "SELECTED" (`settings.folded.selected`): two rows of icon buttons in groups ruled off by
+  `QFrame#controlsRule`, each group in its color (the `tone` property -> controls.qss
+  `QuickButton#controlsTool[tone=…]`): shape = orange (turn X / Y / Z, smaller, bigger, edit CVs),
+  another shape = blue (replace, add, copy, paste, combine), other side = teal (mirror, shape to the
+  other side; their right-click menus stay), zero = violet (groups · into the matrix · out of the matrix —
+  three buttons, the old one button + menu is gone; groups use the suffix field of the Zero row), show
+  and select = yellow (always on top, controls under the selection, controls in the scene), library =
+  green (save as a shape). The "more" menu is gone; shapes to / from a file are in the grid's right click
+  (also on its empty room). Two rows for now — the user wants to come back to it. A turn button is
+  `widgets.TurnButton`: a turning arrow around the axis' letter, painted, both in the axis' color
+  (qproperty axisColor by `[axis]`). The PREVIEW holds what a new control looks like: the facing axis =
+  three chips in its corner (`ShapeView.axis()` / `set_axis` / `axis_picked`; the X Y Z segmented control
+  is gone), the shape's name (`set_title`), and in its bottom corners the size field and "fit"
+  (`set_corner_widgets` — the owner's widgets, re-parented); the wheel over the preview steps the size
+  (`size_stepped`). CONTROL is now library + preview + Name (with Chain, Side color) + Zero + Drive.
+  New icons: `actions/zero_matrix`, `matrix_out`, `on_top`. The window starts 460 x 610; its minimum
+  width is 458. Checked offscreen and in windowed Maya 2025 (the panel's handlers).
+- LIVE PREVIEW (2026-10-10, the user: "the little window should imitate what the settings will do"):
+  while the panel is on screen it follows Maya's selection (`_watch_selection`: MEventMessage
+  SelectionChanged, removed in hideEvent; a 60 ms timer) and `_refresh_live()` — also run on every
+  setting change (`_save`) — shows what Create would make NOW: the first selected object under the shape
+  in its own axes (`scene.target_look` -> `ShapeView.set_target`: a joint = a circle + lines to its child
+  joints, so the facing axis is seen against the bone; anything with shapes = its bounding box, dashed),
+  the shape as big as it will be beside it (size x fit; the wheel changes it visibly), in the COLOR it
+  will get (`set_line_color`), under the NAME it will get ("lf_arm_ctrl  +2" for three; second line: the
+  zero groups "offset ›" / "matrix ›" and "→ constrain"); Create reads "Create 3" / "Shape onto 3".
+  Color of a new control = three states: Side color (the toggle, now in the preview's corner) · your own
+  (`settings.own_color`, the square beside it — a `Swatches` of one: click = pick, which switches Side
+  off; right click: your color / by side / none) · none = Maya's default, drawn grey with the square
+  crossed. `scene.create(rgb=)` / `shapes_onto(rgb=)` take the own color. Checked in windowed Maya 2025
+  through nine states (pictures compared), created controls read back: own color on the shape, none =
+  no override; the callback is gone after the window closes.
+- The preview as a SCENE (2026-10-10, the user's picks 2 / 3 / 4 of four ideas; the first — a ghost
+  control in Maya's own viewport — is wanted LATER): `ShapeView.set_scene(items, chain)` draws EVERY
+  selected object (12 at most, `scene.targets_look`: each with `matrix` = where it stands in the first
+  one's axes, scale taken out, and `parent` = the nearest listed target above it) with its control at
+  its own size and side color; with Chain on, a dashed line joins each control to the one it goes under;
+  the view centres on the lot and zooms to hold it. ZERO is drawn (`set_zero`, qproperty zeroColor =
+  --violet): groups = one dashed frame per group nested around the control in the plane it faces, matrix
+  = the corners of one frame (brackets); the names stay in the second line. HOVERING a SELECTED button
+  (`_watch_hover` -> `_show_action` -> `ShapeView.set_action(before, after, color, zero)`) shows what it
+  would do to the first selected control: its curves now, dotted and faint, and after the click in the
+  control's own color — turn (Shift = the other way), smaller / bigger, replace, add, paste, mirror; the
+  zero buttons show their frames; the second line says it ("turn 90° about Y"). After a click the
+  preview is refreshed on the next turn of the event loop (the next click's effect). Buttons that change
+  no shape (CVs, copy, combine, on top, select, save) show nothing. `_refresh_live` = the hovered action
+  if any, else `_draw_live`. Checked in windowed Maya 2025 through 17 states (pictures compared).
+- The GHOST (2026-10-10, the user's ask; `ghost.py`, maya.cmds / OpenMaya, no Qt; the eye toggle in the
+  Name row, `settings.ghost`, on by default): what Create would make, in MAYA'S OWN viewport on the
+  selected objects before anything is made — the picked shape at each object's size (fit), facing the
+  axis, in the color it will get; rebuilt by `_update_ghost` at the end of every `_draw_live` (selection,
+  any setting; also on DragRelease / Undo / Redo / timeChanged / SceneSaved — `WATCHED`; the 60 ms timer
+  restarts, so playback never rebuilds). Real curves under `|mslControlsGhost` (`scene.GHOST_GROUP`,
+  60 at most), helpers of the session: curves made through the API (MFnNurbsCurve.create — `cmds.curve`
+  would change the selection and loop the refresh), everything inside `_Quiet` (no undo, the modified
+  mark put back), hidden in the Outliner. Measured, Maya 2025: (1) the `doNotWrite` flag did NOT keep
+  them out of a saved .ma — they are deleted on kBeforeSave / kBeforeExport (callbacks kept on maya.cmds,
+  as the shot mask's) and come back on SceneSaved; (2) overrideDisplayType 2 (reference: can't be picked)
+  draws BLACK whatever the override color — so ghosts are ordinary pickable curves, and a picked ghost is
+  swapped for the object it stands for (`ghost.redirect_selection()`, first thing in `_draw_live`).
+  `scene.selected_transforms` / `all_controls` never return a ghost. No ghost: nothing selected, the
+  toggle off, the panel hidden / closed, on a selected CONTROL (it is there to be worked on), and on what
+  Create just made while it stays selected (`_made`). `scene.target_look`'s box is now the SHAPES' boxes
+  (object space) times the world scale: the transform's own boundingBox is in its parent's space, so a
+  mesh away from the origin was drawn off its place in the small preview (the user: "it gets confused").
+  Checked in windowed Maya 2025: six objects, selection / undo name / modified mark untouched, shape +
+  size + color follow, the saved file has no ghost, Create and its undo, toggle, window closed.
+- Grey ghost tried and taken back (2026-10-10): the user asked for a grey ghost (templates,
+  overrideDisplayType 1 — can't be picked), saw it, and wanted the COLORED one back the same hour: grey
+  can be lost against the viewport's background. `ghost.show(grey=True)` keeps the template form, unused;
+  don't offer grey again. Also: a failure of the preview or the ghost is no longer
+  swallowed — `ControlsPanel._report()` puts it in the header (once per message) and the traceback in
+  the Script Editor; the pointer entering the window refreshes the preview too (`enterEvent`).
+  WINDOWED TESTS of a Maya tool run from an ISOLATED COPY of `msl/` (a temp folder as the package root,
+  so its own empty configs/ and logs/), never against the live checkout's configs/: on this day a test
+  script that backed the live configs up and "restored" them while the hub ran wiped the hub's settings.
 
 ## Batch tool
 

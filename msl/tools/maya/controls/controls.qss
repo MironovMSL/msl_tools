@@ -1,0 +1,140 @@
+/*
+ * Controls tool styles (template) — registered with StylesheetBuilder.register_template() by
+ * panel.py and appended after ui/theme/base.qss + widgets.qss. Same var()/alpha() syntax.
+ */
+
+TintedIcon#controlsTitleIcon {
+    qproperty-iconColor: var(--accent);
+}
+ControlsPanel StableScrollArea#controlsScroll {
+    background-color: transparent;
+    border: none;
+}
+ControlsPanel QLabel#controlsCaption {
+    color: var(--text-secondary);
+    font-size: 11px;
+}
+
+/* The shapes: thumbnails in rows on a field; the picked one in the accent. */
+ControlsPanel ShapeGrid#controlsGrid {
+    qproperty-thumbColor: var(--text-primary);
+    background-color: var(--field);
+    border: 1px solid alpha(var(--border), 80%);
+    border-radius: 6px;
+    padding: 2px;
+}
+ControlsPanel ShapeGrid#controlsGrid::item {
+    border: 1px solid transparent;
+    border-radius: 5px;
+}
+ControlsPanel ShapeGrid#controlsGrid::item:hover {
+    background: alpha(var(--accent), 10%);
+}
+ControlsPanel ShapeGrid#controlsGrid::item:selected {
+    background: alpha(var(--accent), 22%);
+    border: 1px solid alpha(var(--accent), 70%);
+}
+
+/* The big preview that turns under the mouse. */
+ControlsPanel ShapeView {
+    qproperty-groundColor: var(--field);
+    qproperty-gridColor:   var(--border);
+    qproperty-lineColor:   var(--accent);
+    qproperty-xColor:      var(--error);
+    qproperty-yColor:      var(--success);
+    qproperty-zColor:      var(--accent);
+    qproperty-titleColor:  var(--text-secondary);
+    qproperty-zeroColor:   var(--violet);
+}
+
+/* Shape tools: small framed icon buttons, like Rename's quick ones. */
+ControlsPanel QuickButton#controlsTool {
+    qproperty-iconColor: var(--text-primary);
+}
+ControlsPanel QPushButton#controlsTool {
+    color: var(--text-primary);
+    background: alpha(var(--text-primary), 5%);
+    border: 1px solid alpha(var(--border), 70%);
+    border-radius: 5px;
+    padding: 0px;
+    min-width: 24px;
+    max-width: 24px;
+    min-height: 22px;
+    max-height: 22px;
+    font-size: 11px;
+    font-weight: 600;
+}
+/* SELECTED: each group of buttons in its own color; a turn button in its axis' color. */
+ControlsPanel QuickButton#controlsTool[tone="orange"] { qproperty-iconColor: var(--orange); }
+ControlsPanel QuickButton#controlsTool[tone="blue"]   { qproperty-iconColor: var(--accent); }
+ControlsPanel QuickButton#controlsTool[tone="teal"]   { qproperty-iconColor: var(--teal); }
+ControlsPanel QuickButton#controlsTool[tone="violet"] { qproperty-iconColor: var(--violet); }
+ControlsPanel QuickButton#controlsTool[tone="yellow"] { qproperty-iconColor: var(--yellow); }
+ControlsPanel QuickButton#controlsTool[tone="green"]  { qproperty-iconColor: var(--success); }
+ControlsPanel TurnButton#controlsTool[axis="X"] { qproperty-axisColor: var(--error); }
+ControlsPanel TurnButton#controlsTool[axis="Y"] { qproperty-axisColor: var(--success); }
+ControlsPanel TurnButton#controlsTool[axis="Z"] { qproperty-axisColor: var(--accent); }
+ControlsPanel QFrame#controlsRule {
+    background: alpha(var(--border), 90%);
+    border: none;
+}
+/* The size of a new control, inside the preview's corner. */
+ControlsPanel DragNumberField#controlsViewSize {
+    min-height: 18px;
+    max-height: 18px;
+    padding: 0px 2px;
+    font-size: 11px;
+    border-radius: 5px;
+}
+ControlsPanel QPushButton#controlsTool:hover {
+    border: 1px solid var(--accent);
+    background: alpha(var(--accent), 12%);
+}
+ControlsPanel QPushButton#controlsTool:pressed {
+    background: alpha(var(--accent), 25%);
+}
+
+/* On / off icon buttons: off = quiet, on = the accent. */
+ControlsPanel ToggleIconButton#controlsToggle {
+    qproperty-iconColor: var(--text-secondary);
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 5px;
+    padding: 0px;
+    min-width: 24px;
+    max-width: 24px;
+    min-height: 22px;
+    max-height: 22px;
+}
+ControlsPanel ToggleIconButton#controlsToggle:hover {
+    border: 1px solid alpha(var(--accent), 60%);
+}
+ControlsPanel ToggleIconButton#controlsToggle[on="true"] {
+    qproperty-iconColor: var(--accent);
+    background: alpha(var(--accent), 20%);
+    border: 1px solid alpha(var(--accent), 70%);
+}
+
+ControlsPanel QPushButton#controlsCreate {
+    padding: 0px 14px;
+    min-height: 22px;
+    max-height: 22px;
+}
+
+/* What the panel says, in the header: done = green, error = red. */
+ControlsWindow QLabel#headerSubtitle[state="done"] {
+    color: var(--success);
+}
+ControlsWindow QLabel#headerSubtitle[state="error"] {
+    color: var(--error);
+}
+
+/* COLOR: the palette and the saved colors — the colors are the scene's; the ring and edge are ours. */
+ControlsPanel Swatches {
+    qproperty-ringColor: var(--accent);
+    qproperty-edgeColor: alpha(var(--text-primary), 25%);
+}
+ControlsPanel ColorSwatchButton#controlsOwnColor {
+    qproperty-borderColor: var(--border);
+    qproperty-hoverBorderColor: var(--accent);
+}
