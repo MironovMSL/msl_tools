@@ -2,6 +2,9 @@
 """The Maya side of the Controls tool (maya.cmds, no Qt): building controls from shapes, placing
 them on what is selected, their offsets (groups or the offsetParentMatrix), editing their shapes.
 Every action the user starts is ONE undo step (`_Chunk`)."""
+import re
+from collections import namedtuple
+
 from maya import cmds
 
 from msl_tools.msl.tools.maya.controls import colors
@@ -271,11 +274,21 @@ def target_look(target: str, axis: "str | None" = None) -> dict:
 def targets_look(targets: list, limit: int = 12, axis: "str | None" = None) -> list:
     """`target_look` of the first `limit` targets, each with `matrix` — where it stands in the FIRST
     one's axes (position and rotation only, 16 numbers) — and `parent`: the index of the nearest listed
-    target above it, -1 for none (whose control a chained control goes under)."""
+    target above it, -1 for none (whose control a chained control goes under). A target may be a Part
+    (see `selection_targets`): its kind is "part"."""
     import maya.api.OpenMaya as om
     shown = list(targets[:limit])
     looks, base = [], None
     for target in shown:
+        if isinstance(target, Part):
+            look = {"name": target.label, "position": target.position, "fit": part_size(target), "kind": "part"}
+            world = om.MMatrix(target.matrix)
+            if base is None:
+                base = world.inverse()
+            look["matrix"] = list(world * base)
+            look["parent"] = -1
+            looks.append(look)
+            continue
         look = target_look(target, axis)
         world = _placed(target)
         if base is None:
@@ -305,18 +318,30 @@ def create(shape: shape_data.Shape, targets: list, template: str, size: float, a
     (parent + scale constraints), "matrix" (through the target's offsetParentMatrix, no constraint
     node), or "shape" — no new object at all: the curves become shapes of the target itself (a joint
     picked by its own curve). Targets that can't be driven (locked or connected channels) are named
-    in `notes`. One undo step. Returns the controls (long names)."""
+    in `notes`.
+
+    A target may be a Part (a vertex, an edge, a face… — see `selection_targets`): the control stands
+    where the part is, turned as the Part says (on a mesh: facing away from the surface), "fit" is
+    the part's own size; a part can't be driven, chained or given the curve. One undo step.
+    Returns the controls (long names)."""
     made = []           # (target, control uuid)
-    if drive == "shape" and targets:
-        return shapes_onto(shape, targets, size, axis, fit, side_color, sides, rgb)
+    whole = [target for target in targets if not isinstance(target, Part)]
+    if drive == "shape" and whole:
+        return shapes_onto(shape, whole, size, axis, fit, side_color, sides, rgb)
     with _Chunk():
         for index, target in enumerate(targets or [None]):
-            where = position(target) if target else None
-            name = control_name(template, target.rpartition("|")[2] if target else "", where, sides, index + 1)
-            scale = size * (fit_size(target, axis) if (fit and target) else 1.0)
+            part = target if isinstance(target, Part) else None
+            target = None if part else target
+            where = part.position if part else (position(target) if target else None)
+            label = part.label if part else (target.rpartition("|")[2] if target else "")
+            name = control_name(template, label, where, sides, index + 1)
+            own = part_size(part) if part else (fit_size(target, axis) if target else 1.0)
+            scale = size * (own if fit else 1.0)
             curves = shape_data.scaled(shape_data.oriented(shape.curves, axis), scale)
             control = cmds.ls(cmds.createNode("transform", name=name, skipSelect=True), long=True)[0]
             add_shapes(control, curves)
+            if part:
+                cmds.xform(control, worldSpace=True, matrix=list(part.matrix))
             if target:
                 cmds.setAttr(control + ".rotateOrder", cmds.getAttr(target + ".rotateOrder"))
                 cmds.matchTransform(control, target, position=True, rotation=True)
@@ -534,6 +559,383 @@ def undrive(selected: list) -> list:
                 if _untie(target, node) and target not in freed:
                     freed.append(target)
     return [node.rpartition("|")[2] for node in freed]
+
+
+def links_of(control: str) -> dict:
+    """What a control that EXISTS is tied into: {"groups": its zero groups, top first,
+    "matrix_zero": it is zeroed in its offsetParentMatrix, "driven": [(object, "constraint" /
+    "matrix")] it drives}."""
+    driven = []
+    for target in driven_by(control):
+        kinds = {cmds.nodeType(driver) for driver, controls in _drivers(target) if control in controls}
+        driven.append((target, "matrix" if "multMatrix" in kinds else "constraint"))
+    held = has_offset_matrix(control) and not cmds.listConnections(control + ".offsetParentMatrix", source=True,
+                                                                   destination=False)
+    return {"groups": _zero_stack(control), "matrix_zero": bool(held), "driven": driven}
+
+
+def flat_axis(control: str) -> str:
+    """The axis a control's shape faces: the one its CVs hardly leave ("Y" for a shape with depth)."""
+    points = [point for shape in curve_shapes(control) for point in _points(shape)]
+    if not points:
+        return "Y"
+    extents = [max(point[i] for point in points) - min(point[i] for point in points) for i in range(3)]
+    thin = min(range(3), key=lambda index: extents[index])
+    return "XYZ"[thin] if extents[thin] < 0.15 * max(extents) else "Y"
+
+
+def world_reach(control: str) -> float:
+    """How far the control's shape reaches from its pivot, in world units."""
+    import maya.api.OpenMaya as om
+    scale = om.MTransformationMatrix(_matrix(control)).scale(om.MSpace.kWorld)
+    return _reach(control) * max(abs(value) for value in scale)
+
+
+# ------------------------------------------------------------------ where the selection is
+
+PARTS_AT_ONCE = 200         # this many selected objects / points / edges / faces are worked on at a time
+LOCATORS_AT_ONCE = PARTS_AT_ONCE
+
+# One selected thing, where it is: `owner` = the object it belongs to, `position` in the world, `source`
+# = the object to take the turn from ("" for a PART of an object), `normal` = the surface's unit normal
+# there (a part of a mesh, when asked for), `size` = the part's own size (when asked for), `item` =
+# what was selected.
+Spot = namedtuple("Spot", "owner position source normal size item")
+# A part of an object as something Create works on, in place of an object: `label` = what the control
+# is named after, `matrix` = where it stands and how it is turned (16 numbers), `size` = what "fit"
+# multiplies by (0 = unknown), `item` = what to select when its ghost is picked (a name or several).
+Part = namedtuple("Part", "label position matrix size owner item")
+
+_RANGE = re.compile(r"^(.*)\.(vtx|e|f)\[(\d+)(?::(\d+))?\]$")
+_MESH_PART = re.compile(r"^(vtx|e|f)\[(\d+)\]$")
+
+
+def _name_stem(owner: str) -> str:
+    """The object's short name without its namespace and its kind suffix: lf_arm_jnt -> lf_arm."""
+    from msl_tools.msl.tools.maya.controls.naming import EXTRA_ENDS
+    from msl_tools.msl.tools.maya.rename import rules
+    short = owner.rpartition("|")[2].rpartition(":")[2]
+    stem, sep, tail = short.rpartition("_")
+    ends = set(rules.DEFAULT_TYPE_SUFFIXES.values()) | set(EXTRA_ENDS)
+    return stem if (sep and stem and tail in ends) else short
+
+
+def _picked(limit: int) -> tuple:
+    """The selection in the order picked, the ranges of mesh parts opened up — but never more than
+    `limit` names: all the vertices of a mesh are a hundred thousand, and this runs on every change
+    of the selection. Returns (the names, how many things are selected)."""
+    items, total = [], 0
+    for item in cmds.ls(orderedSelection=True, long=True) or []:
+        match = _RANGE.match(item)
+        if match:
+            first = int(match.group(3))
+            last = int(match.group(4) or first)
+            total += last - first + 1
+            for index in range(first, min(last, first + limit - len(items) - 1) + 1):
+                items.append(f"{match.group(1)}.{match.group(2)}[{index}]")
+        elif "." in item:
+            flat = cmds.ls(item, flatten=True, long=True) or []
+            total += len(flat)
+            items.extend(flat[:max(0, limit - len(items))])
+        else:
+            total += 1
+            if len(items) < limit:
+                items.append(item)
+    return items, total
+
+
+class _Meshes:
+    """The meshes of one reading of the selection, asked through the API: quick for hundreds of parts."""
+
+    def __init__(self):
+        self._found = {}
+
+    def of(self, node: str):
+        """(dag path, MFnMesh) of the mesh `node` is or holds; None when it is no mesh."""
+        if node not in self._found:
+            import maya.api.OpenMaya as om
+            entry = None
+            try:
+                shape = node
+                if not cmds.objectType(node, isAType="shape"):
+                    shapes = cmds.listRelatives(node, shapes=True, noIntermediate=True, type="mesh", fullPath=True) or []
+                    shape = shapes[0] if shapes else ""
+                if shape and cmds.nodeType(shape) == "mesh":
+                    dag = om.MSelectionList().add(shape).getDagPath(0)
+                    entry = (dag, om.MFnMesh(dag))
+            except (RuntimeError, ValueError):
+                entry = None
+            self._found[node] = entry
+        return self._found[node]
+
+
+def _mesh_part(mesh, kind: str, index: int, normals: bool, sizes: bool) -> tuple:
+    """(where, the normal or None, its own size) of a vertex / an edge / a face, in the world.
+    Its size: a face = from its middle to its farthest corner; an edge = half its length; a vertex =
+    half the way to its neighbours (controls on neighbouring vertices just touch)."""
+    import maya.api.OpenMaya as om
+    dag, mesh_fn = mesh
+    world = om.MSpace.kWorld
+    normal, size = None, 0.0
+    if kind == "vtx":
+        where = mesh_fn.getPoint(index, world)
+        if normals:
+            normal = mesh_fn.getVertexNormal(index, True, world)
+        if sizes:
+            walker = om.MItMeshVertex(dag)
+            walker.setIndex(index)
+            near = list(walker.getConnectedVertices())
+            if near:
+                size = 0.5 * sum(where.distanceTo(mesh_fn.getPoint(other, world)) for other in near) / len(near)
+    elif kind == "e":
+        walker = om.MItMeshEdge(dag)
+        walker.setIndex(index)
+        a, b = walker.point(0, world), walker.point(1, world)
+        where = om.MPoint((a.x + b.x) / 2.0, (a.y + b.y) / 2.0, (a.z + b.z) / 2.0)
+        if normals:
+            normal = mesh_fn.getVertexNormal(walker.vertexId(0), True, world) + \
+                mesh_fn.getVertexNormal(walker.vertexId(1), True, world)
+        size = a.distanceTo(b) / 2.0
+    else:
+        corners = [mesh_fn.getPoint(corner, world) for corner in mesh_fn.getPolygonVertices(index)]
+        where = om.MPoint(sum(p.x for p in corners) / len(corners), sum(p.y for p in corners) / len(corners),
+                          sum(p.z for p in corners) / len(corners))
+        if normals:
+            normal = mesh_fn.getPolygonNormal(index, world)
+        size = max(where.distanceTo(corner) for corner in corners)
+    if normal is not None:
+        normal = om.MVector(normal)
+        normal = None if normal.length() < 1e-9 else tuple(normal.normal())
+    return (where.x, where.y, where.z), normal, size
+
+
+def selection_spots(normals: bool = False, sizes: bool = False, limit: int = PARTS_AT_ONCE) -> tuple:
+    """Where the selection is, one Spot per selected thing, in the order picked — at most `limit` of
+    them — and how many things are selected in all.
+    An object = its pivot, and its turn; a vertex, a CV, a lattice point = where it is (a UV: its
+    vertex — Maya's xform answers that); an edge or a face = the middle of its points. For the parts
+    of a mesh, when asked: the surface's `normal` there and the part's own `size`."""
+    items, total = _picked(limit)
+    meshes = _Meshes()
+    spots = []
+    for item in items:
+        node, dot, part = item.partition(".")
+        if is_ghost(node) or not cmds.objExists(node):
+            continue
+        owner = node
+        if cmds.objectType(node, isAType="shape"):
+            owner = (cmds.listRelatives(node, parent=True, fullPath=True) or [""])[0]
+        if not owner or not cmds.objectType(owner, isAType="transform"):
+            continue
+        if not dot:
+            spots.append(Spot(owner, position(owner), owner, None, 0.0, item))
+            continue
+        match = _MESH_PART.match(part)
+        mesh = meshes.of(node) if match else None
+        if mesh:
+            try:
+                where, normal, size = _mesh_part(mesh, match.group(1), int(match.group(2)), normals, sizes)
+            except (RuntimeError, ValueError, IndexError):
+                continue
+            spots.append(Spot(owner, where, "", normal, size, item))
+            continue
+        try:
+            flat = cmds.xform(item, query=True, worldSpace=True, translation=True) or []
+        except RuntimeError:
+            continue                # something selected that stands nowhere in the world
+        points = [flat[index:index + 3] for index in range(0, len(flat) - 2, 3)]
+        if points:
+            spots.append(Spot(owner, tuple(sum(point[i] for point in points) / len(points) for i in range(3)),
+                              "", None, 0.0, item))
+    return spots, total
+
+
+def part_matrix(where, normal=None, axis: str = "Y") -> tuple:
+    """Standing at `where`, the world's axes — or, with a `normal`, its `axis` along it (16 numbers)."""
+    x, y, z = shape_data.frame_along(normal, axis) if normal else ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0))
+    return tuple(x) + (0.0,) + tuple(y) + (0.0,) + tuple(z) + (0.0,) + tuple(where) + (1.0,)
+
+
+def part_size(part) -> float:
+    """What "fit" multiplies by for a part of an object: its own size; a tenth of the object's when
+    it has none (a lattice point, a surface's CV)."""
+    return part.size if part.size > 1e-6 else 0.1 * fit_size(part.owner)
+
+
+def _numbered(spots: list) -> list:
+    """A name for each spot, after the object it belongs to: lf_arm for the object lf_arm_jnt itself;
+    crate_01, crate_02… when several PARTS of one object are among them."""
+    parts = {}
+    for spot in spots:
+        if not spot.source:
+            parts[spot.owner] = parts.get(spot.owner, 0) + 1
+    numbers, names = {}, []
+    for spot in spots:
+        name = _name_stem(spot.owner)
+        if not spot.source and parts[spot.owner] > 1:
+            numbers[spot.owner] = numbers.get(spot.owner, 0) + 1
+            name += f"_{numbers[spot.owner]:02d}"
+        names.append(name)
+    return names
+
+
+def selection_points() -> tuple:
+    """Every POINT of the selection in the world — an object's pivot, a vertex, both ends of an edge,
+    the corners of a face — however many there are (Maya is asked once for all the parts), with the
+    object the first selected thing belongs to and what is selected."""
+    items = [item for item in cmds.ls(orderedSelection=True, long=True) or []
+             if not is_ghost(item.partition(".")[0])]
+    points, parts, owner = [], [], ""
+    for item in items:
+        node, dot, _part = item.partition(".")
+        if not cmds.objExists(node):
+            continue
+        holder = node
+        if cmds.objectType(node, isAType="shape"):
+            holder = (cmds.listRelatives(node, parent=True, fullPath=True) or [""])[0]
+        if not holder or not cmds.objectType(holder, isAType="transform"):
+            continue
+        owner = owner or holder
+        if dot:
+            parts.append(item)
+        else:
+            points.append(position(holder))
+    flat = []
+    if parts:
+        try:
+            flat = cmds.xform(parts, query=True, worldSpace=True, translation=True) or []
+        except RuntimeError:
+            for item in parts:              # one of them stands nowhere in the world: the others still do
+                try:
+                    flat += cmds.xform(item, query=True, worldSpace=True, translation=True) or []
+                except RuntimeError:
+                    pass
+    points += [tuple(flat[index:index + 3]) for index in range(0, len(flat) - 2, 3)]
+    return points, owner, tuple(items)
+
+
+def _middle(points: list) -> tuple:
+    """(the middle of the box around the points, the normal of the plane they lie in or None, how far
+    the farthest of them is from that middle — across the normal when there is one)."""
+    low = [min(point[i] for point in points) for i in range(3)]
+    high = [max(point[i] for point in points) for i in range(3)]
+    middle = tuple((a + b) / 2.0 for a, b in zip(low, high))
+    normal = shape_data.plane_normal(points)
+    reach = 0.0
+    for point in points:
+        away = [a - b for a, b in zip(point, middle)]
+        if normal:
+            along = sum(a * b for a, b in zip(away, normal))
+            away = [a - along * b for a, b in zip(away, normal)]
+        reach = max(reach, sum(value * value for value in away) ** 0.5)
+    return middle, normal, reach
+
+
+def selection_targets(axis: str = "Y", middle: bool = False) -> list:
+    """What Create works on, in the order picked: an object's long name for each selected object —
+    and for the CVs of a curve, which stand for their curve: a control being reshaped must not get
+    controls on its points — and a Part for each selected vertex, edge, face, lattice point or surface
+    CV (on a mesh it faces away from the surface: its `axis` along the normal there).
+    `middle`: ONE Part instead, in the middle of everything selected — it faces across the plane the
+    spots lie in and reaches just past them: a ring around a limb from its edge loop."""
+    if middle:
+        points, owner, items = selection_points()
+        if len(points) > 1:
+            where, normal, reach = _middle(points)
+            return [Part(_name_stem(owner), where, part_matrix(where, normal, axis), reach * FIT_ROOM, owner, items)]
+    spots, _total = selection_spots(normals=True, sizes=True)
+    if not spots:
+        return []
+    curves = {}
+    for spot in spots:
+        if spot.owner not in curves:
+            curves[spot.owner] = bool(curve_shapes(spot.owner))
+    whole = [bool(spot.source) or curves[spot.owner] for spot in spots]
+    names = _numbered([spot for spot, plain in zip(spots, whole) if not plain])
+    found = []
+    for spot, plain in zip(spots, whole):
+        if plain:
+            if spot.owner not in found:
+                found.append(spot.owner)
+        else:
+            found.append(Part(names.pop(0), spot.position, part_matrix(spot.position, spot.normal, axis),
+                              spot.size, spot.owner, spot.item))
+    return found
+
+
+# ------------------------------------------------------------------ locators and joints on what is selected
+
+def locators_on_selection(center: bool = False, along_normal: bool = False, axis: str = "Y") -> tuple:
+    """Locators where the selection is: one on each selected object (at its pivot, turned like it) and
+    on each selected vertex, CV, edge or face (its middle), named after the object (lf_arm_jnt ->
+    lf_arm_loc; several on one object: head_01_loc, head_02_loc…) — or, `center`, ONE in the middle
+    of all of it (the middle of the box around the spots, so an edge loop's center whatever the
+    density of its points). `along_normal`: on a mesh the locator's `axis` runs along the surface's
+    normal there (the one in the middle: across the plane the spots lie in); else the world's axes.
+    At most LOCATORS_AT_ONCE at a time; they end up selected. One undo step.
+    Returns (the locators, how many things were selected)."""
+    from msl_tools.msl.tools.maya.rename import rules
+    suffix = rules.DEFAULT_TYPE_SUFFIXES.get("locator", "loc")
+    if center:
+        points, owner, items = selection_points()
+        if not points:
+            return [], 0
+        total = _picked(0)[1]               # now: making the locator changes the selection
+        with _Chunk():
+            where, normal, _reach_out = _middle(points)
+            locator = cmds.spaceLocator(name=f"{_name_stem(owner)}_center_{suffix}")[0]
+            cmds.xform(locator, worldSpace=True, matrix=list(part_matrix(where, normal if along_normal else None, axis)))
+            made = [cmds.ls(locator, long=True)[0]]
+            cmds.select(made, replace=True)
+        return made, total
+    spots, total = selection_spots(normals=along_normal)
+    if not spots:
+        return [], 0
+    made = []
+    with _Chunk():
+        for spot, name in zip(spots, _numbered(spots)):
+            locator = cmds.spaceLocator(name=f"{name}_{suffix}")[0]
+            if spot.source:
+                cmds.setAttr(locator + ".rotateOrder", cmds.getAttr(spot.source + ".rotateOrder"))
+                cmds.matchTransform(locator, spot.source, position=True, rotation=True)
+            else:
+                cmds.xform(locator, worldSpace=True, matrix=list(part_matrix(spot.position, spot.normal, axis)))
+            made.append(cmds.ls(locator, long=True)[0])
+        cmds.select(made, replace=True)
+    return made, total
+
+
+def joints_on_selection(chain: bool = True) -> tuple:
+    """Joints where the selection is, in the order picked (objects — locators set out for a skeleton —
+    or vertices, edges, faces), named after what they stand on (lf_arm_loc -> lf_arm_jnt).
+    `chain`: each under the one before it, every bone's X down to the next joint and its Y up (Maya's
+    own "orient joint", xyz / yup), the last one as its bone. Not `chain`: separate joints, each
+    turned like its object. They end up selected, the first one first. One undo step.
+    Returns (the joints, how many things were selected)."""
+    from msl_tools.msl.tools.maya.rename import rules
+    suffix = rules.DEFAULT_TYPE_SUFFIXES.get("joint", "jnt")
+    spots, total = selection_spots()
+    if not spots:
+        return [], 0
+    uuids = []
+    with _Chunk():
+        for spot, name in zip(spots, _numbered(spots)):
+            cmds.select(clear=True)             # else Maya hangs the new joint under what is selected
+            joint = cmds.joint(name=f"{name}_{suffix}", position=spot.position)
+            uuid = _uuid(joint)
+            if chain and uuids:
+                cmds.parent(_path(uuid), _path(uuids[-1]))
+            elif not chain and spot.source:
+                cmds.matchTransform(_path(uuid), spot.source, rotation=True)
+                cmds.makeIdentity(_path(uuid), apply=True, rotate=True)     # the turn goes into jointOrient
+            uuids.append(uuid)
+        if chain and len(uuids) > 1:
+            cmds.joint(_path(uuids[0]), edit=True, orientJoint="xyz", secondaryAxisOrient="yup", children=True,
+                       zeroScaleOrient=True)
+            cmds.setAttr(_path(uuids[-1]) + ".jointOrient", 0, 0, 0)
+        made = [_path(uuid) for uuid in uuids]
+        cmds.select(made, replace=True)
+    return made, total
 
 
 def states(selected: list, limit: int = 40) -> dict:
@@ -756,17 +1158,28 @@ def _mirrored(curves: list, axis: str) -> list:
                              curve.degree, curve.closed) for curve in curves]
 
 
-def other_side(control: str, sides) -> str:
-    """The long name of the control on the other side (lf_arm_ctrl -> rt_arm_ctrl, arm_L -> arm_R,
-    by the Rename tool's rules), "" when the name says no side or there is none."""
+def twin_name(control: str, sides, axis: str = "X") -> str:
+    """What the control's mirror is called (short, with its namespace): the other side's name by the
+    Rename tool's rules (lf_arm_ctrl -> rt_arm_ctrl, arm_L -> arm_R). A name that says NO side — a
+    control not named yet — gets the side word of where its mirror stands in front (arm_ctrl at +X ->
+    rt_arm_ctrl), or "_mirror" at its end when the mirror stands on the same side (a control in the
+    middle, a mirror across Y or Z)."""
     from msl_tools.msl.tools.maya.rename import rules
     short = control.rpartition("|")[2]
-    namespace, _sep, name = short.rpartition(":")
+    namespace, sep, name = short.rpartition(":")
     other = rules.mirror(name, sides)
     if other == name:
-        return ""
-    found = cmds.ls((namespace + ":" if namespace else "") + other, long=True, type="transform") or []
-    return found[0] if len(found) == 1 else ""
+        here = position(control)
+        there = tuple(value * sign for value, sign in zip(here, _REFLECT[axis]))
+        word = sides.text(there)
+        other = f"{word}_{name}" if (word and sides.of(there) != sides.of(here)) else f"{name}_mirror"
+    return namespace + sep + other
+
+
+def other_side(control: str, sides, axis: str = "X") -> str:
+    """The long name of the control's mirror (`twin_name`) when it is in the scene, else ""."""
+    found = cmds.ls(twin_name(control, sides, axis), long=True, type="transform") or []
+    return found[0] if len(found) == 1 and found[0] != control else ""
 
 
 _REFLECT = {"X": (-1, 1, 1), "Y": (1, -1, 1), "Z": (1, 1, -1)}
@@ -824,16 +1237,19 @@ def mirror_control(control: str, sides, axis: str = "X", side_color: bool = Fals
     made again, mirrored, under the twin of their parent (else the same parent); the transform
     mirrored with "behavior" (not frozen: it keeps a clean, positive-scale transform and its own
     pivot); the shape mirrored in it; colored by its side or like the source; an offsetParentMatrix
-    the source zeroes through is used the same way. Returns the new control ("" = the name says no side)."""
+    the source zeroes through is used the same way. A control whose name says no side is mirrored too
+    (see `twin_name`). Returns the new control."""
     import maya.api.OpenMaya as om
-    if _mirror_name(control, sides) == control.rpartition("|")[2]:
-        return ""
+    short = control.rpartition("|")[2]
+    mirrored = twin_name(control, sides, axis)
     stack = _zero_stack(control)
     above = _mirrored_parent(stack[0] if stack else control, sides)
     made = None
     for node in stack + [control]:
         world = _behavior_mirror(om.MMatrix(cmds.getAttr(node + ".worldMatrix[0]")), axis)
-        copy = cmds.createNode(cmds.nodeType(node), name=_mirror_name(node, sides), skipSelect=True)
+        # its zero groups are named after it (<control>_offset): after its mirror, too
+        name = mirrored if node == control else mirrored + node.rpartition("|")[2][len(short):]
+        copy = cmds.createNode(cmds.nodeType(node), name=name, skipSelect=True)
         copy = cmds.ls(copy, long=True)[0]
         cmds.setAttr(copy + ".rotateOrder", cmds.getAttr(node + ".rotateOrder"))
         if above:
@@ -868,7 +1284,7 @@ def mirror_shapes_to_twins(controls: list, sides, axis: str = "X") -> tuple:
     updated, missing = 0, []
     with _Chunk():
         for control in controls:
-            twin = other_side(control, sides)
+            twin = other_side(control, sides, axis)
             if twin and twin != control:
                 _mirror_shape_onto(control, twin, axis)
                 updated += 1
@@ -886,7 +1302,7 @@ def mirror_controls(controls: list, sides, axis: str = "X", side_color: bool = F
     with _Chunk():
         for uuid in uuids:
             control = _path(uuid)
-            twin = other_side(control, sides)
+            twin = other_side(control, sides, axis)
             if twin and twin != control:
                 _mirror_shape_onto(control, twin, axis)
                 updated += 1

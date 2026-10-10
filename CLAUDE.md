@@ -226,7 +226,7 @@ msl_tools/                 (repo root)
     named by what the icon IS, not the gesture (`drag_handle`, not
     `dragAndDrop`). Categories: `window/` (chrome: close/maximize/...),
     `actions/` (row/toolbar actions: `drag_handle`, `copy`, `delete`,
-    `browse`, `folder_add`, `file_video`, `bookmark`, `bookmark_add`, `save`, `file_add`, `chevron_right`, `eye`, `folder_into`, `compress`, `scissors`, `repeat`, `text_frame`, `volume`, `gif`, `image_stack`, `clapper`, `crop`, `merge`, `split_view`, `film`, `timeline`, `folder_watch`, `pause`, `bell` (the Media actions and its queue), `clear`, `arrow_right`, `chevron_down`, `add`, `check`, `select_all`, `more`, `report`, `code`, `restart`, `power`, `play`, `edit`, `scene`, `stop`, `lock`, `search`, `rename`, and the Rename tool's quick buttons: `case_upper`, `case_capital`, `case_lower`, `case_snake` (a snake), `case_camel` (a camel's humps), `cut_prefix`, `cut_suffix`, `cut_number`, `cut_digits`, `cut_first`, `cut_last`, `namespace_out`, `magic_fix`, `sweep`, `mirror_sides`, `shape_name`, `warning`, `error`, `keyboard` (Maya Gate's EN), and the Rename strip's `names_same`, `name_bad`, `skin_joints`, `side_other`, `lock_find`, `convention_check`, `names_unique`, `name_related`, `convention_fix`, `unlock`, `sets`, `star`, `sliders`, `book`, `replace`, `skin_mesh` (the grey cube under `skin_joints`), `branch`, and the Controls tool's `controls`, `grow`, `shrink`, `outliner`, `color_pick`, `line_width`, `mirror_shape`, `mirror_update`, `zero_out`, `zero_matrix`, `matrix_out`, `on_top`, `cvs`, `paste`, `drive_constraint`, `drive_matrix`, `drive_off`; add new action icons here),
+    `browse`, `folder_add`, `file_video`, `bookmark`, `bookmark_add`, `save`, `file_add`, `chevron_right`, `eye`, `folder_into`, `compress`, `scissors`, `repeat`, `text_frame`, `volume`, `gif`, `image_stack`, `clapper`, `crop`, `merge`, `split_view`, `film`, `timeline`, `folder_watch`, `pause`, `bell` (the Media actions and its queue), `clear`, `arrow_right`, `chevron_down`, `add`, `check`, `select_all`, `more`, `report`, `code`, `restart`, `power`, `play`, `edit`, `scene`, `stop`, `lock`, `search`, `rename`, and the Rename tool's quick buttons: `case_upper`, `case_capital`, `case_lower`, `case_snake` (a snake), `case_camel` (a camel's humps), `cut_prefix`, `cut_suffix`, `cut_number`, `cut_digits`, `cut_first`, `cut_last`, `namespace_out`, `magic_fix`, `sweep`, `mirror_sides`, `shape_name`, `warning`, `error`, `keyboard` (Maya Gate's EN), and the Rename strip's `names_same`, `name_bad`, `skin_joints`, `side_other`, `lock_find`, `convention_check`, `names_unique`, `name_related`, `convention_fix`, `unlock`, `sets`, `star`, `sliders`, `book`, `replace`, `skin_mesh` (the grey cube under `skin_joints`), `branch`, and the Controls tool's `controls`, `grow`, `shrink`, `outliner`, `color_pick`, `line_width`, `mirror_shape`, `mirror_update`, `zero_out`, `zero_matrix`, `matrix_out`, `on_top`, `cvs`, `paste`, `drive_constraint`, `drive_matrix`, `drive_off`, `locator`, `joint_chain`, `center`; add new action icons here),
     `apps/` (third-party application logos: `maya`; later houdini, blender...
     — named after the app, not the tool that uses it, so several tools can
     share one), `tools/` (sidebar icons of our OWN hub tools, one-color like
@@ -2507,6 +2507,83 @@ axis (`flip`). ZERO THE SELECTED (`actions/zero_out`, in the Zero row): the mode
   `zero_matrix` + "zero in the matrix"; qproperty zeroColor) and drive (`drive_constraint` /
   `drive_matrix` / `cvs` for Shape; qproperty driveColor = --pink). A hovered tool still shows the
   title (the control's name + what the click does). Checked offscreen from an isolated copy only.
+- ONE LANGUAGE for zero and drive (2026-10-10, the user's picks 1-4 and 6 of six ideas, after a sketch):
+  violet = zero, a pink arrow = drives — in the panel and in Maya alike; the frames AROUND a shape are
+  gone everywhere (they read as part of the shape, and showed no order).
+  THE LINE (`widgets.HierarchyStrip`, `#controlsStrip`, a row under the library; the window starts
+  460 x 640): top first like the Outliner — "[0] grp › offset › lf_arm_ctrl ⇢ lf_arm_jnt +2" — blocks in
+  the tone of what they are, "›" = parent of, the arrow solid for constraints / dashed for the matrix /
+  dots for "doesn't drive"; long names are cut to fit. For a selection that gets NEW controls
+  (`_strip_planned`) the blocks ARE the settings: the zero chip and the arrow open a menu (Zero / Drive),
+  a group block puts the cursor on its word in the suffix field, the control block on the name template.
+  When the first selected object is a control that EXISTS (`_strip_existing`, from `scene.links_of`) the
+  line says what it IS tied into — its real zero groups or "matrix", the object it drives — and a click
+  on a block selects that object; the preview then shows the control's own shape in its own color
+  (not a new control on top of it). The preview's top notes are no longer set (`set_notes` stays).
+  THE GHOST (`ghost._zero_curves` / `_drive_curves`, built in the XZ plane and turned to the axis like
+  the shape): zero groups = small DIAMONDS on a stem beside the control, one per group, the top one
+  farthest (as null groups look in Maya); the matrix = a pair of brackets there; drive = an ARROW from
+  the shape's rim bending in to the pivot (control and object stand in one place), solid for constraints,
+  dashes for the matrix (a curve can't be dashed: short segments). `ghost.show(links=[controls])` draws
+  the same marks, and no shape, for controls that exist: their real groups / matrix and an arrow to each
+  object they drive — straight to it when it stands elsewhere (`scene.flat_axis` = the axis the shape
+  faces, `scene.world_reach`); `_update_ghost` sends selected controls there and the rest to be ghosted.
+  A picked mark selects its control. Checked in windowed Maya 2026 from an isolated copy (the line in
+  seven states, shape counts of the ghosts, clicks on a group word and on a node block, pictures).
+- LOCATORS on the selection (2026-10-10, the user's ask; a plain-colored button in SELECTED's second
+  row, icon `actions/locator`): `scene.locators_on_selection()` makes one locator per selected thing, in
+  the order picked (`selection_spots`: `ls(orderedSelection, flatten)`) — an OBJECT: at its rotate pivot,
+  turned like it (matchTransform position + rotation, its rotateOrder), named <object without its kind
+  suffix>_loc (lf_arm_jnt -> lf_arm_loc); a VERTEX, CV, lattice point: where it is; an EDGE or FACE: the
+  middle of its points (`xform -q -ws -t` on a component returns all its points; a UV answers with its
+  vertex); parts are not turned (the world's axes) and are numbered when one object gets several
+  (crate_01_loc…). Right click -> ONE locator in the middle of everything selected (`center=True`: the
+  middle of the BOX around the spots, so an edge loop's center whatever the density of its points;
+  <object>_center_loc). At most LOCATORS_AT_ONCE (200) per click — the status says "the first 200 of
+  872". Maya's default locator size; at the top of the scene; they end up selected; one undo step.
+  Checked in mayapy 2026 from an isolated copy (19 checks); the button itself was not clicked in a
+  windowed Maya.
+- PARTS of objects, locators along the normal, joints (2026-10-10, the user's picks 1 / 2 / 3 / 6):
+  `scene.selection_spots(normals, sizes)` reads the selection in the order picked, at most PARTS_AT_ONCE
+  (200) things (`_picked` opens the ranges of mesh parts itself up to that — `ls -flatten` of a whole
+  mesh is a hundred thousand names, and the live preview runs this on EVERY selection change): a Spot per
+  object (its pivot, its turn) and per part — mesh vertices / edges / faces through the API (MFnMesh:
+  where, the normal in the world, the part's own size: a face = its middle to its farthest corner, an
+  edge = half its length, a vertex = half the way to its neighbours), anything else through `xform`.
+  CREATE takes parts (`selection_targets(axis, middle)` -> object names and `Part`s, in the order
+  picked; `create` / `ghost.show` / `targets_look` accept a Part where a target stands): a control on
+  each selected vertex / edge / face, standing there, on a mesh FACING AWAY from the surface (its axis
+  along the normal: `shapes.frame_along`, level and right-handed, the world's frame along the world's
+  own axis), "fit" = the part's own size, named <object>_01…; a part can't be driven, chained or given
+  the curve (Drive = Shape on vertices alone: refused with the reason). The CVs of a CURVE still stand
+  for their curve — a control being reshaped ("Edit the shape") must not get controls on its points.
+  "ONE IN THE MIDDLE" (a toggle in the Name row, `settings.middle`, icon `actions/center`): ONE Part in
+  the middle of the box around EVERY point of the selection (`selection_points`: one xform for all the
+  parts, however many — the ends of edges, not their middles), facing across the plane they lie in
+  (`shapes.plane_normal`: the direction of least spread, by power iteration from several starts — one
+  start can lie exactly across the answer —, pointing up / +X / +Z) and reaching FIT_ROOM past them:
+  an edge loop -> a ring around the limb. The button reads "Create 1 · middle"; the ghost shows it.
+  LOCATORS: the right-click menu also has "its <axis> along the surface's normal" (each) and "across the
+  loop" (the middle one); the axis is the preview's. JOINTS (`scene.joints_on_selection`, a second plain
+  button, icon `actions/joint_chain`): a chain through the selection in the order picked — each joint
+  under the one before, Maya's own orient (xyz / yup), the last one as its bone, named after what it
+  stands on (lf_hip_loc -> lf_hip_jnt; parts: lf_limb_01_jnt…); right click: separate joints, each turned
+  like its object (the turn in jointOrient). They end up selected, so the ghost shows controls on them:
+  locators -> joints -> controls is three clicks. A picked ghost of a part selects the part again
+  (`_targets` holds a name or several). The ghost's diamonds are 17% of the control (11% got lost).
+  Checked: unit tests of the frame and the plane; mayapy 2026 from an isolated copy, 43 checks; the
+  panel's handlers in windowed Maya 2026 (vertices, Shape refused, an edge loop each / in the middle,
+  locators along the normal, joints from locators and controls on them, a control's CVs).
+  NOT wanted (the user, same day): presets of the creation settings ("the configs keep everything
+  anyway"); lock / hide of channels belongs to a later ATTRIBUTES tab of its own.
+- MIRROR of a control whose name says no side (2026-10-10, the user: a control not named yet must be
+  mirrored too — it used to answer "the names say no side"): `scene.twin_name(control, sides, axis)` =
+  the other side's name by Rename's rules, and for a name without a side the side word of where the
+  mirror STANDS in front (hand_ctrl at +X -> rt_hand_ctrl; the original keeps its name), or "_mirror" at
+  its end when it lands on the same side (a control in the middle, a mirror across Y / Z). Its zero
+  groups are named after the mirror (<mirror>_offset). `other_side` looks that name up, so a second
+  Mirror — and "shape to the other side" — find the copy and only update its shape. Checked in mayapy
+  2026 from an isolated copy (14 checks); not clicked in a windowed Maya.
 
 ## Batch tool
 

@@ -73,8 +73,12 @@ def redirect_selection() -> bool:
     for item in picked:
         if scene.is_ghost(item):
             parts = item.partition(".")[0].split("|")
-            found = cmds.ls(_targets.get(parts[2] if len(parts) > 2 else "", ""), long=True) if len(parts) > 2 else []
-            item = found[0] if found else ""
+            stood_for = _targets.get(parts[2], "") if len(parts) > 2 else ""
+            names = list(stood_for) if isinstance(stood_for, (list, tuple)) else [stood_for]
+            item = ""
+            for found in (cmds.ls([name for name in names if name], long=True) or []) if any(names) else []:
+                if found not in wanted:
+                    wanted.append(found)
         if item and item not in wanted:
             wanted.append(item)
     with _Quiet():
@@ -133,36 +137,66 @@ def _add_curve(parent: str, curve: shape_data.Curve) -> str:
     return om.MFnDagNode(made).fullPathName()
 
 
-def _square(half: float) -> shape_data.Curve:
-    return shape_data.Curve([(-half, 0.0, -half), (half, 0.0, -half), (half, 0.0, half), (-half, 0.0, half)], 1, True)
-
-
 def _zero_curves(mode: str, count: int, reach: float) -> list:
-    """Zero as lines around the control, in the plane it faces +Y in: "groups" = one frame per group,
-    nested; "matrix" = the corners of one frame (brackets)."""
-    if mode == "groups":
-        return [_square(reach * (1.2 + 0.17 * index)) for index in range(min(max(1, count), 4))]
+    """Zero, drawn BESIDE the control (never around it: frames read as part of the shape), in the
+    plane a flat shape lies in (XZ, before it is turned to its axis): "groups" = small diamonds on a
+    stem, one per group, the top group farthest — the way null groups look in Maya; "matrix" = one
+    pair of brackets there. The stem runs from the shape's rim."""
+    if mode not in ("groups", "matrix"):
+        return []
+    size = reach * 0.17           # big enough to be found in a scene (0.11 got lost)
+    first = -(reach + size * 2.4)
+    step = size * 2.7
+    curves = []
     if mode == "matrix":
-        half, arm = reach * 1.2, reach * 0.45
-        return [shape_data.Curve([(x * (half - arm), 0.0, z * half), (x * half, 0.0, z * half),
-                                  (x * half, 0.0, z * (half - arm))], 1, False)
-                for x in (-1, 1) for z in (-1, 1)]
-    return []
+        for side in (-1, 1):
+            curves.append(shape_data.Curve([(side * size * 0.45, 0.0, first - size), (side * size, 0.0, first - size),
+                                            (side * size, 0.0, first + size), (side * size * 0.45, 0.0, first + size)],
+                                           1, False))
+        curves.append(shape_data.Curve([(0.0, 0.0, -reach), (0.0, 0.0, first + size)], 1, False))
+        return curves
+    amount = min(max(1, count), 5)
+    for index in range(amount):
+        centre = first - index * step
+        curves.append(shape_data.Curve([(0.0, 0.0, centre - size), (size, 0.0, centre), (0.0, 0.0, centre + size),
+                                        (-size, 0.0, centre)], 1, True))
+        below = -reach if index == 0 else first - (index - 1) * step - size
+        curves.append(shape_data.Curve([(0.0, 0.0, below), (0.0, 0.0, centre + size)], 1, False))
+    return curves
 
 
-def _drive_curves(drive: str, reach: float) -> list:
-    """A small mark at the pivot of a control that will DRIVE its object: a diamond for constraints,
-    a little cube for the matrix."""
-    size = reach * 0.14
-    if drive == "constraint":
-        x, y, z = (size, 0, 0), (0, size, 0), (0, 0, size)
-        nx, ny, nz = (-size, 0, 0), (0, -size, 0), (0, 0, -size)
-        return [shape_data.Curve([y, x, ny, nx, y, z, ny, nz, y, x, z, nx, nz, x], 1, False)]
+def _drive_curves(drive: str, reach: float, to=None) -> list:
+    """"This control drives its object", as an ARROW from the control to the object: solid for
+    constraints, dashes for the matrix. The two stand in one place, so the arrow leaves the shape's
+    rim and bends in to the pivot (the plane XZ, before the turn to the axis); `to` = where the object
+    is in the control's own axes, when it is NOT there: then a straight arrow to it."""
+    if drive not in ("constraint", "matrix"):
+        return []
+    if to is None:
+        start, bend, end = (0.0, 0.0, reach), (reach * 0.8, 0.0, reach * 0.8), (reach * 0.2, 0.0, 0.0)
+        points = []
+        for index in range(11):
+            t = index / 10.0
+            points.append(tuple((1 - t) ** 2 * a + 2 * (1 - t) * t * b + t * t * c
+                                for a, b, c in zip(start, bend, end)))
+    else:
+        points = [tuple(value * index / 12.0 for value in to) for index in range(13)]
+    tip, before = points[-1], points[-2]
+    along = [a - b for a, b in zip(tip, before)]
+    length = sum(value * value for value in along) ** 0.5 or 1.0
+    along = [value / length for value in along]
+    up = (0.0, 1.0, 0.0) if abs(along[1]) < 0.9 else (1.0, 0.0, 0.0)
+    across = [along[1] * up[2] - along[2] * up[1], along[2] * up[0] - along[0] * up[2],
+              along[0] * up[1] - along[1] * up[0]]
+    head = reach * 0.16
+    wings = [tuple(tip[i] - along[i] * head + side * across[i] * head * 0.55 for i in range(3)) for side in (1, -1)]
+    curves = [shape_data.Curve([wings[0], tip, wings[1]], 1, False)]
     if drive == "matrix":
-        h = size * 0.8
-        corners = [(-h, -h, -h), (h, -h, -h), (h, -h, h), (-h, -h, h), (-h, h, -h), (h, h, -h), (h, h, h), (-h, h, h)]
-        return [shape_data.Curve([corners[i] for i in (0, 1, 2, 3, 0, 4, 5, 1, 5, 6, 2, 6, 7, 3, 7, 4)], 1, False)]
-    return []
+        curves += [shape_data.Curve([points[index], points[index + 1]], 1, False)
+                   for index in range(0, len(points) - 1, 2)]
+    else:
+        curves.append(shape_data.Curve(points, 1, False))
+    return curves
 
 
 def _colored(node: str, rgb, width: float) -> None:
@@ -176,15 +210,26 @@ def _colored(node: str, rgb, width: float) -> None:
 
 
 def show(shape: shape_data.Shape, targets: list, size: float, axis: str, fit: bool, color_of=None,
-         line_width: float = 2.0, grey: bool = False, zero: tuple = ("none", 0), drive: str = "none") -> int:
+         line_width: float = 2.0, grey: bool = False, zero: tuple = ("none", 0), drive: str = "none",
+         links: "list | tuple" = ()) -> int:
     """A ghost of the control each target would get: the shape facing `axis`, as big as `size` (times
     the target's own when `fit`), standing where the target stands, in the color it will get —
     `color_of(position)` -> (r, g, b), or None for Maya's default; `grey` = a template instead (it
-    can't be picked). Around it, thin: how it will be zeroed (`zero` = ("groups", how many) -> nested
-    frames, ("matrix", 1) -> brackets) and, at its pivot, a mark when it will drive its object (`drive`
-    "constraint" / "matrix"). Replaces the ghosts there were; how many are shown."""
-    targets = [target for target in targets if not scene.is_ghost(target)][:LIMIT]
-    if not targets:
+    can't be picked). Beside it, thin: how it will be zeroed (`zero` = ("groups", how many) -> diamonds
+    on a stem, ("matrix", 1) -> brackets) and an arrow to the object when it will drive it (`drive`
+    "constraint" solid / "matrix" dashed).
+
+    `links` = controls that EXIST: the same marks for what is already true of them (their zero groups
+    or matrix, an arrow to each object they drive — straight to it when it stands elsewhere), and no
+    shape: the control is there. Replaces the ghosts there were; how many are shown."""
+    targets = [target for target in targets
+               if isinstance(target, scene.Part) or not scene.is_ghost(target)][:LIMIT]
+    tied = []
+    for control in [node for node in links if not scene.is_ghost(node)][:LIMIT]:
+        info = scene.links_of(control)
+        if info["groups"] or info["matrix_zero"] or info["driven"]:
+            tied.append((control, info))
+    if not targets and not tied:
         clear()
         return 0
     with _Quiet():
@@ -195,14 +240,22 @@ def show(shape: shape_data.Shape, targets: list, size: float, axis: str, fit: bo
         group = cmds.ls(group, long=True)[0]
         _helper(group)
         for index, target in enumerate(targets):
-            reach = size * (scene.fit_size(target, axis) if fit else 1.0)
+            part = target if isinstance(target, scene.Part) else None
+            own = scene.part_size(part) if part else scene.fit_size(target, axis)
+            reach = size * (own if fit else 1.0)
             ghost = cmds.createNode("transform", name=f"{GROUP}_{index + 1}", parent=group, skipSelect=True)
             ghost = cmds.ls(ghost, long=True)[0]
-            cmds.setAttr(ghost + ".rotateOrder", cmds.getAttr(target + ".rotateOrder"))
-            cmds.matchTransform(ghost, target, position=True, rotation=True)
+            if part:                # a vertex, an edge, a face: it stands there, turned as the Part says
+                cmds.xform(ghost, worldSpace=True, matrix=list(part.matrix))
+                _targets[ghost.rpartition("|")[2]] = part.item
+                where = part.position
+            else:
+                cmds.setAttr(ghost + ".rotateOrder", cmds.getAttr(target + ".rotateOrder"))
+                cmds.matchTransform(ghost, target, position=True, rotation=True)
+                _targets[ghost.rpartition("|")[2]] = cmds.ls(target, uuid=True)[0]
+                where = scene.position(target)
             _helper(ghost)
-            _targets[ghost.rpartition("|")[2]] = cmds.ls(target, uuid=True)[0]
-            rgb = color_of(scene.position(target)) if color_of else None
+            rgb = color_of(where) if color_of else None
             for curve in shape_data.scaled(shape_data.oriented(shape.curves, axis), reach):
                 node = _add_curve(ghost, curve)
                 _helper(node)
@@ -217,7 +270,30 @@ def show(shape: shape_data.Shape, targets: list, size: float, axis: str, fit: bo
                 if cmds.attributeQuery("lineWidth", node=node, exists=True):
                     cmds.setAttr(node + ".lineWidth", line_width)
             for curve in shape_data.oriented(_zero_curves(zero[0], zero[1], reach), axis):
-                _colored(_add_curve(ghost, curve), colors.GHOST_ZERO, 1.0)
-            for curve in _drive_curves(drive, reach):
+                _colored(_add_curve(ghost, curve), colors.GHOST_ZERO, 1.5)
+            for curve in shape_data.oriented(_drive_curves("none" if part else drive, reach), axis):
                 _colored(_add_curve(ghost, curve), colors.GHOST_DRIVE, 1.5)
-    return len(targets)
+        for index, (control, info) in enumerate(tied):
+            ghost = cmds.createNode("transform", name=f"{GROUP}_link_{index + 1}", parent=group, skipSelect=True)
+            ghost = cmds.ls(ghost, long=True)[0]
+            cmds.setAttr(ghost + ".rotateOrder", cmds.getAttr(control + ".rotateOrder"))
+            cmds.matchTransform(ghost, control, position=True, rotation=True)
+            _helper(ghost)
+            _targets[ghost.rpartition("|")[2]] = cmds.ls(control, uuid=True)[0]
+            reach = scene.world_reach(control)
+            facing = scene.flat_axis(control)
+            marks = ("groups", len(info["groups"])) if info["groups"] else \
+                ("matrix", 1) if info["matrix_zero"] else ("none", 0)
+            for curve in shape_data.oriented(_zero_curves(marks[0], marks[1], reach), facing):
+                _colored(_add_curve(ghost, curve), colors.GHOST_ZERO, 1.5)
+            frame = scene._placed(control).inverse()
+            for target, kind in info["driven"][:6]:
+                spot = om.MPoint(*scene.position(target)) * frame
+                away = (spot.x, spot.y, spot.z)
+                if max(abs(value) for value in away) > reach * 0.3:
+                    arrows = _drive_curves(kind, reach, to=away)
+                else:
+                    arrows = shape_data.oriented(_drive_curves(kind, reach), facing)
+                for curve in arrows:
+                    _colored(_add_curve(ghost, curve), colors.GHOST_DRIVE, 1.5)
+    return len(targets) + len(tied)

@@ -146,6 +146,162 @@ class TurnButton(qt.QtWidgets.QPushButton):
         painter.end()
 
 
+class HierarchyStrip(qt.QtWidgets.QWidget):
+    """One line that reads like the Outliner, top first: the zero groups, the control, an arrow to the
+    object it drives — "grp › offset › lf_arm_ctrl ⇢ lf_arm_jnt". Blocks in the tone of what they are
+    (zero / control / drive / target / muted), "›" = is the parent of, an arrow = drives (solid:
+    constraints, dashed: the matrix, dots: doesn't). Long names are cut to fit. Blocks and arrows
+    with a key can be clicked.
+
+    set_items([{"key", "text", "tone", "icon", "tip", "link", "link_key"}]) — `link` is how an item
+    joins the NEXT one: "into", "gap", "constraint", "matrix", "none" or "" (nothing).
+
+    Signals:
+        clicked(str, QPoint) — a block's `key` or an arrow's `link_key`, and where (global).
+    """
+
+    clicked = qt.QtCore.Signal(str, qt.QtCore.QPoint)
+
+    zeroColor = color_property("_zero", "update")
+    controlColor = color_property("_control", "update")
+    driveColor = color_property("_drive", "update")
+    targetColor = color_property("_target", "update")
+    textColor = color_property("_text", "update")
+    mutedColor = color_property("_muted", "update")
+
+    LINK_WIDTH = {"into": 12, "gap": 4, "constraint": 28, "matrix": 28, "none": 28, "": 0}
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        from msl_tools.msl.core.theme.theme_registry import ThemeRegistry
+        fallback = ThemeRegistry.fallback()
+        self._zero = qt.QtGui.QColor(fallback.accent)
+        self._control = qt.QtGui.QColor(fallback.accent)
+        self._drive = qt.QtGui.QColor(fallback.accent)
+        self._target = qt.QtGui.QColor(fallback.text_secondary)
+        self._text = qt.QtGui.QColor(fallback.text_primary)
+        self._muted = qt.QtGui.QColor(fallback.text_secondary)
+        self._items = []
+        self._hits = []          # (QRectF, key, tip)
+        self._hover = ""
+        self.setFixedHeight(24)
+        self.setMinimumWidth(60)
+        self.setMouseTracking(True)
+
+    def set_items(self, items: list) -> None:
+        self._items = [dict(item) for item in items]
+        self.update()
+
+    def _tone(self, tone: str) -> "qt.QtGui.QColor":
+        return {"zero": self._zero, "control": self._control, "drive": self._drive,
+                "target": self._target}.get(tone, self._muted)
+
+    def _laid_out(self, metrics) -> list:
+        """[(item, block rect, shown text, link rect)] — the texts cut until the line fits."""
+        cap = 400
+        while True:
+            x, placed = 0.0, []
+            for item in self._items:
+                text = metrics.elidedText(item.get("text", ""), qt.QtCore.Qt.TextElideMode.ElideMiddle, cap)
+                icon = item.get("icon")
+                has_icon = icon is not None and not icon.isNull()
+                width = 12 + (14 if has_icon else 0) + (metrics.horizontalAdvance(text) if text else 0) \
+                    - (4 if has_icon and not text else 0)
+                block = qt.QtCore.QRectF(x, 2, width, self.height() - 4)
+                x += width
+                gap = self.LINK_WIDTH.get(item.get("link", ""), 0)
+                placed.append((item, block, text, qt.QtCore.QRectF(x, 2, gap, self.height() - 4)))
+                x += gap
+            if x <= self.width() or cap <= 24:
+                return placed
+            cap -= 6
+
+    def paintEvent(self, event) -> None:
+        painter = qt.QtGui.QPainter(self)
+        painter.setRenderHint(qt.QtGui.QPainter.RenderHint.Antialiasing)
+        font = painter.font()
+        font.setPixelSize(11)
+        painter.setFont(font)
+        self._hits = []
+        middle = self.height() / 2.0
+        for item, block, text, link in self._laid_out(painter.fontMetrics()):
+            tone = self._tone(item.get("tone", ""))
+            key = item.get("key", "")
+            quiet = item.get("tone", "") in ("", "muted")
+            fill = qt.QtGui.QColor(tone)
+            fill.setAlpha((70 if key and key == self._hover else 34) if not quiet else (40 if key == self._hover and key else 0))
+            edge = qt.QtGui.QColor(tone)
+            edge.setAlpha(170 if not quiet else 70)
+            painter.setPen(qt.QtGui.QPen(edge, 1))
+            painter.setBrush(fill)
+            painter.drawRoundedRect(block.adjusted(0.5, 0.5, -0.5, -0.5), 5, 5)
+            left = block.left() + 6
+            icon = item.get("icon")
+            if icon is not None and not icon.isNull():
+                from msl_tools.msl.ui.icon_manager import tint_icon
+                painter.drawPixmap(qt.QtCore.QPointF(left - (2 if not text else 0), middle - 6),
+                                   tint_icon(icon, 12, self.devicePixelRatioF(), tone if not quiet else self._muted))
+                left += 14
+            if text:
+                painter.setPen(self._muted if quiet else self._text)
+                painter.drawText(qt.QtCore.QRectF(left, block.top(), block.right() - left, block.height()),
+                                 qt.QtCore.Qt.AlignmentFlag.AlignLeft | qt.QtCore.Qt.AlignmentFlag.AlignVCenter, text)
+            if key:
+                self._hits.append((block, key, item.get("tip", "")))
+            kind = item.get("link", "")
+            if kind == "into":
+                painter.setPen(self._muted)
+                painter.drawText(link, qt.QtCore.Qt.AlignmentFlag.AlignCenter, "›")
+            elif kind in ("constraint", "matrix", "none"):
+                link_key = item.get("link_key", "")
+                if link_key and link_key == self._hover:
+                    wash = qt.QtGui.QColor(self._drive)
+                    wash.setAlpha(45)
+                    painter.setPen(qt.QtCore.Qt.PenStyle.NoPen)
+                    painter.setBrush(wash)
+                    painter.drawRoundedRect(link.adjusted(1, 1, -1, -1), 5, 5)
+                pen = qt.QtGui.QPen(self._drive if kind != "none" else self._muted, 1.5)
+                pen.setCapStyle(qt.QtCore.Qt.PenCapStyle.RoundCap)
+                pen.setStyle({"matrix": qt.QtCore.Qt.PenStyle.DashLine,
+                              "none": qt.QtCore.Qt.PenStyle.DotLine}.get(kind, qt.QtCore.Qt.PenStyle.SolidLine))
+                painter.setPen(pen)
+                start, end = link.left() + 5, link.right() - 5
+                painter.drawLine(qt.QtCore.QPointF(start, middle), qt.QtCore.QPointF(end, middle))
+                if kind != "none":
+                    pen.setStyle(qt.QtCore.Qt.PenStyle.SolidLine)
+                    painter.setPen(pen)
+                    painter.drawLine(qt.QtCore.QPointF(end, middle), qt.QtCore.QPointF(end - 4, middle - 3.5))
+                    painter.drawLine(qt.QtCore.QPointF(end, middle), qt.QtCore.QPointF(end - 4, middle + 3.5))
+                if link_key:
+                    self._hits.append((link, link_key, item.get("link_tip", "")))
+        painter.end()
+
+    def _at(self, point) -> tuple:
+        for rect, key, tip in self._hits:
+            if rect.contains(point):
+                return key, tip
+        return "", ""
+
+    def mouseMoveEvent(self, event) -> None:
+        key, tip = self._at(event.position())
+        if key != self._hover:
+            self._hover = key
+            self.setCursor(qt.QtCore.Qt.CursorShape.PointingHandCursor if key
+                           else qt.QtCore.Qt.CursorShape.ArrowCursor)
+            self.setToolTip(tip)
+            self.update()
+
+    def leaveEvent(self, event) -> None:
+        if self._hover:
+            self._hover = ""
+            self.update()
+
+    def mousePressEvent(self, event) -> None:
+        key, _tip = self._at(event.position())
+        if key and event.button() == qt.QtCore.Qt.MouseButton.LeftButton:
+            self.clicked.emit(key, event.globalPosition().toPoint())
+
+
 class Swatches(qt.QtWidgets.QWidget):
     """Colors as small squares in rows: Maya's index palette, the user's saved colors. The colors
     are the scene's (data), only the ring under the pointer / around the current one comes from

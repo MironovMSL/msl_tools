@@ -12,7 +12,7 @@ from msl_tools.msl.tools.maya.controls import colors as color_data
 from msl_tools.msl.tools.maya.controls.naming import DEFAULT_TEMPLATE, control_name
 from msl_tools.msl.tools.maya.controls.panel_color import _ColorMixin
 from msl_tools.msl.tools.maya.controls.preview import ShapeView, thumbnail
-from msl_tools.msl.tools.maya.controls.widgets import DragNumberField, Swatches, TurnButton
+from msl_tools.msl.tools.maya.controls.widgets import DragNumberField, HierarchyStrip, Swatches, TurnButton
 from msl_tools.msl.tools.maya.rename import rules
 from msl_tools.msl.tools.maya.rename.buttons import QuickButton, ToggleIconButton
 from msl_tools.msl.ui.theme import StylesheetBuilder
@@ -98,7 +98,7 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
     TOOL_NAME = "controls"
     DEFAULTS = {"shape": "circle", "category": ALL, "template": DEFAULT_TEMPLATE, "size": 1.0, "fit": True,
                 "axis": "X", "offsets": "Groups", "offset_names": "offset", "chain": True, "side_color": True,
-                "drive": "None", "own_color": "", "ghost": True,
+                "drive": "None", "own_color": "", "ghost": True, "middle": False,
                 "folded": {"control": False}}
 
     def __init__(self, parent=None):
@@ -183,6 +183,12 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
         naming.addWidget(self._caption("Name"))
         naming.addWidget(self._template, 1)
         naming.addWidget(self._chain)
+        self._middle = ToggleIconButton(icons.get_icon("center", sub_folder="actions"), "One in the middle",
+                                        "ONE control in the middle of everything selected, instead of one on "
+                                        "each: select an edge loop and get a ring around the limb — it faces "
+                                        "across the loop and reaches just past it (with Fit)")
+        self._middle.setObjectName("controlsToggle")
+        naming.addWidget(self._middle)
         self._ghost = ToggleIconButton(icons.get_icon("eye", sub_folder="actions"), "Ghost in the viewport",
                                        "What Create would make, shown in Maya's viewport on the selected "
                                        "objects before anything is made: it follows the shape, size, axis and "
@@ -228,6 +234,10 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
 
         card.body_layout.addLayout(head)
         card.body_layout.addLayout(shelf)
+        # top first, like the Outliner: the zero groups, the control, an arrow to what it drives
+        self._strip = HierarchyStrip()
+        self._strip.setObjectName("controlsStrip")
+        card.body_layout.addWidget(self._strip)
         card.body_layout.addLayout(naming)
         card.body_layout.addLayout(making)
         card.body_layout.addLayout(driving)
@@ -284,7 +294,7 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
                                                          "selected — staying where they are, colors kept")
         # the other side (teal)
         self._mirror = tool("mirror_shape", "teal", "Mirror", "A mirrored copy of each selected control on the "
-                            "other side (lf_ ↔ rt_, _L ↔ _R): its zero groups too, under the other side's parent; "
+                            "other side (lf_ ↔ rt_, _L ↔ _R; a name without a side gets one: arm_ctrl → rt_arm_ctrl): its zero groups too, under the other side's parent; "
                             "when that control is there already, its shape is made the mirror of this one\n"
                             "Right click: across Y / Z, or flip in place", menu=True)
         self._mirror_update = tool("mirror_update", "teal", "Shape to the other side", "Only the SHAPE: the other "
@@ -319,6 +329,15 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
                                                                                       "(curve) under what is selected")
         self._select_all = tool("select_all", "yellow", "Controls in the scene", "Select every control (curve) in "
                                                                                "the scene")
+        # helpers of the rigging itself (plain)
+        self._locators = tool("locator", "", "Locators on the selection", "A locator on each selected object — "
+                              "at its pivot, turned like it — and on each selected vertex, CV, edge or face (its "
+                              "middle)\nRight click: along the surface's normal · ONE locator in the "
+                              "middle of everything selected (the center of an edge loop)", menu=True)
+        self._joints = tool("joint_chain", "", "Joints on the selection", "A chain of joints through what is "
+                            "selected, in the order picked — locators set out for a skeleton, or vertices: "
+                            "each joint under the one before, its X down the bone, named after what it stands "
+                            "on (lf_arm_loc → lf_arm_jnt)\nRight click: separate joints, not a chain", menu=True)
         # into the library (green)
         self._capture = tool("bookmark_add", "green", "Save as a shape", "Save the selected curves as a shape of "
                                                                          "yours (it goes under Mine)")
@@ -329,6 +348,7 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
                 ((self._zero_groups_button, self._zero_matrix_button, self._matrix_back_button),
                  (self._drive_constraint, self._drive_matrix, self._drive_off),
                  (self._on_top_button, self._select_below, self._select_all),
+                 (self._locators, self._joints),
                  (self._capture,)))
         for groups in rows:
             line = qt.QtWidgets.QHBoxLayout()
@@ -387,6 +407,10 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
         self._drive_constraint.clicked.connect(lambda: self._drive_selected("constraint"))
         self._drive_matrix.clicked.connect(lambda: self._drive_selected("matrix"))
         self._drive_off.clicked.connect(self._undrive_selected)
+        self._locators.clicked.connect(lambda: self._make_locators(False))
+        self._locators.customContextMenuRequested.connect(self._on_locators_menu)
+        self._joints.clicked.connect(lambda: self._make_joints(True))
+        self._joints.customContextMenuRequested.connect(self._on_joints_menu)
         self._select_below.clicked.connect(lambda: self._select_controls(True))
         self._select_all.clicked.connect(lambda: self._select_controls(False))
         self._drive.current_changed.connect(self._save)
@@ -401,9 +425,10 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
         for widget in (self._template, self._offset_names):
             widget.textEdited.connect(self._save)
         self._size.value_changed.connect(self._save)
-        for toggle in (self._fit, self._chain, self._side_color, self._ghost):
+        for toggle in (self._fit, self._chain, self._side_color, self._ghost, self._middle):
             toggle.toggled.connect(self._save)
         self._view.axis_picked.connect(self._on_axis)
+        self._strip.clicked.connect(self._on_strip)
         self._color_chip.clicked.connect(lambda _key: self._pick_own_color())
         self._color_chip.menu_requested.connect(self._on_color_chip_menu)
         self._view.size_stepped.connect(self._size._nudge)
@@ -507,8 +532,10 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
     def _draw_live(self) -> None:
         """Every selected object (a joint with its bones, a box) with the control it would get: at its
         real size, in its color, its zero groups as frames around it, chained controls joined by a
-        line; the first one's name on top; the button says how many."""
-        targets, looks = [], []
+        line; the first one's name on top; the button says how many. `entries` = what Create works
+        on (scene.selection_targets): objects, and the selected PARTS of objects — vertices, edges,
+        faces — or the one in the middle of them all; `targets` = the objects among them."""
+        entries, targets, looks = [], [], []
         try:
             from maya import cmds as _maya
             in_maya = True
@@ -519,8 +546,9 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
                 from msl_tools.msl.tools.maya.controls import ghost, scene
                 if ghost.redirect_selection():
                     return      # a picked ghost became its object: Maya tells of the new selection
-                targets = scene.selected_transforms()
-                looks = scene.targets_look(targets[:1], axis=self._view.axis())
+                entries = scene.selection_targets(self._view.axis(), self._middle.isChecked())
+                targets = [entry for entry in entries if isinstance(entry, str)]
+                looks = scene.targets_look(entries[:1], axis=self._view.axis())
             except Exception as error:
                 self._report("Couldn't read the selection", error)
         look = looks[0] if looks else None
@@ -533,64 +561,169 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
         drive = self._drive.current()
         mode = self._offsets.current()
         fit = self._fit.isChecked()
-        count = len(targets)
-        # the name and the count are the button's to say; the preview says HOW: zero and drive, as icons
-        icons = UiResources().iconManager
+        count = len(entries)
+        in_middle = count == 1 and not targets and bool(entries) and not isinstance(entries[0].item, str)
         name = look["name"] if (look and drive == "Shape") else control_name(
             self._template.text().strip(), look["name"] if look else "", position, self._sides(), 1)
-        notes = []
-        if drive == "Shape":
-            notes.append((icons.get_icon("cvs", sub_folder="actions"), "the curve goes onto it", "drive"))
-        else:
-            if mode == "Groups":
-                notes.append((icons.get_icon("zero_out", sub_folder="actions"),
-                              " › ".join(self._offset_suffixes()), "zero"))
-            elif mode == "Matrix":
-                notes.append((icons.get_icon("zero_matrix", sub_folder="actions"), "zero in the matrix", "zero"))
-            if drive == "Constrain":
-                notes.append((icons.get_icon("drive_constraint", sub_folder="actions"), "constraints", "drive"))
-            elif drive == "Matrix":
-                notes.append((icons.get_icon("drive_matrix", sub_folder="actions"), "driven by matrix", "drive"))
         self._view.set_title("", "")
-        self._view.set_notes(notes)
+        self._view.set_notes([])
+        self._view.set_zero("none")
         self._create.setToolTip((f"Makes {name}" + (f" and {count - 1} more" if count > 1 else "") + "\n"
                                  if count or drive != "Shape" else "") +
                                 "A control on every selected object (nothing selected: one at the origin) · "
                                 "double click a shape does the same")
-        items = [{"look": each, "reach": self._size.value() * (each["fit"] if fit else 1.0),
-                  "color": self._color_for(self._control_rgb(each["position"])), "matrix": each["matrix"],
-                  "parent": each["parent"]} for each in looks] or [{"color": self._color_for(rgb)}]
-        self._view.set_action(None, None)
-        self._view.set_zero("none" if drive == "Shape" else mode.lower(), len(self._offset_suffixes()))
-        self._view.set_scene(items)
+        existing = None             # the first selected object is a control that exists
+        if entries and in_maya and isinstance(entries[0], str):
+            try:
+                if scene.curve_shapes(targets[0]):
+                    own = scene.read_color(targets[0])[0]
+                    existing = (scene.read_curves(targets[0]), own, scene.links_of(targets[0]))
+            except Exception as error:
+                self._report("Couldn't read the selected control", error)
+        if existing:
+            # what IS: its own shape in its own color, and the line says what it is tied into
+            curves, own, info = existing
+            self._view.set_action(curves, curves, self._color_for(own) if own is not None else None)
+            self._strip.set_items(self._strip_existing(targets[0], info, count))
+        else:
+            # what WILL BE made of the selection
+            items = [{"look": each, "reach": self._size.value() * (each["fit"] if fit else 1.0),
+                      "color": self._color_for(self._control_rgb(each["position"])), "matrix": each["matrix"],
+                      "parent": each["parent"]} for each in looks] or [{"color": self._color_for(rgb)}]
+            self._view.set_action(None, None)
+            self._view.set_scene(items)
+            self._strip.set_items(self._strip_planned(look, count, name, mode, drive))
         self._refresh_states(targets)
-        self._create.setText("Create" if not count else f"Shape onto {count}" if drive == "Shape"
-                             else f"Create {count}")
-        self._update_ghost(targets)
+        self._create.setText("Create" if not count else f"Shape onto {len(targets)}" if drive == "Shape" and targets
+                             else "Create 1 · middle" if in_middle else f"Create {count}")
+        self._update_ghost(entries)
+
+    # ---- the line under the library: zero groups › control ⇢ what it drives
+
+    def _strip_planned(self, look, count: int, name: str, mode: str, drive: str) -> list:
+        """What Create WOULD make, top first. Its blocks are the settings: a click changes them."""
+        icons = UiResources().iconManager
+        more = f"  +{count - 1}" if count > 1 else ""
+        target = {"key": "", "text": (look["name"] + more) if look else "what you select",
+                  "tone": "target" if look else "muted", "tip": "The object the control is made for"}
+        if drive == "Shape":
+            return [{"key": "drive", "icon": icons.get_icon("cvs", sub_folder="actions"), "text": "the curve",
+                     "tone": "drive", "link": "into", "tip": "No new object: the curve becomes a shape of the "
+                                                             "object itself — click to change"}, target]
+        items = [{"key": "zero", "tone": "zero" if mode != "None" else "muted",
+                  "icon": icons.get_icon({"Groups": "zero_out", "Matrix": "zero_matrix"}.get(mode, "clear"),
+                                         sub_folder="actions"),
+                  "text": {"Matrix": "matrix", "None": "no zero"}.get(mode, ""),
+                  "link": "gap" if mode == "Groups" else "into",
+                  "tip": "How a new control is zeroed — click to change"}]
+        if mode == "Groups":
+            for index, suffix in enumerate(self._offset_suffixes()):
+                items.append({"key": f"group:{index}", "text": suffix, "tone": "zero", "link": "into",
+                              "tip": f"A group above the control: <control>_{suffix} — click to rename it"})
+        items.append({"key": "control", "text": name + more, "tone": "control",
+                      "tip": "The new control — click to change how it is named",
+                      "link": {"Constrain": "constraint", "Matrix": "matrix"}.get(drive, "none"),
+                      "link_key": "drive",
+                      "link_tip": {"Constrain": "It will drive the object through constraints",
+                                   "Matrix": "It will drive the object through its offsetParentMatrix"}
+                      .get(drive, "It will NOT drive the object") + " — click to change"})
+        items.append(target)
+        return items
+
+    def _strip_existing(self, control: str, info: dict, count: int) -> list:
+        """What a control that exists IS tied into. A click on a block selects that object."""
+        icons = UiResources().iconManager
+        short = control.rpartition("|")[2]
+        items = []
+        for group in info["groups"]:
+            name = group.rpartition("|")[2]
+            items.append({"key": "node:" + group, "tone": "zero", "link": "into", "tip": f"{name} — click to select it",
+                          "text": name[len(short) + 1:] if name.startswith(short + "_") else name})
+        if info["matrix_zero"]:
+            items.append({"key": "", "tone": "zero", "text": "matrix", "link": "into",
+                          "icon": icons.get_icon("zero_matrix", sub_folder="actions"),
+                          "tip": "Zeroed in its offsetParentMatrix"})
+        driven = info["driven"]
+        items.append({"key": "node:" + control, "text": short + (f"  +{count - 1}" if count > 1 else ""),
+                      "tone": "control", "tip": "The selected control",
+                      "link": driven[0][1] if driven else "",
+                      "link_tip": "Drives it through " + ("constraints" if driven and driven[0][1] == "constraint"
+                                                          else "its offsetParentMatrix")})
+        if driven:
+            items.append({"key": "node:" + driven[0][0], "tone": "target", "tip": "The object it drives — click to "
+                          "select it", "text": driven[0][0].rpartition("|")[2] +
+                          (f"  +{len(driven) - 1}" if len(driven) > 1 else "")})
+        elif not info["groups"] and not info["matrix_zero"]:
+            items.append({"key": "", "tone": "muted", "text": "not zeroed · drives nothing"})
+        return items
+
+    def _on_strip(self, key: str, where) -> None:
+        if key.startswith("node:"):
+            try:
+                from maya import cmds
+                cmds.select(key[5:], replace=True)
+            except (ImportError, RuntimeError, ValueError):
+                pass
+        elif key == "control":
+            self._template.setFocus()
+            self._template.selectAll()
+        elif key.startswith("group:"):
+            import re
+            if self._offsets.current() != "Groups":
+                self._offsets.set_current("Groups")
+                self._on_offsets("Groups")
+            words = list(re.finditer(r"[^,\s]+", self._offset_names.text()))
+            index = int(key[6:])
+            self._offset_names.setFocus()
+            if index < len(words):
+                self._offset_names.setSelection(words[index].start(), len(words[index].group()))
+            else:
+                self._offset_names.selectAll()
+        elif key in ("zero", "drive"):
+            control = self._offsets if key == "zero" else self._drive
+            notes = {"None": "it only stands there", "Groups": "groups above the control",
+                     "Matrix": "in its offsetParentMatrix, no group"} if key == "zero" else \
+                {"None": "it only stands there", "Shape": "the curve becomes the object's own shape",
+                 "Constrain": "parent + scale constraints", "Matrix": "the object's offsetParentMatrix"}
+            menu = make_rounded_popup(qt.QtWidgets.QMenu(self))
+            for option in (OFFSET_MODES if key == "zero" else DRIVES):
+                action = menu.addAction(f"{option} — {notes[option]}", lambda option=option: self._pick_setting(control, option))
+                action.setCheckable(True)
+                action.setChecked(control.current() == option)
+            menu.exec(where)
+
+    def _pick_setting(self, control, option: str) -> None:
+        control.set_current(option)
+        if control is self._offsets:
+            self._on_offsets(option)
+        else:
+            self._save()
 
     # ---- the ghost: the same, in Maya's own viewport
 
     _made = frozenset()      # what the last Create made / shaped: no ghost on it while it stays selected
 
-    def _update_ghost(self, targets: list) -> None:
+    def _update_ghost(self, entries: list) -> None:
         try:
             from maya import cmds as _maya      # no Maya here: no ghost
         except ImportError:
             return
         from msl_tools.msl.tools.maya.controls import ghost
-        if self._made and not set(targets) <= self._made:
+        targets = [entry for entry in entries if isinstance(entry, str)]
+        if self._made and (len(targets) != len(entries) or not set(targets) <= self._made):
             self._made = frozenset()
-        # a selected CONTROL is there to be worked on (SELECTED), not to get a control of its own
         from msl_tools.msl.tools.maya.controls import scene
-        targets = [target for target in targets if not scene.curve_shapes(target)]
-        if not (self._ghost.isChecked() and targets and self.isVisible()) or self._made:
+        # a selected CONTROL doesn't get a ghost of a new one: it gets the marks of what it is tied into
+        links = [target for target in targets if scene.curve_shapes(target)]
+        fresh = [] if self._made else [entry for entry in entries if not (isinstance(entry, str) and entry in links)]
+        if not (self._ghost.isChecked() and self.isVisible() and (fresh or links)):
             ghost.clear()
             return
         try:
             drive = {"constrain": "constraint"}.get(self._drive.current().lower(), self._drive.current().lower())
             zero = ("none", 0) if drive == "shape" else (self._offsets.current().lower(), len(self._offset_suffixes()))
-            ghost.show(self._picked_shape(), targets, self._size.value(), self._view.axis(), self._fit.isChecked(),
-                       self._control_rgb, zero=zero, drive=drive)
+            ghost.show(self._picked_shape(), fresh, self._size.value(), self._view.axis(), self._fit.isChecked(),
+                       self._control_rgb, zero=zero, drive=drive, links=links)
         except Exception as error:
             self._report("The ghost couldn't be drawn", error)
             ghost.clear()
@@ -707,6 +840,7 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
         self._drive.set_current(drive if drive in DRIVES else "None", animate=False)
         self._chain.setChecked(bool(s.get("chain", True)))
         self._ghost.setChecked(bool(s.get("ghost", True)))
+        self._middle.setChecked(bool(s.get("middle", False)))
         self._side_color.setChecked(bool(s.get("side_color", True)))
         category = s.get("category", ALL)
         self._categories.set_current(category if category in (ALL,) + shape_data.CATEGORIES else ALL)
@@ -724,7 +858,7 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
                   "fit": self._fit.isChecked(), "axis": self._view.axis(), "offsets": self._offsets.current(),
                   "offset_names": self._offset_names.text().strip(), "chain": self._chain.isChecked(),
                   "side_color": self._side_color.isChecked(), "drive": self._drive.current(),
-                  "ghost": self._ghost.isChecked()}
+                  "ghost": self._ghost.isChecked(), "middle": self._middle.isChecked()}
         for key, value in values.items():
             if self._settings.get(key) != value:
                 self._settings[key] = value
@@ -848,11 +982,16 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
         shape = self._picked_shape()
         names = self._offset_suffixes()
         drive = {"constrain": "constraint"}.get(self._drive.current().lower(), self._drive.current().lower())
-        targets = scene.selected_transforms()
+        entries = scene.selection_targets(self._view.axis(), self._middle.isChecked())
+        targets = [entry for entry in entries if isinstance(entry, str)]
+        parts = len(entries) - len(targets)
+        if drive == "shape" and parts and not targets:
+            self._say("The curve can't become the shape of a vertex, an edge or a face — pick another Drive", "error")
+            return
         notes = []
         self._clear_ghost()
         try:
-            made = scene.create(shape, targets, self._template.text().strip(), self._size.value(),
+            made = scene.create(shape, entries, self._template.text().strip(), self._size.value(),
                                 self._view.axis(), self._fit.isChecked(), self._offsets.current().lower(),
                                 names, self._chain.isChecked(), self._side_color.isChecked(), self._sides(),
                                 drive=drive, notes=notes, rgb=self._own_rgb())
@@ -867,10 +1006,12 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
             return
         text = f"Created {len(made)}: {listed}"
         if targets and drive in ("constraint", "matrix"):
-            driven = len(made) - len(notes)
+            driven = len(targets) - len(notes)
             text += f" · {driven} driven by {'constraints' if drive == 'constraint' else 'the matrix'}"
         if notes:
             text += f" · NOT driven — {notes[0]}" + (f" (+{len(notes) - 1})" if len(notes) > 1 else "")
+        if parts and drive in ("constraint", "matrix"):
+            text += " · a vertex, an edge or a face can't be driven: those only stand there"
         self._say(text + " · Ctrl+Z undoes it", "error" if notes and len(notes) == len(made) else "done")
 
     def _selected_controls(self) -> list:
@@ -1112,6 +1253,64 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
         for each in (notes + problems)[:1]:
             text += f" · NOT tied — {each}" + (f" (+{len(notes + problems) - 1})" if len(notes + problems) > 1 else "")
         self._say(text + (" · Ctrl+Z undoes it" if done else ""), "done" if done else "error")
+
+    def _make_locators(self, center: bool, along_normal: bool = False) -> None:
+        from msl_tools.msl.tools.maya.controls import scene
+        try:
+            made, total = scene.locators_on_selection(center=center, along_normal=along_normal,
+                                                      axis=self._view.axis())
+        except RuntimeError as error:
+            self._say(f"Maya refused: {error}".strip(), "error")
+            return
+        if not made:
+            self._say("Select objects, vertices, edges or faces first", "error")
+            return
+        short = [path.rpartition("|")[2] for path in made]
+        if center:
+            text = f"One locator in the middle of {total} selected: {short[0]}"
+        else:
+            text = f"{len(made)} locator{'s' if len(made) != 1 else ''}: " + ", ".join(short[:3]) + \
+                ("…" if len(short) > 3 else "")
+            if total > len(made):
+                text += f" · the first {len(made)} of {total} (right click: one in the middle)"
+        if along_normal:
+            text += f" · {self._view.axis()} along the normal"
+        self._say(text + " · Ctrl+Z undoes it", "done")
+
+    def _on_locators_menu(self, position) -> None:
+        axis = self._view.axis()
+        menu = make_rounded_popup(qt.QtWidgets.QMenu(self))
+        menu.addAction("A locator on each selected object, vertex, edge or face", lambda: self._make_locators(False))
+        menu.addAction(f"…on each, its {axis} along the surface's normal (vertices, edges, faces of a mesh)",
+                       lambda: self._make_locators(False, True))
+        menu.addSeparator()
+        menu.addAction("One locator in the middle of everything selected", lambda: self._make_locators(True))
+        menu.addAction(f"…in the middle, its {axis} across the loop", lambda: self._make_locators(True, True))
+        menu.exec(self._locators.mapToGlobal(position))
+
+    def _make_joints(self, chain: bool) -> None:
+        from msl_tools.msl.tools.maya.controls import scene
+        try:
+            made, total = scene.joints_on_selection(chain=chain)
+        except RuntimeError as error:
+            self._say(f"Maya refused: {error}".strip(), "error")
+            return
+        if not made:
+            self._say("Select locators (or other objects, vertices) in the order of the chain first", "error")
+            return
+        short = [path.rpartition("|")[2] for path in made]
+        text = (f"A chain of {len(made)} joints: " if chain and len(made) > 1 else
+                f"{len(made)} joint{'s' if len(made) != 1 else ''}: ") + ", ".join(short[:3]) + \
+            ("…" if len(short) > 3 else "")
+        if total > len(made):
+            text += f" · the first {len(made)} of {total}"
+        self._say(text + " · Ctrl+Z undoes it", "done")
+
+    def _on_joints_menu(self, position) -> None:
+        menu = make_rounded_popup(qt.QtWidgets.QMenu(self))
+        menu.addAction("A chain of joints through the selection, in the order picked", lambda: self._make_joints(True))
+        menu.addAction("Separate joints, each turned like its object", lambda: self._make_joints(False))
+        menu.exec(self._joints.mapToGlobal(position))
 
     def _undrive_selected(self) -> None:
         from msl_tools.msl.tools.maya.controls import scene

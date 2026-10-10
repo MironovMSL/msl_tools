@@ -236,6 +236,14 @@ class ShapeView(qt.QtWidgets.QWidget):
                 painter.drawLine(origin, end)
                 painter.drawEllipse(end, radius_px * 0.6, radius_px * 0.6)
             return
+        if look.get("kind") == "part":
+            # a point of a surface: a dot, and the way the surface faces there (the picked axis)
+            origin = place((0.0, 0.0, 0.0))
+            painter.setPen(qt.QtGui.QPen(color, 1.2))
+            painter.setBrush(color)
+            painter.drawEllipse(origin, 2.5, 2.5)
+            painter.setBrush(qt.QtCore.Qt.BrushStyle.NoBrush)
+            return
         box = look.get("box")
         if not box:
             return

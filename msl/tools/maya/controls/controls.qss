@@ -80,6 +80,15 @@ ControlsPanel QFrame#controlsRule {
     background: alpha(var(--border), 90%);
     border: none;
 }
+/* The line under the library: zero groups › control ⇢ what it drives. */
+ControlsPanel HierarchyStrip#controlsStrip {
+    qproperty-zeroColor:    var(--violet);
+    qproperty-controlColor: var(--accent);
+    qproperty-driveColor:   var(--pink);
+    qproperty-targetColor:  var(--text-secondary);
+    qproperty-textColor:    var(--text-primary);
+    qproperty-mutedColor:   var(--text-secondary);
+}
 /* The size of a new control, inside the preview's corner. */
 ControlsPanel DragNumberField#controlsViewSize {
     min-height: 22px;

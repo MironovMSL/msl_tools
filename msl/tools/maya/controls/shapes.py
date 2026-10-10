@@ -93,6 +93,82 @@ def turned(curves: list, axis: str, degrees: float = 90.0) -> list:
     return [Curve([turn(point) for point in curve.points], curve.degree, curve.closed) for curve in curves]
 
 
+def _cross(p, q) -> tuple:
+    return (p[1] * q[2] - p[2] * q[1], p[2] * q[0] - p[0] * q[2], p[0] * q[1] - p[1] * q[0])
+
+
+def frame_along(normal, axis: str = "Y") -> tuple:
+    """Three unit axes — (x, y, z), each a triple in the world — of a frame whose `axis` runs along
+    `normal`, the other two as level as they can be: along the world's own axis the frame IS the
+    world's. For a control (a locator) that stands on a surface and faces away from it."""
+    length = math.sqrt(sum(value * value for value in normal)) or 1.0
+    along = tuple(value / length for value in normal)
+    axis = axis if axis in AXES else "Y"
+    # where the frame's SECOND axis would like to point (X: its Y up; Y: its Z forward; Z: its Y up),
+    # and what to take when the normal runs that very way
+    hints = {"X": ((0.0, 1.0, 0.0), (-1.0, 0.0, 0.0)), "Y": ((0.0, 0.0, 1.0), (0.0, -1.0, 0.0)),
+             "Z": ((0.0, 1.0, 0.0), (0.0, 0.0, -1.0))}[axis]
+    second = hints[1]
+    for hint in hints:
+        dot = sum(a * b for a, b in zip(hint, along))
+        flat = tuple(a - dot * b for a, b in zip(hint, along))
+        size = math.sqrt(sum(value * value for value in flat))
+        if size > 1e-3:
+            second = tuple(value / size for value in flat)
+            break
+    if axis == "X":
+        return along, second, _cross(along, second)
+    if axis == "Z":
+        return _cross(second, along), second, along
+    return _cross(along, second), along, second
+
+
+def plane_normal(points) -> "tuple | None":
+    """The unit normal of the plane a ring of points lies in best — the direction they vary in LEAST;
+    they needn't be in order (an edge loop picked any way). It points up, else along +X, else +Z.
+    None when the points span no plane: fewer than three, or all on one line."""
+    points = [tuple(float(value) for value in point) for point in points]
+    if len(points) < 3:
+        return None
+    middle = [sum(point[i] for point in points) / len(points) for i in range(3)]
+    spread = [[sum((point[i] - middle[i]) * (point[j] - middle[j]) for point in points) for j in range(3)]
+              for i in range(3)]
+
+    def widest(matrix):
+        """The direction a symmetric matrix stretches most, and by how much (power iteration — from
+        several starts: one start can lie exactly across the answer, and then finds nothing)."""
+        best = ((1.0, 0.0, 0.0), 0.0)
+        for vector in ((0.61, 0.53, 0.59), (-0.37, 0.71, 0.60), (0.74, -0.42, 0.52)):
+            stretch = 0.0
+            for _turn in range(80):
+                moved = tuple(sum(matrix[i][j] * vector[j] for j in range(3)) for i in range(3))
+                stretch = math.sqrt(sum(value * value for value in moved))
+                if stretch < 1e-14:
+                    stretch = 0.0
+                    break
+                vector = tuple(value / stretch for value in moved)
+            if stretch > best[1]:
+                best = (vector, stretch)
+        return best
+
+    first, most = widest(spread)
+    if most < 1e-12:
+        return None
+    rest = [[spread[i][j] - most * first[i] * first[j] for j in range(3)] for i in range(3)]
+    second, next_most = widest(rest)
+    if next_most < most * 1e-6:
+        return None                     # on one line
+    normal = _cross(first, second)
+    length = math.sqrt(sum(value * value for value in normal))
+    if length < 1e-9:
+        return None
+    normal = tuple(value / length for value in normal)
+    for index in (1, 0, 2):
+        if abs(normal[index]) > 1e-3:
+            return normal if normal[index] > 0 else tuple(-value for value in normal)
+    return normal
+
+
 def polyline(curve: Curve, steps: int = 8) -> list:
     """Points along the curve as Maya draws it: degree 1 = its CVs (the first again at the end if
     closed); degree 2+ = a uniform B-spline — periodic when closed, clamped to its ends when open."""

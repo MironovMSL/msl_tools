@@ -40,6 +40,50 @@ class BuiltIn(unittest.TestCase):
         self.assertAlmostEqual(y, 1.0)
 
 
+class Frames(unittest.TestCase):
+    def assert_frame(self, frame):
+        x, y, z = frame
+        for axis in frame:
+            self.assertAlmostEqual(sum(value * value for value in axis), 1.0, places=6)
+        self.assertAlmostEqual(sum(a * b for a, b in zip(x, y)), 0.0, places=6)
+        cross = (x[1] * y[2] - x[2] * y[1], x[2] * y[0] - x[0] * y[2], x[0] * y[1] - x[1] * y[0])
+        for got, want in zip(cross, z):                 # right-handed: no mirrored control
+            self.assertAlmostEqual(got, want, places=6)
+
+    def test_along_the_worlds_own_axis_it_is_the_world(self):
+        for axis, normal in (("X", (1, 0, 0)), ("Y", (0, 1, 0)), ("Z", (0, 0, 1))):
+            frame = shapes.frame_along(normal, axis)
+            self.assertEqual([tuple(round(value, 6) for value in row) for row in frame],
+                             [(1, 0, 0), (0, 1, 0), (0, 0, 1)])
+
+    def test_the_axis_runs_along_the_normal_whatever_it_is(self):
+        for normal in ((0, 1, 0), (0, -1, 0), (1, 0, 0), (0, 0, 1), (0, 0, -3), (0.3, 0.8, -0.5), (-2, 0.1, 0.4)):
+            length = math.sqrt(sum(value * value for value in normal))
+            for index, axis in enumerate("XYZ"):
+                frame = shapes.frame_along(normal, axis)
+                with self.subTest(normal=normal, axis=axis):
+                    self.assert_frame(frame)
+                    for got, want in zip(frame[index], normal):
+                        self.assertAlmostEqual(got, want / length, places=6)
+
+    def test_the_plane_of_a_ring(self):
+        ring = [(math.cos(a) * 2, 0.0, math.sin(a) * 2) for a in (i * math.pi / 6 for i in range(12))]
+        self.assertEqual(tuple(round(value, 4) for value in shapes.plane_normal(ring)), (0, 1, 0))
+        shuffled = ring[::3] + ring[1::3] + ring[2::3]              # the order doesn't matter
+        self.assertEqual(tuple(round(value, 4) for value in shapes.plane_normal(shuffled)), (0, 1, 0))
+        upright = [(5.0, y + 3, z) for z, _zero, y in ring]         # a ring in the YZ plane, moved
+        self.assertEqual(tuple(round(value, 4) for value in shapes.plane_normal(upright)), (1, 0, 0))
+        tilted = [(x, x * 0.5, z) for x, _y, z in ring]             # up, though tilted
+        normal = shapes.plane_normal(tilted)
+        self.assertGreater(normal[1], 0.8)
+        self.assertAlmostEqual(normal[0] * 1 + normal[1] * 0.5, 0.0, places=4)   # across the plane's own slope
+
+    def test_no_plane(self):
+        self.assertIsNone(shapes.plane_normal([(0, 0, 0), (1, 1, 1)]))
+        self.assertIsNone(shapes.plane_normal([(0, 0, 0), (1, 2, 3), (2, 4, 6), (-1, -2, -3)]))
+        self.assertIsNone(shapes.plane_normal([(1, 1, 1)] * 4))
+
+
 class Drawing(unittest.TestCase):
     def test_a_closed_cubic_is_a_loop_inside_its_cvs(self):
         ring = shapes.Curve([(math.cos(a), 0.0, math.sin(a)) for a in (i * math.pi / 4 for i in range(8))], 3, True)
