@@ -142,7 +142,8 @@ class ShapeView(qt.QtWidgets.QWidget):
         {"look": scene.target_look or None, "reach": the control's size in scene units,
          "color": QColor / "plain" (no color of its own) / None (the preview's own),
          "matrix": 16 numbers placing it in the FIRST object's axes (None = there), "parent": the index of
-         the item its control goes under, or -1}. `chain` draws a line from each control to its parent's."""
+         the item its control goes under, or -1, "becomes": True when the object itself becomes the control
+         (the curve goes onto it): it is then drawn in the control's color}. `chain` draws a line from each control to its parent's."""
         self._items, self._chain = list(items), bool(chain)
         self.update()
 
@@ -223,12 +224,14 @@ class ShapeView(qt.QtWidgets.QWidget):
     def _color_of(self, wanted) -> "qt.QtGui.QColor":
         return self._title_color if isinstance(wanted, str) else (wanted or self._line)
 
-    def _paint_target(self, painter, place, look, radius_px: float) -> None:
-        color = qt.QtGui.QColor(self._title_color)
-        color.setAlpha(190)
+    def _paint_target(self, painter, place, look, radius_px: float, own=None) -> None:
+        """The object a control is made for, quiet and grey — or, `own` (a color): the object that
+        BECOMES the control (the curve goes onto it), drawn in the control's color, as one with it."""
+        color = qt.QtGui.QColor(own if own is not None else self._title_color)
+        color.setAlpha(255 if own is not None else 190)
         painter.setBrush(qt.QtCore.Qt.BrushStyle.NoBrush)
         if look.get("kind") == "joint":
-            painter.setPen(qt.QtGui.QPen(color, 1.2))
+            painter.setPen(qt.QtGui.QPen(color, 1.8 if own is not None else 1.2))
             origin = place((0.0, 0.0, 0.0))
             painter.drawEllipse(origin, radius_px, radius_px)
             for bone in look.get("bones", []):
@@ -345,7 +348,8 @@ class ShapeView(qt.QtWidgets.QWidget):
             look = item.get("look")
             if look:
                 radius = max(2.5, min(look.get("radius", 0.5) / extent * scale, 14.0))
-                self._paint_target(painter, place_from(item.get("matrix")), look, radius)
+                self._paint_target(painter, place_from(item.get("matrix")), look, radius,
+                                   self._color_of(item.get("color")) if item.get("becomes") else None)
         if self._chain and many:
             for item, spot in zip(items, spots):
                 parent = item.get("parent", -1)

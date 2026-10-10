@@ -9,7 +9,7 @@ import msl_tools.msl.ui.qt_bindings as qt
 from msl_tools.msl.core.resources import Resources
 from msl_tools.msl.tools.maya.controls import shapes as shape_data
 from msl_tools.msl.tools.maya.controls import colors as color_data
-from msl_tools.msl.tools.maya.controls.editor import ShapeEditor
+from msl_tools.msl.tools.maya.controls.editor import ShapeEditor, axis_step_button
 from msl_tools.msl.tools.maya.controls.naming import DEFAULT_TEMPLATE, control_name
 from msl_tools.msl.tools.maya.controls.panel_color import _ColorMixin
 from msl_tools.msl.tools.maya.controls.preview import ShapeView, thumbnail
@@ -19,6 +19,7 @@ from msl_tools.msl.tools.maya.rename.buttons import QuickButton, ToggleIconButto
 from msl_tools.msl.ui.theme import StylesheetBuilder
 from msl_tools.msl.ui.theme.qss import color_property, make_rounded_popup, repolish
 from msl_tools.msl.ui.ui_resources import UiResources
+from msl_tools.msl.ui.widgets.atoms.comboboxes.base_combo_box import BaseComboBox
 from msl_tools.msl.ui.widgets.atoms.segmented.segmented_control import SegmentedControl
 from msl_tools.msl.ui.widgets.atoms.surfaces.stable_scroll_area import StableScrollArea
 from msl_tools.msl.ui.widgets.compositions.chip_bar import ChipBar
@@ -30,8 +31,30 @@ ALL = "All"
 OFFSET_MODES = ("None", "Groups", "Matrix")
 DRIVES = ("None", "Shape", "Constrain", "Matrix")
 SHAPES_FILTER = "MSL control shapes (*.json)"
-EDITOR_HEIGHT = 400
+EDITOR_HEIGHT = 456
 THUMB = 38
+CELL = THUMB + 8
+FAVORITE_ROWS, LIBRARY_ROWS = 2, 3         # how tall the grid is: your shapes / the whole library
+STAR = 13                                  # the star in a tile's corner (and the spot that takes its click)
+# the shapes a fresh install starts with as favorites — the ones every rig uses
+FIRST_FAVORITES = ("circle", "square", "cube", "sphere", "diamond", "arrow", "double_arrow", "four_arrows",
+                   "pin", "locator", "cross", "root")
+
+
+class CategoryBox(BaseComboBox):
+    """The library's categories as one drop-down in the card's heading (they were a row of chips)."""
+
+    clicked = qt.QtCore.Signal(str)
+
+    def __init__(self, names, parent=None):
+        super().__init__(list(names), names[0], enable_wheel=False, parent=parent)
+        self.activated.connect(lambda _index: self.clicked.emit(self.currentText()))
+
+    def current(self) -> str:
+        return self.currentText()
+
+    def set_current(self, name: str) -> None:
+        self.setCurrentText(name)
 
 
 class ShapeGrid(qt.QtWidgets.QListWidget):
@@ -39,29 +62,222 @@ class ShapeGrid(qt.QtWidgets.QListWidget):
     thumbColor; the name is the tooltip."""
 
     thumbColor = color_property("_thumb", "_retint")
+    starColor = color_property("_star", "_repaint_stars")            # a favorite's star
+    starIdleColor = color_property("_star_idle", "_repaint_stars")   # the hollow star of the hovered tile
+
+    def _repaint_stars(self) -> None:
+        self.viewport().update()
 
     hovered = qt.QtCore.Signal(str)      # the shape under the pointer ("" = none)
+    star_clicked = qt.QtCore.Signal(str) # the star in a tile's corner was clicked
+
+    # ---- the order of the tiles by dragging one (the favorites: `set_reorderable`). Done by hand —
+    #      an icon-mode list's own drag moves tiles freely, not in order.
+
+    dropColor = color_property("_drop", "_repaint_stars")      # the line where a dragged tile would land
+    order_changed = qt.QtCore.Signal(list)                     # the names in their new order
+
+    def set_reorderable(self, on: bool) -> None:
+        self._reorderable = bool(on)
+        if not on:
+            self._end_drag()
+
+    def _end_drag(self) -> None:
+        if self._dragging:
+            self.viewport().unsetCursor()
+        self._drag_name, self._dragging, self._drop_index = "", False, -1
+        self.viewport().update()
+
+    def _drop_index_at(self, position) -> tuple:
+        """(before which tile a drop at `position` lands — count = after the last —, whether that is
+        the END of the pointer's row: the line then stands after the row's last tile)."""
+        if not self.count():
+            return 0, False
+        first, last = self.visualItemRect(self.item(0)), self.visualItemRect(self.item(self.count() - 1))
+        y = max(first.top(), min(last.bottom(), position.y()))
+        in_row = -1
+        for row in range(self.count()):
+            rect = self.visualItemRect(self.item(row))
+            if rect.top() <= y <= rect.bottom():
+                if position.x() < rect.center().x():
+                    return row, False
+                in_row = row
+        return in_row + 1, in_row + 1 < self.count()
+
+    def _drop_line(self):
+        """The drop line's two ends, or None."""
+        if not self._dragging or self._drop_index < 0 or not self.count():
+            return None
+        if self._drop_index < self.count():
+            rect = self.visualItemRect(self.item(self._drop_index))
+            x = rect.left()
+            # the first tile of a row, while the pointer is still on the row above: the line stands
+            # at the END of that row
+            if self._drop_index and self._drop_row_end:
+                rect = self.visualItemRect(self.item(self._drop_index - 1))
+                x = rect.right()
+        else:
+            rect = self.visualItemRect(self.item(self.count() - 1))
+            x = rect.right()
+        return qt.QtCore.QPointF(x + 0.5, rect.top() + 4), qt.QtCore.QPointF(x + 0.5, rect.bottom() - 4)
 
     def mouseMoveEvent(self, event) -> None:
+        position = event.position().toPoint()
+        if self._drag_name and event.buttons() & qt.QtCore.Qt.MouseButton.LeftButton:
+            # a press on a tile is held: no super() — the list would pick every tile it passes
+            if not self._dragging and (position - self._drag_from).manhattanLength() >= \
+                    qt.QtWidgets.QApplication.startDragDistance():
+                self._dragging = True
+                self.viewport().setCursor(qt.QtCore.Qt.CursorShape.ClosedHandCursor)
+                if self._hovered:
+                    self._hovered = ""
+                    self.hovered.emit("")
+            if self._dragging:
+                self._drop_index, self._drop_row_end = self._drop_index_at(position)
+                self.viewport().update()
+            event.accept()
+            return
         super().mouseMoveEvent(event)
-        item = self.itemAt(event.position().toPoint())
+        item = self.itemAt(position)
         name = item.data(qt.QtCore.Qt.ItemDataRole.UserRole) if item is not None else ""
         if name != self._hovered:
             self._hovered = name
+            self.viewport().update()
             self.hovered.emit(name)
 
     def leaveEvent(self, event) -> None:
         super().leaveEvent(event)
         if self._hovered:
             self._hovered = ""
+            self.viewport().update()
             self.hovered.emit("")
+
+    # ---- the star in a tile's corner: a favorite's is always drawn (while the whole library shows),
+    #      the tile under the pointer shows one to click
+
+    def set_favorites(self, names, always: bool) -> None:
+        """`names`: the favorite shapes; `always`: draw their stars all the time (the whole library is
+        shown) — else only on the tile under the pointer (every tile shown is a favorite)."""
+        self._favorites, self._stars_always = set(names), always
+        self.viewport().update()
+
+    def _star_rect(self, item) -> "qt.QtCore.QRect":
+        rect = self.visualItemRect(item)
+        return qt.QtCore.QRect(rect.right() - STAR - 1, rect.top() + 2, STAR, STAR)
+
+    def star_at(self, position) -> str:
+        """The shape whose star is at `position` (viewport), or ""."""
+        item = self.itemAt(position)
+        if item is not None and self._star_rect(item).adjusted(-2, -2, 2, 2).contains(position):
+            return item.data(qt.QtCore.Qt.ItemDataRole.UserRole)
+        return ""
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == qt.QtCore.Qt.MouseButton.LeftButton and self.star_at(event.position().toPoint()):
+            self._star_pressed = self.star_at(event.position().toPoint())
+            event.accept()          # the star's own click: the tile is not picked
+            return
+        self._star_pressed = ""
+        super().mousePressEvent(event)
+        item = self.itemAt(event.position().toPoint())
+        if self._reorderable and event.button() == qt.QtCore.Qt.MouseButton.LeftButton and item is not None \
+                and self.count() > 1:
+            self._drag_name = item.data(qt.QtCore.Qt.ItemDataRole.UserRole)
+            self._drag_from = event.position().toPoint()
+
+    def _emit_order(self) -> None:
+        names, self._new_order = self._new_order, []
+        if names:
+            self.order_changed.emit(names)
+
+    def mouseReleaseEvent(self, event) -> None:
+        if self._dragging:
+            names = [self.item(row).data(qt.QtCore.Qt.ItemDataRole.UserRole) for row in range(self.count())]
+            source, target = names.index(self._drag_name), self._drop_index
+            self._end_drag()
+            if target not in (source, source + 1) and target >= 0:
+                name = names.pop(source)
+                names.insert(target - 1 if target > source else target, name)
+                self._new_order = names          # sent on the next turn: the owner rebuilds the list
+                qt.QtCore.QTimer.singleShot(0, self._emit_order)
+            event.accept()
+            return
+        self._drag_name = ""
+        pressed, self._star_pressed = self._star_pressed, ""
+        if pressed:
+            if self.star_at(event.position().toPoint()) == pressed:
+                # on the next turn of the event loop: the owner rebuilds the list, and that must not
+                # happen inside the click
+                self._star_name = pressed
+                qt.QtCore.QTimer.singleShot(0, self._emit_star)
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+    def mouseDoubleClickEvent(self, event) -> None:
+        if self.star_at(event.position().toPoint()):
+            event.accept()          # a fast second click on the star is no "create"
+            return
+        super().mouseDoubleClickEvent(event)
+
+    def _emit_star(self) -> None:
+        name, self._star_name = self._star_name, ""
+        if name:
+            self.star_clicked.emit(name)
+
+    @staticmethod
+    def _star_path(rect) -> "qt.QtGui.QPainterPath":
+        import math
+        path = qt.QtGui.QPainterPath()
+        cx, cy, outer = rect.center().x() + 0.5, rect.center().y() + 0.5, rect.width() / 2.0
+        for index in range(10):
+            radius = outer if index % 2 == 0 else outer * 0.45
+            angle = -math.pi / 2 + index * math.pi / 5
+            point = qt.QtCore.QPointF(cx + radius * math.cos(angle), cy + radius * math.sin(angle))
+            path.lineTo(point) if index else path.moveTo(point)
+        path.closeSubpath()
+        return path
+
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+        painter = qt.QtGui.QPainter(self.viewport())
+        painter.setRenderHint(qt.QtGui.QPainter.RenderHint.Antialiasing)
+        for index in range(self.count()):
+            item = self.item(index)
+            name = item.data(qt.QtCore.Qt.ItemDataRole.UserRole)
+            favorite, under = name in self._favorites, name == self._hovered
+            if not ((favorite and self._stars_always) or under):
+                continue
+            path = self._star_path(self._star_rect(item))
+            if favorite:
+                painter.setPen(qt.QtCore.Qt.PenStyle.NoPen)
+                painter.setBrush(self._star)
+            else:
+                painter.setPen(qt.QtGui.QPen(self._star_idle, 1.2))
+                painter.setBrush(qt.QtCore.Qt.BrushStyle.NoBrush)
+            painter.drawPath(path)
+        line = self._drop_line()
+        if line is not None:
+            pen = qt.QtGui.QPen(self._drop, 2.0)
+            pen.setCapStyle(qt.QtCore.Qt.PenCapStyle.RoundCap)
+            painter.setPen(pen)
+            painter.drawLine(*line)
+        painter.end()
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._hovered = ""
+        self._favorites, self._stars_always = set(), False
+        self._star_pressed = self._star_name = ""
+        self._reorderable = self._dragging = self._drop_row_end = False
+        self._drag_name, self._drop_index, self._new_order = "", -1, []
+        self._drag_from = qt.QtCore.QPoint()
         self.setMouseTracking(True)
         from msl_tools.msl.core.theme.theme_registry import ThemeRegistry
         self._thumb = qt.QtGui.QColor(ThemeRegistry.fallback().text_primary)
+        self._star = qt.QtGui.QColor(ThemeRegistry.fallback().accent)
+        self._star_idle = qt.QtGui.QColor(ThemeRegistry.fallback().text_secondary)
+        self._drop = qt.QtGui.QColor(ThemeRegistry.fallback().accent)
         self._shapes = []
         self.setObjectName("controlsGrid")
         self.setViewMode(qt.QtWidgets.QListView.ViewMode.IconMode)
@@ -77,14 +293,36 @@ class ShapeGrid(qt.QtWidgets.QListWidget):
         self.setFocusPolicy(qt.QtCore.Qt.FocusPolicy.NoFocus)
         self.setContextMenuPolicy(qt.QtCore.Qt.ContextMenuPolicy.CustomContextMenu)
 
+    def _tip(self, shape) -> str:
+        return (shape.title() + (" — yours" if shape.user else " — corrected by you" if shape.changed else "") +
+                ("\n★ a favorite — the star in its corner takes it out" if shape.name in self._favorites
+                 else "\nThe star in its corner adds it to your favorites"))
+
     def set_shapes(self, shapes: list, current: str) -> None:
+        if self.count() == len(shapes) and [shape.name for shape in shapes] == [shape.name for shape in self._shapes]:
+            # the same tiles (a star was clicked): nothing is rebuilt, so the list stays where it is
+            # scrolled to — a rebuild jumped back to the top
+            self._shapes = list(shapes)
+            for index, shape in enumerate(self._shapes):
+                self.item(index).setToolTip(self._tip(shape))
+                if shape.name == current and self.currentItem() is not self.item(index):
+                    self.blockSignals(True)
+                    self.setCurrentItem(self.item(index))
+                    self.blockSignals(False)
+            self._retint()
+            self.viewport().update()
+            return
+        # the same shapes in another order (a star clicked in a search: favorites go first) keep the
+        # place too; another set of shapes starts at its top
+        same = {shape.name for shape in shapes} == {shape.name for shape in self._shapes}
+        scrolled = self.verticalScrollBar().value() if same else 0
         self._shapes = list(shapes)
         self.blockSignals(True)
         self.clear()
         for shape in self._shapes:
             item = qt.QtWidgets.QListWidgetItem()
             item.setData(qt.QtCore.Qt.ItemDataRole.UserRole, shape.name)
-            item.setToolTip(shape.title() + (" — yours" if shape.user else ""))
+            item.setToolTip(self._tip(shape))
             item.setSizeHint(qt.QtCore.QSize(THUMB + 8, THUMB + 8))
             self.addItem(item)
             if shape.name == current:
@@ -92,6 +330,9 @@ class ShapeGrid(qt.QtWidgets.QListWidget):
                 self.setCurrentItem(item)
         self.blockSignals(False)
         self._retint()
+        if scrolled:
+            self.doItemsLayout()
+            self.verticalScrollBar().setValue(min(scrolled, self.verticalScrollBar().maximum()))
 
     def _retint(self) -> None:
         ratio = self.devicePixelRatioF()
@@ -121,6 +362,8 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
     DEFAULTS = {"shape": "circle", "category": ALL, "template": DEFAULT_TEMPLATE, "size": 1.0, "fit": True,
                 "axis": "X", "offsets": "Groups", "offset_names": "offset", "chain": True, "side_color": True,
                 "drive": "None", "own_color": "", "ghost": True, "middle": False,
+                "shape_step": 0.1, "shape_angle": 90.0, "shape_factor": 1.25, "hide_joint": True, "as_joint": False,
+                "favorites": list(FIRST_FAVORITES), "library": "favorites",
                 "folded": {"control": False}}
 
     def __init__(self, parent=None):
@@ -147,41 +390,77 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
         self._search.setObjectName("controlsSearch")
         self._search.setPlaceholderText("Find a shape")
         self._search.setClearButtonEnabled(True)
-        self._search.setFixedWidth(120)
-        card = self._control_card = FoldingCard("CONTROL", icons.get_icon("controls", sub_folder="actions"),
-                                                extras=[self._search])
-        self._categories = ChipBar(checkable=True)
+        self._search.setFixedWidth(104)
+        self._search.setToolTip("Looks through the WHOLE library, whichever of the two is shown")
+        # the library: only your favorites (two rows), or all of it (in place, by category)
+        self._categories = CategoryBox((ALL,) + shape_data.CATEGORIES)
         self._categories.setObjectName("controlsCategories")
-        self._categories.set_chips([(name, name, "") for name in (ALL,) + shape_data.CATEGORIES])
-        head = qt.QtWidgets.QHBoxLayout()
-        head.setSpacing(6)
-        head.addWidget(self._categories, 1)
+        self._categories.setFixedWidth(82)
+        self._categories.setToolTip("Which part of the library is shown")
+        self._favorites_only = ToggleIconButton(icons.get_icon("star", sub_folder="actions"), "Only your favorites",
+                                                "The shapes you use — a short list instead of the whole library. "
+                                                "The star in a tile's corner adds a shape or takes it out; "
+                                                "drag a tile to put them in your order")
+        self._whole_library = ToggleIconButton(icons.get_icon("grid", sub_folder="actions"), "The whole library",
+                                               "Every shape, by category — to find one and star it")
+        for button in (self._favorites_only, self._whole_library):
+            button.setObjectName("controlsToggle")
+        card = self._control_card = FoldingCard("CONTROL", icons.get_icon("controls", sub_folder="actions"),
+                                                extras=[self._categories, self._favorites_only,
+                                                        self._whole_library, self._search])
+        self._heading_extras = (self._categories, self._favorites_only, self._whole_library, self._search)
 
         self._grid = ShapeGrid()
-        self._grid.setFixedHeight((THUMB + 8) * 3 + 6)
         self._view = ShapeView()
-        self._view.setFixedSize(132, (THUMB + 8) * 3 + 6 - 28)
-        # the picked shape and, under it, what makes it
+        self._view.setFixedWidth(132)
+        # what makes the picked shape: under the library, as wide as it — the preview keeps its height
         self._create = qt.QtWidgets.QPushButton("Create")
         self._create.setProperty("primary", True)
         self._create.setObjectName("controlsCreate")
-        self._create.setFixedWidth(132)
+        self._no_favorites = qt.QtWidgets.QLabel("No favorites yet — open the whole library (the grid button "
+                                                 "above) and click the star in a shape's corner")
+        self._no_favorites.setObjectName("controlsCaption")
+        self._no_favorites.setWordWrap(True)
+        self._no_favorites.setAlignment(qt.QtCore.Qt.AlignmentFlag.AlignCenter)
+        self._no_favorites.hide()
         self._create.setToolTip("A control on every selected object (nothing selected: one at the origin) · "
-                                "double click a shape does the same")
+                                "double click a shape does the same — or, with only controls (curves) "
+                                "selected, gives them that shape")
         picked = qt.QtWidgets.QVBoxLayout()
         picked.setSpacing(6)
-        picked.addWidget(self._view)
+        picked.addWidget(self._grid)
+        picked.addWidget(self._no_favorites)
         picked.addWidget(self._create)
         shelf = qt.QtWidgets.QHBoxLayout()
         shelf.setSpacing(6)
-        shelf.addWidget(self._grid, 1)
-        shelf.addLayout(picked)
+        shelf.addLayout(picked, 1)
+        shelf.addWidget(self._view)
         # the preview grows into an editor of the shape's points, in the library's room
         self._expand = self._tool_button("expand", "Edit the shape", "The preview grows into an editor: drag the "
                                          "shape's points, move it away from the pivot, turn and scale it, add and "
-                                         "remove points — then create it, put it on a control or save it as yours")
+                                         "remove points — then create it, put it on a control or save it as yours."
+                                         + chr(10) + "With a curve selected in the scene, THAT curve opens in it")
         self._expand.setParent(self._view)
         self._expand.move(5, 5)
+        # "the joint itself is the control": the curve becomes the joint's own shape (Drive = Shape)
+        self._bone = ToggleIconButton(icons.get_icon("joint_shape", sub_folder="actions"), "The joint is the control",
+                                      "No new object: the curve becomes the shape of the selected joint (or object) "
+                                      "itself — you pick and animate the joint by its curve. The same as Drive = "
+                                      "Shape; Zero, Chain and the name don't apply")
+        self._bone.setObjectName("controlsToggle")
+        self._bone.setParent(self._view)
+        self._bone.move(32, 5)
+        # an eye for the joint's own bone: open = it is drawn, closed = only the curve is seen
+        self._eye_icons = {True: icons.get_icon("eye", sub_folder="actions"),
+                           False: icons.get_icon("eye_off", sub_folder="actions")}
+        self._hide_joint = ToggleIconButton(self._eye_icons[True], "The joint's bone is seen",
+                                            "The eye open: a joint that is a control draws its bone under the curve "
+                                            "· closed: only the curve is seen (Draw Style: None).\nIt shows how the "
+                                            "SELECTED joint controls are drawn now, and a click changes them at "
+                                            "once; with none selected it is how the next ones are made")
+        self._hide_joint.setObjectName("controlsToggle")
+        self._hide_joint.setParent(self._view)
+        self._hide_joint.move(59, 5)
         self._editor = ShapeEditor()
         self._editor.setFixedHeight(EDITOR_HEIGHT)
         self._editor.hide()
@@ -222,6 +501,11 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
                                         "across the loop and reaches just past it (with Fit)")
         self._middle.setObjectName("controlsToggle")
         naming.addWidget(self._middle)
+        self._as_joint = ToggleIconButton(icons.get_icon("joint_node", sub_folder="actions"), "Controls are joints",
+                                          "Each new control is a JOINT node (its bone not drawn, only the curve) "
+                                          "instead of a plain transform — for rigs built of joints all through")
+        self._as_joint.setObjectName("controlsToggle")
+        naming.addWidget(self._as_joint)
         self._ghost = ToggleIconButton(icons.get_icon("eye", sub_folder="actions"), "Ghost in the viewport",
                                        "What Create would make, shown in Maya's viewport on the selected "
                                        "objects before anything is made: it follows the shape, size, axis and "
@@ -265,7 +549,6 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
         driving.addWidget(self._drive)
         driving.addStretch(1)
 
-        card.body_layout.addLayout(head)
         card.body_layout.addLayout(shelf)
         card.body_layout.addWidget(self._editor)
         # top first, like the Outliner: the zero groups, the control, an arrow to what it drives
@@ -307,11 +590,13 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
         # the shape itself (orange)
         self._turns = {}
         for axis in shape_data.AXES:
-            self._turns[axis] = TurnButton(axis, f"Turn about {axis}\nThe selected controls' shapes 90° about "
-                                                 f"their own {axis} (Shift: −90°)")
+            self._turns[axis] = TurnButton(axis, f"Turn about {axis}\nThe selected controls' shapes about their "
+                                                 f"own {axis}, by the angle beside it (Shift: the other way)")
             self._turns[axis].setObjectName("controlsTool")
-        self._shrink = tool("shrink", "orange", "Smaller", "The selected controls' shapes smaller (×0.8)")
-        self._grow = tool("grow", "orange", "Bigger", "The selected controls' shapes bigger (×1.25)")
+        self._shrink = tool("shrink", "orange", "Smaller", "The selected controls' shapes smaller: divided by "
+                                                           "the number beside it")
+        self._grow = tool("grow", "orange", "Bigger", "The selected controls' shapes bigger: times the number "
+                                                      "beside it")
         self._cvs = tool("cvs", "orange", "Edit the shape", "The selected controls' CVs get selected: move, turn "
                          "and scale the SHAPE with Maya's own tools, the control's channels stay as they are · "
                          "again: back to the controls")
@@ -326,6 +611,9 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
                                  "it is — same size, same place about the pivot; each keeps its own color")
         self._combine = tool("merge", "blue", "Combine", "The selected curves become ONE control, the last "
                                                          "selected — staying where they are, colors kept")
+        self._strip_shape = tool("shape_off", "blue", "Take the curve off", "The selected objects lose their curve — "
+                                 "a joint that was made a control (the bone on the preview) is a plain joint "
+                                 "again, drawn as a bone")
         # the other side (teal)
         self._mirror = tool("mirror_shape", "teal", "Mirror", "A mirrored copy of each selected control on the "
                             "other side (lf_ ↔ rt_, _L ↔ _R; a name without a side gets one: arm_ctrl → rt_arm_ctrl): its zero groups too, under the other side's parent; "
@@ -376,11 +664,12 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
         self._capture = tool("bookmark_add", "green", "Save as a shape", "Save the selected curves as a shape of "
                                                                          "yours (it goes under Mine)")
 
-        rows = (((self._turns["X"], self._turns["Y"], self._turns["Z"], self._shrink, self._grow, self._cvs),
-                 (self._replace, self._add_shape, self._copy_shape, self._paste_shape, self._combine),
-                 (self._mirror, self._mirror_update)),
-                ((self._zero_groups_button, self._zero_matrix_button, self._matrix_back_button),
-                 (self._drive_constraint, self._drive_matrix, self._drive_off),
+        # (the turn and bigger / smaller buttons stand in the rows below, beside their numbers)
+        rows = (((self._cvs,),
+                 (self._replace, self._add_shape, self._copy_shape, self._paste_shape, self._combine, self._strip_shape),
+                 (self._mirror, self._mirror_update),
+                 (self._zero_groups_button, self._zero_matrix_button, self._matrix_back_button)),
+                ((self._drive_constraint, self._drive_matrix, self._drive_off),
                  (self._on_top_button, self._select_below, self._select_all),
                  (self._locators, self._joints),
                  (self._capture,)))
@@ -399,6 +688,44 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
                     line.addWidget(button)
             line.addStretch(1)
             card.body_layout.addLayout(line)
+
+        # the shape of a control that exists, by exact steps: off its pivot along an axis; how much a
+        # turn turns and a "bigger" grows
+        self._shape_step = DragNumberField(0.1, 0.001, 1000.0, 0.05, width=44, decimals=3)
+        self._shape_step.setToolTip("The step of the six buttons beside it — drag with the middle mouse button, the wheel")
+        self._shape_angle = DragNumberField(90.0, 1.0, 180.0, 5.0, width=38, decimals=1)
+        self._shape_angle.setToolTip("The angle, in degrees: the three buttons beside it turn the shape by it "
+                                     "about X, Y or Z (Shift + click: the other way)")
+        self._shape_factor = DragNumberField(1.25, 1.01, 10.0, 0.05, width=40, decimals=2)
+        self._shape_factor.setToolTip("The factor: the two buttons beside it make the shape that much smaller / bigger")
+        steps = qt.QtWidgets.QHBoxLayout()
+        steps.setSpacing(3)
+        steps.addWidget(self._caption("Move"))
+        steps.addWidget(self._shape_step)
+        self._shifts = {}
+        for index, axis in enumerate(shape_data.AXES):
+            for sign, mark in ((-1, "−"), (1, "+")):
+                made = axis_step_button(axis, mark, f"The selected controls' shapes one step along their own "
+                                                    f"{mark}{axis}: off the pivot, the control itself stays "
+                                                    "(Shift: five steps)")
+                self._shifts[(index, sign)] = made
+                steps.addWidget(made)
+        steps.addStretch(1)
+        card.body_layout.addLayout(steps)
+        # each number with the buttons that use it right beside it
+        turning = qt.QtWidgets.QHBoxLayout()
+        turning.setSpacing(3)
+        turning.addWidget(self._caption("Turn"))
+        turning.addWidget(self._shape_angle)
+        for axis in shape_data.AXES:
+            turning.addWidget(self._turns[axis])
+        turning.addSpacing(14)
+        turning.addWidget(self._caption("Scale"))
+        turning.addWidget(self._shape_factor)
+        turning.addWidget(self._shrink)
+        turning.addWidget(self._grow)
+        turning.addStretch(1)
+        card.body_layout.addLayout(turning)
         return card
 
     # ---- menus: a caption says what the lines under it are, every line has an icon in its button's color
@@ -440,20 +767,30 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
         self._search.textChanged.connect(lambda _text: self._refresh_grid())
         self._categories.clicked.connect(self._on_category)
         self._grid.itemSelectionChanged.connect(self._on_shape_picked)
-        self._grid.itemDoubleClicked.connect(lambda _item: self.create())
+        self._grid.itemDoubleClicked.connect(lambda _item: self._on_shape_double_click())
         self._grid.customContextMenuRequested.connect(self._on_grid_menu)
         self._grid.hovered.connect(self._on_shape_hover)
+        self._grid.star_clicked.connect(self._toggle_favorite)
+        self._grid.order_changed.connect(self._on_favorites_order)
+        self._favorites_only.clicked.connect(lambda: self._set_library("favorites"))
+        self._whole_library.clicked.connect(lambda: self._set_library("all"))
         self._expand.clicked.connect(lambda: self._set_editing(True))
+        self._bone.toggled.connect(self._on_bone)
         self._editor.closed.connect(lambda: self._set_editing(False))
         self._editor.edited.connect(self._on_shape_edited)
         self._editor.reset_requested.connect(self._reset_edited)
         self._editor.save_requested.connect(self._on_save_edited)
         self._editor.create_requested.connect(self.create)
         self._editor.apply_requested.connect(self._on_replace)
+        self._editor.take_requested.connect(self._take_shape)
         for axis, button in self._turns.items():
             button.clicked.connect(lambda _checked=False, axis=axis: self._turn(axis))
-        self._shrink.clicked.connect(lambda: self._resize(0.8))
-        self._grow.clicked.connect(lambda: self._resize(1.25))
+        self._shrink.clicked.connect(lambda: self._resize(1.0 / self._shape_factor.value()))
+        self._grow.clicked.connect(lambda: self._resize(self._shape_factor.value()))
+        for (index, sign), button in self._shifts.items():
+            button.clicked.connect(lambda _checked=False, index=index, sign=sign: self._shift_shape(index, sign))
+        for field in (self._shape_step, self._shape_angle, self._shape_factor):
+            field.value_changed.connect(self._save)
         self._replace.clicked.connect(self._on_replace)
         self._capture.clicked.connect(self._on_capture)
         self._mirror.clicked.connect(lambda: self._mirror_to_other("X"))
@@ -465,6 +802,7 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
         self._paste_shape.clicked.connect(self._on_paste_shape)
         self._add_shape.clicked.connect(self._on_add_shape)
         self._combine.clicked.connect(self._on_combine)
+        self._strip_shape.clicked.connect(self._on_strip_shape)
         self._zero_groups_button.clicked.connect(self._zero_groups)
         self._zero_matrix_button.clicked.connect(self._zero_matrix)
         self._matrix_back_button.clicked.connect(self._matrix_back)
@@ -481,6 +819,8 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
         self._drive.current_changed.connect(self._save)
         for axis, button in self._turns.items():
             self._watch_hover(button, f"turn_{axis}")
+        for (index, sign), button in self._shifts.items():
+            self._watch_hover(button, f"shift_{index}{'+' if sign > 0 else '-'}")
         for key, button in (("shrink", self._shrink), ("grow", self._grow), ("replace", self._replace),
                             ("add", self._add_shape), ("paste", self._paste_shape), ("mirror", self._mirror),
                             ("mirror_update", self._mirror_update), ("zero_groups", self._zero_groups_button),
@@ -490,7 +830,9 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
         for widget in (self._template, self._offset_names):
             widget.textEdited.connect(self._save)
         self._size.value_changed.connect(self._save)
-        for toggle in (self._fit, self._chain, self._side_color, self._ghost, self._middle):
+        self._hide_joint.toggled.connect(self._show_eye)
+        self._hide_joint.toggled.connect(self._on_hide_joint)
+        for toggle in (self._fit, self._chain, self._side_color, self._ghost, self._middle, self._as_joint):
             toggle.toggled.connect(self._save)
         self._view.axis_picked.connect(self._on_axis)
         self._strip.clicked.connect(self._on_strip)
@@ -500,7 +842,7 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
         self._selected_card.toggled.connect(lambda opened: self._save_folded("selected", opened))
         self._offsets.current_changed.connect(self._on_offsets)
         self._control_card.toggled.connect(lambda opened: self._save_folded("control", opened))
-        self._control_card.toggled.connect(self._search.setVisible)
+        self._control_card.toggled.connect(lambda _opened: self._show_heading())
         self._connect_color()
 
     def showEvent(self, event) -> None:
@@ -636,7 +978,8 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
         self._create.setToolTip((f"Makes {name}" + (f" and {count - 1} more" if count > 1 else "") + "\n"
                                  if count or drive != "Shape" else "") +
                                 "A control on every selected object (nothing selected: one at the origin) · "
-                                "double click a shape does the same")
+                                "double click a shape does the same — or, with only controls (curves) "
+                                "selected, gives them that shape")
         existing = None             # the first selected object is a control that exists
         if entries and in_maya and isinstance(entries[0], str):
             try:
@@ -658,13 +1001,20 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
             self._strip.set_items(self._strip_existing(targets[0], info, count))
         else:
             # what WILL BE made of the selection
+            becomes = drive == "Shape"         # the object itself becomes the control: one color with its curve
             items = [{"look": each, "reach": self._size.value() * (each["fit"] if fit else 1.0),
                       "color": self._color_for(self._control_rgb(each["position"])), "matrix": each["matrix"],
-                      "parent": each["parent"]} for each in looks] or [{"color": self._color_for(rgb)}]
+                      "parent": each["parent"], "becomes": becomes and each.get("kind") != "part"} for each in looks]
+            if not items and becomes:
+                # nothing selected yet: a bone to show what this mode makes — a joint that wears the curve
+                items = [{"look": {"kind": "joint", "radius": 0.22, "bones": [(1.5, 0.0, 0.0)]}, "reach": 1.0,
+                          "color": self._color_for(rgb), "becomes": True}]
+            items = items or [{"color": self._color_for(rgb)}]
             self._view.set_action(None, None)
             self._view.set_scene(items)
             self._strip.set_items(self._strip_planned(look, count, name, mode, drive))
         self._refresh_states(targets)
+        self._read_joint_controls(targets)
         self._create.setText("Create" if not count else f"Shape onto {len(targets)}" if drive == "Shape" and targets
                              else "Create 1 · middle" if in_middle else f"Create {count}")
         self._editor.set_create_text(self._create.text())
@@ -774,6 +1124,68 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
                             hint="✓" if control.current() == option else "")
         return menu
 
+    # ---- the bone on the preview: Drive = Shape, as a picture
+
+    _drive_before = "None"       # what Drive was before the bone was switched on: switching it off goes back
+    _worn = ()                   # the selected joints that wear a curve (joint controls): the eye is theirs
+
+    def _read_joint_controls(self, targets: list) -> None:
+        """The eye shows how the selected joint controls are drawn NOW (read from the scene on every
+        change of the selection) — not what the setting says."""
+        try:
+            from msl_tools.msl.tools.maya.controls import scene
+            self._worn = tuple(scene.joint_controls(targets))
+            hidden = scene.bones_hidden(list(self._worn)) if self._worn else bool(self._settings.get("hide_joint", True))
+        except ImportError:
+            self._worn, hidden = (), bool(self._settings.get("hide_joint", True))
+        if self._hide_joint.isChecked() == hidden:       # the eye is OPEN (checked) while the bone is seen
+            self._syncing_bone = True
+            try:
+                self._hide_joint.setChecked(not hidden)
+            finally:
+                self._syncing_bone = False
+        self._sync_bone()
+
+    def _show_eye(self, *_args) -> None:
+        """Open while the bone is seen, closed while it is not."""
+        self._hide_joint.set_source_icon(self._eye_icons[self._hide_joint.isChecked()])
+
+    def _on_hide_joint(self, seen: bool) -> None:
+        if self._syncing_bone or self._loading:
+            return
+        if not self._worn:
+            self._save()                # nothing to change in the scene: it is how the next ones are made
+            return
+        from msl_tools.msl.tools.maya.controls import scene
+        count = scene.set_bones_hidden(list(self._worn), not seen)
+        self._say(f"{count} joint control{'s' if count != 1 else ''}: " +
+                  ("the bone is seen too" if seen else "only the curve is seen") + " · Ctrl+Z undoes it", "done")
+
+    def _on_bone(self, on: bool) -> None:
+        if self._syncing_bone or self._loading:
+            return
+        if on:
+            if self._drive.current() != "Shape":
+                self._drive_before = self._drive.current()
+            self._pick_setting(self._drive, "Shape")
+        elif self._drive.current() == "Shape":
+            self._pick_setting(self._drive, self._drive_before if self._drive_before != "Shape" else "None")
+
+    _syncing_bone = False
+
+    def _sync_bone(self) -> None:
+        """The bone follows Drive, whoever changed it."""
+        wanted = self._drive.current() == "Shape"
+        shown = wanted or bool(self._worn)              # the eye: with the bone, or for selected joint controls
+        if self._hide_joint.isHidden() == shown:
+            self._hide_joint.setVisible(shown)
+        if self._bone.isChecked() != wanted:
+            self._syncing_bone = True
+            try:
+                self._bone.setChecked(wanted)
+            finally:
+                self._syncing_bone = False
+
     def _pick_setting(self, control, option: str) -> None:
         control.set_current(option)
         if control is self._offsets:
@@ -852,11 +1264,19 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
         back = bool(qt.QtWidgets.QApplication.keyboardModifiers() & qt.QtCore.Qt.KeyboardModifier.ShiftModifier)
         after, zero, text = before, None, ""
         if key.startswith("turn_"):
-            after = shape_data.turned(before, key[-1], -90.0 if back else 90.0)
-            text = f"turn {'−' if back else ''}90° about {key[-1]}"
+            angle = self._shape_angle.value()
+            after = shape_data.turned(before, key[-1], -angle if back else angle)
+            text = f"turn {'−' if back else ''}{angle:g}° about {key[-1]}"
+        elif key.startswith("shift_"):
+            axis, sign = int(key[6]), (1 if key.endswith("+") else -1)
+            step = sign * self._shape_step.value() * (5 if back else 1)
+            after = [shape_data.Curve([tuple(value + (step if index == axis else 0.0) for index, value in enumerate(point))
+                                       for point in curve.points], curve.degree, curve.closed) for curve in before]
+            text = f"{step:+g} along {shape_data.AXES[axis]}"
         elif key in ("shrink", "grow"):
-            after = shape_data.scaled(before, 0.8 if key == "shrink" else 1.25)
-            text = "×0.8" if key == "shrink" else "×1.25"
+            factor = self._shape_factor.value() if key == "grow" else 1.0 / self._shape_factor.value()
+            after = shape_data.scaled(before, factor)
+            text = f"×{factor:.3g}"
         elif key == "replace":
             after, text = picked, "gets " + self._picked_shape().title().lower()
         elif key == "add":
@@ -928,16 +1348,24 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
         self._offset_names.setText(s.get("offset_names", "offset"))
         drive = s.get("drive", "None")
         self._drive.set_current(drive if drive in DRIVES else "None", animate=False)
+        self._bone.setChecked(drive == "Shape")
+        self._hide_joint.setChecked(not bool(s.get("hide_joint", True)))
+        self._show_eye()
+        self._as_joint.setChecked(bool(s.get("as_joint", False)))
+        self._hide_joint.setVisible(drive == "Shape")
         self._chain.setChecked(bool(s.get("chain", True)))
         self._ghost.setChecked(bool(s.get("ghost", True)))
+        self._shape_step.set_value(float(s.get("shape_step", 0.1)))
+        self._shape_angle.set_value(float(s.get("shape_angle", 90.0)))
+        self._shape_factor.set_value(float(s.get("shape_factor", 1.25)))
         self._middle.setChecked(bool(s.get("middle", False)))
         self._side_color.setChecked(bool(s.get("side_color", True)))
         category = s.get("category", ALL)
         self._categories.set_current(category if category in (ALL,) + shape_data.CATEGORIES else ALL)
         self._control_card.set_open(not dict(s.get("folded") or {}).get("control", False))
         self._selected_card.set_open(not dict(s.get("folded") or {}).get("selected", False))
-        if not self._control_card.is_open():
-            self._search.hide()
+        self._fit_library()
+        self._show_heading()
         self._show_offset_names()
         self._apply_color_settings()
 
@@ -948,10 +1376,15 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
                   "fit": self._fit.isChecked(), "axis": self._view.axis(), "offsets": self._offsets.current(),
                   "offset_names": self._offset_names.text().strip(), "chain": self._chain.isChecked(),
                   "side_color": self._side_color.isChecked(), "drive": self._drive.current(),
-                  "ghost": self._ghost.isChecked(), "middle": self._middle.isChecked()}
+                  "ghost": self._ghost.isChecked(), "middle": self._middle.isChecked(),
+                  "hide_joint": (not self._hide_joint.isChecked()) if not self._worn else
+                  bool(self._settings.get("hide_joint", True)), "as_joint": self._as_joint.isChecked(),
+                  "shape_step": self._shape_step.value(), "shape_angle": self._shape_angle.value(),
+                  "shape_factor": self._shape_factor.value()}
         for key, value in values.items():
             if self._settings.get(key) != value:
                 self._settings[key] = value
+        self._sync_bone()
         self._refresh_live()
 
     def _save_folded(self, key: str, opened: bool) -> None:
@@ -961,16 +1394,116 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
 
     # ------------------------------------------------------------------ the library
 
+    def _favorites(self) -> list:
+        """Your favorite shapes that still exist, in your order."""
+        shapes = self.library.all()
+        stored = self._settings.get("favorites", None)
+        if not isinstance(stored, (list, tuple)):
+            # settings from before favorites existed: the usual ones + every shape of the user's own
+            stored = list(FIRST_FAVORITES) + list(self.library.mine())
+        return [name for name in stored if name in shapes]
+
+    def _whole(self) -> bool:
+        return self._settings.get("library", "favorites") == "all"
+
     def _shown_shapes(self) -> list:
-        category = self._categories.current() or ALL
         needle = self._search.text().strip().lower()
-        return [shape for shape in self.library.all().values()
-                if (category == ALL or shape.category == category)
-                and (not needle or needle in shape.name.lower())]
+        shapes = self.library.all()
+        if needle:
+            # a search looks through everything, whichever is shown: favorites first
+            favorites = self._favorites()
+            found = [shape for shape in shapes.values() if needle in shape.name.lower()]
+            return sorted(found, key=lambda shape: shape.name not in favorites)
+        if not self._whole():
+            return [shapes[name] for name in self._favorites()]
+        category = self._categories.current() or ALL
+        return [shape for shape in shapes.values() if category == ALL or shape.category == category]
 
     def _refresh_grid(self) -> None:
-        self._grid.set_shapes(self._shown_shapes(), self._settings.get("shape", "circle"))
+        searching = bool(self._search.text().strip())
+        self._grid.set_favorites(self._favorites(), always=self._whole() or searching)
+        self._grid.set_reorderable(not self._whole() and not searching)      # your list: drag a tile
+        shown = self._shown_shapes()
+        self._grid.set_shapes(shown, self._settings.get("shape", "circle"))
+        empty = not shown and not searching and not self._whole() and not self._editor.isVisible()
+        self._grid.setVisible(not empty and not self._editor.isVisible())
+        self._no_favorites.setVisible(empty)
         self._show_preview()
+
+    def _rows(self) -> int:
+        return LIBRARY_ROWS if self._whole() else FAVORITE_ROWS
+
+    def _fit_library(self) -> None:
+        """The grid as tall as its rows (two of favorites, three of the library), the preview beside
+        it as tall as the grid + Create; the two buttons say which is shown."""
+        height = CELL * self._rows() + 6
+        self._grid.setFixedHeight(height)
+        self._no_favorites.setFixedHeight(height)
+        self._view.setFixedHeight(height + 6 + 22)
+        self._library_syncing = True
+        try:
+            self._favorites_only.setChecked(not self._whole())
+            self._whole_library.setChecked(self._whole())
+        finally:
+            self._library_syncing = False
+
+    _library_syncing = False
+
+    def _show_heading(self) -> None:
+        opened = self._control_card.is_open()
+        for widget in self._heading_extras:
+            widget.setVisible(opened and (widget is not self._categories or self._whole()))
+
+    def _set_library(self, which: str) -> None:
+        """Your favorites, or the whole library in their place — the window gives it its row."""
+        if self._library_syncing:
+            return
+        before = self._rows()
+        if self._settings.get("library", "favorites") != which:
+            self._settings["library"] = which
+        self._fit_library()
+        self._show_heading()
+        self._refresh_grid()
+        grown = CELL * (self._rows() - before)
+        window = self.window()
+        if grown and not self._editor.isVisible() and window is not None and window is not self \
+                and not window.isMaximized():
+            window.resize(window.width(), max(window.minimumHeight(), window.height() + grown))
+
+    def _toggle_favorite(self, name: str) -> None:
+        favorites = self._favorites()
+        if name in favorites:
+            favorites.remove(name)
+            self._say(f"“{name}” is out of your favorites — it stays in the library", "")
+        else:
+            favorites.append(name)
+            self._say(f"“{name}” is a favorite now", "done")
+        self._settings["favorites"] = favorites
+        self._refresh_grid()
+
+    def _add_favorites(self, names) -> None:
+        favorites = self._favorites()
+        self._settings["favorites"] = favorites + [name for name in names if name not in favorites]
+
+    def _on_favorites_order(self, names: list) -> None:
+        """A tile was dragged to another place among the favorites."""
+        if not self._whole() and not self._search.text().strip():
+            self._settings["favorites"] = list(names)
+            self._refresh_grid()
+
+    def _move_favorite(self, name: str, steps: int) -> None:
+        favorites = self._favorites()
+        if name in favorites:
+            index = favorites.index(name)
+            favorites.insert(max(0, min(len(favorites) - 1, index + steps)), favorites.pop(index))
+            self._settings["favorites"] = favorites
+            self._refresh_grid()
+
+    def _show_saved(self) -> None:
+        """A shape just saved / brought in is shown: with the library open, under Mine."""
+        if self._whole():
+            self._categories.set_current("Mine")
+            self._settings["category"] = "Mine"
 
     def _on_category(self, name: str) -> None:
         self._settings["category"] = name
@@ -980,7 +1513,10 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
         name = self._grid.current_name()
         if name:
             self._settings["shape"] = name
-            self._edited = None             # another shape: the hand-made changes of the last one go
+            self._drop_edited()             # another shape: the hand-made changes of the last one go
+            if self._editor.isVisible():
+                shape = self._library_shape()
+                self._editor.open(shape.curves, shape.title())
             self._show_preview()
 
     # ---- the shape under the pointer in the library, looked at before it is picked
@@ -1008,6 +1544,58 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
     # ---- the editor: the preview grown into the library's room
 
     _edited = None          # the picked shape as changed by hand; Create, the ghost and Replace use it
+    _taken = ""             # the control the working copy was TAKEN from ("" = it began as a library shape)
+
+    def _pick_saved(self, name: str) -> None:
+        """A shape just saved / brought in becomes THE picked shape. The editor's working copy of the
+        shape picked before goes with it — else Create kept making that old copy while the library
+        showed the new shape as picked (it did: a curve saved from the scene, then Create made a pin)."""
+        self._settings["shape"] = name
+        self._drop_edited()
+        if self._editor.isVisible():
+            shape = self._library_shape()
+            self._editor.open(shape.curves, shape.title())
+
+    def _drop_edited(self) -> None:
+        self._edited, self._taken = None, ""
+        self._editor.set_apply_text("Onto the selected controls")
+
+    @staticmethod
+    def _unturned(curves: list, axis: str) -> list:
+        """Curves as they are on a control, turned back to how the library keeps a shape (facing +Y):
+        turned to `axis` again — what Create does — they are exactly what they were."""
+        if axis == "X":
+            back = lambda q: (q[1], q[0], -q[2])       # the turn to X is its own inverse
+        elif axis == "Z":
+            back = lambda q: (q[0], q[2], -q[1])
+        else:
+            return curves
+        return [shape_data.Curve([back(point) for point in curve.points], curve.degree, curve.closed) for curve in curves]
+
+    @staticmethod
+    def _curve_selected() -> bool:
+        try:
+            from msl_tools.msl.tools.maya.controls import scene
+            return bool(scene.controls_in_selection())
+        except (ImportError, RuntimeError, ValueError):
+            return False
+
+    def _take_shape(self) -> None:
+        """The selected control's shape into the editor, as it is in the scene: to be changed and put
+        back exactly, made again elsewhere, or saved as a shape of yours."""
+        from msl_tools.msl.tools.maya.controls import scene
+        controls = self._selected_controls()
+        if not controls:
+            return
+        name = controls[0].rpartition("|")[2]
+        curves = self._unturned(scene.read_curves(controls[0]), self._view.axis())
+        self._edited = shape_data.Shape(name.rpartition(":")[2], curves, "Mine", True)
+        self._taken = name
+        self._editor.open(curves, f"{name} · from the scene")
+        self._editor.set_apply_text("Back onto the selected controls")
+        self._show_preview()
+        self._say(f"The curve {name} is in the editor — change it, put it back, or Save… it as a shape of yours "
+                  "(Reset: the library's shape)", "done")
 
     def _library_shape(self) -> "shape_data.Shape":
         return self.library.get(self._settings.get("shape", "circle")) or shape_data.BUILT_IN["circle"]
@@ -1015,27 +1603,39 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
     def _set_editing(self, on: bool) -> None:
         if on == self._editor.isVisible():
             return
+        shelf_height = self._view.height()
         for widget in (self._grid, self._view, self._create):
             widget.setVisible(not on)
+        self._no_favorites.hide()
         self._editor.setVisible(on)
+        if not on:
+            self._refresh_grid()
         if on:
             shape = self._picked_shape()
             self._editor.open(shape.curves, shape.title() + (" · edited" if self._edited is not None else ""))
             self._editor.set_create_text(self._create.text())
+            # a curve is selected in the scene: THAT is what one opens the editor for — it comes in as
+            # it is, to be changed, put back or saved as a shape (Reset: the library's shape instead)
+            if not self._taken and self._curve_selected():
+                self._take_shape()
         # the window gives the editor its room, and takes it back
         window = self.window()
-        grown = EDITOR_HEIGHT - self._grid.height()
+        grown = EDITOR_HEIGHT - shelf_height
         if window is not None and window is not self and not window.isMaximized():
             window.resize(window.width(), max(window.minimumHeight(), window.height() + (grown if on else -grown)))
 
     def _on_shape_edited(self) -> None:
-        source = self._library_shape()
-        self._edited = shape_data.Shape(source.name, self._editor.curves(), source.category, True)
-        self._editor.set_title(source.title() + " · edited")
+        if self._taken:
+            self._edited = shape_data.Shape(self._edited.name, self._editor.curves(), "Mine", True)
+            self._editor.set_title(f"{self._taken} · from the scene · edited")
+        else:
+            source = self._library_shape()
+            self._edited = shape_data.Shape(source.name, self._editor.curves(), source.category, True)
+            self._editor.set_title(source.title() + " · edited")
         self._show_preview()
 
     def _reset_edited(self) -> None:
-        self._edited = None
+        self._drop_edited()
         source = self._library_shape()
         self._editor.open(source.curves, source.title())
         self._show_preview()
@@ -1043,23 +1643,55 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
 
     def _on_save_edited(self) -> None:
         from msl_tools.msl.tools.maya.rename.panel_words import _field_action
-        source = self._library_shape()
+        source = self._edited if self._taken else self._library_shape()
         button = self._editor.save_button()
         menu = self._menu()
-        self._menu_caption(menu, "Save this shape among yours — its name:")
+        if not self._taken:
+            # a fix of the shape itself: it stays what and where it is in the library
+            self._menu_caption(menu, "The library's shape")
+            self._menu_item(menu, "save", f"Update “{source.title()}”", self._update_shape,
+                            "The library keeps the shape as it is in the editor now, in its place — "
+                            + ("your shape is saved over" if source.user else
+                               "a correction of the built-in shape; the library's right-click menu can "
+                               "bring the built-in one back"))
+            menu.addSeparator()
+        self._menu_caption(menu, "A new shape of yours — its name:")
         _field_action(menu, source.name, "Shape name", self._save_edited)
         menu.exec(button.mapToGlobal(qt.QtCore.QPoint(0, button.height())))
 
-    def _save_edited(self, name: str) -> None:
-        saved = self.library.add(name, self._editor.curves())
-        self._edited = None
-        self._settings["shape"] = saved
-        self._categories.set_current("Mine")
-        self._settings["category"] = "Mine"
+    def _update_shape(self) -> None:
+        """The picked library shape becomes what is in the editor (not a new shape under Mine)."""
+        name = self._settings.get("shape", "circle")
+        if self._taken or not self.library.update(name, self._editor.curves()):
+            self._say("Nothing to update — pick a shape of the library first", "error")
+            return
+        self._drop_edited()
         self._refresh_grid()
         shape = self._library_shape()
         self._editor.open(shape.curves, shape.title())
-        self._say(f"Saved the shape “{saved}” — it is under Mine", "done")
+        self._say(f"The library's “{shape.title()}” is updated" +
+                  ("" if shape.user else " — right click it in the library to bring the built-in one back"), "done")
+
+    def _restore_shape(self, name: str) -> None:
+        if self.library.restore(name):
+            if name == self._settings.get("shape"):
+                self._drop_edited()
+                if self._editor.isVisible():
+                    shape = self._library_shape()
+                    self._editor.open(shape.curves, shape.title())
+            self._refresh_grid()
+            self._say(f"“{name}” is the built-in shape again", "done")
+
+    def _save_edited(self, name: str) -> None:
+        saved = self.library.add(name, self._editor.curves())
+        self._drop_edited()
+        self._settings["shape"] = saved
+        self._add_favorites([saved])
+        self._show_saved()
+        self._refresh_grid()
+        shape = self._library_shape()
+        self._editor.open(shape.curves, shape.title())
+        self._say(f"Saved the shape “{saved}” — it is among your favorites (and under Mine)", "done")
 
     def _on_axis(self, _axis: str) -> None:
         self._save()
@@ -1090,14 +1722,31 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
         shape = self.library.get(name) if name else None
         if shape is not None:
             self._menu_caption(menu, shape.title())
+            replaces = self._only_controls_selected()      # what a double click does NOW
             self._menu_item(menu, "controls", "Create", self.create, "A control of this shape on the selection",
-                            hint="double click")
+                            hint="" if replaces else "double click")
             self._menu_item(menu, "replace", "Replace the selected controls' shape", self._on_replace,
-                            "As big as theirs, same color", self._replace.iconColor)
+                            "As big as theirs, same color", self._replace.iconColor,
+                            hint="double click" if replaces else "")
             self._menu_item(menu, "add", "Add to the selected controls", self._on_add_shape,
                             "Beside the shape they have", self._replace.iconColor)
+            favorites = self._favorites()
+            if name in favorites:
+                self._menu_item(menu, "star", "Take out of favorites", lambda: self._toggle_favorite(name),
+                                "It stays in the library", hint="the star")
+                if not self._whole() and not self._search.text().strip() and len(favorites) > 1:
+                    self._menu_item(menu, "chevron_left", "Move earlier", lambda: self._move_favorite(name, -1))
+                    self._menu_item(menu, "chevron_right", "Move later", lambda: self._move_favorite(name, 1))
+                    self._menu_item(menu, "chevron_up", "Move to the front",
+                                    lambda: self._move_favorite(name, -len(favorites)))
+            else:
+                self._menu_item(menu, "star", "Add to favorites", lambda: self._toggle_favorite(name),
+                                "Your short list: what the library shows by default", hint="the star")
             if shape.user:
                 self._menu_item(menu, "delete", "Remove from your shapes", lambda: self._remove_shape(name))
+            if shape.changed:
+                self._menu_item(menu, "undo", "Back to the built-in shape", lambda: self._restore_shape(name),
+                                "You updated this shape — this drops your correction")
             menu.addSeparator()
         mine = len(self.library.mine())
         self._menu_caption(menu, f"Your shapes · {mine}")
@@ -1174,7 +1823,9 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
             made = scene.create(shape, entries, self._template.text().strip(), self._size.value(),
                                 self._view.axis(), self._fit.isChecked(), self._offsets.current().lower(),
                                 names, self._chain.isChecked(), self._side_color.isChecked(), self._sides(),
-                                drive=drive, notes=notes, rgb=self._own_rgb())
+                                drive=drive, notes=notes, rgb=self._own_rgb(),
+                                as_joint=self._as_joint.isChecked(),
+                                hide_joint=bool(self._settings.get("hide_joint", True)))
         except RuntimeError as error:
             self._say(f"Maya refused: {error}".strip(), "error")
             return
@@ -1194,6 +1845,24 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
             text += " · a vertex, an edge or a face can't be driven: those only stand there"
         self._say(text + " · Ctrl+Z undoes it", "error" if notes and len(notes) == len(made) else "done")
 
+    @staticmethod
+    def _only_controls_selected() -> bool:
+        """Something is selected and every selected object is a control (has curve shapes)."""
+        try:
+            from msl_tools.msl.tools.maya.controls import scene
+            selected = scene.selected_transforms()
+            return bool(selected) and all(scene.curve_shapes(item) for item in selected)
+        except (ImportError, RuntimeError, ValueError):
+            return False
+
+    def _on_shape_double_click(self) -> None:
+        """A double click on a library shape: the selected controls get that shape (Replace) when ONLY
+        controls are selected; on anything else — or nothing — a control is made, as Create does."""
+        if self._only_controls_selected():
+            self._on_replace()
+        else:
+            self.create()
+
     def _selected_controls(self) -> list:
         from msl_tools.msl.tools.maya.controls import scene
         controls = scene.controls_in_selection()
@@ -1206,8 +1875,20 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
         controls = self._selected_controls()
         if controls:
             back = bool(qt.QtWidgets.QApplication.keyboardModifiers() & qt.QtCore.Qt.KeyboardModifier.ShiftModifier)
-            scene.turn(controls, axis, -90.0 if back else 90.0)
-            self._say(f"Turned {len(controls)} {'−' if back else ''}90° about {axis}", "done")
+            angle = self._shape_angle.value()
+            scene.turn(controls, axis, -angle if back else angle)
+            self._say(f"Turned {len(controls)} {'−' if back else ''}{angle:g}° about {axis}", "done")
+
+    def _shift_shape(self, axis: int, sign: int) -> None:
+        from msl_tools.msl.tools.maya.controls import scene
+        controls = self._selected_controls()
+        if controls:
+            shift = bool(qt.QtWidgets.QApplication.keyboardModifiers() & qt.QtCore.Qt.KeyboardModifier.ShiftModifier)
+            offset = [0.0, 0.0, 0.0]
+            offset[axis] = sign * self._shape_step.value() * (5 if shift else 1)
+            scene.shift(controls, offset)
+            self._say(f"The shape of {len(controls)} moved {offset[axis]:+g} along {shape_data.AXES[axis]} · "
+                      "Ctrl+Z undoes it", "done")
 
     def _resize(self, factor: float) -> None:
         from msl_tools.msl.tools.maya.controls import scene
@@ -1221,6 +1902,12 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
         controls = self._selected_controls()
         if controls:
             shape = self._picked_shape()
+            if self._taken and self._edited is not None:
+                # a shape TAKEN from the scene goes back as it is: same size, same place about the pivot
+                # (Replace would size a library shape to the control — this one has its own size)
+                count = scene.set_curves(controls, shape_data.oriented(shape.curves, self._view.axis()))
+                self._say(f"{count} got the edited shape back, exactly · Ctrl+Z undoes it", "done")
+                return
             count = scene.replace(controls, shape, self._view.axis())
             self._say(f"{count} got the shape “{shape.title()}” · Ctrl+Z undoes it", "done")
 
@@ -1262,6 +1949,15 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
             shape = self._picked_shape()
             scene.add_shape(controls, shape, self._view.axis())
             self._say(f"Added “{shape.title()}” to {len(controls)} · Ctrl+Z undoes it", "done")
+
+    def _on_strip_shape(self) -> None:
+        from msl_tools.msl.tools.maya.controls import scene
+        controls = self._selected_controls()
+        if controls:
+            stripped = scene.strip_shapes(controls)
+            self._say(f"The curve is off {len(stripped)}: " + ", ".join(stripped[:3]) + ("…" if len(stripped) > 3 else "")
+                      + " · Ctrl+Z undoes it", "done")
+            self._refresh_live()        # they are no controls any more: the preview, the line, the eye
 
     def _on_combine(self) -> None:
         from msl_tools.msl.tools.maya.controls import scene
@@ -1322,9 +2018,9 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
         if not added:
             self._say("Nothing new in that file: you have those shapes", "")
             return
-        self._categories.set_current("Mine")
-        self._settings["category"] = "Mine"
-        self._settings["shape"] = added[0]
+        self._pick_saved(added[0])
+        self._add_favorites(added)
+        self._show_saved()
         self._refresh_grid()
         self._say(f"{len(added)} shape{'s' if len(added) != 1 else ''} added to Mine", "done")
 
@@ -1512,7 +2208,7 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
         self._menu_caption(menu, "Joints where the selection is")
         self._menu_item(menu, "joint_chain", "A chain, in the order picked", lambda: self._make_joints(True),
                         "Each joint under the one before, X down the bone", hint="click")
-        self._menu_item(menu, "locator", "Separate joints", lambda: self._make_joints(False),
+        self._menu_item(menu, "joints_separate", "Separate joints", lambda: self._make_joints(False),
                         "Not connected, each turned like its object")
         return menu
 
@@ -1551,8 +2247,8 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
 
     def _save_shape(self, name: str, curves: list) -> None:
         saved = self.library.add(name, curves)
-        self._settings["shape"] = saved
-        self._categories.set_current("Mine")
-        self._settings["category"] = "Mine"
+        self._pick_saved(saved)
+        self._add_favorites([saved])
+        self._show_saved()
         self._refresh_grid()
-        self._say(f"Saved the shape “{saved}” — it is under Mine", "done")
+        self._say(f"Saved the shape “{saved}” — it is among your favorites (and under Mine)", "done")

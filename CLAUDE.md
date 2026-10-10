@@ -226,7 +226,7 @@ msl_tools/                 (repo root)
     named by what the icon IS, not the gesture (`drag_handle`, not
     `dragAndDrop`). Categories: `window/` (chrome: close/maximize/...),
     `actions/` (row/toolbar actions: `drag_handle`, `copy`, `delete`,
-    `browse`, `folder_add`, `file_video`, `bookmark`, `bookmark_add`, `save`, `file_add`, `chevron_right`, `eye`, `folder_into`, `compress`, `scissors`, `repeat`, `text_frame`, `volume`, `gif`, `image_stack`, `clapper`, `crop`, `merge`, `split_view`, `film`, `timeline`, `folder_watch`, `pause`, `bell` (the Media actions and its queue), `clear`, `arrow_right`, `chevron_down`, `add`, `check`, `select_all`, `more`, `report`, `code`, `restart`, `power`, `play`, `edit`, `scene`, `stop`, `lock`, `search`, `rename`, and the Rename tool's quick buttons: `case_upper`, `case_capital`, `case_lower`, `case_snake` (a snake), `case_camel` (a camel's humps), `cut_prefix`, `cut_suffix`, `cut_number`, `cut_digits`, `cut_first`, `cut_last`, `namespace_out`, `magic_fix`, `sweep`, `mirror_sides`, `shape_name`, `warning`, `error`, `keyboard` (Maya Gate's EN), and the Rename strip's `names_same`, `name_bad`, `skin_joints`, `side_other`, `lock_find`, `convention_check`, `names_unique`, `name_related`, `convention_fix`, `unlock`, `sets`, `star`, `sliders`, `book`, `replace`, `skin_mesh` (the grey cube under `skin_joints`), `branch`, and the Controls tool's `controls`, `grow`, `shrink`, `outliner`, `color_pick`, `line_width`, `mirror_shape`, `mirror_update`, `zero_out`, `zero_matrix`, `matrix_out`, `on_top`, `cvs`, `paste`, `drive_constraint`, `drive_matrix`, `drive_off`, `locator`, `joint_chain`, `center`, `move`, `minus`, `smooth_curve`, `expand`, `collapse`, `undo`, `redo`; add new action icons here),
+    `browse`, `folder_add`, `file_video`, `bookmark`, `bookmark_add`, `save`, `file_add`, `chevron_right`, `eye`, `folder_into`, `compress`, `scissors`, `repeat`, `text_frame`, `volume`, `gif`, `image_stack`, `clapper`, `crop`, `merge`, `split_view`, `film`, `timeline`, `folder_watch`, `pause`, `bell` (the Media actions and its queue), `clear`, `arrow_right`, `chevron_down`, `add`, `check`, `select_all`, `more`, `report`, `code`, `restart`, `power`, `play`, `edit`, `scene`, `stop`, `lock`, `search`, `rename`, and the Rename tool's quick buttons: `case_upper`, `case_capital`, `case_lower`, `case_snake` (a snake), `case_camel` (a camel's humps), `cut_prefix`, `cut_suffix`, `cut_number`, `cut_digits`, `cut_first`, `cut_last`, `namespace_out`, `magic_fix`, `sweep`, `mirror_sides`, `shape_name`, `warning`, `error`, `keyboard` (Maya Gate's EN), and the Rename strip's `names_same`, `name_bad`, `skin_joints`, `side_other`, `lock_find`, `convention_check`, `names_unique`, `name_related`, `convention_fix`, `unlock`, `sets`, `star`, `sliders`, `book`, `replace`, `skin_mesh` (the grey cube under `skin_joints`), `branch`, and the Controls tool's `controls`, `grow`, `shrink`, `outliner`, `color_pick`, `line_width`, `mirror_shape`, `mirror_update`, `zero_out`, `zero_matrix`, `matrix_out`, `on_top`, `cvs`, `paste`, `drive_constraint`, `drive_matrix`, `drive_off`, `locator`, `joint_chain`, `center`, `move`, `minus`, `smooth_curve`, `expand`, `collapse`, `undo`, `redo`, `snap_grid`, `chevron_left`, `chevron_up`, `joint_node`, `joint_shape`, `joints_separate`, `shape_off`, `eye_off` (`joint_chain` = a ball and a tapering bone to a smaller ball, like Maya's own joint icon); add new action icons here),
     `apps/` (third-party application logos: `maya`; later houdini, blender...
     — named after the app, not the tool that uses it, so several tools can
     share one), `tools/` (sidebar icons of our OWN hub tools, one-color like
@@ -2620,6 +2620,183 @@ axis (`flip`). ZERO THE SELECTED (`actions/zero_out`, in the Zero row): the mode
   Checked: the editor offscreen from an isolated copy with real mouse events (31 checks); in windowed
   Maya 2026 — the ghost follows an edit, Create from the editor makes the control with its shape off
   the pivot, the hover compare, the menus with their icons.
+- The editor, second round (2026-10-10, the user's asks): move / turn / scale act on the PICKED points
+  ONLY — with none picked nothing happens and the hint line says "Pick points first — click one, drag a
+  frame, or A for all" (the whole shape off its pivot = A, then Move); SNAP (the `snap_grid` toggle in
+  the tool column, or Ctrl held — Ctrl INVERTS the toggle): the point under the pointer lands ON the
+  grid of the Step and the others move with it (not "the move is a whole number of steps"), turns go
+  by 15°, scales by 0.1; the step's lines are drawn when they are 7 px apart or more, stronger while
+  snap is on. A row under the canvas: Step (a DragNumberField, 0.1 at first), four NUDGE buttons (one
+  step left / right / up / down on the screen, Shift = five; the arrow keys do the same), and how many
+  points are picked. Q / W / E / R pick Points / Move / Turn / Scale as in Maya (`tool_wanted`): the
+  canvas answers QEvent.ShortcutOverride for its keys, or Maya's own hotkeys would take a single letter
+  before keyPressEvent sees it. EDITOR_HEIGHT 428. Checked offscreen from an isolated copy with real
+  mouse and key events (42 checks); not opened in a windowed Maya after this round — that Q / W / E / R
+  really beat Maya's hotkeys there is NOT yet seen.
+- The editor, third round (2026-10-10, the user's picks 1 / 2 / 6 of six ideas): ABOUT THEIR MIDDLE (a
+  toggle in the tool column, `EditorCanvas.set_about_centre`): Turn and Scale go about the middle of the
+  box around the picked points instead of the control's pivot. NUMBERS (a row X / Y / Z,
+  `CoordinateField`): the picked points' coordinate where they all agree, empty where they differ; a
+  typed number + Enter puts ONE point exactly and lines SEVERAL up there (`set_coordinate`); the wheel
+  and Up / Down change it by the Step; the axis letter in front of a field (`QPushButton#controlsAxis`)
+  lines the picked points up at their average (`align`). FROM THE SCENE (the pipette in the editor's
+  bar, `ControlsPanel._take_shape`): the selected control's shape opens in the editor as it is —
+  `_unturned` turns the curves back to how the library keeps a shape (facing +Y) for the axis picked NOW,
+  so turned to that axis again (what Create does) they are exactly what they were; `_taken` holds the
+  control's name, the title reads "<control> · from the scene", the second button reads "Back onto the
+  selected controls" and puts the edited curves back with `scene.set_curves` — same size, same place
+  about the pivot, each control's own color (Replace would size a library shape to the control; a taken
+  one has its own size). Create makes more of it, Save as… keeps it. Picking a library shape drops the
+  taken copy (`_drop_edited`). OPENING the editor while a curve is selected takes it at once
+  (`_set_editing`: `_curve_selected()` and nothing taken yet) — a curve drawn by hand in the scene goes
+  editor -> Save as… -> Mine without looking for the pipette; nothing selected = the library's shape.
+  A DOUBLE CLICK on a library shape (`_on_shape_double_click`, the user's ask): with ONLY controls
+  selected (`_only_controls_selected`: every selected transform has curve shapes) it is Replace — same
+  size, same color —, with anything else selected, a mix, or nothing it is Create as before; the grid
+  menu's "double click" hint sits on the line it would run. Checked in windowed Maya 2026 with real
+  double clicks from an isolated copy (joint -> created, control -> replaced + one undo, mix, nothing). `scene.read_curves`: a degree-1 curve that ENDS WHERE IT STARTS is read
+  as closed without the repeated point, whatever Maya's `form` says (our own polygons are built as open
+  lines) — else moving its first corner in the editor left the last one behind and opened the square.
+  TRAP met again: `repolish()` on a button that is not yet in a styled window raised "Internal C++
+  object (QProxyStyle) already deleted" right after Maya's start (once in several runs) —
+  `ShapeEditor._lit` swallows it; a widget that sets a QSS property in its constructor should not
+  repolish there. EDITOR_HEIGHT 456. Checked: offscreen from an isolated copy (50 checks); in windowed
+  Maya 2026 the round trip — taken, one point nudged two steps, put back: only that corner (and its
+  closing twin) moved, the color stayed, one undo; made again on another joint.
+- The editor's MANIPULATOR (2026-10-10, the user: "I pick, go to another mode, leave it, unpick, pick,
+  go to a mode again" and "3/4 should edit too"). PICKING works in every tool now — a click on a point
+  picks it (Shift adds / takes away), a drag over empty room is a frame, a click on empty room picks
+  none — so a tool is never left to pick. Move / Turn / Scale no longer act on "a drag anywhere": a
+  manipulator stands on the picked points (`EditorCanvas.gizmo_handles()` / `_handle_at` /
+  `_paint_gizmo`, arms GIZMO 46 px in the axes' colors — qproperty xColor / yColor / zColor): MOVE = an
+  arm moves along its axis only (the pointer's move projected on the arm's screen vector), the middle
+  square freely; SCALE = an arm scales that axis, the middle evenly; TURN = a ring in the straight
+  views (the angle the pointer sweeps around it; which way a positive turn goes on the screen is found
+  by turning a probe point, `_turn_sign`, not reasoned per view). Move's manipulator stands on the
+  picked points, Turn's and Scale's on what they go about (the pivot, or the points' middle).
+  The 3/4 VIEW edits too: points are picked there, and the manipulator has all three arms (an arm that
+  points at the eye is left out) — Turn shows a dot per axis to drag sideways; only the FREE drag of a
+  point is missing there (the screen has no plane to drag it in), and the arrow-key nudge. Alt + drag
+  turns the 3/4 view (a plain drag is a frame now); the middle button pans, Alt + drag pans in the
+  straight views. Checked offscreen from an isolated copy with real mouse and key events (50 checks:
+  picking in each of the four tools, both arms, the free middle, snap on an arm, the ring both about
+  the pivot and about the middle, the arms of Scale, 3/4 pick / Y arm / turn dot / even scale / Alt
+  orbit / frame); NOT opened in a windowed Maya after this round.
+- STEPS ALONG THE AXES (2026-10-10, the user: "moving doesn't work in 3/4" — the screen-arrow nudges
+  refused there — and "I want to move the points of a control that EXISTS by buttons: left / right,
+  turn, scale"). In the EDITOR the four screen arrows became six axis buttons −X +X −Y +Y −Z +Z
+  (`editor.axis_step_button`, `#controlsAxisStep`, the axis' color; `EditorCanvas.nudge_axis`): they
+  mean the same in every view, 3/4 too. The arrow keys still step on the screen in the straight views;
+  in 3/4 right = +X and up = +Y; Page Up / Down step along Z everywhere.
+  In SELECTED a third row works on the shapes of the selected controls in the scene: Move [step] and the
+  same six buttons (`scene.shift`: every CV by the offset in the control's OWN axes — the shape goes off
+  its pivot, the control and its channels stay; Shift = five steps), Turn [angle] = how far the turn
+  buttons X / Y / Z above turn (was a fixed 90°), × [factor] = how much Bigger grows and Smaller shrinks
+  (was 1.25 / 0.8); `settings.shape_step` / `shape_angle` / `shape_factor`. Hovering a step button shows
+  the moved shape in the preview like the other tools. The window starts 460 x 668.
+  Checked: the editor offscreen from an isolated copy (52 checks); in windowed Maya 2026 — three steps
+  on a control (every CV by exactly the offset, the control unmoved, one undo each), a 45° turn, ×2 and
+  back, the hover; and INSIDE Maya the editor's 3/4 view: a click picks, the Y arm lifts, the +X / −Z
+  buttons step (with Qt's own mouse events, not a hand on the mouse).
+- The BONE on the preview (2026-10-10, the user's idea: "select a joint, Drive = Shape — that is a kind
+  of control of its own; draw a bone on the small viewport, lit = the control is made with the bone"):
+  a toggle in the preview's top left corner, beside the expand button (`ControlsPanel._bone`, icon
+  `joint_chain`) IS Drive = Shape as a picture — on: Drive becomes Shape (what it was is remembered and
+  comes back when it is switched off); it follows Drive whoever changes it (`_sync_bone` from `_save`,
+  a guard flag, no blockSignals: ToggleIconButton lights itself from its own `toggled`). While it is on
+  the preview draws the object that BECOMES the control in the control's color, one with its curve
+  (`item["becomes"]` -> `ShapeView._paint_target(own=)`); with nothing selected a bone is drawn so the
+  mode is seen. Checked offscreen from an isolated copy (8 checks); Drive = Shape itself was checked in
+  Maya earlier, the toggle was not clicked there.
+- JOINT CONTROLS, and the numbers beside their buttons (2026-10-10, the user: "all the points are
+  interesting" + "there are number boxes but I don't see how to turn").
+  SELECTED was regrouped: the turn buttons X / Y / Z stand right after the Turn [angle] field and Smaller
+  / Bigger right after Scale [factor], in a row of their own under Move [step] −X…+Z — a number and the
+  buttons that use it are never on different rows (the angle had been in row 3, its buttons in row 1).
+  Icon rows: (edit CVs) (replace, add, copy, paste, combine, TAKE THE CURVE OFF) (mirror x2) (zero x3) /
+  (drive x3) (show x3) (locators, joints) (save). The window starts 460 x 694, its minimum width is 448.
+  Drive = Shape grew into a kind of control of its own: (1) `hide_joint` (`settings.hide_joint`, on by
+  default; an eye toggle that shows beside the bone only while the bone is on): the joint that gets the
+  curve stops drawing its bone (drawStyle 2 = None; `scene.JOINT_HIDDEN`); (2) doing it AGAIN on a joint
+  that wears a curve puts the new one INSTEAD (`_swap_shapes`: its color kept) — it used to pile curves
+  up; (3) `scene.strip_shapes` (the `shape_off` button, blue group): the curve shapes removed, a joint
+  drawn as a bone again; (4) Replace, the editor's take / put back and Move by a step work on such a
+  joint as on any control (it has curve shapes, so `controls_in_selection` takes it).
+  "CONTROLS ARE JOINTS" (a toggle in the Name row, icon `joint_node`, `settings.as_joint`, off by
+  default; `scene.create(as_joint=)`): each new control is a JOINT node with its bone not drawn instead
+  of a transform; its zero groups stay plain groups; chain, zero (groups or matrix), drive and mirror
+  work as for transforms (a mirrored copy keeps the node type and drawStyle). TRAP, measured: a joint
+  parented under its offset group keeps its turn in jointOrient — `add_offset_groups` and
+  `move_to_offset_matrix` zero jointOrient for a joint, or the control is not at zero / not in place.
+  New icons: `actions/joint_node`, `shape_off` (later: `eye_off`, `joint_shape`). Checked in mayapy 2026 from an isolated copy (19
+  checks); the panel built offscreen; the new toggles and the button were not clicked in a windowed Maya.
+- The EYE reads the scene (2026-10-10, the user: "if the joint is hidden it should read that itself,
+  and a click on the eye should show it — not only at creation"): `_read_joint_controls` (every
+  `_draw_live`) takes the selected joints that wear a curve (`scene.joint_controls`); while there are
+  any the eye is shown — bone toggle or not — and says how THEY are drawn now (`scene.bones_hidden`),
+  and a click changes them at once (`scene.set_bones_hidden`, one undo step, said in the header). With
+  none selected the eye is the setting for the next ones (`settings.hide_joint`), which a click on
+  selected joints never overwrites (`_save` keeps the stored value while `_worn` is not empty; Create
+  reads the setting, not the button). Checked in windowed Maya 2026 from an isolated copy: shown / hidden
+  with the bone and with the selection, a click draws the bones at once, undo, a bone changed outside
+  the tool is read, "take the curve off", a control made as a joint node. (After "take the curve off"
+  the preview is refreshed by hand: no selection change tells it.)
+- The eye's two faces, the bone's own icon (2026-10-10, the user: "an open and a closed eye — I see /
+  don't see the joint", and "a truer icon for the joint shape"): the eye toggle is CHECKED = the bone is
+  SEEN (`actions/eye`, lit) and unchecked = hidden (`actions/eye_off`: a closed lid with lashes, quiet);
+  `_show_eye` swaps the shape on every toggle (`IconPushButton.set_source_icon`). The stored setting is
+  still `hide_joint` (True = hidden), so the button is its opposite: `setChecked(not hide_joint)`. The
+  bone toggle's icon is `actions/joint_shape` — the user's own pick: the joint mark of `joint_node` (a
+  ball with its cross) with the control's ring drawn around it (a first try, a ball with a bone running
+  off inside an ellipse, was too dense at 16 px); `joint_chain` stays the Joints button's. Checked offscreen and in
+  windowed Maya 2026 from an isolated copy (hidden joints -> the eye closed; a click opens it and the
+  bones are drawn; a bone shown outside the tool is read; after "take the curve off" the eye is gone).
+- FAVORITES instead of the whole library (2026-10-10, the user: "I don't use all of them anyway", after
+  a mock-up; their answers: the library opens IN PLACE, no "recent" row). The row of category chips is
+  gone. The CONTROL heading holds: the categories as one drop-down (`CategoryBox`, a BaseComboBox with
+  the chips' current / set_current / clicked; shown only with the whole library), two toggles that work
+  as a pair — star = only your favorites, grid = the whole library (`settings.library` "favorites" /
+  "all", `_set_library`) — and the search field, which ALWAYS looks through the whole library
+  (favorites first). Favorites: `settings.favorites`, names in the user's order (`FIRST_FAVORITES` on a
+  fresh install; settings from before the key existed = that list + every shape of the user's own;
+  an empty list stays empty and shows a hint in the grid's place). The grid is FAVORITE_ROWS (2) high,
+  LIBRARY_ROWS (3) for the library, and the window grows / shrinks by that row on a switch. A STAR in
+  a tile's corner (`ShapeGrid.paintEvent` over the items, qproperty starColor = --yellow /
+  starIdleColor): filled on a favorite while the library or a search shows, hollow on the tile under
+  the pointer; a click on it adds / takes out WITHOUT picking the tile (`star_clicked`, sent on the next
+  turn of the event loop — the owner rebuilds the list). The grid's menu: add / take out, and in the
+  favorites list "Move earlier / later / to the front". DRAG A TILE to order the favorites (the user's
+  ask; `ShapeGrid.set_reorderable` — on only for the plain favorites list, not the library or a search):
+  done by hand in the grid's mouse events, because an icon-mode QListWidget's own drag moves tiles
+  freely, not in order — a held press past the drag distance shows an accent drop line (qproperty
+  dropColor) before the tile under the pointer / at the end of its row, the release sends
+  `order_changed(names)` on the next turn of the event loop; while a tile is held super().mouseMoveEvent
+  is NOT called (the list would pick every tile it passes). A star click keeps the list where it is
+  scrolled: `set_shapes` rebuilds nothing when the tiles are the same, and keeps the scroll value when
+  it is the same set in another order. A shape saved or brought in from a file becomes a favorite at once.
+  LAYOUT: Create moved under the library, as wide as it; the preview stands beside both and is as tall
+  as grid + Create (126 px with favorites — taller than the 116 it was, though the shelf lost a row —,
+  172 with the library). The window starts 460 x 648. A color_property on a QListWidget needs its own
+  on_change: the default "update" is QAbstractItemView.update(index) there.
+  Checked offscreen from an isolated copy (24 checks, real clicks on the star) and in windowed Maya 2026.
+- FACING X, a shape points UP (2026-10-10, the user: pins made on joints hung upside down and had to be
+  turned 180 every time): `shapes.oriented(curves, "X")` is now (x, y, z) -> (y, x, -z) — the shape's
+  own +X (a pin's stick, an arrow, a pointer, the hand's fingers) goes to +Y; it was a quarter turn about
+  Z, which sent it to -Y. Still a rotation (no mirror) and its own inverse, so `_unturned` for X is the
+  same formula. Facing Z is unchanged (a quarter turn about X: the shape's +X stays +X, as the tile reads
+  from the front). Controls made before keep their shape; a shape Replaced on them comes the new way up.
+  Checked in mayapy 2026 from an isolated copy (pin / pointer / arrow / hand on a joint, three axes).
+- A LIBRARY SHAPE UPDATED IN PLACE (2026-10-10, the user: a shape with a construction error is fixed
+  in the editor and must stay that shape — not become a new one under Mine). The editor's button reads
+  "Save…" and its menu has two parts: "Update “<shape>”" (`ControlsPanel._update_shape` ->
+  `ShapeLibrary.update(name, curves)`: normalized, same name / category / place) and the name field for a
+  new shape of the user's own (as before); a curve taken from the scene has only the second. A config
+  entry under a BUILT-IN shape's name is that user's correction of it: `all()` shows it in the built-in
+  one's place and category (`Shape.changed`, not `user` — so not in `mine()` or the shapes file,
+  `remove()` refuses it); the tile's tooltip says "corrected by you" and its menu has "Back to the
+  built-in shape" (`restore`). One of the user's own is simply saved over. The correction lives in this
+  user's config only — a fix meant for EVERYONE still has to go into `shapes.py`.
+  Checked: unit test; offscreen from an isolated copy (9 checks).
 
 ## Batch tool
 

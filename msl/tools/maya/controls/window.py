@@ -18,7 +18,7 @@ class ControlsWindow(FramelessDialog):
     OBJECT_NAME = "mslControlsWindow"
 
     def __init__(self, parent=None):
-        super().__init__(title="MSL Controls", width=460, height=640, fade_when_inactive=False,
+        super().__init__(title="MSL Controls", width=460, height=648, fade_when_inactive=False,
                          show_minimize_button=False, show_maximize_button=False, parent=parent)
         self.setObjectName(self.OBJECT_NAME)
         self.setAttribute(qt.QtCore.Qt.WidgetAttribute.WA_DeleteOnClose, True)

@@ -21,6 +21,9 @@ ControlsPanel QLabel#controlsCaption {
 /* The shapes: thumbnails in rows on a field; the picked one in the accent. */
 ControlsPanel ShapeGrid#controlsGrid {
     qproperty-thumbColor: var(--text-primary);
+    qproperty-starColor: var(--yellow);
+    qproperty-starIdleColor: var(--text-secondary);
+    qproperty-dropColor: var(--accent);
     background-color: var(--field);
     border: 1px solid alpha(var(--border), 80%);
     border-radius: 6px;
@@ -92,7 +95,45 @@ ControlsPanel EditorCanvas#controlsEditorCanvas {
     qproperty-pickedColor: var(--orange);
     qproperty-pivotColor:  var(--text-secondary);
     qproperty-textColor:   var(--text-secondary);
+    qproperty-xColor:      var(--error);
+    qproperty-yColor:      var(--success);
+    qproperty-zColor:      var(--accent);
 }
+/* The editor's numbers: an axis letter (a click lines the picked points up) and its field. */
+ControlsPanel QPushButton#controlsAxis {
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 5px;
+    padding: 0px;
+    min-width: 18px;
+    max-width: 18px;
+    min-height: 22px;
+    max-height: 22px;
+    font-size: 11px;
+    font-weight: 600;
+}
+ControlsPanel QPushButton#controlsAxis:hover { border: 1px solid alpha(var(--accent), 60%); }
+ControlsPanel QPushButton#controlsAxis[axis="X"] { color: var(--error); }
+ControlsPanel QPushButton#controlsAxis[axis="Y"] { color: var(--success); }
+ControlsPanel QPushButton#controlsAxis[axis="Z"] { color: var(--accent); }
+/* One step along an axis: "−X" / "+X", framed like a tool, in the axis' color. */
+ControlsPanel QPushButton#controlsAxisStep {
+    background: alpha(var(--text-primary), 5%);
+    border: 1px solid alpha(var(--border), 70%);
+    border-radius: 5px;
+    padding: 0px;
+    min-width: 24px;
+    max-width: 24px;
+    min-height: 22px;
+    max-height: 22px;
+    font-size: 11px;
+    font-weight: 600;
+}
+ControlsPanel QPushButton#controlsAxisStep:hover { border: 1px solid var(--accent); background: alpha(var(--accent), 12%); }
+ControlsPanel QPushButton#controlsAxisStep:pressed { background: alpha(var(--accent), 25%); }
+ControlsPanel QPushButton#controlsAxisStep[axis="X"] { color: var(--error); }
+ControlsPanel QPushButton#controlsAxisStep[axis="Y"] { color: var(--success); }
+ControlsPanel QPushButton#controlsAxisStep[axis="Z"] { color: var(--accent); }
 /* The line under the library: zero groups › control ⇢ what it drives. */
 ControlsPanel HierarchyStrip#controlsStrip {
     qproperty-zeroColor:    var(--violet);

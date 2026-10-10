@@ -33,6 +33,42 @@ class BuiltIn(unittest.TestCase):
         facing_z = shapes.oriented(circle, "Z")
         self.assertTrue(all(abs(point[2]) < 1e-6 for point in facing_z[0].points))
 
+    def test_a_library_shape_is_updated_in_place(self):
+        """A fix of a built-in shape stays that shape — same name and category, not one of the
+        user's own — and can be taken back; one of the user's own is saved over."""
+        library = shapes.ShapeLibrary({})
+        fixed = [shapes.Curve([(-2.0, 0.0, -2.0), (2.0, 0.0, -2.0), (2.0, 0.0, 2.0)], 1, True)]
+        self.assertTrue(library.update("square", fixed))
+        square = library.get("square")
+        self.assertEqual((len(square.curves[0].points), square.category, square.user, square.changed),
+                         (3, shapes.BUILT_IN["square"].category, False, True))
+        self.assertAlmostEqual(reach(square.curves), 1.0, places=5)          # normalized like any shape
+        self.assertNotIn("square", library.mine())
+        self.assertFalse(library.remove("square"))                          # not through "remove yours"
+        self.assertEqual(len(library.all()), len(shapes.BUILT_IN))
+        self.assertTrue(library.restore("square"))
+        self.assertEqual(len(library.get("square").curves[0].points), 4)
+        self.assertFalse(library.get("square").changed)
+        own = library.add("my arrow", fixed)
+        self.assertTrue(library.update(own, shapes.BUILT_IN["circle"].curves))
+        self.assertTrue(library.get(own).user and library.get(own).curves[0].degree == 3)
+        self.assertFalse(library.restore(own))
+        self.assertFalse(library.update("no_such_shape", fixed))
+
+    def test_facing_x_the_shape_points_up(self):
+        """A pin's stick, an arrow point along the shape's own +X: facing X they go UP, not down —
+        and the turn is a rotation (no mirror) that undoes itself."""
+        axes = [shapes.Curve([(1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)])]
+        x, y, z = shapes.oriented(axes, "X")[0].points
+        self.assertEqual((x, y), ((0.0, 1.0, 0.0), (1.0, 0.0, 0.0)))
+        cross = (x[1] * y[2] - x[2] * y[1], x[2] * y[0] - x[0] * y[2], x[0] * y[1] - x[1] * y[0])
+        self.assertEqual(cross, z)                                   # right-handed still
+        self.assertEqual(shapes.oriented(shapes.oriented(axes, "X"), "X")[0].points, axes[0].points)
+        for name in ("pin_flat", "pointer", "arrow", "lollipop", "square_stick"):
+            turned_up = shapes.oriented(shapes.BUILT_IN[name].curves, "X")
+            points = [point for curve in turned_up for point in curve.points]
+            self.assertGreater(max(p[1] for p in points), -min(p[1] for p in points) - 1e-6, name)
+
     def test_turn_a_quarter(self):
         curve = [shapes.Curve([(1.0, 0.0, 0.0)])]
         x, y, z = shapes.turned(curve, "Z", 90)[0].points[0]

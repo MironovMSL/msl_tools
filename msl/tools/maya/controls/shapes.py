@@ -38,6 +38,7 @@ class Shape:
     curves: list = field(default_factory=list)
     category: str = "Basic"
     user: bool = False
+    changed: bool = False        # a built-in shape the user has corrected (ShapeLibrary.update)
 
     def to_dict(self) -> dict:
         return {"category": self.category, "curves": [curve.to_dict() for curve in self.curves]}
@@ -65,9 +66,14 @@ def normalized(curves: list) -> list:
 
 
 def oriented(curves: list, axis: str) -> list:
-    """Flat shapes face +Y; turned to face +X ("X") or +Z ("Z") — a quarter turn about Z / X."""
+    """Flat shapes face +Y; turned to face +X ("X") or +Z ("Z").
+
+    Facing X, the shape's own +X — where a pin's stick, an arrow, a pointer point in the library —
+    goes UP (+Y): a half turn about the X = Y diagonal. (A quarter turn about Z sent it DOWN: every
+    pin on a joint hung under it and had to be turned 180 by hand.) Facing Z is a quarter turn about
+    X: the shape's +X stays +X, as the tile shows it seen from the front."""
     if axis == "X":
-        turn = lambda p: (p[1], -p[0], p[2])      # +Y -> +X
+        turn = lambda p: (p[1], p[0], -p[2])      # +Y -> +X, +X -> +Y (up)
     elif axis == "Z":
         turn = lambda p: (p[0], -p[2], p[1])      # +Y -> +Z
     else:
@@ -726,7 +732,11 @@ BUILT_IN = {shape.name: shape for shape in _shapes()}
 # ------------------------------------------------------------------ the library
 
 class ShapeLibrary:
-    """The built-in shapes + the user's own, which live in a config node (`{name: shape dict}`)."""
+    """The built-in shapes + the user's own, which live in a config node (`{name: shape dict}`).
+
+    An entry under a BUILT-IN shape's name is the user's correction of that shape (`update`): it is
+    shown in the built-in one's place and category, is not one of the user's own (`mine`, the file),
+    and `restore` takes it away again."""
 
     def __init__(self, store):
         self._store = store      # a ConfigNode / dict: name -> Shape.to_dict()
@@ -735,10 +745,31 @@ class ShapeLibrary:
         shapes = dict(BUILT_IN)
         for name, data in dict(self._store).items():
             try:
-                shapes[name] = Shape.from_dict(name, dict(data))
+                shape = Shape.from_dict(name, dict(data))
             except (TypeError, ValueError, AttributeError):
                 continue    # a broken entry is skipped, never raised
+            if name in BUILT_IN:
+                if not shape.curves:
+                    continue
+                shape = Shape(name, shape.curves, BUILT_IN[name].category, False, True)
+            shapes[name] = shape
         return shapes
+
+    def update(self, name: str, curves: list) -> bool:
+        """The shape `name` gets these curves (normalized) and stays what and where it is: one of the
+        user's own is saved over, a built-in one is corrected for this user (see `restore`)."""
+        shape = self.get(name)
+        if shape is None or not curves:
+            return False
+        self._store[name] = Shape(name, normalized(curves), shape.category, shape.user).to_dict()
+        return True
+
+    def restore(self, name: str) -> bool:
+        """A corrected built-in shape is as it was made again."""
+        if name in BUILT_IN and name in dict(self._store):
+            del self._store[name]
+            return True
+        return False
 
     def get(self, name: str) -> "Shape | None":
         return self.all().get(name)
@@ -758,7 +789,7 @@ class ShapeLibrary:
         return name
 
     def remove(self, name: str) -> bool:
-        if name in dict(self._store):
+        if name in dict(self._store) and name not in BUILT_IN:
             del self._store[name]
             return True
         return False

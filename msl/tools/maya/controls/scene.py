@@ -66,7 +66,10 @@ def read_curves(transform: str) -> list:
             # a periodic curve has as many CVs of its own as spans (the others repeat its first ones;
             # xform lists only those, getAttr all)
             curves.append(shape_data.Curve(points[:cmds.getAttr(shape + ".spans")], degree, True))
-        elif form == 1 and degree == 1 and len(points) > 2 and points[0] == points[-1]:
+        elif degree == 1 and len(points) > 3 and all(abs(a - b) < 1e-6 for a, b in zip(points[0], points[-1])):
+            # a polygon: Maya keeps it as an OPEN line that ends where it starts (so do we, when we
+            # build one) — as a shape it is closed, without the repeated point: moving its first
+            # corner in the editor must not leave the last one behind and open it
             curves.append(shape_data.Curve(points[:-1], 1, True))
         else:
             curves.append(shape_data.Curve(points, degree, False))
@@ -226,6 +229,10 @@ def add_offset_groups(control: str, suffixes: list) -> list:
         control = cmds.ls(control, long=True)[0]
         for attr in ("translate", "rotate"):
             cmds.setAttr(f"{control}.{attr}", 0, 0, 0)
+        if cmds.objectType(control, isAType="joint"):
+            # a control that is a joint: Maya keeps its turn in jointOrient when it is parented — the
+            # group above it holds the turn now, so that is zero too
+            cmds.setAttr(control + ".jointOrient", 0, 0, 0)
     return groups
 
 
@@ -238,6 +245,8 @@ def move_to_offset_matrix(control: str) -> None:
     cmds.setAttr(control + ".offsetParentMatrix", list(local * offset), type="matrix")
     for attr, value in (("translate", 0), ("rotate", 0), ("scale", 1), ("shear", 0)):
         cmds.setAttr(f"{control}.{attr}", value, value, value)
+    if cmds.objectType(control, isAType="joint"):
+        cmds.setAttr(control + ".jointOrient", 0, 0, 0)       # it was part of the local matrix just moved
 
 
 def _uuid(node: str) -> str:
@@ -307,7 +316,8 @@ def targets_look(targets: list, limit: int = 12, axis: "str | None" = None) -> l
 
 def create(shape: shape_data.Shape, targets: list, template: str, size: float, axis: str, fit: bool,
            offset_mode: str, offset_names: list, chain: bool, side_color: bool, sides,
-           drive: str = "none", notes: "list | None" = None, rgb=None) -> list:
+           drive: str = "none", notes: "list | None" = None, rgb=None, as_joint: bool = False,
+           hide_joint: bool = False) -> list:
     """A control of `shape` for each target (or one at the origin): named by the template, as big
     as `size` (times the target's own size when `fit`), facing `axis`, matched to the target's
     position and rotation; its offsets (`offset_mode` "groups" / "matrix" / "none"); under the
@@ -322,12 +332,16 @@ def create(shape: shape_data.Shape, targets: list, template: str, size: float, a
 
     A target may be a Part (a vertex, an edge, a face… — see `selection_targets`): the control stands
     where the part is, turned as the Part says (on a mesh: facing away from the surface), "fit" is
-    the part's own size; a part can't be driven, chained or given the curve. One undo step.
+    the part's own size; a part can't be driven, chained or given the curve.
+
+    `as_joint`: each control is a JOINT node (its bone not drawn, only its curve) instead of a plain
+    transform — rigs built of joints all through; its zero groups stay plain groups. `hide_joint`
+    (with drive "shape"): the joint that gets the curve stops drawing its bone. One undo step.
     Returns the controls (long names)."""
     made = []           # (target, control uuid)
     whole = [target for target in targets if not isinstance(target, Part)]
     if drive == "shape" and whole:
-        return shapes_onto(shape, whole, size, axis, fit, side_color, sides, rgb)
+        return shapes_onto(shape, whole, size, axis, fit, side_color, sides, rgb, hide_joint)
     with _Chunk():
         for index, target in enumerate(targets or [None]):
             part = target if isinstance(target, Part) else None
@@ -338,7 +352,10 @@ def create(shape: shape_data.Shape, targets: list, template: str, size: float, a
             own = part_size(part) if part else (fit_size(target, axis) if target else 1.0)
             scale = size * (own if fit else 1.0)
             curves = shape_data.scaled(shape_data.oriented(shape.curves, axis), scale)
-            control = cmds.ls(cmds.createNode("transform", name=name, skipSelect=True), long=True)[0]
+            control = cmds.ls(cmds.createNode("joint" if as_joint else "transform", name=name, skipSelect=True),
+                              long=True)[0]
+            if as_joint:
+                cmds.setAttr(control + ".drawStyle", JOINT_HIDDEN)
             add_shapes(control, curves)
             if part:
                 cmds.xform(control, worldSpace=True, matrix=list(part.matrix))
@@ -367,24 +384,67 @@ def create(shape: shape_data.Shape, targets: list, template: str, size: float, a
     return controls
 
 
+JOINT_AS_BONE, JOINT_HIDDEN = 0, 2          # a joint's drawStyle: Bone / None
+
+
 def shapes_onto(shape: shape_data.Shape, targets: list, size: float, axis: str, fit: bool, side_color: bool,
-                sides, rgb=None) -> list:
+                sides, rgb=None, hide_joint: bool = False) -> list:
     """The curves as shapes OF the targets themselves (no control object): a joint that is picked
-    and animated by its own curve. One undo step; the targets."""
+    and animated by its own curve. A target that wears a curve already gets this one INSTEAD (its
+    color kept) — doing it twice doesn't pile curves up. `hide_joint`: the joint's own bone is no
+    longer drawn (drawStyle None), only its curve. One undo step; the targets."""
     with _Chunk():
         for target in targets:
             scale = size * (fit_size(target, axis) if fit else 1.0)
-            old = curve_shapes(target)
-            made = add_shapes(target, shape_data.scaled(shape_data.oriented(shape.curves, axis), scale),
-                              keep_from=old[0] if old else None)
-            color = SIDE_COLORS[sides.of(position(target))] if side_color else rgb
-            if color is not None and not old:
-                for node in made:
-                    cmds.setAttr(node + ".overrideEnabled", 1)
-                    cmds.setAttr(node + ".overrideRGBColors", 1)
-                    cmds.setAttr(node + ".overrideColorRGB", *color)
+            curves = shape_data.scaled(shape_data.oriented(shape.curves, axis), scale)
+            if curve_shapes(target):
+                _swap_shapes(target, curves)
+            else:
+                made = add_shapes(target, curves)
+                color = SIDE_COLORS[sides.of(position(target))] if side_color else rgb
+                if color is not None:
+                    for node in made:
+                        cmds.setAttr(node + ".overrideEnabled", 1)
+                        cmds.setAttr(node + ".overrideRGBColors", 1)
+                        cmds.setAttr(node + ".overrideColorRGB", *color)
+            if hide_joint and cmds.objectType(target, isAType="joint"):
+                _set(target + ".drawStyle", JOINT_HIDDEN)
         cmds.select(targets, replace=True)
     return list(targets)
+
+
+def joint_controls(nodes: list) -> list:
+    """The joints among `nodes` that wear a curve: joints that are controls."""
+    return [node for node in nodes if cmds.objectType(node, isAType="joint") and curve_shapes(node)]
+
+
+def bones_hidden(joints: list) -> bool:
+    """True when none of these joints draws its bone (drawStyle None)."""
+    return bool(joints) and all(cmds.getAttr(joint + ".drawStyle") == JOINT_HIDDEN for joint in joints)
+
+
+def set_bones_hidden(joints: list, hidden: bool) -> int:
+    """The joints draw their bones again, or stop (only their curves are seen). One undo step."""
+    with _Chunk():
+        done = sum(_set(joint + ".drawStyle", JOINT_HIDDEN if hidden else JOINT_AS_BONE) for joint in joints)
+    return done
+
+
+def strip_shapes(nodes: list) -> list:
+    """The curves taken OFF the objects again: their curve shapes are removed; a joint is drawn as a
+    bone again. What Drive = Shape did, undone (a plain control is left an empty transform).
+    One undo step; the objects that had a curve (short names)."""
+    stripped = []
+    with _Chunk():
+        for node in nodes:
+            shapes = curve_shapes(node)
+            if not shapes:
+                continue
+            cmds.delete(shapes)
+            if cmds.objectType(node, isAType="joint"):
+                _set(node + ".drawStyle", JOINT_AS_BONE)
+            stripped.append(node.rpartition("|")[2])
+    return stripped
 
 
 def _settable(node: str, attrs) -> bool:
@@ -1007,6 +1067,12 @@ def turn(controls: list, axis: str, degrees: float = 90.0) -> int:
     return edit_points(controls, change)
 
 
+def shift(controls: list, offset) -> int:
+    """Every CV of the controls' shapes moved by `offset` in the control's OWN axes: the shape goes
+    off its pivot (or back), the control and its channels stay. One undo step; how many shapes."""
+    return edit_points(controls, lambda points: [tuple(a + b for a, b in zip(point, offset)) for point in points])
+
+
 def resize(controls: list, factor: float) -> int:
     return edit_points(controls, lambda points: [tuple(value * factor for value in point) for point in points])
 
@@ -1251,6 +1317,8 @@ def mirror_control(control: str, sides, axis: str = "X", side_color: bool = Fals
         name = mirrored if node == control else mirrored + node.rpartition("|")[2][len(short):]
         copy = cmds.createNode(cmds.nodeType(node), name=name, skipSelect=True)
         copy = cmds.ls(copy, long=True)[0]
+        if cmds.objectType(node, isAType="joint"):          # a joint control: its copy is drawn (or not) alike
+            cmds.setAttr(copy + ".drawStyle", cmds.getAttr(node + ".drawStyle"))
         cmds.setAttr(copy + ".rotateOrder", cmds.getAttr(node + ".rotateOrder"))
         if above:
             copy = cmds.ls(cmds.parent(copy, above)[0], long=True)[0]
