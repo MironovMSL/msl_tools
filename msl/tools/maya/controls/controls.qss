@@ -10,6 +10,9 @@ ControlsPanel StableScrollArea#controlsScroll {
     background-color: transparent;
     border: none;
 }
+ControlsPanel {
+    qproperty-menuIconColor: var(--text-primary);
+}
 ControlsPanel QLabel#controlsCaption {
     color: var(--text-secondary);
     font-size: 11px;
@@ -79,6 +82,16 @@ ControlsPanel TurnButton#controlsTool[axis="Z"] { qproperty-axisColor: var(--acc
 ControlsPanel QFrame#controlsRule {
     background: alpha(var(--border), 90%);
     border: none;
+}
+/* The shape editor: the preview grown into the library's room. */
+ControlsPanel EditorCanvas#controlsEditorCanvas {
+    qproperty-groundColor: var(--field);
+    qproperty-gridColor:   var(--border);
+    qproperty-lineColor:   var(--accent);
+    qproperty-pointColor:  var(--text-primary);
+    qproperty-pickedColor: var(--orange);
+    qproperty-pivotColor:  var(--text-secondary);
+    qproperty-textColor:   var(--text-secondary);
 }
 /* The line under the library: zero groups › control ⇢ what it drives. */
 ControlsPanel HierarchyStrip#controlsStrip {

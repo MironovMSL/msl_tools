@@ -226,7 +226,7 @@ msl_tools/                 (repo root)
     named by what the icon IS, not the gesture (`drag_handle`, not
     `dragAndDrop`). Categories: `window/` (chrome: close/maximize/...),
     `actions/` (row/toolbar actions: `drag_handle`, `copy`, `delete`,
-    `browse`, `folder_add`, `file_video`, `bookmark`, `bookmark_add`, `save`, `file_add`, `chevron_right`, `eye`, `folder_into`, `compress`, `scissors`, `repeat`, `text_frame`, `volume`, `gif`, `image_stack`, `clapper`, `crop`, `merge`, `split_view`, `film`, `timeline`, `folder_watch`, `pause`, `bell` (the Media actions and its queue), `clear`, `arrow_right`, `chevron_down`, `add`, `check`, `select_all`, `more`, `report`, `code`, `restart`, `power`, `play`, `edit`, `scene`, `stop`, `lock`, `search`, `rename`, and the Rename tool's quick buttons: `case_upper`, `case_capital`, `case_lower`, `case_snake` (a snake), `case_camel` (a camel's humps), `cut_prefix`, `cut_suffix`, `cut_number`, `cut_digits`, `cut_first`, `cut_last`, `namespace_out`, `magic_fix`, `sweep`, `mirror_sides`, `shape_name`, `warning`, `error`, `keyboard` (Maya Gate's EN), and the Rename strip's `names_same`, `name_bad`, `skin_joints`, `side_other`, `lock_find`, `convention_check`, `names_unique`, `name_related`, `convention_fix`, `unlock`, `sets`, `star`, `sliders`, `book`, `replace`, `skin_mesh` (the grey cube under `skin_joints`), `branch`, and the Controls tool's `controls`, `grow`, `shrink`, `outliner`, `color_pick`, `line_width`, `mirror_shape`, `mirror_update`, `zero_out`, `zero_matrix`, `matrix_out`, `on_top`, `cvs`, `paste`, `drive_constraint`, `drive_matrix`, `drive_off`, `locator`, `joint_chain`, `center`; add new action icons here),
+    `browse`, `folder_add`, `file_video`, `bookmark`, `bookmark_add`, `save`, `file_add`, `chevron_right`, `eye`, `folder_into`, `compress`, `scissors`, `repeat`, `text_frame`, `volume`, `gif`, `image_stack`, `clapper`, `crop`, `merge`, `split_view`, `film`, `timeline`, `folder_watch`, `pause`, `bell` (the Media actions and its queue), `clear`, `arrow_right`, `chevron_down`, `add`, `check`, `select_all`, `more`, `report`, `code`, `restart`, `power`, `play`, `edit`, `scene`, `stop`, `lock`, `search`, `rename`, and the Rename tool's quick buttons: `case_upper`, `case_capital`, `case_lower`, `case_snake` (a snake), `case_camel` (a camel's humps), `cut_prefix`, `cut_suffix`, `cut_number`, `cut_digits`, `cut_first`, `cut_last`, `namespace_out`, `magic_fix`, `sweep`, `mirror_sides`, `shape_name`, `warning`, `error`, `keyboard` (Maya Gate's EN), and the Rename strip's `names_same`, `name_bad`, `skin_joints`, `side_other`, `lock_find`, `convention_check`, `names_unique`, `name_related`, `convention_fix`, `unlock`, `sets`, `star`, `sliders`, `book`, `replace`, `skin_mesh` (the grey cube under `skin_joints`), `branch`, and the Controls tool's `controls`, `grow`, `shrink`, `outliner`, `color_pick`, `line_width`, `mirror_shape`, `mirror_update`, `zero_out`, `zero_matrix`, `matrix_out`, `on_top`, `cvs`, `paste`, `drive_constraint`, `drive_matrix`, `drive_off`, `locator`, `joint_chain`, `center`, `move`, `minus`, `smooth_curve`, `expand`, `collapse`, `undo`, `redo`; add new action icons here),
     `apps/` (third-party application logos: `maya`; later houdini, blender...
     — named after the app, not the tool that uses it, so several tools can
     share one), `tools/` (sidebar icons of our OWN hub tools, one-color like
@@ -2584,6 +2584,42 @@ axis (`flip`). ZERO THE SELECTED (`actions/zero_out`, in the Zero row): the mode
   groups are named after the mirror (<mirror>_offset). `other_side` looks that name up, so a second
   Mirror — and "shape to the other side" — find the copy and only update its shape. Checked in mayapy
   2026 from an isolated copy (14 checks); not clicked in a windowed Maya.
+- The SHAPE EDITOR, hover compare, menus (2026-10-10, the user's picks after a mock-up; their three
+  answers: edit in the straight views only, a working copy, existing curves only).
+  `editor.py` (Qt only — a shape is data): `EditorCanvas` paints the curves with a handle on every
+  point, the pivot's cross and a half-unit grid, and takes the mouse: tools "points" (click, Shift for
+  more, a frame over several; drag moves them), "move" / "turn" / "scale" (the picked points, or the
+  WHOLE shape when none is picked, about the pivot — moving the whole shape IS the offset from the
+  pivot a control is then made with), "add" (a click on a line puts a point there), "remove"; Ctrl =
+  by steps (0.05, 15°); smooth <-> straight for the curves of the picked points; symmetry across X (a
+  moved point's mirror point follows, points on the middle line stay on it); its own undo / redo (60
+  steps, Ctrl+Z / Ctrl+Y — the keys are accepted so Maya's hotkeys don't answer too), the wheel zooms,
+  the middle button / Alt+drag pans, F fits, A picks all, Delete removes. Views Top / Front / Side
+  (a drag moves a point in the plane of the screen) and 3/4 = LOOKING ONLY (a drag turns the view).
+  After an edit that took a point out of the picture the shape is fitted again. `ShapeEditor` = the
+  canvas, its tool column, the views, undo / redo, Reset, Save as…, Create and "Onto the selected
+  controls". In the panel: the expand button on the preview (`_set_editing`) hides the library grid,
+  the preview and Create, shows the editor in their room (EDITOR_HEIGHT 400) and makes the WINDOW that
+  much taller (and back). The edit is a WORKING COPY (`ControlsPanel._edited`): the library is not
+  touched; `_picked_shape()` returns the copy, so Create, the ghost, Replace and Add use it; it outlives
+  closing the editor and is dropped when another shape is picked; Reset = the library's again; Save as…
+  = `library.add` (normalized, the offset kept in proportion) under Mine. The editor edits the shape as
+  the library has it (facing +Y); the facing axis is applied when the control is made, as always.
+  HOVER (`ShapeGrid.hovered`): the shape under the pointer in the library is shown in the preview before
+  it is picked (`_previewed_shape`), and with an existing control selected the preview shows its shape
+  dotted and the hovered one as Replace would put it on (`_draw_live(with_ghost=False)` — the ghost in
+  Maya stays the picked shape's: a hover must not churn scene nodes).
+  MENUS (the user: plain lists of text were hard to read): `_menu` / `_menu_caption` / `_menu_item` —
+  a caption line (disabled) names each group, every line has an icon tinted with its BUTTON's own
+  `iconColor` (`tinted_menu_icon`; qproperty menuIconColor for lines of no colored button), short
+  texts, the long explanation in the tooltip, "click" at the right edge of the line a plain click does,
+  "✓" on the setting that is on. Each menu is built by a function that returns it (`_mirror_menu`,
+  `_mirror_update_menu`, `_locators_menu`, `_joints_menu`, `_grid_menu`, `_color_menu`,
+  `_setting_menu`), so a test can look at it without exec(). New icons: `actions/move`, `minus`,
+  `smooth_curve`, `expand`, `collapse`, `undo`, `redo`.
+  Checked: the editor offscreen from an isolated copy with real mouse events (31 checks); in windowed
+  Maya 2026 — the ghost follows an edit, Create from the editor makes the control with its shape off
+  the pivot, the hover compare, the menus with their icons.
 
 ## Batch tool
 

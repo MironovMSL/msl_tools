@@ -9,6 +9,7 @@ import msl_tools.msl.ui.qt_bindings as qt
 from msl_tools.msl.core.resources import Resources
 from msl_tools.msl.tools.maya.controls import shapes as shape_data
 from msl_tools.msl.tools.maya.controls import colors as color_data
+from msl_tools.msl.tools.maya.controls.editor import ShapeEditor
 from msl_tools.msl.tools.maya.controls.naming import DEFAULT_TEMPLATE, control_name
 from msl_tools.msl.tools.maya.controls.panel_color import _ColorMixin
 from msl_tools.msl.tools.maya.controls.preview import ShapeView, thumbnail
@@ -29,6 +30,7 @@ ALL = "All"
 OFFSET_MODES = ("None", "Groups", "Matrix")
 DRIVES = ("None", "Shape", "Constrain", "Matrix")
 SHAPES_FILTER = "MSL control shapes (*.json)"
+EDITOR_HEIGHT = 400
 THUMB = 38
 
 
@@ -38,8 +40,26 @@ class ShapeGrid(qt.QtWidgets.QListWidget):
 
     thumbColor = color_property("_thumb", "_retint")
 
+    hovered = qt.QtCore.Signal(str)      # the shape under the pointer ("" = none)
+
+    def mouseMoveEvent(self, event) -> None:
+        super().mouseMoveEvent(event)
+        item = self.itemAt(event.position().toPoint())
+        name = item.data(qt.QtCore.Qt.ItemDataRole.UserRole) if item is not None else ""
+        if name != self._hovered:
+            self._hovered = name
+            self.hovered.emit(name)
+
+    def leaveEvent(self, event) -> None:
+        super().leaveEvent(event)
+        if self._hovered:
+            self._hovered = ""
+            self.hovered.emit("")
+
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._hovered = ""
+        self.setMouseTracking(True)
         from msl_tools.msl.core.theme.theme_registry import ThemeRegistry
         self._thumb = qt.QtGui.QColor(ThemeRegistry.fallback().text_primary)
         self._shapes = []
@@ -95,6 +115,8 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
 
     status_changed = qt.QtCore.Signal(str, str)
 
+    menuIconColor = color_property("_menu_icon", None)     # a menu's icons that belong to no colored button
+
     TOOL_NAME = "controls"
     DEFAULTS = {"shape": "circle", "category": ALL, "template": DEFAULT_TEMPLATE, "size": 1.0, "fit": True,
                 "axis": "X", "offsets": "Groups", "offset_names": "offset", "chain": True, "side_color": True,
@@ -108,6 +130,8 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
         self._settings = config["settings"]
         self.library = shape_data.ShapeLibrary(config["shapes"])
         self._loading = True
+        from msl_tools.msl.core.theme.theme_registry import ThemeRegistry
+        self._menu_icon = qt.QtGui.QColor(ThemeRegistry.fallback().text_primary)
         self._build()
         self._apply_settings()
         self._connect()
@@ -152,6 +176,15 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
         shelf.setSpacing(6)
         shelf.addWidget(self._grid, 1)
         shelf.addLayout(picked)
+        # the preview grows into an editor of the shape's points, in the library's room
+        self._expand = self._tool_button("expand", "Edit the shape", "The preview grows into an editor: drag the "
+                                         "shape's points, move it away from the pivot, turn and scale it, add and "
+                                         "remove points — then create it, put it on a control or save it as yours")
+        self._expand.setParent(self._view)
+        self._expand.move(5, 5)
+        self._editor = ShapeEditor()
+        self._editor.setFixedHeight(EDITOR_HEIGHT)
+        self._editor.hide()
 
         # how a new control is made — its size, "fit" and the axis it faces live in the preview
         self._template = qt.QtWidgets.QLineEdit()
@@ -234,6 +267,7 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
 
         card.body_layout.addLayout(head)
         card.body_layout.addLayout(shelf)
+        card.body_layout.addWidget(self._editor)
         # top first, like the Outliner: the zero groups, the control, an arrow to what it drives
         self._strip = HierarchyStrip()
         self._strip.setObjectName("controlsStrip")
@@ -367,6 +401,29 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
             card.body_layout.addLayout(line)
         return card
 
+    # ---- menus: a caption says what the lines under it are, every line has an icon in its button's color
+
+    def _menu(self) -> "qt.QtWidgets.QMenu":
+        menu = make_rounded_popup(qt.QtWidgets.QMenu(self))
+        menu.setToolTipsVisible(True)
+        return menu
+
+    @staticmethod
+    def _menu_caption(menu, text: str) -> None:
+        """A line that only names the group under it (it can't be picked)."""
+        menu.addAction(text).setEnabled(False)
+
+    def _menu_item(self, menu, icon: str, text: str, slot, tip: str = "", color=None, hint: str = ""):
+        """A line of a menu: `icon` (actions/) tinted `color` — a button's own `iconColor`, so a menu
+        looks like its button —, `hint` at the right edge (what a plain click does: "click")."""
+        from msl_tools.msl.ui.icon_manager import tinted_menu_icon
+        picture = tinted_menu_icon(UiResources().iconManager.get_icon(icon, sub_folder="actions"),
+                                   color or self._menu_icon, self.devicePixelRatioF())
+        action = menu.addAction(picture, text + (f"\t{hint}" if hint else ""), slot)
+        if tip:
+            action.setToolTip(tip)
+        return action
+
     def _tool_button(self, icon: str, text: str, tooltip: str) -> QuickButton:
         button = QuickButton(UiResources().iconManager.get_icon(icon, sub_folder="actions"), text,
                              f"{text}\n{tooltip}", icon_size=16)
@@ -385,6 +442,14 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
         self._grid.itemSelectionChanged.connect(self._on_shape_picked)
         self._grid.itemDoubleClicked.connect(lambda _item: self.create())
         self._grid.customContextMenuRequested.connect(self._on_grid_menu)
+        self._grid.hovered.connect(self._on_shape_hover)
+        self._expand.clicked.connect(lambda: self._set_editing(True))
+        self._editor.closed.connect(lambda: self._set_editing(False))
+        self._editor.edited.connect(self._on_shape_edited)
+        self._editor.reset_requested.connect(self._reset_edited)
+        self._editor.save_requested.connect(self._on_save_edited)
+        self._editor.create_requested.connect(self.create)
+        self._editor.apply_requested.connect(self._on_replace)
         for axis, button in self._turns.items():
             button.clicked.connect(lambda _checked=False, axis=axis: self._turn(axis))
         self._shrink.clicked.connect(lambda: self._resize(0.8))
@@ -529,7 +594,7 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
     def _color_for(self, rgb):
         return qt.QtGui.QColor.fromRgbF(*rgb[:3]) if rgb is not None else "plain"
 
-    def _draw_live(self) -> None:
+    def _draw_live(self, with_ghost: bool = True) -> None:
         """Every selected object (a joint with its bones, a box) with the control it would get: at its
         real size, in its color, its zero groups as frames around it, chained controls joined by a
         line; the first one's name on top; the button says how many. `entries` = what Create works
@@ -583,7 +648,13 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
         if existing:
             # what IS: its own shape in its own color, and the line says what it is tied into
             curves, own, info = existing
-            self._view.set_action(curves, curves, self._color_for(own) if own is not None else None)
+            after = curves
+            if self._hover_shape:
+                # the shape under the pointer in the library, as Replace would put it on this control
+                reach = max([abs(value) for curve in curves for point in curve.points for value in point] or [1.0])
+                after = shape_data.scaled(shape_data.oriented(self._previewed_shape().curves, self._view.axis()),
+                                          reach or 1.0)
+            self._view.set_action(curves, after, self._color_for(own) if own is not None else None)
             self._strip.set_items(self._strip_existing(targets[0], info, count))
         else:
             # what WILL BE made of the selection
@@ -596,7 +667,9 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
         self._refresh_states(targets)
         self._create.setText("Create" if not count else f"Shape onto {len(targets)}" if drive == "Shape" and targets
                              else "Create 1 · middle" if in_middle else f"Create {count}")
-        self._update_ghost(entries)
+        self._editor.set_create_text(self._create.text())
+        if with_ghost:
+            self._update_ghost(entries)
 
     # ---- the line under the library: zero groups › control ⇢ what it drives
 
@@ -680,17 +753,26 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
             else:
                 self._offset_names.selectAll()
         elif key in ("zero", "drive"):
-            control = self._offsets if key == "zero" else self._drive
-            notes = {"None": "it only stands there", "Groups": "groups above the control",
-                     "Matrix": "in its offsetParentMatrix, no group"} if key == "zero" else \
-                {"None": "it only stands there", "Shape": "the curve becomes the object's own shape",
-                 "Constrain": "parent + scale constraints", "Matrix": "the object's offsetParentMatrix"}
-            menu = make_rounded_popup(qt.QtWidgets.QMenu(self))
-            for option in (OFFSET_MODES if key == "zero" else DRIVES):
-                action = menu.addAction(f"{option} — {notes[option]}", lambda option=option: self._pick_setting(control, option))
-                action.setCheckable(True)
-                action.setChecked(control.current() == option)
-            menu.exec(where)
+            self._setting_menu(key).exec(where)
+
+    def _setting_menu(self, key: str) -> "qt.QtWidgets.QMenu":
+        """Zero ("zero") or Drive ("drive") of a new control as a menu; the one that is set is marked."""
+        control = self._offsets if key == "zero" else self._drive
+        lines = (("None", "clear", "No zero", "The control keeps its own values"),
+                 ("Groups", "zero_out", "Groups above it", "One group per suffix of the Zero row"),
+                 ("Matrix", "zero_matrix", "In its matrix", "Its offsetParentMatrix holds the place: no group")) \
+            if key == "zero" else \
+                (("None", "clear", "Doesn't drive", "The control only stands there"),
+                 ("Shape", "cvs", "The curve onto the object", "No new object: the object gets the curve as its shape"),
+                 ("Constrain", "drive_constraint", "Constraints", "Parent + scale constraints"),
+                 ("Matrix", "drive_matrix", "Matrix", "The object's offsetParentMatrix: no constraint node"))
+        tone = (self._zero_groups_button if key == "zero" else self._drive_constraint).iconColor
+        menu = self._menu()
+        self._menu_caption(menu, "Zero of a new control" if key == "zero" else "What a new control does to its object")
+        for option, icon, text, tip in lines:
+            self._menu_item(menu, icon, text, lambda option=option: self._pick_setting(control, option), tip, tone,
+                            hint="✓" if control.current() == option else "")
+        return menu
 
     def _pick_setting(self, control, option: str) -> None:
         control.set_current(option)
@@ -817,12 +899,20 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
         self._side_color.setChecked(mode == "side")
         self._save()
 
+    def _color_menu(self) -> "qt.QtWidgets.QMenu":
+        by_side, own = self._side_color.isChecked(), self._own_rgb() is not None
+        menu = self._menu()
+        self._menu_caption(menu, "Color of a new control")
+        self._menu_item(menu, "mirror_sides", "By its side", lambda: self._set_color_mode("side"),
+                        "Left blue, right red, middle yellow", hint="✓" if by_side else "")
+        self._menu_item(menu, "color_pick", "Your color…", self._pick_own_color,
+                        "Pick one color for every new control", hint="✓" if own and not by_side else "")
+        self._menu_item(menu, "clear", "No color", lambda: self._set_color_mode("none"),
+                        "Maya's default color: no override", hint="✓" if not own and not by_side else "")
+        return menu
+
     def _on_color_chip_menu(self, _key: str, position) -> None:
-        menu = make_rounded_popup(qt.QtWidgets.QMenu(self))
-        menu.addAction("Your color…", self._pick_own_color)
-        menu.addAction("By side: left blue · right red · middle yellow", lambda: self._set_color_mode("side"))
-        menu.addAction("No color — Maya's default", lambda: self._set_color_mode("none"))
-        menu.exec(position)
+        self._color_menu().exec(position)
 
     # ------------------------------------------------------------------ settings
 
@@ -890,7 +980,86 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
         name = self._grid.current_name()
         if name:
             self._settings["shape"] = name
+            self._edited = None             # another shape: the hand-made changes of the last one go
             self._show_preview()
+
+    # ---- the shape under the pointer in the library, looked at before it is picked
+
+    _hover_shape = ""
+
+    def _on_shape_hover(self, name: str) -> None:
+        if name == self._hover_shape or self._loading:
+            return
+        self._hover_shape = name
+        shape = self._previewed_shape()
+        self._view.set_curves(shape_data.oriented(shape.curves, self._view.axis()), self._view.axis())
+        try:
+            if self._hovered_action:
+                self._show_action()
+            else:
+                self._draw_live(with_ghost=False)       # the ghost in Maya stays the PICKED shape's
+        except Exception as error:
+            self._report("The preview couldn't show that shape", error)
+
+    def _previewed_shape(self) -> "shape_data.Shape":
+        """What the small preview shows: the shape under the pointer in the library, else the picked one."""
+        return (self.library.get(self._hover_shape) if self._hover_shape else None) or self._picked_shape()
+
+    # ---- the editor: the preview grown into the library's room
+
+    _edited = None          # the picked shape as changed by hand; Create, the ghost and Replace use it
+
+    def _library_shape(self) -> "shape_data.Shape":
+        return self.library.get(self._settings.get("shape", "circle")) or shape_data.BUILT_IN["circle"]
+
+    def _set_editing(self, on: bool) -> None:
+        if on == self._editor.isVisible():
+            return
+        for widget in (self._grid, self._view, self._create):
+            widget.setVisible(not on)
+        self._editor.setVisible(on)
+        if on:
+            shape = self._picked_shape()
+            self._editor.open(shape.curves, shape.title() + (" · edited" if self._edited is not None else ""))
+            self._editor.set_create_text(self._create.text())
+        # the window gives the editor its room, and takes it back
+        window = self.window()
+        grown = EDITOR_HEIGHT - self._grid.height()
+        if window is not None and window is not self and not window.isMaximized():
+            window.resize(window.width(), max(window.minimumHeight(), window.height() + (grown if on else -grown)))
+
+    def _on_shape_edited(self) -> None:
+        source = self._library_shape()
+        self._edited = shape_data.Shape(source.name, self._editor.curves(), source.category, True)
+        self._editor.set_title(source.title() + " · edited")
+        self._show_preview()
+
+    def _reset_edited(self) -> None:
+        self._edited = None
+        source = self._library_shape()
+        self._editor.open(source.curves, source.title())
+        self._show_preview()
+        self._say(f"“{source.title()}” is as the library has it again", "")
+
+    def _on_save_edited(self) -> None:
+        from msl_tools.msl.tools.maya.rename.panel_words import _field_action
+        source = self._library_shape()
+        button = self._editor.save_button()
+        menu = self._menu()
+        self._menu_caption(menu, "Save this shape among yours — its name:")
+        _field_action(menu, source.name, "Shape name", self._save_edited)
+        menu.exec(button.mapToGlobal(qt.QtCore.QPoint(0, button.height())))
+
+    def _save_edited(self, name: str) -> None:
+        saved = self.library.add(name, self._editor.curves())
+        self._edited = None
+        self._settings["shape"] = saved
+        self._categories.set_current("Mine")
+        self._settings["category"] = "Mine"
+        self._refresh_grid()
+        shape = self._library_shape()
+        self._editor.open(shape.curves, shape.title())
+        self._say(f"Saved the shape “{saved}” — it is under Mine", "done")
 
     def _on_axis(self, _axis: str) -> None:
         self._save()
@@ -906,30 +1075,41 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
             self._offset_names.setVisible(wanted)
 
     def _picked_shape(self) -> "shape_data.Shape | None":
-        return self.library.get(self._settings.get("shape", "circle")) or shape_data.BUILT_IN["circle"]
+        """The shape a control is made of: the library's picked one — as changed in the editor, if it was."""
+        return self._edited if self._edited is not None else self._library_shape()
 
     def _show_preview(self) -> None:
-        shape = self._picked_shape()
+        shape = self._previewed_shape()
         axis = self._view.axis()
         self._view.set_curves(shape_data.oriented(shape.curves, axis), axis)
         self._refresh_live()
 
-    def _on_grid_menu(self, position) -> None:
-        item = self._grid.itemAt(position)
-        menu = make_rounded_popup(qt.QtWidgets.QMenu(self))
-        if item is not None:
-            name = item.data(qt.QtCore.Qt.ItemDataRole.UserRole)
-            shape = self.library.get(name)
-            menu.addAction("Create it", self.create)
-            menu.addAction("Put it on the selected controls", self._on_replace)
-            menu.addAction("Add it to the selected controls", self._on_add_shape)
-            if shape is not None and shape.user:
-                menu.addAction("Remove this shape of yours", lambda: self._remove_shape(name))
+    def _grid_menu(self, name: str = "") -> "qt.QtWidgets.QMenu":
+        """The library's menu: for the shape under the pointer (`name`), then your own shapes' file."""
+        menu = self._menu()
+        shape = self.library.get(name) if name else None
+        if shape is not None:
+            self._menu_caption(menu, shape.title())
+            self._menu_item(menu, "controls", "Create", self.create, "A control of this shape on the selection",
+                            hint="double click")
+            self._menu_item(menu, "replace", "Replace the selected controls' shape", self._on_replace,
+                            "As big as theirs, same color", self._replace.iconColor)
+            self._menu_item(menu, "add", "Add to the selected controls", self._on_add_shape,
+                            "Beside the shape they have", self._replace.iconColor)
+            if shape.user:
+                self._menu_item(menu, "delete", "Remove from your shapes", lambda: self._remove_shape(name))
             menu.addSeparator()
         mine = len(self.library.mine())
-        menu.addAction(f"Your shapes into a file… ({mine})", self._on_export_shapes).setEnabled(mine > 0)
-        menu.addAction("Shapes from a file…", self._on_import_shapes)
-        menu.exec(self._grid.viewport().mapToGlobal(position))
+        self._menu_caption(menu, f"Your shapes · {mine}")
+        self._menu_item(menu, "save", "Into a file…", self._on_export_shapes,
+                        "To hand your shapes to someone else").setEnabled(mine > 0)
+        self._menu_item(menu, "file_add", "From a file…", self._on_import_shapes, "Add someone's shapes to yours")
+        return menu
+
+    def _on_grid_menu(self, position) -> None:
+        item = self._grid.itemAt(position)
+        name = item.data(qt.QtCore.Qt.ItemDataRole.UserRole) if item is not None else ""
+        self._grid_menu(name).exec(self._grid.viewport().mapToGlobal(position))
 
     def _remove_shape(self, name: str) -> None:
         if self.library.remove(name):
@@ -1181,23 +1361,35 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
             text += f" · {len(missing)} without one: " + ", ".join(missing[:2])
         self._say(text + " · Ctrl+Z undoes it", "done")
 
-    def _on_mirror_update_menu(self, position) -> None:
-        menu = make_rounded_popup(qt.QtWidgets.QMenu(self))
+    def _mirror_update_menu(self) -> "qt.QtWidgets.QMenu":
+        tone = self._mirror_update.iconColor
+        menu = self._menu()
+        self._menu_caption(menu, "Only the shape, to the control on the other side")
         for axis in shape_data.AXES:
-            menu.addAction(f"The shape to the other side, across the world {axis}",
-                           lambda axis=axis: self._mirror_shapes(axis))
-        menu.exec(self._mirror_update.mapToGlobal(position))
+            self._menu_item(menu, "mirror_update", f"Across {axis}", lambda axis=axis: self._mirror_shapes(axis),
+                            f"The mirror plane stands across the world's {axis}", tone, hint="click" if axis == "X" else "")
+        return menu
+
+    def _on_mirror_update_menu(self, position) -> None:
+        self._mirror_update_menu().exec(self._mirror_update.mapToGlobal(position))
+
+    def _mirror_menu(self) -> "qt.QtWidgets.QMenu":
+        tone = self._mirror.iconColor
+        menu = self._menu()
+        self._menu_caption(menu, "A mirrored copy on the other side")
+        for axis in shape_data.AXES:
+            self._menu_item(menu, "mirror_shape", f"Across {axis}", lambda axis=axis: self._mirror_to_other(axis),
+                            f"The mirror plane stands across the world's {axis}: the copy, its zero groups, its name",
+                            tone, hint="click" if axis == "X" else "")
+        menu.addSeparator()
+        self._menu_caption(menu, "Flip this shape, where it is")
+        for axis in shape_data.AXES:
+            self._menu_item(menu, "mirror_sides", f"Along its own {axis}", lambda axis=axis: self._flip(axis),
+                            "No copy: the shape is turned inside out along that axis of the control", tone)
+        return menu
 
     def _on_mirror_menu(self, position) -> None:
-        from msl_tools.msl.tools.maya.controls import scene
-        menu = make_rounded_popup(qt.QtWidgets.QMenu(self))
-        for axis in shape_data.AXES:
-            menu.addAction(f"Mirror across the world {axis}",
-                           lambda axis=axis: self._mirror_to_other(axis))
-        menu.addSeparator()
-        for axis in shape_data.AXES:
-            menu.addAction(f"Flip in place across its own {axis}", lambda axis=axis: self._flip(axis))
-        menu.exec(self._mirror.mapToGlobal(position))
+        self._mirror_menu().exec(self._mirror.mapToGlobal(position))
 
     def _flip(self, axis: str) -> None:
         from msl_tools.msl.tools.maya.controls import scene
@@ -1277,16 +1469,25 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
             text += f" · {self._view.axis()} along the normal"
         self._say(text + " · Ctrl+Z undoes it", "done")
 
-    def _on_locators_menu(self, position) -> None:
+    def _locators_menu(self) -> "qt.QtWidgets.QMenu":
         axis = self._view.axis()
-        menu = make_rounded_popup(qt.QtWidgets.QMenu(self))
-        menu.addAction("A locator on each selected object, vertex, edge or face", lambda: self._make_locators(False))
-        menu.addAction(f"…on each, its {axis} along the surface's normal (vertices, edges, faces of a mesh)",
-                       lambda: self._make_locators(False, True))
+        menu = self._menu()
+        self._menu_caption(menu, "A locator on each selected thing")
+        self._menu_item(menu, "locator", "On each", lambda: self._make_locators(False),
+                        "An object: at its pivot, turned like it · a vertex, edge, face: where it is", hint="click")
+        self._menu_item(menu, "locator", f"On each, {axis} along the normal", lambda: self._make_locators(False, True),
+                        "Vertices, edges, faces of a mesh: the locator faces away from the surface "
+                        "(the axis is the preview's)")
         menu.addSeparator()
-        menu.addAction("One locator in the middle of everything selected", lambda: self._make_locators(True))
-        menu.addAction(f"…in the middle, its {axis} across the loop", lambda: self._make_locators(True, True))
-        menu.exec(self._locators.mapToGlobal(position))
+        self._menu_caption(menu, "One locator for all of it")
+        self._menu_item(menu, "center", "In the middle", lambda: self._make_locators(True),
+                        "The center of an edge loop, of several objects")
+        self._menu_item(menu, "center", f"In the middle, {axis} across the loop", lambda: self._make_locators(True, True),
+                        "Turned along the limb the loop goes around")
+        return menu
+
+    def _on_locators_menu(self, position) -> None:
+        self._locators_menu().exec(self._locators.mapToGlobal(position))
 
     def _make_joints(self, chain: bool) -> None:
         from msl_tools.msl.tools.maya.controls import scene
@@ -1306,11 +1507,17 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
             text += f" · the first {len(made)} of {total}"
         self._say(text + " · Ctrl+Z undoes it", "done")
 
+    def _joints_menu(self) -> "qt.QtWidgets.QMenu":
+        menu = self._menu()
+        self._menu_caption(menu, "Joints where the selection is")
+        self._menu_item(menu, "joint_chain", "A chain, in the order picked", lambda: self._make_joints(True),
+                        "Each joint under the one before, X down the bone", hint="click")
+        self._menu_item(menu, "locator", "Separate joints", lambda: self._make_joints(False),
+                        "Not connected, each turned like its object")
+        return menu
+
     def _on_joints_menu(self, position) -> None:
-        menu = make_rounded_popup(qt.QtWidgets.QMenu(self))
-        menu.addAction("A chain of joints through the selection, in the order picked", lambda: self._make_joints(True))
-        menu.addAction("Separate joints, each turned like its object", lambda: self._make_joints(False))
-        menu.exec(self._joints.mapToGlobal(position))
+        self._joints_menu().exec(self._joints.mapToGlobal(position))
 
     def _undrive_selected(self) -> None:
         from msl_tools.msl.tools.maya.controls import scene

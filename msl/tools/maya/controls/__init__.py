@@ -7,6 +7,7 @@
     scene.py      the Maya side: build, place, offsets (groups / offsetParentMatrix), shape edits
     preview.py    thumbnails and the turning preview, drawn by Qt from the points
     ghost.py      what Create would make, shown in Maya's viewport on the selected objects
+    editor.py     the shape editor: the preview grown into the library's room, points edited by hand
     panel.py      ControlsPanel (cards that fold: CONTROL…), window.py ControlsWindow
     controls.qss
 
