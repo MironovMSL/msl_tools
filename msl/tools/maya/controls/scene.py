@@ -74,18 +74,77 @@ def position(transform: str):
     return tuple(cmds.xform(transform, query=True, worldSpace=True, rotatePivot=True))
 
 
-def fit_size(target: str) -> float:
-    """How big a control for `target` reads well: a joint by its radius, anything else by its
-    bounding box; 1 when there is nothing to measure."""
+FIT_ROOM = 1.2          # a fitted control stands this much clear of what it is made for
+BOX_SHAPES = 300        # an object with more shapes under it than this is measured by Maya's own box
+
+
+def _placed(node: str):
+    """The node's world matrix without its scale and shear: where a control matched to it stands."""
+    import maya.api.OpenMaya as om
+    placed = om.MTransformationMatrix(_matrix(node))
+    placed.setScale((1.0, 1.0, 1.0), om.MSpace.kWorld)
+    placed.setShear((0.0, 0.0, 0.0), om.MSpace.kWorld)
+    return placed.asMatrix()
+
+
+def local_box(target: str) -> "tuple | None":
+    """The box around the object AND everything under it (a group has no shape of its own), in the
+    object's OWN axes and in world units — (x0, y0, z0, x1, y1, z1) about its pivot; a turned object
+    doesn't swell it, as a world box would. None when there is nothing to measure."""
+    import maya.api.OpenMaya as om
+    below = cmds.listRelatives(target, allDescendents=True, fullPath=True) or []
+    shapes = cmds.ls(below, shapes=True, long=True, noIntermediate=True) if below else []
+    if not shapes:
+        return None
+    frame = _placed(target).inverse()
+    low, high = [float("inf")] * 3, [float("-inf")] * 3
+    if len(shapes) > BOX_SHAPES:
+        box = cmds.exactWorldBoundingBox(target)
+        corners = [om.MPoint(x, y, z) * frame for x in (box[0], box[3]) for y in (box[1], box[4])
+                   for z in (box[2], box[5])]
+    else:
+        corners = []
+        for shape in shapes:
+            a, b = cmds.getAttr(shape + ".boundingBoxMin")[0], cmds.getAttr(shape + ".boundingBoxMax")[0]
+            if any(lo > hi for lo, hi in zip(a, b)):
+                continue                # an empty shape
+            holder = cmds.listRelatives(shape, parent=True, fullPath=True)[0]
+            to_frame = _matrix(holder) * frame
+            corners += [om.MPoint(x, y, z) * to_frame for x in (a[0], b[0]) for y in (a[1], b[1])
+                        for z in (a[2], b[2])]
+    if not corners:
+        return None
+    # about the PIVOT, not the transform's origin: a control is matched to the rotate pivot
+    pivot = om.MPoint(*position(target)) * frame
+    for corner in corners:
+        for index, value in enumerate((corner.x - pivot.x, corner.y - pivot.y, corner.z - pivot.z)):
+            low[index], high[index] = min(low[index], value), max(high[index], value)
+    return tuple(low) + tuple(high)
+
+
+def fit_size(target: str, axis: "str | None" = None) -> float:
+    """How big a control for `target` reads well; 1 when there is nothing to measure.
+    A joint: by its radius. Anything else: by its box in its own axes (`local_box`: its children
+    counted, its turn not), ACROSS the axis the control faces — a ring around a long cylinder fits
+    its girth, not its length (`axis` None: its longest side) — reaching from the pivot to the box's
+    far side plus a little room, but never more than the box is wide (a pivot far away)."""
     if cmds.objectType(target, isAType="joint"):
         return max(0.1, cmds.getAttr(target + ".radius") * 2.0)
-    shapes = cmds.listRelatives(target, shapes=True, fullPath=True, noIntermediate=True) or []
-    if shapes:
-        box = cmds.exactWorldBoundingBox(target)
-        extent = max(box[3] - box[0], box[4] - box[1], box[5] - box[2])
-        if extent > 0:
-            return extent * 0.6
+    box = local_box(target)
+    if box is None:
+        return 1.0
+    across = [index for index in range(3) if axis not in AXIS_INDEX or index != AXIS_INDEX[axis]]
+    reach = 0.0
+    for wanted in (across, [0, 1, 2]):          # a box flat across the axis: its longest side after all
+        for index in wanted:
+            low, high = box[index], box[index + 3]
+            reach = max(reach, min(max(abs(low), abs(high)), high - low))
+        if reach > 1e-6:
+            return reach * FIT_ROOM
     return 1.0
+
+
+AXIS_INDEX = {"X": 0, "Y": 1, "Z": 2}
 
 
 # ------------------------------------------------------------------ building
@@ -191,35 +250,25 @@ def _path(uuid: str) -> str:
 DRIVES = ("none", "shape", "constraint", "matrix")
 
 
-def target_look(target: str) -> dict:
+def target_look(target: str, axis: "str | None" = None) -> dict:
     """What a preview needs to draw the object a control is made for, in the object's OWN axes (a
     control matched to it has the same): its kind ("joint" with `radius` and `bones` = where its child
-    joints are; else "box" with its object-space bounding box, or "null"), its short `name`, world
-    `position` and `fit` (fit_size)."""
-    look = {"name": target.rpartition("|")[2], "position": position(target), "fit": fit_size(target),
+    joints are; else "box" with `local_box`, or "null"), its short `name`, world `position` and `fit`
+    (fit_size for a control facing `axis`)."""
+    look = {"name": target.rpartition("|")[2], "position": position(target), "fit": fit_size(target, axis),
             "kind": "null"}
     if cmds.objectType(target, isAType="joint"):
         children = cmds.listRelatives(target, children=True, type="joint", fullPath=True) or []
         look.update(kind="joint", radius=cmds.getAttr(target + ".radius"),
                     bones=[tuple(cmds.getAttr(child + ".translate")[0]) for child in children[:6]])
     else:
-        # the SHAPES' boxes are in the object's own axes (the transform's own box is in its parent's:
-        # it would be drawn where the object stands in the world), times the object's scale in the
-        # world — a control is matched to its place and turn, never its scale
-        shapes = cmds.listRelatives(target, shapes=True, fullPath=True, noIntermediate=True) or []
-        if shapes:
-            import maya.api.OpenMaya as om
-            lows = [cmds.getAttr(shape + ".boundingBoxMin")[0] for shape in shapes]
-            highs = [cmds.getAttr(shape + ".boundingBoxMax")[0] for shape in shapes]
-            scale = om.MTransformationMatrix(_matrix(target)).scale(om.MSpace.kWorld)
-            low = [min(each[i] for each in lows) * scale[i] for i in range(3)]
-            high = [max(each[i] for each in highs) * scale[i] for i in range(3)]
-            look.update(kind="box", box=tuple(min(a, b) for a, b in zip(low, high)) +
-                        tuple(max(a, b) for a, b in zip(low, high)))
+        box = local_box(target)
+        if box is not None:
+            look.update(kind="box", box=box)
     return look
 
 
-def targets_look(targets: list, limit: int = 12) -> list:
+def targets_look(targets: list, limit: int = 12, axis: "str | None" = None) -> list:
     """`target_look` of the first `limit` targets, each with `matrix` — where it stands in the FIRST
     one's axes (position and rotation only, 16 numbers) — and `parent`: the index of the nearest listed
     target above it, -1 for none (whose control a chained control goes under)."""
@@ -227,11 +276,8 @@ def targets_look(targets: list, limit: int = 12) -> list:
     shown = list(targets[:limit])
     looks, base = [], None
     for target in shown:
-        look = target_look(target)
-        placed = om.MTransformationMatrix(_matrix(target))
-        placed.setScale((1.0, 1.0, 1.0), om.MSpace.kWorld)
-        placed.setShear((0.0, 0.0, 0.0), om.MSpace.kWorld)
-        world = placed.asMatrix()
+        look = target_look(target, axis)
+        world = _placed(target)
         if base is None:
             base = world.inverse()
         look["matrix"] = list(world * base)
@@ -267,7 +313,7 @@ def create(shape: shape_data.Shape, targets: list, template: str, size: float, a
         for index, target in enumerate(targets or [None]):
             where = position(target) if target else None
             name = control_name(template, target.rpartition("|")[2] if target else "", where, sides, index + 1)
-            scale = size * (fit_size(target) if (fit and target) else 1.0)
+            scale = size * (fit_size(target, axis) if (fit and target) else 1.0)
             curves = shape_data.scaled(shape_data.oriented(shape.curves, axis), scale)
             control = cmds.ls(cmds.createNode("transform", name=name, skipSelect=True), long=True)[0]
             add_shapes(control, curves)
@@ -302,7 +348,7 @@ def shapes_onto(shape: shape_data.Shape, targets: list, size: float, axis: str, 
     and animated by its own curve. One undo step; the targets."""
     with _Chunk():
         for target in targets:
-            scale = size * (fit_size(target) if fit else 1.0)
+            scale = size * (fit_size(target, axis) if fit else 1.0)
             old = curve_shapes(target)
             made = add_shapes(target, shape_data.scaled(shape_data.oriented(shape.curves, axis), scale),
                               keep_from=old[0] if old else None)
@@ -488,6 +534,28 @@ def undrive(selected: list) -> list:
                 if _untie(target, node) and target not in freed:
                     freed.append(target)
     return [node.rpartition("|")[2] for node in freed]
+
+
+def states(selected: list, limit: int = 40) -> dict:
+    """What is already true of the selected objects, for the SELECTED buttons to show:
+    {"constraint": n, "matrix": n} = how many are tied that way (as the object, or as the control),
+    {"zero_groups": n, "zero_matrix": n} = how many are zeroed that way, {"on_top": n}."""
+    found = {"constraint": 0, "matrix": 0, "zero_groups": 0, "zero_matrix": 0, "on_top": 0}
+    for node in selected[:limit]:
+        kinds = {cmds.nodeType(driver) for driver, _controls in _drivers(node)}
+        for target in driven_by(node):
+            kinds |= {cmds.nodeType(driver) for driver, controls in _drivers(target) if node in controls}
+        found["matrix"] += "multMatrix" in kinds
+        found["constraint"] += bool(kinds - {"multMatrix"})
+        found["zero_groups"] += bool(_zero_stack(node))
+        if has_offset_matrix(node) and not cmds.listConnections(node + ".offsetParentMatrix", source=True,
+                                                                 destination=False):
+            found["zero_matrix"] += 1
+        shapes = curve_shapes(node)
+        found["on_top"] += bool(shapes) and all(
+            cmds.attributeQuery("alwaysDrawOnTop", node=shape, exists=True) and cmds.getAttr(shape + ".alwaysDrawOnTop")
+            for shape in shapes)
+    return found
 
 
 def _chain(made: list) -> None:

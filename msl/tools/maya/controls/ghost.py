@@ -17,7 +17,7 @@ a ghost therefore means the object it stands for: `redirect_selection()` swaps o
 from maya import cmds
 import maya.api.OpenMaya as om
 
-from msl_tools.msl.tools.maya.controls import scene
+from msl_tools.msl.tools.maya.controls import colors, scene
 from msl_tools.msl.tools.maya.controls import shapes as shape_data
 
 GROUP = scene.GHOST_GROUP
@@ -133,12 +133,56 @@ def _add_curve(parent: str, curve: shape_data.Curve) -> str:
     return om.MFnDagNode(made).fullPathName()
 
 
+def _square(half: float) -> shape_data.Curve:
+    return shape_data.Curve([(-half, 0.0, -half), (half, 0.0, -half), (half, 0.0, half), (-half, 0.0, half)], 1, True)
+
+
+def _zero_curves(mode: str, count: int, reach: float) -> list:
+    """Zero as lines around the control, in the plane it faces +Y in: "groups" = one frame per group,
+    nested; "matrix" = the corners of one frame (brackets)."""
+    if mode == "groups":
+        return [_square(reach * (1.2 + 0.17 * index)) for index in range(min(max(1, count), 4))]
+    if mode == "matrix":
+        half, arm = reach * 1.2, reach * 0.45
+        return [shape_data.Curve([(x * (half - arm), 0.0, z * half), (x * half, 0.0, z * half),
+                                  (x * half, 0.0, z * (half - arm))], 1, False)
+                for x in (-1, 1) for z in (-1, 1)]
+    return []
+
+
+def _drive_curves(drive: str, reach: float) -> list:
+    """A small mark at the pivot of a control that will DRIVE its object: a diamond for constraints,
+    a little cube for the matrix."""
+    size = reach * 0.14
+    if drive == "constraint":
+        x, y, z = (size, 0, 0), (0, size, 0), (0, 0, size)
+        nx, ny, nz = (-size, 0, 0), (0, -size, 0), (0, 0, -size)
+        return [shape_data.Curve([y, x, ny, nx, y, z, ny, nz, y, x, z, nx, nz, x], 1, False)]
+    if drive == "matrix":
+        h = size * 0.8
+        corners = [(-h, -h, -h), (h, -h, -h), (h, -h, h), (-h, -h, h), (-h, h, -h), (h, h, -h), (h, h, h), (-h, h, h)]
+        return [shape_data.Curve([corners[i] for i in (0, 1, 2, 3, 0, 4, 5, 1, 5, 6, 2, 6, 7, 3, 7, 4)], 1, False)]
+    return []
+
+
+def _colored(node: str, rgb, width: float) -> None:
+    _helper(node)
+    if rgb is not None:
+        cmds.setAttr(node + ".overrideEnabled", 1)
+        cmds.setAttr(node + ".overrideRGBColors", 1)
+        cmds.setAttr(node + ".overrideColorRGB", *rgb[:3])
+    if cmds.attributeQuery("lineWidth", node=node, exists=True):
+        cmds.setAttr(node + ".lineWidth", width)
+
+
 def show(shape: shape_data.Shape, targets: list, size: float, axis: str, fit: bool, color_of=None,
-         line_width: float = 2.0, grey: bool = False) -> int:
+         line_width: float = 2.0, grey: bool = False, zero: tuple = ("none", 0), drive: str = "none") -> int:
     """A ghost of the control each target would get: the shape facing `axis`, as big as `size` (times
     the target's own when `fit`), standing where the target stands, in the color it will get —
     `color_of(position)` -> (r, g, b), or None for Maya's default; `grey` = a template instead (it
-    can't be picked). Replaces the ghosts there were; how many are shown."""
+    can't be picked). Around it, thin: how it will be zeroed (`zero` = ("groups", how many) -> nested
+    frames, ("matrix", 1) -> brackets) and, at its pivot, a mark when it will drive its object (`drive`
+    "constraint" / "matrix"). Replaces the ghosts there were; how many are shown."""
     targets = [target for target in targets if not scene.is_ghost(target)][:LIMIT]
     if not targets:
         clear()
@@ -151,7 +195,7 @@ def show(shape: shape_data.Shape, targets: list, size: float, axis: str, fit: bo
         group = cmds.ls(group, long=True)[0]
         _helper(group)
         for index, target in enumerate(targets):
-            reach = size * (scene.fit_size(target) if fit else 1.0)
+            reach = size * (scene.fit_size(target, axis) if fit else 1.0)
             ghost = cmds.createNode("transform", name=f"{GROUP}_{index + 1}", parent=group, skipSelect=True)
             ghost = cmds.ls(ghost, long=True)[0]
             cmds.setAttr(ghost + ".rotateOrder", cmds.getAttr(target + ".rotateOrder"))
@@ -172,4 +216,8 @@ def show(shape: shape_data.Shape, targets: list, size: float, axis: str, fit: bo
                     cmds.setAttr(node + ".overrideColorRGB", *rgb[:3])
                 if cmds.attributeQuery("lineWidth", node=node, exists=True):
                     cmds.setAttr(node + ".lineWidth", line_width)
+            for curve in shape_data.oriented(_zero_curves(zero[0], zero[1], reach), axis):
+                _colored(_add_curve(ghost, curve), colors.GHOST_ZERO, 1.0)
+            for curve in _drive_curves(drive, reach):
+                _colored(_add_curve(ghost, curve), colors.GHOST_DRIVE, 1.5)
     return len(targets)

@@ -20,6 +20,8 @@ INDEX_COLORS = (
 )
 # the rig's usual side colors: left blue, right red, middle yellow (by the Rename tool's sides)
 SIDE_COLORS = {"left": (0.15, 0.45, 1.0), "right": (1.0, 0.15, 0.15), "center": (1.0, 0.85, 0.05)}
+GHOST_ZERO = (0.71, 0.55, 1.0)       # the ghost's frames that stand for zero groups / the matrix
+GHOST_DRIVE = (1.0, 0.49, 0.71)      # the ghost's mark for "this control will drive its object"
 GAMMA = 2.2
 
 

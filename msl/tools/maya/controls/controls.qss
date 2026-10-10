@@ -45,6 +45,7 @@ ControlsPanel ShapeView {
     qproperty-zColor:      var(--accent);
     qproperty-titleColor:  var(--text-secondary);
     qproperty-zeroColor:   var(--violet);
+    qproperty-driveColor:  var(--pink);
 }
 
 /* Shape tools: small framed icon buttons, like Rename's quick ones. */
@@ -81,8 +82,8 @@ ControlsPanel QFrame#controlsRule {
 }
 /* The size of a new control, inside the preview's corner. */
 ControlsPanel DragNumberField#controlsViewSize {
-    min-height: 18px;
-    max-height: 18px;
+    min-height: 22px;
+    max-height: 22px;
     padding: 0px 2px;
     font-size: 11px;
     border-radius: 5px;
@@ -93,6 +94,11 @@ ControlsPanel QPushButton#controlsTool:hover {
 }
 ControlsPanel QPushButton#controlsTool:pressed {
     background: alpha(var(--accent), 25%);
+}
+/* Lit: it is already true of what is selected (tied, zeroed, on top). */
+ControlsPanel QPushButton#controlsTool[on="true"] {
+    background: alpha(var(--text-primary), 16%);
+    border: 1px solid alpha(var(--text-primary), 75%);
 }
 
 /* On / off icon buttons: off = quiet, on = the accent. */

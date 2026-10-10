@@ -78,6 +78,7 @@ class ShapeView(qt.QtWidgets.QWidget):
     zColor = color_property("_z", "update")
     titleColor = color_property("_title_color", "update")
     zeroColor = color_property("_zero_color", "update")      # the frames that stand for zero groups
+    driveColor = color_property("_drive_color", "update")    # the note that says the control will drive
 
     axis_picked = qt.QtCore.Signal(str)      # a click on an axis chip: the shape faces it now
     size_stepped = qt.QtCore.Signal(int)     # the wheel over the view: +1 / -1
@@ -98,6 +99,8 @@ class ShapeView(qt.QtWidgets.QWidget):
         self._subtitle = ""
         self._corner = ([], [])
         self._zero_color = qt.QtGui.QColor(fallback.accent)
+        self._drive_color = qt.QtGui.QColor(fallback.accent)
+        self._notes = []             # [(icon, text, "zero" / "drive" / "")]: what will be done, top left
         self._items = []             # what Create would make: one per target (see set_scene)
         self._chain = False
         self._zero = ("none", 0)     # how new controls are zeroed: ("groups", how many) / ("matrix", 1)
@@ -127,6 +130,13 @@ class ShapeView(qt.QtWidgets.QWidget):
         self._title, self._subtitle = text, subtitle
         self.update()
 
+    def set_notes(self, notes: list) -> None:
+        """Lines top left, each a small icon in its tone and a few words: [(QIcon, text, "zero" /
+        "drive" / "")] — how the new control is zeroed, what it will drive. Shown instead of the
+        title while there are any (the title is a hovered tool's)."""
+        self._notes = list(notes)
+        self.update()
+
     def set_scene(self, items: list, chain: bool = False) -> None:
         """What Create would make, one item per object it is made for:
         {"look": scene.target_look or None, "reach": the control's size in scene units,
@@ -154,18 +164,38 @@ class ShapeView(qt.QtWidgets.QWidget):
         self._corner = (list(left), list(right))
         for widget in self._corner[0] + self._corner[1]:
             widget.setParent(self)
+            widget.installEventFilter(self)     # the stylesheet resizes them after they were placed
+        self._place_corners()
+
+    def eventFilter(self, watched, event) -> bool:
+        if event.type() in (qt.QtCore.QEvent.Type.Resize, qt.QtCore.QEvent.Type.Show) and \
+                watched in self._corner[0] + self._corner[1]:
+            self._place_corners()
+        return super().eventFilter(watched, event)
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
         self._place_corners()
 
     def _place_corners(self) -> None:
+        """One row along the bottom: whatever their heights, their MIDDLES are on one line."""
         left, right = self._corner
+        tallest = max([widget.height() for widget in left + right] or [0])
+        middle = self.height() - 5 - tallest / 2.0
+
+        def put(widget, x: int) -> None:
+            spot = qt.QtCore.QPoint(x, int(round(middle - widget.height() / 2.0)))
+            if widget.pos() != spot:
+                widget.move(spot)
+
         x = 5
         for widget in left:
-            widget.move(x, self.height() - widget.height() - 5)
+            put(widget, x)
             x += widget.width() + 3
         x = self.width() - 5
         for widget in reversed(right):
             x -= widget.width()
-            widget.move(x, self.height() - widget.height() - 5)
+            put(widget, x)
             x -= 3
 
     @staticmethod
@@ -432,8 +462,22 @@ class ShapeView(qt.QtWidgets.QWidget):
             painter.drawText(chip, qt.QtCore.Qt.AlignmentFlag.AlignCenter, axis)
         font.setBold(False)
         painter.setFont(font)
+        notes = [] if self._action else self._notes
+        for row, (icon, text, tone) in enumerate(notes):
+            from msl_tools.msl.ui.icon_manager import tint_icon
+            color = {"zero": self._zero_color, "drive": self._drive_color}.get(tone, self._title_color)
+            top = 5 + row * 15
+            left = 7
+            if icon is not None and not icon.isNull():
+                painter.drawPixmap(qt.QtCore.QPointF(left, top), tint_icon(icon, 12, self.devicePixelRatioF(), color))
+                left += 16
+            painter.setPen(self._title_color)
+            room = qt.QtCore.QRectF(left, top - 1, self.width() - 29 - left, 14)
+            painter.drawText(room, qt.QtCore.Qt.AlignmentFlag.AlignLeft | qt.QtCore.Qt.AlignmentFlag.AlignVCenter,
+                             painter.fontMetrics().elidedText(text, qt.QtCore.Qt.TextElideMode.ElideRight,
+                                                              int(room.width())))
         for row, (text, alpha) in enumerate(((self._title, 255), (self._subtitle, 150))):
-            if not text:
+            if not text or notes:
                 continue
             color = qt.QtGui.QColor(self._title_color)
             color.setAlpha(alpha)

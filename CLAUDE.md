@@ -2469,6 +2469,44 @@ axis (`flip`). ZERO THE SELECTED (`actions/zero_out`, in the Zero row): the mode
   New icons: `actions/drive_constraint`, `drive_matrix`, `drive_off`. Checked in mayapy 2026 from an
   isolated copy (26 checks: both modes by name and by order, follow, let go from both ends, stays in
   place, undo, the refusals); the three buttons were not clicked in a windowed Maya.
+- Three of the user's picks (2026-10-10; a fourth — FIT for a joint by its bone length instead of its
+  radius — was built, tried and taken back the same hour: "bad, I'd rather switch fit off and scale";
+  fit stays radius x 2, don't offer it again). LIT BUTTONS: the
+  SELECTED buttons show what is ALREADY true of the selection (`scene.states` -> `_refresh_states`, run
+  with the live preview and one event-loop turn after every `_say`): tied by constraints / the matrix
+  (from either end; Let go lit when tied at all), zeroed with groups / in the matrix, drawn on top — the
+  `on` property (`QPushButton#controlsTool[on="true"]`: a light fill + edge, the icon keeps its tone)
+  and a last tooltip line "● 3 of the selected are tied by constraints". The SMALL PREVIEW shows the
+  FIRST selected object only ("+4" in its title): the whole selection is the ghost's to show — rows of
+  rings and chain lines were unreadable at that size (`set_scene` still takes several). The GHOST draws
+  how the control will be zeroed and whether it will drive (`ghost.show(zero=, drive=)`): thin violet
+  frames around it, one per group, or brackets for the matrix; a small pink diamond (constraints) or cube
+  (matrix) at its pivot — colors.GHOST_ZERO / GHOST_DRIVE (scene data, like SIDE_COLORS). Checked in
+  windowed Maya 2026 from an isolated copy (the lit states after Create, on the driven joint, after Let
+  go and on top; ghost shape counts; pictures).
+- FIT for what is not a joint (2026-10-10, the user's yes to three of four ideas; joints stay radius x 2):
+  `scene.local_box(target)` = the box around the object AND everything under it (a group of meshes has
+  no shape of its own; over BOX_SHAPES 300 shapes: Maya's world box turned into the frame), in the
+  object's OWN axes (a turned object doesn't swell it as the world box did), in world units (its scale
+  counted), about its rotate PIVOT (what a control is matched to — measured from the transform's origin
+  a moved pivot gave the wrong size). `fit_size(target, axis)` reaches ACROSS the axis the control faces:
+  per cross axis min(pivot to the box's far side, the box's width) — so a pivot at the base still
+  encloses the object and a pivot far away can't blow it up —, the largest of them x FIT_ROOM 1.2; a box
+  flat across that axis falls back to its longest side. A ring around a 10-long tube of radius 1: 1.2
+  facing along it, 6 facing across (it was 6 either way). The axis comes from the preview's chips: Create,
+  the ghost and `target_look(target, axis)` / the preview's dashed box all use the same numbers. Checked
+  in mayapy 2026 from an isolated copy (18 checks: tube, turned, scaled, pivot at the base / far away,
+  group, empty group, flat plane, locator, joint, Create).
+- The preview's corners and notes (2026-10-10, the user's asks): the four widgets along its bottom (size,
+  fit, side color, the color square) are all 24 px high and `ShapeView._place_corners` puts their
+  MIDDLES on one line — and again whenever one of them is resized or shown (an event filter: the
+  stylesheet resizes them AFTER they were first placed, which left them at different heights in Maya).
+  The control's NAME and "+N" are gone from the preview (the button says "Create 3", its tooltip
+  "Makes lf_arm_ctrl and 2 more"); in their place `ShapeView.set_notes([(icon, text, tone)])` = what
+  will be done, a small tinted icon + a few words per line: zero (`zero_out` + the group suffixes, or
+  `zero_matrix` + "zero in the matrix"; qproperty zeroColor) and drive (`drive_constraint` /
+  `drive_matrix` / `cvs` for Shape; qproperty driveColor = --pink). A hovered tool still shows the
+  title (the control's name + what the click does). Checked offscreen from an isolated copy only.
 
 ## Batch tool
 

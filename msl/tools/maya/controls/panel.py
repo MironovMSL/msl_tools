@@ -16,7 +16,7 @@ from msl_tools.msl.tools.maya.controls.widgets import DragNumberField, Swatches,
 from msl_tools.msl.tools.maya.rename import rules
 from msl_tools.msl.tools.maya.rename.buttons import QuickButton, ToggleIconButton
 from msl_tools.msl.ui.theme import StylesheetBuilder
-from msl_tools.msl.ui.theme.qss import color_property, make_rounded_popup
+from msl_tools.msl.ui.theme.qss import color_property, make_rounded_popup, repolish
 from msl_tools.msl.ui.ui_resources import UiResources
 from msl_tools.msl.ui.widgets.atoms.segmented.segmented_control import SegmentedControl
 from msl_tools.msl.ui.widgets.atoms.surfaces.stable_scroll_area import StableScrollArea
@@ -174,7 +174,7 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
                                             "off: your color (the square beside it), or none")
         self._side_color.setObjectName("controlsToggle")
         # the color a new control gets — as the preview draws it; a click picks one of your own
-        self._color_chip = Swatches(side=18, gap=0, columns=1)
+        self._color_chip = Swatches(side=22, gap=0, columns=1)
         self._color_chip.setObjectName("controlsViewColor")
         self._color_chip.setFixedSize(self._color_chip.sizeHint())
         self._view.set_corner_widgets([self._size, self._fit], [self._side_color, self._color_chip])
@@ -520,7 +520,7 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
                 if ghost.redirect_selection():
                     return      # a picked ghost became its object: Maya tells of the new selection
                 targets = scene.selected_transforms()
-                looks = scene.targets_look(targets)
+                looks = scene.targets_look(targets[:1], axis=self._view.axis())
             except Exception as error:
                 self._report("Couldn't read the selection", error)
         look = looks[0] if looks else None
@@ -534,25 +534,36 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
         mode = self._offsets.current()
         fit = self._fit.isChecked()
         count = len(targets)
-        if look and drive == "Shape":
-            title, sub = look["name"], "gets the curve itself"
+        # the name and the count are the button's to say; the preview says HOW: zero and drive, as icons
+        icons = UiResources().iconManager
+        name = look["name"] if (look and drive == "Shape") else control_name(
+            self._template.text().strip(), look["name"] if look else "", position, self._sides(), 1)
+        notes = []
+        if drive == "Shape":
+            notes.append((icons.get_icon("cvs", sub_folder="actions"), "the curve goes onto it", "drive"))
         else:
-            title = control_name(self._template.text().strip(), look["name"] if look else "", position,
-                                 self._sides(), 1)
-            if count > 1:
-                title += f"  +{count - 1}"
-            parts = [" › ".join(self._offset_suffixes()) + " ›" if mode == "Groups" else
-                     "matrix ›" if mode == "Matrix" else ""]
-            if look and drive != "None":
-                parts.append("→ " + drive.lower())
-            sub = "  ".join(part for part in parts if part)
-        self._view.set_title(title, sub)
+            if mode == "Groups":
+                notes.append((icons.get_icon("zero_out", sub_folder="actions"),
+                              " › ".join(self._offset_suffixes()), "zero"))
+            elif mode == "Matrix":
+                notes.append((icons.get_icon("zero_matrix", sub_folder="actions"), "zero in the matrix", "zero"))
+            if drive == "Constrain":
+                notes.append((icons.get_icon("drive_constraint", sub_folder="actions"), "constraints", "drive"))
+            elif drive == "Matrix":
+                notes.append((icons.get_icon("drive_matrix", sub_folder="actions"), "driven by matrix", "drive"))
+        self._view.set_title("", "")
+        self._view.set_notes(notes)
+        self._create.setToolTip((f"Makes {name}" + (f" and {count - 1} more" if count > 1 else "") + "\n"
+                                 if count or drive != "Shape" else "") +
+                                "A control on every selected object (nothing selected: one at the origin) · "
+                                "double click a shape does the same")
         items = [{"look": each, "reach": self._size.value() * (each["fit"] if fit else 1.0),
                   "color": self._color_for(self._control_rgb(each["position"])), "matrix": each["matrix"],
                   "parent": each["parent"]} for each in looks] or [{"color": self._color_for(rgb)}]
         self._view.set_action(None, None)
         self._view.set_zero("none" if drive == "Shape" else mode.lower(), len(self._offset_suffixes()))
-        self._view.set_scene(items, chain=self._chain.isChecked() and drive != "Shape")
+        self._view.set_scene(items)
+        self._refresh_states(targets)
         self._create.setText("Create" if not count else f"Shape onto {count}" if drive == "Shape"
                              else f"Create {count}")
         self._update_ghost(targets)
@@ -576,8 +587,10 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
             ghost.clear()
             return
         try:
+            drive = {"constrain": "constraint"}.get(self._drive.current().lower(), self._drive.current().lower())
+            zero = ("none", 0) if drive == "shape" else (self._offsets.current().lower(), len(self._offset_suffixes()))
             ghost.show(self._picked_shape(), targets, self._size.value(), self._view.axis(), self._fit.isChecked(),
-                       self._control_rgb)
+                       self._control_rgb, zero=zero, drive=drive)
         except Exception as error:
             self._report("The ghost couldn't be drawn", error)
             ghost.clear()
@@ -653,6 +666,7 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
             self._draw_live()
             return
         name = holders[0].rpartition("|")[2] + (f"  +{len(holders) - 1}" if len(holders) > 1 else "")
+        self._view.set_notes([])
         self._view.set_title(name, text)
         self._view.set_action(before, after, self._color_for(rgb) if rgb is not None else None, zero)
 
@@ -792,6 +806,37 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
 
     def _say(self, text: str, state: str = "") -> None:
         self.status_changed.emit(text, state)
+        if not self._loading:       # something was done: the buttons' marks may be out of date
+            qt.QtCore.QTimer.singleShot(0, self._refresh_states)
+
+    def _refresh_states(self, selected: "list | None" = None) -> None:
+        """The SELECTED buttons show what is ALREADY true of the selection: tied by constraints / the
+        matrix, zeroed with groups / in the matrix, drawn on top — the button of it is lit (`on`)."""
+        found = {}
+        try:
+            from msl_tools.msl.tools.maya.controls import scene
+            found = scene.states(scene.selected_transforms() if selected is None else selected)
+        except ImportError:
+            pass
+        except Exception as error:
+            self._report("Couldn't read what the selection is tied to", error)
+        total = 0 if selected is None else len(selected)
+        for key, button, what in (("constraint", self._drive_constraint, "tied by constraints"),
+                                  ("matrix", self._drive_matrix, "tied through the matrix"),
+                                  ("zero_groups", self._zero_groups_button, "zeroed with groups"),
+                                  ("zero_matrix", self._zero_matrix_button, "zeroed in the matrix"),
+                                  ("on_top", self._on_top_button, "drawn on top")):
+            count = int(found.get(key, 0))
+            if bool(button.property("on")) != bool(count):
+                button.setProperty("on", bool(count))
+                repolish(button)
+            base = button.toolTip().split("\n● ")[0]
+            button.setToolTip(base + (f"\n● {count} of the selected {'is' if count == 1 else 'are'} {what}"
+                                      if count else ""))
+        tied = bool(found.get("constraint") or found.get("matrix"))
+        if bool(self._drive_off.property("on")) != tied:
+            self._drive_off.setProperty("on", tied)
+            repolish(self._drive_off)
 
     def _sides(self) -> rules.Sides:
         """The Rename tool's sides (one setting for both tools)."""
