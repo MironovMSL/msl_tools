@@ -79,10 +79,19 @@ def _popup_base_style(popup: qt.QtWidgets.QWidget):
 
 def repolish(widget: qt.QtWidgets.QWidget) -> None:
     """Re-applies the stylesheet to `widget` after a dynamic property that
-    QSS selects on (e.g. `[state="error"]`) changed."""
-    style = widget.style()
-    style.unpolish(widget)
-    style.polish(widget)
+    QSS selects on (e.g. `[state="error"]`) changed.
+
+    Never raises. Inside Maya, a widget that is not yet in a styled window may hand back a style whose
+    C++ object is already gone ("Internal C++ object (QProxyStyle) already deleted" — met three times,
+    each time right after Maya's start, each time while a window was being BUILT): there is nothing to
+    re-apply then, and the window's own stylesheet polishes the widget — with the property already
+    set — as soon as it is applied."""
+    try:
+        style = widget.style()
+        style.unpolish(widget)
+        style.polish(widget)
+    except RuntimeError:
+        return
     # Unbound on purpose: item views overload update(index), hiding QWidget.update().
     qt.QtWidgets.QWidget.update(widget)
 

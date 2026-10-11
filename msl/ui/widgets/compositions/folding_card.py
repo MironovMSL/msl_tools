@@ -55,6 +55,7 @@ class FoldingCard(qt.QtWidgets.QFrame):
             top.addWidget(mark)
         top.addWidget(heading)
         top.addWidget(self._summary, 1)
+        self._extras = list(extras)
         for extra in extras:
             top.addWidget(extra)
         self.body = qt.QtWidgets.QWidget()
@@ -83,10 +84,20 @@ class FoldingCard(qt.QtWidgets.QFrame):
         self._summary_text = text
         self._summary.setText("" if self._open else text)
 
+    def _over_extra(self, position) -> bool:
+        child = self._header.childAt(position)
+        return child is not None and any(extra is child or extra.isAncestorOf(child) for extra in self._extras)
+
     def eventFilter(self, watched, event) -> bool:
         if watched is self._header:
             kind = event.type()
             if kind == qt.QtCore.QEvent.Type.MouseButtonPress and event.button() == qt.QtCore.Qt.MouseButton.LeftButton:
+                if self._over_extra(event.position().toPoint()):
+                    # a press on a widget IN the heading (a switch, a mark, a button) is that widget's,
+                    # also when it lets the event through (a segmented control does): the card is not
+                    # folded by it
+                    self._press, self._dragging = None, False
+                    return False
                 self._press, self._dragging = event.globalPosition().toPoint(), False
                 return True
             if kind == qt.QtCore.QEvent.Type.MouseMove and getattr(self, "_press", None) is not None:
@@ -99,6 +110,11 @@ class FoldingCard(qt.QtWidgets.QFrame):
                     self.drag_moved.emit(self, where)
                 return True
             if kind == qt.QtCore.QEvent.Type.MouseButtonRelease and event.button() == qt.QtCore.Qt.MouseButton.LeftButton:
+                if getattr(self, "_press", None) is None:
+                    # the press was not ours: it began on a widget IN the heading (a switch, a mark) that
+                    # took it and let only the release through — that is no click on the heading
+                    # (a segmented control in a heading folded its card on every click)
+                    return False
                 dragged, self._press, self._dragging = getattr(self, "_dragging", False), None, False
                 if dragged:
                     self._header.setCursor(qt.QtCore.Qt.CursorShape.PointingHandCursor)

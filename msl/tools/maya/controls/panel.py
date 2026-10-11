@@ -1088,6 +1088,7 @@ class ControlsPanel(_ColorMixin, _AttributesMixin, _TransformsMixin, qt.QtWidget
         try:
             self._show_line_width()
             self._show_color_places()
+            self._refresh_transform_values()
             self._refresh_attributes()      # CHANNELS / ATTRIBUTES, while they are on screen
         except Exception as error:
             self._report("The channels couldn't follow the selection", error)
@@ -1538,6 +1539,7 @@ class ControlsPanel(_ColorMixin, _AttributesMixin, _TransformsMixin, qt.QtWidget
         self._show_offset_names()
         self._apply_color_settings()
         self._apply_attribute_settings()
+        self._apply_transform_settings()
         self._apply_card_order()
 
     def _save(self, *_args) -> None:

@@ -18,9 +18,12 @@ _PARENT = qt.QtCore.Qt.ItemDataRole.UserRole + 5    # the uuid of the listed row
 _NS = qt.QtCore.Qt.ItemDataRole.UserRole + 6        # its namespace ("ns:"), drawn faint before the name
 INDENT = 12        # px per level of the tree
 ARROW = 12         # px of the fold arrow in front of a row (in the tree)
-DOT, DOT_GAP = 6, 9    # the problem dots after a name
-# what a problem dot means, in the order they are drawn (the colors: qproperty, rename.qss)
+DOT, DOT_GAP = 13, 16  # the problem marks after a name: a small icon each, and the step between them
+# what a problem mark means, in the order they are drawn (the colors: qproperty, rename.qss)
 DOT_KINDS = ("same", "bad", "convention", "shape")
+# each mark is the ICON OF THE STRIP BUTTON that finds that problem (actions/), so the list and the
+# strip speak one language; a dot said only "something", and four dots of four colors were a riddle
+MARK_ICONS = {"same": "names_same", "bad": "name_bad", "convention": "convention_check", "shape": "shape_name"}
 _ROW_MIME = "application/x-msl-rename-row"
 FRAME_DELAY_MS = 250   # a click on a row frames its object this much later (unless a double click came)
 _CHANGING = ("", "warning", "clash")                # states whose new name is drawn with its changes
@@ -144,12 +147,16 @@ class _NameDelegate(qt.QtWidgets.QStyledItemDelegate):
                          int(qt.QtCore.Qt.AlignmentFlag.AlignVCenter | qt.QtCore.Qt.AlignmentFlag.AlignLeft), shown)
         hits = []
         x += width + 7
-        painter.setPen(qt.QtCore.Qt.PenStyle.NoPen)
+        top = rect.top() + (rect.height() - DOT) // 2
         for kind, _why in issues:
-            painter.setBrush(owner.dot_color(kind))
-            center = qt.QtCore.QPointF(x + DOT / 2, rect.center().y() + 0.5)
-            painter.drawEllipse(center, DOT / 2, DOT / 2)
-            hits.append((qt.QtCore.QRect(int(x) - 2, rect.top(), DOT_GAP + 1, rect.height()), kind))
+            mark = owner.mark_pixmap(kind)
+            if mark is not None:
+                painter.drawPixmap(qt.QtCore.QRect(int(x), top, DOT, DOT), mark)
+            else:                        # (the icon file is missing: the old dot)
+                painter.setPen(qt.QtCore.Qt.PenStyle.NoPen)
+                painter.setBrush(owner.dot_color(kind))
+                painter.drawEllipse(qt.QtCore.QPointF(x + DOT / 2, rect.center().y() + 0.5), 3, 3)
+            hits.append((qt.QtCore.QRect(int(x) - 2, rect.top(), DOT_GAP, rect.height()), kind))
             x += DOT_GAP
         owner._dot_hits[uuid] = hits
         painter.restore()
@@ -262,6 +269,7 @@ class PreviewList(qt.QtWidgets.QTreeWidget):
         self._row_sides: dict = {}     # uuid -> "left" / "right"
         self._row_issues: dict = {}    # uuid -> [(kind, why)]
         self._dot_hits: dict = {}      # uuid -> [(rect, kind)] where its dots were drawn
+        self._mark_pixmaps: dict = {}  # (kind, color, pixel ratio) -> the mark's tinted picture
         self._editing = False
         self._ordered = False          # the user dragged the rows into an order of their own
         icons = UiResources().iconManager
@@ -391,6 +399,17 @@ class PreviewList(qt.QtWidgets.QTreeWidget):
         if not self.tree_shown():
             return 0
         return (index.data(_DEPTH) or 0) * INDENT + ARROW
+
+    def mark_pixmap(self, kind: str) -> "qt.QtGui.QPixmap | None":
+        """The small icon of a problem, tinted in its color (cached: the list paints it on every row)."""
+        color = self.dot_color(kind)
+        ratio = self.devicePixelRatioF()
+        key = (kind, color.rgba(), ratio)
+        if key not in self._mark_pixmaps:
+            icon = UiResources().iconManager.get_icon(MARK_ICONS.get(kind, ""), sub_folder="actions")
+            self._mark_pixmaps[key] = (tint_icon(icon, DOT, ratio, color)
+                                       if icon is not None and not icon.isNull() else None)
+        return self._mark_pixmaps[key]
 
     def dot_color(self, kind: str) -> "qt.QtGui.QColor":
         return {"same": self._same_dot, "bad": self._bad_dot, "convention": self._convention_dot,

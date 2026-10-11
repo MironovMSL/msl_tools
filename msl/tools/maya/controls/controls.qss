@@ -378,3 +378,32 @@ ControlsPanel PlaceMark#controlsPlaceMark {
     qproperty-warnColor: var(--warning);
     font-size: 11px;
 }
+
+/* TRANSFORMS: the grid of channels — taken (the axis' color), taken inverted (the warning tone, "−X"),
+   left out (quiet and dashed). */
+ControlsPanel QPushButton#controlsPick {
+    padding: 0px;
+    font-weight: 600;
+    border-radius: 5px;
+    border: 1px solid alpha(var(--accent), 55%);
+    background: alpha(var(--accent), 14%);
+    color: var(--text-primary);
+}
+ControlsPanel QPushButton#controlsPick[axis="X"][state="on"] { color: var(--danger); border-color: alpha(var(--danger), 55%); background: alpha(var(--danger), 14%); }
+ControlsPanel QPushButton#controlsPick[axis="Y"][state="on"] { color: var(--success); border-color: alpha(var(--success), 55%); background: alpha(var(--success), 14%); }
+ControlsPanel QPushButton#controlsPick[axis="Z"][state="on"] { color: var(--accent); border-color: alpha(var(--accent), 55%); background: alpha(var(--accent), 14%); }
+ControlsPanel QPushButton#controlsPick[state="inv"] {
+    color: var(--warning);
+    border: 1px solid alpha(var(--warning), 75%);
+    background: alpha(var(--warning), 16%);
+}
+ControlsPanel QPushButton#controlsPick[state="off"] {
+    color: alpha(var(--text-secondary), 70%);
+    border: 1px dashed alpha(var(--text-secondary), 60%);
+    background: transparent;
+}
+ControlsPanel QPushButton#controlsPick:hover { border-color: var(--accent); }
+ControlsPanel QLabel#controlsHint {
+    color: var(--warning);
+    font-size: 11px;
+}

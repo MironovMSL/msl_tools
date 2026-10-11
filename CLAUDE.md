@@ -2251,6 +2251,14 @@ window's checks, written anew for this framework). Hotkeys: MSLRename, MSLRename
   parented to Maya, the list following the selection, lock, template with side / number / kind,
   one undo step, replace in the whole scene, out of a namespace, a word, letters, one name typed
   in the list, selected shapes, light theme, closing with callbacks gone.
+- The list's PROBLEM MARKS are small icons, not dots (2026-10-11, the user: red and yellow dots said only
+  "something is wrong", and dots already mean the side on the type icon): after a name each problem is
+  the ICON OF THE STRIP BUTTON that finds it, 13 px, in that problem's color - `preview.MARK_ICONS`
+  (same -> names_same, bad -> name_bad, convention -> convention_check, shape -> shape_name),
+  `PreviewList.mark_pixmap(kind)` (tinted with `tint_icon`, cached per color and pixel ratio; a missing
+  icon file falls back to the dot). A press on a mark still opens that row's fixes (`_dot_hits`).
+  Checked in windowed Maya 2026 from an isolated copy (a default name, two same names, a shape not named
+  after its transform: each row its own mark).
 
 ## Controls tool (inside Maya)
 
@@ -3057,6 +3065,51 @@ axis (`flip`). ZERO THE SELECTED (`actions/zero_out`, in the Zero row): the mode
   an isolated copy (the card order with mouse events: 11 checks); windowed Maya 2026 (match with a locked
   object left, undo, match all, reset rotate, freeze with the points staying, world paste onto a child,
   darker / lighter + three undos, the look off and on, mixed values, Rename's fold / hide / next window).
+- TRANSFORMS, second cut (2026-10-11, the user's "all five" after a mock-up; the first cut's twelve word
+  buttons are gone). ONE GRID says what the whole card works on: Move / Rotate / Scale x X Y Z, each
+  channel a three-state button (`QPushButton#controlsPick[state]`): taken (the axis' color), taken
+  INVERTED (the warning tone, "-X": its value goes over with the other sign - what a mirrored control
+  needs), left out (dashed); a click cycles, a row's caption takes or drops its three; scale is left out
+  at first (`settings.transform_channels`). `_picked_channels()` -> {channel: +1 / -1}, the argument of
+  every function of `transforms.py`. BESIDE each channel its NUMBER (`attribute_rows.ValueSlider`): the
+  first selected object's value; typed or dragged it goes to every selected object, a drag = one undo.
+  WORLD / LOCAL in the heading (`settings.transform_space`): in the world an object is put where the other
+  one STANDS (`matchTransform` with its per-axis flags positionX ... scaleZ - they exist, checked in
+  2026; a sign means nothing there), locally the channels' own numbers go over.
+  Do: MATCH (the selected onto the LAST selected), RESET (the chosen channels to rest), FREEZE
+  (`makeIdentity` for the GROUPS that have a channel chosen - Maya freezes a group, not an axis).
+  A POSE (`transforms.pose_of`): plain data - per object its name, nine values, world matrix. COPY puts it
+  on the SYSTEM CLIPBOARD AS TEXT (JSON marked "msl_pose") as well as in a class variable, so PASTE works
+  in ANOTHER MAYA (the user's idea, instead of a file-only save): `_clipboard_pose()` reads the clipboard
+  first. Pairing (`pair_pose`): ONE copied object goes onto every selected one; several find theirs by
+  NAME without path and namespace (the same rig in another scene, a referenced copy), else - as many as
+  selected - by the order picked. A world paste puts a helper transform at the copied matrix and matches
+  to it (so it lands right under any parent; parents first). Files: the right-click menus of Copy
+  ("Save to a file...") and Paste ("Load from a file...").
+  SIDES: L -> R, R -> L, Swap (`side_pairs` + `transfer_sides`): each selected object and its other-side
+  twin by `scene.other_side` (Rename's rules - no tag fields), LEFT = the one further along +X; the chosen
+  channels' own values, signs applied; one side selected is enough.
+  `ui/theme/qss.py:repolish` never raises now: a widget not yet in a styled window can hand back a style
+  whose C++ object is gone ("QProxyStyle already deleted", right after Maya's start, while a window is
+  built - met a third time here); the window's stylesheet polishes it anyway once applied.
+  Checked in windowed Maya 2026 from an isolated copy: the numbers follow the selection, a typed number on
+  two objects, a world match on tx + rotate only, a local match with tx inverted, reset, copy -> the
+  clipboard text -> paste by name onto namespaced copies (the class copy cleared: as in another Maya),
+  one object onto several, a world paste onto a child of a moved parent, L -> R with tx inverted, Swap
+  from the right one + one undo, no twin = said. Minimum width 392. The file dialogs were not opened.
+  Two corrections after the user tried it (2026-10-11): (1) a click on World / Local FOLDED the card - a
+  widget in a FoldingCard's heading that lets its mouse press through (SegmentedControl does) made the
+  heading take it for its own click. `FoldingCard._over_extra`: a press over one of the `extras` is that
+  widget's - not consumed, not a click on the heading, and a release without a press of the heading's
+  own folds nothing. (2) "the second Match didn't work": Match itself repeats fine (checked: target
+  changed with the selection kept -> the next Match follows) - but with NO channel taken every button
+  under the grid silently did nothing, and a Match that had nothing to change still said "matched". Now:
+  no channel taken -> Match / Reset / Freeze / Paste / the Sides buttons are greyed and a warning line in
+  the card says why (`_sync_transform_buttons`); a Match that moved nothing says "Already matched ... it
+  is the LAST selected object they are matched to" (`transforms.match` counts only objects that changed,
+  `matched` is no longer needed by the panel but kept). The numbers' tooltip says they go to EVERY
+  selected object, the one matched to included.
+  Checked offscreen from an isolated copy (9 checks, real clicks on the heading's widgets) and in mayapy.
 
 ## Batch tool
 

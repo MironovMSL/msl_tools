@@ -35,8 +35,8 @@ CARDS = (("channels", "channels", "Channels", "Lock and hide the move / rotate /
                                            "put values back, change the rotate order"),
          ("attributes", "attributes", "Attributes", "The selected object's own attributes: values, names, "
                                                     "order, add and remove, copy and paste, saved sets"),
-         ("transforms", "move", "Transforms", "Match the selected objects to another, values back to rest, "
-                                              "freeze, a place in the world copied and pasted"))
+         ("transforms", "move", "Transforms", "Match, reset and freeze by channel, type the numbers, copy a "
+                                              "pose and paste it (in another Maya too), carry it from side to side"))
 
 
 # the cards the header can also put away, shown unless switched off (the two above: hidden until wanted)
@@ -285,6 +285,7 @@ class _AttributesMixin:
             self._show_attr_heading()
         if opened:
             self._refresh_attributes()
+            self._refresh_transform_values()
 
     def _show_card(self, key: str, on: bool) -> None:
         """The header's button: the card shown (folded or open, as it was left) or put away
@@ -312,6 +313,8 @@ class _AttributesMixin:
             self._settings["shown"] = shown
         if on and key in ("channels", "attributes"):
             self._refresh_attributes()
+        elif on and key == "transforms":
+            self._refresh_transform_values()
 
     def _apply_attribute_settings(self) -> None:
         shown = dict(self._settings.get("shown") or {})
