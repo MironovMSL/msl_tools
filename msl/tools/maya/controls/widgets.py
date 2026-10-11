@@ -156,13 +156,22 @@ class HierarchyStrip(qt.QtWidgets.QWidget):
     Blocks and the mark with a key can be clicked.
 
     set_items([{"key", "text", "tone", "icon", "tip", "link", "link_key"}]) — `link` is how an item
-    joins the NEXT one: "into", "gap", "constraint", "matrix", "none" or "" (nothing).
+    joins the NEXT one: "into", "gap", "constraint", "matrix", "shape" (the curve goes onto the object
+    itself), "none" or "" (nothing). A block may be `off` (True): it stands where it stood, grey and
+    dashed — a setting that doesn't apply right now; its tip still shows, a click does nothing.
+
+    A block can be TYPED IN PLACE: `edit(key, text, placeholder)` puts a field over it — Enter takes
+    the text (`edited`), Esc, the focus leaving or a click anywhere else gives it up.
 
     Signals:
         clicked(str, QPoint) — a block's `key` or an arrow's `link_key`, and where (global).
+        context(str, QPoint) — the same for a right click.
+        edited(str, str)     — a block's `key` and the text typed for it (Enter).
     """
 
     clicked = qt.QtCore.Signal(str, qt.QtCore.QPoint)
+    context = qt.QtCore.Signal(str, qt.QtCore.QPoint)
+    edited = qt.QtCore.Signal(str, str)
 
     zeroColor = color_property("_zero", "update")
     controlColor = color_property("_control", "update")
@@ -171,8 +180,9 @@ class HierarchyStrip(qt.QtWidgets.QWidget):
     textColor = color_property("_text", "update")
     mutedColor = color_property("_muted", "update")
 
-    LINK_WIDTH = {"into": 12, "gap": 4, "constraint": 34, "matrix": 34, "none": 34, "": 0}
-    LINK_ICONS = {"constraint": "drive_constraint", "matrix": "drive_matrix", "none": "drive_off"}   # actions/
+    LINK_WIDTH = {"into": 12, "gap": 4, "constraint": 34, "matrix": 34, "shape": 34, "none": 34, "": 0}
+    LINK_ICONS = {"constraint": "drive_constraint", "matrix": "drive_matrix", "shape": "cvs",
+                  "none": "drive_off"}   # actions/
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -187,6 +197,9 @@ class HierarchyStrip(qt.QtWidgets.QWidget):
         self._items = []
         self._hits = []          # (QRectF, key, tip)
         self._hover = ""
+        self._editor = None      # the field over a block while it is typed
+        self._editing = ""
+        self._outside = None
         self.setFixedHeight(24)
         self.setMinimumWidth(60)
         self.setMouseTracking(True)
@@ -237,14 +250,18 @@ class HierarchyStrip(qt.QtWidgets.QWidget):
         self._hits = []
         middle = self.height() / 2.0
         for item, block, text, link in self._laid_out(painter.fontMetrics()):
-            tone = self._tone(item.get("tone", ""))
+            off = bool(item.get("off"))
+            tone = self._tone("muted" if off else item.get("tone", ""))
             key = item.get("key", "")
-            quiet = item.get("tone", "") in ("", "muted")
+            quiet = off or item.get("tone", "") in ("", "muted")
             fill = qt.QtGui.QColor(tone)
             fill.setAlpha((70 if key and key == self._hover else 34) if not quiet else (40 if key == self._hover and key else 0))
             edge = qt.QtGui.QColor(tone)
             edge.setAlpha(170 if not quiet else 70)
-            painter.setPen(qt.QtGui.QPen(edge, 1))
+            pen = qt.QtGui.QPen(edge, 1)
+            if off:
+                pen.setStyle(qt.QtCore.Qt.PenStyle.DashLine)
+            painter.setPen(pen)
             painter.setBrush(fill)
             painter.drawRoundedRect(block.adjusted(0.5, 0.5, -0.5, -0.5), 5, 5)
             left = block.left() + 6
@@ -258,13 +275,13 @@ class HierarchyStrip(qt.QtWidgets.QWidget):
                 painter.setPen(self._muted if quiet else self._text)
                 painter.drawText(qt.QtCore.QRectF(left, block.top(), block.right() - left, block.height()),
                                  qt.QtCore.Qt.AlignmentFlag.AlignLeft | qt.QtCore.Qt.AlignmentFlag.AlignVCenter, text)
-            if key:
-                self._hits.append((block, key, item.get("tip", "")))
+            if key or (off and item.get("tip")):
+                self._hits.append((block, "" if off else key, item.get("tip", "")))
             kind = item.get("link", "")
             if kind == "into":
                 painter.setPen(self._muted)
                 painter.drawText(link, qt.QtCore.Qt.AlignmentFlag.AlignCenter, "›")
-            elif kind in ("constraint", "matrix", "none"):
+            elif kind in ("constraint", "matrix", "shape", "none"):
                 link_key = item.get("link_key", "")
                 if link_key and link_key == self._hover:
                     wash = qt.QtGui.QColor(self._drive)
@@ -306,13 +323,17 @@ class HierarchyStrip(qt.QtWidgets.QWidget):
                 return key, tip
         return "", ""
 
+    def _block_rect(self, key: str):
+        return next((rect for rect, each, _tip in self._hits if each and each == key), None)
+
     def mouseMoveEvent(self, event) -> None:
         key, tip = self._at(event.position())
+        if tip != self.toolTip():
+            self.setToolTip(tip)
         if key != self._hover:
             self._hover = key
             self.setCursor(qt.QtCore.Qt.CursorShape.PointingHandCursor if key
                            else qt.QtCore.Qt.CursorShape.ArrowCursor)
-            self.setToolTip(tip)
             self.update()
 
     def leaveEvent(self, event) -> None:
@@ -324,6 +345,59 @@ class HierarchyStrip(qt.QtWidgets.QWidget):
         key, _tip = self._at(event.position())
         if key and event.button() == qt.QtCore.Qt.MouseButton.LeftButton:
             self.clicked.emit(key, event.globalPosition().toPoint())
+        elif key and event.button() == qt.QtCore.Qt.MouseButton.RightButton:
+            self.context.emit(key, event.globalPosition().toPoint())
+
+    # ---- a block typed in place
+
+    def is_editing(self) -> bool:
+        return self._editor is not None
+
+    def edit(self, key: str, text: str = "", placeholder: str = "") -> None:
+        """A field over the block `key` (at the line's end when there is no such block)."""
+        from msl_tools.msl.tools.maya.controls.attribute_rows import _OutsideClick
+        self._close_editor()
+        rect = self._block_rect(key)
+        left = int(rect.left()) if rect is not None else max(0, self.width() - 96)
+        width = max(84, int(rect.width()) + 30 if rect is not None else 84)
+        left = max(0, min(left, self.width() - width))
+        editor = self._editor = qt.QtWidgets.QLineEdit(text, self)
+        editor.setObjectName("controlsAttrEdit")
+        editor.setPlaceholderText(placeholder)
+        editor.setGeometry(left, 1, width, self.height() - 2)
+        self._editing = key
+        editor.show()
+        editor.setFocus()
+        editor.selectAll()
+        editor.returnPressed.connect(self._typed)       # only Enter takes it
+        editor.installEventFilter(self)
+        self._outside = _OutsideClick(editor, self._close_editor)
+
+    def _typed(self) -> None:
+        key, text = self._editing, self._editor.text().strip() if self._editor is not None else ""
+        self._close_editor()
+        if key:
+            self.edited.emit(key, text)
+
+    def _close_editor(self) -> None:
+        editor, self._editor, self._editing = self._editor, None, ""
+        if self._outside is not None:
+            self._outside.stop()
+            self._outside = None
+        if editor is not None:
+            editor.removeEventFilter(self)
+            editor.hide()
+            editor.deleteLater()
+            self.update()
+
+    def eventFilter(self, watched, event) -> bool:
+        if watched is self._editor and self._editor is not None:
+            if event.type() == qt.QtCore.QEvent.Type.KeyPress and event.key() == qt.QtCore.Qt.Key.Key_Escape:
+                self._close_editor()
+                return True
+            if event.type() == qt.QtCore.QEvent.Type.FocusOut:
+                qt.QtCore.QTimer.singleShot(0, self._close_editor)
+        return super().eventFilter(watched, event)
 
 
 class Swatches(qt.QtWidgets.QWidget):

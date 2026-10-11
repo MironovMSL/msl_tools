@@ -25,6 +25,7 @@ from msl_tools.msl.tools.maya.rename import rules
 from msl_tools.msl.tools.maya.rename.buttons import QuickButton, ToggleIconButton
 from msl_tools.msl.ui.theme import StylesheetBuilder
 from msl_tools.msl.ui.theme.qss import color_property, make_rounded_popup, repolish
+from msl_tools.msl.ui.widgets.atoms.editors.token_line_edit import TokenLineEdit
 from msl_tools.msl.ui.ui_resources import UiResources
 from msl_tools.msl.ui.widgets.atoms.comboboxes.base_combo_box import BaseComboBox
 from msl_tools.msl.ui.widgets.atoms.segmented.segmented_control import SegmentedControl
@@ -163,11 +164,14 @@ class ControlsPanel(_ColorMixin, _AttributesMixin, _TransformsMixin, _SelectedMi
         self._editor.hide()
 
         # how a new control is made — its size, "fit" and the axis it faces live in the preview
-        self._template = qt.QtWidgets.QLineEdit()
+        self._template = TokenLineEdit({"side": "lf / rt / mid, from where the control stands",
+                                        "name": "what it is made for, its side word and suffix taken off",
+                                        "#": "01, 02… in the order picked"}, default=DEFAULT_TEMPLATE)
         self._template.setObjectName("controlsTemplate")
         self._template.setPlaceholderText(DEFAULT_TEMPLATE)
         self._template.setToolTip("The new control's name: {name} = what it is made for (its side word and "
-                                  "suffix taken off), {side} = lf / rt / mid from where it stands, {#} = 01, 02…")
+                                  "suffix taken off), {side} = lf / rt / mid from where it stands, {#} = 01, 02…"
+                                  "\nRight click: put a token in · empty = " + DEFAULT_TEMPLATE)
         self._size = DragNumberField(1.0, 0.01, 1000.0, 0.1, width=40)
         self._size.setObjectName("controlsViewSize")
         self._size.setToolTip("Size of a new control — the wheel over the preview, drag with the middle mouse "
@@ -222,14 +226,8 @@ class ControlsPanel(_ColorMixin, _AttributesMixin, _TransformsMixin, _SelectedMi
                                       "\"offset\" or \"grp, offset, driven\" for three — also what "
                                       "“Zero with groups” of SELECTED makes")
         # hidden on None / Matrix, its room kept: the row doesn't jump when the mode changes
-        policy = self._offset_names.sizePolicy()
-        policy.setRetainSizeWhenHidden(True)
-        self._offset_names.setSizePolicy(policy)
-        making = qt.QtWidgets.QHBoxLayout()
-        making.setSpacing(4)
-        making.addWidget(self._caption("Zero"))
-        making.addWidget(self._offsets)
-        making.addWidget(self._offset_names, 1)
+        # (no Zero / Drive rows since 2026-10-11: the line under Create IS those settings. The three
+        # widgets live on, unseen and in no layout — everything still reads the settings from them)
 
         # what the new control does to the object it is made for
         self._drive = SegmentedControl(list(DRIVES), "None")
@@ -240,18 +238,14 @@ class ControlsPanel(_ColorMixin, _AttributesMixin, _TransformsMixin, _SelectedMi
                                "Constrain — the object follows it through parent + scale constraints\n"
                                "Matrix — the object follows it through its offsetParentMatrix: no constraint node, "
                                "its channels read zero and stay free")
-        driving = qt.QtWidgets.QHBoxLayout()
-        driving.setSpacing(4)
-        driving.addWidget(self._caption("Drive"))
-        driving.addWidget(self._drive)
-        driving.addStretch(1)
+        for unseen in (self._offsets, self._offset_names, self._drive):
+            unseen.setParent(card)
+            unseen.hide()
 
         card.body_layout.addLayout(shelf)
         card.body_layout.addWidget(self._editor)
         # top first, like the Outliner: the zero groups, the control, an arrow to what it drives
         card.body_layout.addLayout(naming)
-        card.body_layout.addLayout(making)
-        card.body_layout.addLayout(driving)
 
         body = qt.QtWidgets.QWidget()
         column = qt.QtWidgets.QVBoxLayout(body)
@@ -351,6 +345,19 @@ class ControlsPanel(_ColorMixin, _AttributesMixin, _TransformsMixin, _SelectedMi
         menu = make_rounded_popup(qt.QtWidgets.QMenu(self))
         menu.setToolTipsVisible(True)
         return menu
+
+    def _submenu(self, menu, title: str) -> "qt.QtWidgets.QMenu":
+        """A submenu of `menu`, made with the menu as its PARENT and kept by it: one made with
+        `menu.addMenu(title)` was deleted as soon as its Python name went out of scope (met in Maya
+        2026 - "Internal C++ object (QMenu) already deleted", then a crash)."""
+        sub = make_rounded_popup(qt.QtWidgets.QMenu(title, menu))
+        sub.setToolTipsVisible(True)
+        menu.addMenu(sub)
+        kept = getattr(menu, "_kept_submenus", None)
+        if kept is None:
+            kept = menu._kept_submenus = []
+        kept.append(sub)
+        return sub
 
     @staticmethod
     def _menu_caption(menu, text: str) -> None:
@@ -457,6 +464,9 @@ class ControlsPanel(_ColorMixin, _AttributesMixin, _TransformsMixin, _SelectedMi
             toggle.toggled.connect(self._save)
         self._view.axis_picked.connect(self._on_axis)
         self._strip.clicked.connect(self._on_strip)
+        self._template.token_inserted.connect(self._save)       # (textEdited doesn't fire for it)
+        self._strip.context.connect(self._on_strip_context)
+        self._strip.edited.connect(self._on_strip_edited)
         self._color_chip.clicked.connect(lambda _key: self._pick_own_color())
         self._color_chip.menu_requested.connect(self._on_color_chip_menu)
         self._view.size_stepped.connect(self._size._nudge)
@@ -662,26 +672,34 @@ class ControlsPanel(_ColorMixin, _AttributesMixin, _TransformsMixin, _SelectedMi
         more = f"  +{count - 1}" if count > 1 else ""
         target = {"key": "", "text": (look["name"] + more) if look else "what you select",
                   "tone": "target" if look else "muted", "tip": "The object the control is made for"}
-        if drive == "Shape":
-            return [{"key": "drive", "icon": icons.get_icon("cvs", sub_folder="actions"), "text": "the curve",
-                     "tone": "drive", "link": "into", "tip": "No new object: the curve becomes a shape of the "
-                                                             "object itself — click to change"}, target]
-        items = [{"key": "zero", "tone": "zero" if mode != "None" else "muted",
+        # Drive = Shape makes no new object: no zero, no groups, no name. The line STANDS AS IT STOOD -
+        # what doesn't apply goes grey - so nothing jumps when the bone is switched on (the user's ask)
+        shape = drive == "Shape"
+        unused = "Not used now: the curve goes onto the object itself (Drive = the curve) - no new control, " \
+                 "no groups, no name"
+        items = [{"key": "zero", "tone": "zero" if mode != "None" else "muted", "off": shape,
                   "icon": icons.get_icon({"Groups": "zero_out", "Matrix": "zero_matrix"}.get(mode, "clear"),
                                          sub_folder="actions"),
                   "text": {"Matrix": "matrix", "None": "no zero"}.get(mode, ""),
                   "link": "gap" if mode == "Groups" else "into",
-                  "tip": "How a new control is zeroed — click to change"}]
+                  "tip": unused if shape else "How a new control is zeroed — click to change"}]
         if mode == "Groups":
-            for index, suffix in enumerate(self._offset_suffixes()):
-                items.append({"key": f"group:{index}", "text": suffix, "tone": "zero", "link": "into",
-                              "tip": f"A group above the control: <control>_{suffix} — click to rename it"})
-        items.append({"key": "control", "text": name + more, "tone": "control",
-                      "tip": "The new control — click to change how it is named",
-                      "link": {"Constrain": "constraint", "Matrix": "matrix"}.get(drive, "none"),
+            suffixes = self._offset_suffixes()
+            for index, suffix in enumerate(suffixes):
+                items.append({"key": f"group:{index}", "text": suffix, "tone": "zero", "off": shape,
+                              "link": "gap" if index == len(suffixes) - 1 else "into",
+                              "tip": unused if shape else
+                              f"A group above the control: <control>_{suffix}\nClick: rename it (empty = "
+                              "take it out) · right click: more"})
+            items.append({"key": "group:add", "text": "+", "tone": "muted", "link": "into", "off": shape,
+                          "tip": unused if shape else "One more group above the control — type its suffix, Enter"})
+        items.append({"key": "control", "text": name + more, "tone": "control", "off": shape,
+                      "tip": unused if shape else "The new control — click to change how it is named",
+                      "link": {"Constrain": "constraint", "Matrix": "matrix", "Shape": "shape"}.get(drive, "none"),
                       "link_key": "drive",
                       "link_tip": {"Constrain": "It will drive the object through constraints",
-                                   "Matrix": "It will drive the object through its offsetParentMatrix"}
+                                   "Matrix": "It will drive the object through its offsetParentMatrix",
+                                   "Shape": "No new object: the curve becomes a shape of the object itself"}
                       .get(drive, "It will NOT drive the object") + " — click to change"})
         items.append(target)
         return items
@@ -723,26 +741,74 @@ class ControlsPanel(_ColorMixin, _AttributesMixin, _TransformsMixin, _SelectedMi
         elif key == "control":
             self._template.setFocus()
             self._template.selectAll()
+        elif key == "group:add":
+            self._strip.edit(key, "", "suffix")
         elif key.startswith("group:"):
-            import re
-            if self._offsets.current() != "Groups":
-                self._offsets.set_current("Groups")
-                self._on_offsets("Groups")
-            words = list(re.finditer(r"[^,\s]+", self._offset_names.text()))
+            suffixes = self._offset_suffixes()
             index = int(key[6:])
-            self._offset_names.setFocus()
-            if index < len(words):
-                self._offset_names.setSelection(words[index].start(), len(words[index].group()))
-            else:
-                self._offset_names.selectAll()
+            self._strip.edit(key, suffixes[index] if index < len(suffixes) else "", "suffix")
         elif key in ("zero", "drive"):
             self._setting_menu(key).exec(where)
+
+    # ---- the zero groups, typed in the line itself
+
+    def _set_suffixes(self, suffixes: list) -> None:
+        """The groups above a new control, top first; none left = Zero goes to None."""
+        suffixes = [part for part in suffixes if part]
+        if suffixes:
+            self._offset_names.setText(", ".join(suffixes))
+            if self._offsets.current() != "Groups":
+                self._offsets.set_current("Groups")
+            self._save()
+        else:
+            self._offset_names.setText("offset")
+            self._pick_setting(self._offsets, "None")
+
+    def _on_strip_edited(self, key: str, text: str) -> None:
+        if not key.startswith("group:"):
+            return
+        words = [part for part in text.replace(",", " ").split() if part]
+        suffixes = self._offset_suffixes()
+        if key == "group:add":
+            suffixes = suffixes + words
+        else:
+            index = int(key[6:])
+            suffixes = suffixes[:index] + words + suffixes[index + 1:]      # empty = taken out; "a b" = two
+        self._set_suffixes(suffixes)
+
+    def _on_strip_context(self, key: str, where) -> None:
+        if key in ("zero", "drive"):
+            self._setting_menu(key).exec(where)
+        elif key.startswith("group:") and key != "group:add":
+            self._group_block_menu(int(key[6:])).exec(where)
+
+    def _group_block_menu(self, index: int) -> "qt.QtWidgets.QMenu":
+        suffixes = self._offset_suffixes()
+        tone = self._zero_groups_button.iconColor
+        menu = self._menu()
+
+        def moved(step: int) -> None:
+            order = list(suffixes)
+            order.insert(index + step, order.pop(index))
+            self._set_suffixes(order)
+
+        self._menu_caption(menu, f"The group <control>_{suffixes[index]}" if index < len(suffixes) else "The group")
+        self._menu_item(menu, "edit", "Rename", lambda: self._strip.edit(f"group:{index}", suffixes[index], "suffix"),
+                        "Type its suffix in place", tone, hint="click")
+        if index > 0:
+            self._menu_item(menu, "chevron_left", "Higher", lambda: moved(-1), "One step up the hierarchy", tone)
+        if index < len(suffixes) - 1:
+            self._menu_item(menu, "chevron_right", "Lower", lambda: moved(1), "One step toward the control", tone)
+        self._menu_item(menu, "delete", "Take it out", lambda: self._set_suffixes(suffixes[:index] + suffixes[index + 1:]),
+                        "The last one taken out = no zero" if len(suffixes) == 1 else "", tone)
+        return menu
 
     def _setting_menu(self, key: str) -> "qt.QtWidgets.QMenu":
         """Zero ("zero") or Drive ("drive") of a new control as a menu; the one that is set is marked."""
         control = self._offsets if key == "zero" else self._drive
         lines = (("None", "clear", "No zero", "The control keeps its own values"),
-                 ("Groups", "zero_out", "Groups above it", "One group per suffix of the Zero row"),
+                 ("Groups", "zero_out", "Groups above it", "One group per suffix — the violet blocks of the line: "
+                                                           "click one to rename it, + adds one"),
                  ("Matrix", "zero_matrix", "In its matrix", "Its offsetParentMatrix holds the place: no group")) \
             if key == "zero" else \
                 (("None", "clear", "Doesn't drive", "The control only stands there"),
@@ -1009,9 +1075,7 @@ class ControlsPanel(_ColorMixin, _AttributesMixin, _TransformsMixin, _SelectedMi
         self._show_offset_names()
 
     def _show_offset_names(self) -> None:
-        wanted = self._offsets.current() == "Groups"
-        if wanted == self._offset_names.isHidden():
-            self._offset_names.setVisible(wanted)
+        """(The suffix field is never on screen now: the groups are typed in the line under Create.)"""
 
 
     def _show_preview(self) -> None:

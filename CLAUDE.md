@@ -1010,7 +1010,7 @@ atoms/comboboxes/base_combo_box.py        BaseComboBox (was QCustomComboBox)
 atoms/charts/ring_gauge.py                RingGauge (how far something is as a ring filling clockwise, a value in the middle, a caption under it; animated; qproperty trackColor / fillColor / textColor / captionColor; #ringDone = the success tone)
 atoms/charts/bar_strip.py                 BarStrip (a handful of measurements as thin bars in two tones, each with a tooltip; scaled from zero; qproperty accentColor / mutedColor)
 atoms/layouts/flow_layout.py              FlowLayout (items left to right, wrapping like words; height-for-width; hidden widgets take no room)
-atoms/editors/token_line_edit.py          TokenLineEdit (a line edit whose text may hold {tokens}: a right click lists them and the picked one goes in WHERE THE CLICK WAS; Cut / Copy / Paste stay in that menu; insert_token() for a button beside it; token_inserted(str), focused())
+atoms/editors/token_line_edit.py          TokenLineEdit (a line edit whose text may hold {tokens}: a right click lists them and the picked one goes in WHERE THE CLICK WAS; Cut / Copy / Paste stay in that menu; default= adds "Back to <that text>"; insert_token() for a button beside it; token_inserted(str), focused())
 atoms/editors/log_view.py                 LogView (read-only log: time-stamped entries colored by level — error / warning / info / trace — from qproperty colors; follows the tail; its QSS `color` exists only to color the placeholder — a QPlainTextEdit without one draws it near-black)
 atoms/editors/code_editor.py              CodeEditor (line numbers + gutter divider, Python highlighting from --syntax-* tokens, Tab/auto-indent)
 atoms/segmented/segmented_control.py     SegmentedControl (one-of-few picker: sunken track, raised pill that slides; Left/Right keys)
@@ -3197,6 +3197,57 @@ axis (`flip`). ZERO THE SELECTED (`actions/zero_out`, in the Zero row): the mode
   (zero by the group and by its menu, the lit mark, mirror, Mirror's submenu, an unseen member's tone,
   Bigger / a step / the line width with numbers set through the fields, the hover, select). The corner
   triangle and holding the button were not tried with a real mouse.
+- CONTROL without its Zero and Drive rows (2026-10-11, the user's pick of a mock-up, variant A: Name
+  stays in sight, B would have put it in the line too): the line under Create (`HierarchyStrip`) IS those
+  settings for a NEW control. The zero block opens the menu None / Groups / Matrix, the round mark the
+  Drive menu (left or right click); each violet GROUP block is typed in place - a click puts a field
+  over it (`HierarchyStrip.edit(key, text, placeholder)` -> `edited(key, text)`: Enter takes it, Esc /
+  the focus leaving / a click elsewhere gives it up, the attribute rows' `_OutsideClick`), an empty
+  text takes the group out, two words make two groups; the "+" block after them adds one; a right click
+  on a group (`context` -> `_group_block_menu`): Rename, Higher, Lower, Take it out. The last group taken
+  out = Zero goes to None (`_set_suffixes`); Groups picked again starts from "offset".
+  THE THREE WIDGETS LIVE ON, unseen and in no layout (`_offsets`, `_offset_names`, `_drive`: children of
+  the card, hidden): Create, the ghost, the bone toggle, the settings and quick.py still read them, the
+  line only sets them. `_show_offset_names` does nothing now - never show that field again by
+  `setVisible`: it has no place in a layout. With a control that EXISTS selected the line is as before:
+  its real groups / matrix / what it drives, a click selects the object, nothing is edited.
+  The card is two rows shorter (the window 504 px high where it was 560). Minimum width 455.
+  Checked: offscreen from an isolated copy (18 checks with real clicks and typing in the line);
+  windowed Maya 2026 (two groups typed in the line + Constraints from the mark -> Create makes
+  ctrl_grp > ctrl_offset > ctrl driving the joint, the existing control's line only selects, undo;
+  Matrix + "doesn't drive" from the menus -> Create). Not tried by a real hand.
+- A POSE PASTED MIRRORED (2026-10-11, the user's pick): "Paste mirrored" - a submenu of the saved poses'
+  menu (each pose) and a line of Paste's right-click menu (the clipboard's pose) ->
+  `_paste_pose(pose, mirrored=True)`: `transforms.mirrored_pose(pose, other_name)` gives every copied
+  object its OTHER-SIDE name (Rename's `rules.mirror` with the user's sides; the namespace kept; a name
+  without a side keeps it - a middle control takes its own values back with the signs), then the usual
+  pairing (`pair_pose`: one copied object onto every selected, else by name, else by order) and ALWAYS
+  as channel values (Local - World is ignored here), the channels taken INVERTED in the grid with the
+  other sign. So the grid must hold a Mirror set ("Mirror · controls" for this tool's mirrored controls,
+  "Mirror · joint behavior" for Behavior-mirrored joints): with no channel inverted the status says so.
+  The same side selected = refused with the reason.
+  TRAP, met in Maya 2026: a submenu made with `menu.addMenu("title")` was DELETED as soon as its Python
+  name went out of scope ("Internal C++ object (QMenu) already deleted", Maya then crashed on exit) -
+  every submenu of the tool is made by `ControlsPanel._submenu(menu, title)` now (a QMenu with the menu as
+  its parent, kept in a list on the menu). The four older "Remove ..." submenus had the same flaw.
+  Checked in windowed Maya 2026 from an isolated copy: a left arm of two controls (zero groups) mirrored
+  by the tool, posed, the pose saved; pasted mirrored onto the right side with "-++ +--": points riding
+  on both sides are exact mirrors across X, one undo; with nothing inverted - the hint; the same side
+  selected - refused; one copied object from Paste's menu.
+  The line STANDS STILL on Drive = Shape (2026-10-11, the user: it jumped - the line collapsed to "the
+  curve > object" and everything moved): the zero block, the groups, "+" and the control block stay
+  where they are, `off` (grey, dashed, a click does nothing, the tip says "Not used now: the curve goes
+  onto the object itself"), and the round mark - still the Drive menu - shows the curve's icon (link
+  kind "shape", `LINK_ICONS["shape"] = "cvs"`). `HierarchyStrip` items take `off: True` for that.
+  THE NAME FIELD LISTS ITS TOKENS (the user: with the name wiped they had to be remembered): `_template`
+  is a `TokenLineEdit` - a right click puts {side} / {name} / {#} in where the click was, and "Back to
+  {side}_{name}_ctrl" (`TokenLineEdit(default=)`, a new option of the atom: the menu offers the text the
+  field starts with while it holds another; reported through `token_inserted`, which the panel saves on).
+  Checked offscreen from an isolated copy (10 checks: the blocks keep their places to the pixel, grey,
+  the mark still clicks, back as it was; a token put in is saved, the default put back).
+  NOT BUILT, the user's plan for later: a HOTKEYS window of its own - the tool's commands listed, each
+  can be tried by a click to see what it does, and given a key there (instead of a mere list in the
+  settings menu).
 
 ## Batch tool
 

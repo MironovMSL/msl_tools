@@ -23,6 +23,9 @@ ALL_CHANNELS = tuple(attr for _title, attrs in GROUPS for attr in attrs)
 SPACES = ("World", "Local")
 POSE_FILTER = "MSL pose (*.json)"
 POSES_AT_MOST = 40           # saved poses kept (the oldest goes first)
+MIRRORED_TIP = ("Onto the OTHER side: a pose of lf_… goes to the selected rt_… (found by the names, as Rename "
+                "does it; one copied object goes onto every selected one). The values go over as channel values, "
+                "the channels taken INVERTED in the grid with the other sign — set the grid to a Mirror set first")
 STATES = ("on", "inv", "off")           # a channel: taken, taken inverted, left out
 # ready sets of the grid ("+" taken, "-" taken inverted, "." left out; move xyz, rotate xyz, scale xyz)
 GRID_SETS = (
@@ -284,7 +287,7 @@ class _TransformsMixin:
         self._menu_caption(menu, "Save the grid as it is — a name:")
         _field_action(menu, "", "Set name", self._save_grid_set)
         if own:
-            removing = menu.addMenu("Remove a set of yours")
+            removing = self._submenu(menu, "Remove a set of yours")
             for name in own:
                 self._menu_item(removing, "delete", name, lambda name=name: self._remove_grid_set(name))
         return menu
@@ -462,13 +465,35 @@ class _TransformsMixin:
             self._say(f"The pose of {len(nodes)} object{'s' if len(nodes) != 1 else ''} is copied — paste it here or "
                       "in another Maya", "done")
 
-    def _paste_pose(self, pose: "dict | None") -> None:
+    def _paste_pose(self, pose: "dict | None", mirrored: bool = False) -> None:
+        """The pose onto the selection. `mirrored`: onto the OTHER side — each copied object's values go
+        to the selected object of its other-side name (lf_ -> rt_, by Rename's rule), always as channel
+        values (Local), the channels taken INVERTED in the grid with the other sign."""
         from msl_tools.msl.tools.maya.controls import transforms
         if not pose:
             self._say("Nothing copied yet — Copy a pose first (here, or in another Maya)", "error")
             return
         nodes, channels = self._transform_nodes(), self._channels_or_say()
         if not nodes or not channels:
+            return
+        if mirrored:
+            from msl_tools.msl.tools.maya.rename import rules
+            sides = self._sides()
+            done, left, how = transforms.apply_pose(
+                nodes, transforms.mirrored_pose(pose, lambda name: rules.mirror(name, sides)), channels, False)
+            if not how:
+                self._say("None of the selected is the other side of a copied object — select the other side's "
+                          "controls (rt_… for a pose of lf_…), or as many objects in the same order", "error")
+                return
+            inverted = sum(1 for sign in channels.values() if sign < 0)
+            words = {"one": "the copied object's pose", "name": "found by the other side's name",
+                     "order": "by the order picked"}[how]
+            hint = "" if inverted else " · NO channel is inverted: the values went over as they are — pick a " \
+                                       "Mirror set of the grid (the bookmark by Move)"
+            self._say((f"{done} got the pose mirrored ({words}, {inverted} channel{'s' if inverted != 1 else ''} "
+                       "inverted)" if done else "Nothing pasted") + self._left_text(left) + hint +
+                      (" · Ctrl+Z undoes it" if done else ""), "done" if done else "error")
+            self._refresh_transform_values()
             return
         done, left, how = transforms.apply_pose(nodes, pose, channels, self._world())
         if not how:
@@ -492,6 +517,8 @@ class _TransformsMixin:
         else:
             self._menu_caption(menu, "A pose onto the selection")
             self._menu_item(menu, "paste", "Paste", self._on_pose_paste, "From the clipboard", hint="click")
+            self._menu_item(menu, "mirror_sides", "Paste mirrored", lambda: self._paste_pose(self._clipboard_pose(), True),
+                            MIRRORED_TIP)
             self._menu_item(menu, "file_add", "Load from a file…", self._on_pose_load, "A pose saved with Copy's menu")
         return menu
 
@@ -531,11 +558,16 @@ class _TransformsMixin:
             self._menu_item(menu, "bookmark", name, lambda pose=pose: self._paste_pose(pose),
                             f"{len(objects)} object{'s' if len(objects) != 1 else ''}: {names}",
                             hint=str(len(objects)))
+        if poses:
+            mirrored = self._submenu(menu, "Paste mirrored")
+            for name, pose in poses.items():
+                self._menu_item(mirrored, "mirror_sides", name, lambda pose=pose: self._paste_pose(pose, True),
+                                MIRRORED_TIP)
         menu.addSeparator()
         self._menu_caption(menu, "Save the selected objects' pose — a name:")
         _field_action(menu, "", "Pose name", self._save_pose_as)
         if poses:
-            removing = menu.addMenu("Remove a pose")
+            removing = self._submenu(menu, "Remove a pose")
             for name in poses:
                 self._menu_item(removing, "delete", name, lambda name=name: self._remove_pose(name))
         return menu

@@ -75,7 +75,7 @@ class _SelectedMixin:
                                    "way, by what is selected\nRight click: across Y / Z", menu=True)
         # zero (violet)
         self._zero_groups_button = tool("zero_out", "violet", "Zero with groups", "Groups above each selected "
-                                        "control where it stands (the suffixes of the Zero row below), its "
+                                        "control where it stands (the violet blocks of the line under Create), its "
                                         "translate / rotate read 0")
         self._zero_matrix_button = tool("zero_matrix", "violet", "Zero into the matrix", "What the selected "
                                         "controls' channels say moves into their offsetParentMatrix: they read 0, "

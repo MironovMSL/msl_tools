@@ -211,6 +211,20 @@ def pose_from_text(text: str) -> "dict | None":
     return {POSE_MARK: 1, "objects": objects} if objects else None
 
 
+def mirrored_pose(pose: dict, other_name) -> dict:
+    """The pose for the OTHER side: every object under its other-side name (`other_name(name)` — the
+    Rename tool's rule: lf_arm_ctrl -> rt_arm_ctrl; a name that says no side keeps it, so a middle
+    control takes its own values back, inverted where the grid says so). The values themselves are not
+    touched here: pasted locally, the channels taken INVERTED go over with the other sign. No world
+    matrix is kept — a mirrored pose is a thing of the channels."""
+    objects = []
+    for entry in pose.get("objects") or []:
+        namespace, sep, name = str(entry.get("name", "")).rpartition(":")
+        objects.append({"name": namespace + sep + other_name(name), "values": dict(entry.get("values") or {}),
+                        "matrix": None})
+    return {POSE_MARK: 1, "objects": objects}
+
+
 def pair_pose(nodes: list, pose: dict) -> tuple:
     """Which copied object each selected one takes: (pairs [(node, entry)], how — "one" / "name" /
     "order" / ""). ONE copied object goes onto every selected one; several are matched by NAME

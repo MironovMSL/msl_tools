@@ -331,7 +331,7 @@ class _AttributesMixin:
         self._menu_caption(menu, "Save the window as it is — a name:")
         _field_action(menu, "", "Layout name", self._save_layout)
         if own:
-            removing = menu.addMenu("Remove a layout of yours")
+            removing = self._submenu(menu, "Remove a layout of yours")
             for name in own:
                 self._menu_item(removing, "delete", name, lambda name=name: self._remove_layout(name))
         return menu
@@ -712,7 +712,7 @@ class _AttributesMixin:
         _field_action(menu, "", "Set name", self._save_attribute_set)
         if sets:
             menu.addSeparator()
-            removing = menu.addMenu("Remove a set")
+            removing = self._submenu(menu, "Remove a set")
             removing.setToolTipsVisible(True)
             for name in sets:
                 self._menu_item(removing, "delete", name, lambda name=name: self._remove_attribute_set(name))

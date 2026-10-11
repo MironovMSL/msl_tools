@@ -13,7 +13,9 @@ class TokenLineEdit(qt.QtWidgets.QLineEdit):
         field.token_inserted.connect(...)   # textEdited doesn't fire for an insert made by code
 
     `tokens`: name -> what it stands for (the menu item's tooltip). `insert_token()`
-    puts one in at the cursor — for a button beside the field.
+    puts one in at the cursor — for a button beside the field. `default`: a text the
+    menu offers to put back ("Back to …") while the field holds something else — it
+    is reported through `token_inserted` too.
 
     Signals:
         token_inserted(str) — the token that went in, braces included.
@@ -24,15 +26,21 @@ class TokenLineEdit(qt.QtWidgets.QLineEdit):
     token_inserted = qt.QtCore.Signal(str)
     focused = qt.QtCore.Signal()
 
-    def __init__(self, tokens: dict, parent=None):
+    def __init__(self, tokens: dict, parent=None, default: str = ""):
         super().__init__(parent)
         self._tokens = dict(tokens)
+        self._default = default      # a text the menu can put back ("Back to …"); "" = no such line
 
     def insert_token(self, token: str) -> None:
         """Puts `token` ("{scene}") in at the cursor, replacing a selection."""
         self.insert(token)
         self.setFocus()
         self.token_inserted.emit(token)
+
+    def _put_default(self) -> None:
+        self.setText(self._default)
+        self.setFocus()
+        self.token_inserted.emit(self._default)      # (setText fires no textEdited either)
 
     def focusInEvent(self, event) -> None:
         super().focusInEvent(event)
@@ -49,6 +57,11 @@ class TokenLineEdit(qt.QtWidgets.QLineEdit):
             action = menu.addAction("{" + token + "}")
             action.setToolTip(meaning)
             action.triggered.connect(lambda _checked=False, text="{" + token + "}": self.insert_token(text))
+        if self._default and self.text() != self._default and not self.isReadOnly():
+            menu.addSeparator()
+            back = menu.addAction("Back to " + self._default)
+            back.setToolTip("The text this field starts with")
+            back.triggered.connect(self._put_default)
         menu.addSeparator()
         cut = menu.addAction("Cut")
         cut.setEnabled(self.hasSelectedText() and not self.isReadOnly())
