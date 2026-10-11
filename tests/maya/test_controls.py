@@ -55,6 +55,77 @@ class BuiltIn(unittest.TestCase):
         self.assertFalse(library.restore(own))
         self.assertFalse(library.update("no_such_shape", fixed))
 
+    def test_the_panel_and_its_mixins_share_no_method_name(self):
+        """ControlsPanel is put together from mixins; a method of the same name in the panel's own
+        body silently replaces the mixin's (it did: saved colors never showed, because the panel had
+        got a `_show_saved` of its own for saved shapes). Read from the source, no Qt needed."""
+        import ast
+        from pathlib import Path
+        folder = Path(shapes.__file__).parent
+
+        def methods(file_name: str, class_name: str) -> set:
+            tree = ast.parse((folder / file_name).read_text(encoding="utf-8"))
+            for node in tree.body:
+                if isinstance(node, ast.ClassDef) and node.name == class_name:
+                    return {each.name for each in node.body if isinstance(each, ast.FunctionDef)}
+            self.fail(f"{class_name} not found in {file_name}")
+
+        parts = {"panel": methods("panel.py", "ControlsPanel"), "color": methods("panel_color.py", "_ColorMixin"),
+                 "attributes": methods("panel_attributes.py", "_AttributesMixin")}
+        names = sorted(parts)
+        for index, one in enumerate(names):
+            for other in names[index + 1:]:
+                self.assertEqual(sorted(parts[one] & parts[other]), [], f"{one} and {other} both define these")
+
+    def test_a_shape_as_a_maya_script(self):
+        """The script for the Script Editor is plain maya.cmds and builds every curve of the shape."""
+        calls = []
+
+        class FakeCmds:
+            def group(self, **kwargs):
+                return kwargs["name"]
+
+            def curve(self, **kwargs):
+                calls.append(kwargs)
+                return "curve%d" % len(calls)
+
+            def listRelatives(self, node, **kwargs):
+                return ["|%s|shape" % node]
+
+            def parent(self, *args, **kwargs):
+                pass
+
+            def delete(self, *args):
+                pass
+
+            def rename(self, *args):
+                pass
+
+            def select(self, *args):
+                pass
+
+        import sys
+        import types
+        code = shapes.as_maya_code(shapes.BUILT_IN["target"], "aim_ctrl")
+        self.assertNotIn("msl_tools.", code)
+        fake = types.ModuleType("maya")
+        fake.cmds = FakeCmds()
+        before = sys.modules.get("maya")
+        sys.modules["maya"] = fake
+        try:
+            exec(compile(code, "<script>", "exec"), {})
+        finally:
+            if before is None:
+                del sys.modules["maya"]
+            else:
+                sys.modules["maya"] = before
+        target = shapes.BUILT_IN["target"].curves
+        self.assertEqual(len(calls), len(target))
+        ring = calls[0]                                         # a smooth ring: periodic
+        self.assertTrue(ring["periodic"] and len(ring["point"]) == len(target[0].points) + 3
+                        and len(ring["knot"]) == len(ring["point"]) + 3 - 1)
+        self.assertEqual(calls[-1]["degree"], 1)                # a straight line
+
     def test_facing_x_the_shape_points_up(self):
         """A pin's stick, an arrow point along the shape's own +X: facing X they go UP, not down —
         and the turn is a rotation (no mirror) that undoes itself."""
@@ -65,9 +136,13 @@ class BuiltIn(unittest.TestCase):
         self.assertEqual(cross, z)                                   # right-handed still
         self.assertEqual(shapes.oriented(shapes.oriented(axes, "X"), "X")[0].points, axes[0].points)
         for name in ("pin_flat", "pointer", "arrow", "lollipop", "square_stick"):
-            turned_up = shapes.oriented(shapes.BUILT_IN[name].curves, "X")
-            points = [point for curve in turned_up for point in curve.points]
-            self.assertGreater(max(p[1] for p in points), -min(p[1] for p in points) - 1e-6, name)
+            for axis in ("X", "Z"):
+                turned_up = shapes.oriented(shapes.BUILT_IN[name].curves, axis)
+                points = [point for curve in turned_up for point in curve.points]
+                self.assertGreater(max(p[1] for p in points), -min(p[1] for p in points) - 1e-6, name + axis)
+        # facing Z: up as well, the axes going round — a rotation
+        x, y, z = shapes.oriented(axes, "Z")[0].points
+        self.assertEqual((x, y, z), ((0.0, 1.0, 0.0), (0.0, 0.0, 1.0), (1.0, 0.0, 0.0)))
 
     def test_turn_a_quarter(self):
         curve = [shapes.Curve([(1.0, 0.0, 0.0)])]

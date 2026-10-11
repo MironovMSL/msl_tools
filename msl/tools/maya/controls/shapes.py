@@ -70,12 +70,12 @@ def oriented(curves: list, axis: str) -> list:
 
     Facing X, the shape's own +X — where a pin's stick, an arrow, a pointer point in the library —
     goes UP (+Y): a half turn about the X = Y diagonal. (A quarter turn about Z sent it DOWN: every
-    pin on a joint hung under it and had to be turned 180 by hand.) Facing Z is a quarter turn about
-    X: the shape's +X stays +X, as the tile shows it seen from the front."""
+    pin on a joint hung under it and had to be turned 180 by hand.) Facing Z it goes UP too: the
+    axes go round (+X -> +Y, +Y -> +Z, +Z -> +X). Both are rotations — nothing is mirrored."""
     if axis == "X":
         turn = lambda p: (p[1], p[0], -p[2])      # +Y -> +X, +X -> +Y (up)
     elif axis == "Z":
-        turn = lambda p: (p[0], -p[2], p[1])      # +Y -> +Z
+        turn = lambda p: (p[2], p[0], p[1])       # +Y -> +Z, +X -> +Y (up)
     else:
         return curves
     return [Curve([turn(point) for point in curve.points], curve.degree, curve.closed) for curve in curves]
@@ -727,6 +727,57 @@ def _shapes() -> list:
 
 
 BUILT_IN = {shape.name: shape for shape in _shapes()}
+
+
+def _number(value: float) -> str:
+    text = f"{value:.4f}".rstrip("0").rstrip(".")
+    return "0" if text in ("", "-0") else text
+
+
+def as_maya_code(shape: Shape, name: str = "") -> str:
+    """The shape as a script for Maya's Script Editor (Python): run it and the curve is made — one
+    transform called `name` holding every curve of the shape, selected. It needs nothing of
+    msl_tools: plain maya.cmds, so it can be sent to anyone."""
+    name = name or f"{shape.name}_ctrl"
+    lines = [f"# {shape.title()} - a control curve (made with MSL Tools > Controls)",
+             "from maya import cmds",
+             "",
+             "curves = ["]
+    for curve in shape.curves:
+        points = ", ".join("(" + ", ".join(_number(value) for value in point) + ")" for point in curve.points)
+        lines.append(f"    ([{points}], {curve.degree}, {curve.closed}),")
+    lines += ["]",
+              f'control = cmds.group(empty=True, name="{name}")',
+              "for points, degree, closed in curves:",
+              "    degree = max(1, min(degree, len(points) - 1))",
+              "    if closed and degree > 1:        # a smooth closed curve: periodic",
+              "        made = cmds.curve(point=points + points[:degree], degree=degree, periodic=True,",
+              "                          knot=list(range(-degree + 1, len(points) + degree)))",
+              "    elif closed:                     # a polygon: it ends where it starts",
+              "        made = cmds.curve(point=points + points[:1], degree=1)",
+              "    else:",
+              "        made = cmds.curve(point=points, degree=degree)",
+              "    shape = cmds.listRelatives(made, shapes=True, fullPath=True)[0]",
+              "    cmds.parent(shape, control, shape=True, relative=True)",
+              "    cmds.delete(made)",
+              "for index, shape in enumerate(cmds.listRelatives(control, shapes=True, fullPath=True)):",
+              '    cmds.rename(shape, control.rpartition("|")[2] + "Shape" + (str(index) if index else ""))',
+              "cmds.select(control)",
+              ""]
+    return "\n".join(lines)
+
+
+def as_code(shape: Shape) -> str:
+    """The shape as a line for `_shapes()` in this file — how a fix made in the editor, or a shape
+    of the user's own, gets into the built-in library."""
+    number = _number
+    curves = []
+    for curve in shape.curves:
+        points = ", ".join("(" + ", ".join(number(value) for value in point) + ")" for point in curve.points)
+        curves.append(f"Curve([{points}], {curve.degree}, {curve.closed})")
+    category = shape.category if shape.category in CATEGORIES and shape.category != "Mine" else "Basic"
+    joined = (",\n" + " " * 8).join(curves)
+    return f'    add("{shape.name}", "{category}", [\n        {joined}])\n'
 
 
 # ------------------------------------------------------------------ the library

@@ -18,7 +18,7 @@ class ControlsWindow(FramelessDialog):
     OBJECT_NAME = "mslControlsWindow"
 
     def __init__(self, parent=None):
-        super().__init__(title="MSL Controls", width=460, height=648, fade_when_inactive=False,
+        super().__init__(title="MSL Controls", width=460, height=600, fade_when_inactive=False,
                          show_minimize_button=False, show_maximize_button=False, parent=parent)
         self.setObjectName(self.OBJECT_NAME)
         self.setAttribute(qt.QtCore.Qt.WidgetAttribute.WA_DeleteOnClose, True)
@@ -29,6 +29,8 @@ class ControlsWindow(FramelessDialog):
         icon.setObjectName("controlsTitleIcon")
         icon.setAttribute(qt.QtCore.Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self.header.leading_layout.insertWidget(0, icon)
+        for index, widget in enumerate(self.panel.header_widgets()):      # cards shown / hidden from the header
+            self.header.trailing_layout.insertWidget(index, widget)
         self._status = ""
         label = self.header.subtitle_label
         label.setSizePolicy(qt.QtWidgets.QSizePolicy.Policy.Ignored, qt.QtWidgets.QSizePolicy.Policy.Preferred)
@@ -39,6 +41,16 @@ class ControlsWindow(FramelessDialog):
         main.setStretch(main.indexOf(self.header.leading_layout) + 1, 0)
         self.header.leading_layout.setStretchFactor(label, 1)
         self.panel.status_changed.connect(self._show_status)
+        # the window is as tall as what the panel shows: a card folded, the library opened, the
+        # editor — no empty room under it, nothing to scroll (clamped to the screen)
+        self._fit_timer = qt.QtCore.QTimer(self)
+        self._fit_timer.setSingleShot(True)
+        self._fit_timer.setInterval(40)
+        self._fit_timer.timeout.connect(self._fit_height)
+        scroll = self.panel.findChild(qt.QtWidgets.QScrollArea, "controlsScroll")
+        self._body = scroll.widget() if scroll is not None else None
+        if self._body is not None:
+            self._body.installEventFilter(self)
         self.finished.connect(self._remember_geometry)
 
     def _show_status(self, text: str, state: str = "") -> None:
@@ -64,7 +76,27 @@ class ControlsWindow(FramelessDialog):
     def eventFilter(self, watched, event) -> bool:
         if watched is self.header.subtitle_label and event.type() == qt.QtCore.QEvent.Type.Resize:
             self._fit_status()
+        elif watched is getattr(self, "_body", None) and event.type() == qt.QtCore.QEvent.Type.LayoutRequest:
+            self._fit_timer.start()
         return super().eventFilter(watched, event)
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._fit_timer.start()
+
+    def _fit_height(self) -> None:
+        if not self.isVisible() or self.isMaximized():
+            return
+        change = self.panel.content_height_change()
+        if abs(change) < 2:
+            return
+        wanted = self.height() + change
+        screen = self.screen().availableGeometry() if self.screen() is not None else None
+        if screen is not None:
+            wanted = min(wanted, screen.bottom() - self.geometry().top() + 1)
+        wanted = max(wanted, self.minimumHeight())
+        if wanted != self.height():
+            self.resize(self.width(), wanted)
 
     @classmethod
     def open(cls) -> "ControlsWindow":

@@ -19,7 +19,22 @@ INDEX_COLORS = (
     (0.188, 0.631, 0.631), (0.188, 0.404, 0.631), (0.435, 0.188, 0.631), (0.631, 0.188, 0.416),
 )
 # the rig's usual side colors: left blue, right red, middle yellow (by the Rename tool's sides)
-SIDE_COLORS = {"left": (0.15, 0.45, 1.0), "right": (1.0, 0.15, 0.15), "center": (1.0, 0.85, 0.05)}
+SIDE_DEFAULTS = {"left": (0.15, 0.45, 1.0), "right": (1.0, 0.15, 0.15), "center": (1.0, 0.85, 0.05)}
+# what every part of the tool reads (Create, mirror, "by side", the previews). ONE dict, changed in
+# place by `set_side_colors` — so the user's own side colors reach all of them at once
+SIDE_COLORS = dict(SIDE_DEFAULTS)
+
+
+def set_side_colors(texts: "dict | None") -> None:
+    """The user's side colors ({"left" / "right" / "center": "#rrggbb"}; a missing or broken one =
+    the default) put into SIDE_COLORS, in place."""
+    for side, default in SIDE_DEFAULTS.items():
+        rgb = None
+        try:
+            rgb = from_hex(str((texts or {}).get(side, "")))
+        except (ValueError, TypeError, AttributeError):
+            rgb = None
+        SIDE_COLORS[side] = tuple(rgb) if rgb else default
 GHOST_ZERO = (0.71, 0.55, 1.0)       # the ghost's frames that stand for zero groups / the matrix
 GHOST_DRIVE = (1.0, 0.49, 0.71)      # the ghost's mark for "this control will drive its object"
 GAMMA = 2.2

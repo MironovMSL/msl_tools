@@ -226,7 +226,7 @@ msl_tools/                 (repo root)
     named by what the icon IS, not the gesture (`drag_handle`, not
     `dragAndDrop`). Categories: `window/` (chrome: close/maximize/...),
     `actions/` (row/toolbar actions: `drag_handle`, `copy`, `delete`,
-    `browse`, `folder_add`, `file_video`, `bookmark`, `bookmark_add`, `save`, `file_add`, `chevron_right`, `eye`, `folder_into`, `compress`, `scissors`, `repeat`, `text_frame`, `volume`, `gif`, `image_stack`, `clapper`, `crop`, `merge`, `split_view`, `film`, `timeline`, `folder_watch`, `pause`, `bell` (the Media actions and its queue), `clear`, `arrow_right`, `chevron_down`, `add`, `check`, `select_all`, `more`, `report`, `code`, `restart`, `power`, `play`, `edit`, `scene`, `stop`, `lock`, `search`, `rename`, and the Rename tool's quick buttons: `case_upper`, `case_capital`, `case_lower`, `case_snake` (a snake), `case_camel` (a camel's humps), `cut_prefix`, `cut_suffix`, `cut_number`, `cut_digits`, `cut_first`, `cut_last`, `namespace_out`, `magic_fix`, `sweep`, `mirror_sides`, `shape_name`, `warning`, `error`, `keyboard` (Maya Gate's EN), and the Rename strip's `names_same`, `name_bad`, `skin_joints`, `side_other`, `lock_find`, `convention_check`, `names_unique`, `name_related`, `convention_fix`, `unlock`, `sets`, `star`, `sliders`, `book`, `replace`, `skin_mesh` (the grey cube under `skin_joints`), `branch`, and the Controls tool's `controls`, `grow`, `shrink`, `outliner`, `color_pick`, `line_width`, `mirror_shape`, `mirror_update`, `zero_out`, `zero_matrix`, `matrix_out`, `on_top`, `cvs`, `paste`, `drive_constraint`, `drive_matrix`, `drive_off`, `locator`, `joint_chain`, `center`, `move`, `minus`, `smooth_curve`, `expand`, `collapse`, `undo`, `redo`, `snap_grid`, `chevron_left`, `chevron_up`, `joint_node`, `joint_shape`, `joints_separate`, `shape_off`, `eye_off` (`joint_chain` = a ball and a tapering bone to a smaller ball, like Maya's own joint icon); add new action icons here),
+    `browse`, `folder_add`, `file_video`, `bookmark`, `bookmark_add`, `save`, `file_add`, `chevron_right`, `eye`, `folder_into`, `compress`, `scissors`, `repeat`, `text_frame`, `volume`, `gif`, `image_stack`, `clapper`, `crop`, `merge`, `split_view`, `film`, `timeline`, `folder_watch`, `pause`, `bell` (the Media actions and its queue), `clear`, `arrow_right`, `chevron_down`, `add`, `check`, `select_all`, `more`, `report`, `code`, `restart`, `power`, `play`, `edit`, `scene`, `stop`, `lock`, `search`, `rename`, and the Rename tool's quick buttons: `case_upper`, `case_capital`, `case_lower`, `case_snake` (a snake), `case_camel` (a camel's humps), `cut_prefix`, `cut_suffix`, `cut_number`, `cut_digits`, `cut_first`, `cut_last`, `namespace_out`, `magic_fix`, `sweep`, `mirror_sides`, `shape_name`, `warning`, `error`, `keyboard` (Maya Gate's EN), and the Rename strip's `names_same`, `name_bad`, `skin_joints`, `side_other`, `lock_find`, `convention_check`, `names_unique`, `name_related`, `convention_fix`, `unlock`, `sets`, `star`, `sliders`, `book`, `replace`, `skin_mesh` (the grey cube under `skin_joints`), `branch`, and the Controls tool's `controls`, `grow`, `shrink`, `outliner`, `color_pick`, `line_width`, `mirror_shape`, `mirror_update`, `zero_out`, `zero_matrix`, `matrix_out`, `on_top`, `cvs`, `paste`, `drive_constraint`, `drive_matrix`, `drive_off`, `locator`, `joint_chain`, `center`, `move`, `minus`, `smooth_curve`, `expand`, `collapse`, `undo`, `redo`, `snap_grid`, `chevron_left`, `chevron_up`, `joint_node`, `joint_shape`, `joints_separate`, `shape_off`, `eye_off`, `same_shape`, `channels`, `attributes`, `keyframe`, `range`, `viewport`, `brush` (the COLOR card and its header button; `color_pick` stays the pipette of "take the color") (`joint_chain` = a ball and a tapering bone to a smaller ball, like Maya's own joint icon); add new action icons here),
     `apps/` (third-party application logos: `maya`; later houdini, blender...
     — named after the app, not the tool that uses it, so several tools can
     share one), `tools/` (sidebar icons of our OWN hub tools, one-color like
@@ -2797,6 +2797,233 @@ axis (`flip`). ZERO THE SELECTED (`actions/zero_out`, in the Zero row): the mode
   built-in shape" (`restore`). One of the user's own is simply saved over. The correction lives in this
   user's config only — a fix meant for EVERYONE still has to go into `shapes.py`.
   Checked: unit test; offscreen from an isolated copy (9 checks).
+- A round of eight (2026-10-10, the user's picks 1-4, 6-9 of an idea list):
+  "ONE IN THE MIDDLE" is for one Create — the toggle switches itself off after it (left on, it silently
+  made one control of several objects). FACING Z a shape points up too: `oriented(…, "Z")` is the axes
+  going round, (x, y, z) -> (z, x, y) (`_unturned`: (q1, q2, q0)). THE WINDOW FOLLOWS ITS CONTENT
+  (`ControlsWindow._fit_height`, on the scroll body's LayoutRequest, 40 ms; `ControlsPanel.
+  content_height_change()`; clamped to the screen; always on — no setting): folding a card, opening the
+  library or the editor resizes it; the panel no longer resizes the window by hand. FAVORITES IN ONE ROW
+  that the wheel turns sideways (`ShapeGrid.set_single_row`: no wrapping, per-pixel horizontal scroll, a
+  tile per notch, a small arrow at an end while there is more, the row turns under a dragged tile near
+  an end); the library still wraps into three rows. So that the preview keeps a usable height (110), the
+  line that reads like the Outliner (`HierarchyStrip`) moved under Create, beside the preview. The window
+  starts 460 x 600; minimum width 445 in Maya. COPY AS CODE (the grid menu of a corrected / own shape;
+  `shapes.as_code`): the shape as an `add("name", "Category", [Curve(…)])` line for `_shapes()` on the
+  clipboard — how a fix reaches the built-in library. SAME SHAPE (yellow `same_shape` button;
+  `scene.same_shape`: curves equal point for point after dividing by the reach, 0.03 tolerance; size and
+  color don't matter, the facing axis does; right click: only under the selection). FIT TO ITS OBJECT
+  (orange `frame_fit` button after Smaller / Bigger; `scene.fit_controls`: the object a control drives,
+  else `find_target` by name; `fit_size(target, flat_axis(control)) / world_reach` scales the CVs). Since the same day it first takes the OBJECTS selected with the controls (the user: names don't always match): one object for every control, or as many objects as controls by the order picked; other counts are refused.
+  LIVE MIRROR (the right-click menu of "shape to the other side": Link across X / Y / Z, Unlink; the
+  button is lit on either end — `states()["mirror_link"]`): `scene.link_mirror` gives the twin the mirror
+  once, then each of its curves is fed by the leading control's own — `shape.local` ->
+  transformGeometry (tagged `mslMirrorLink`, matrix = control space -> world -> mirrored -> twin space
+  AT LINK TIME, a constant: posing either control changes nothing) -> `twinShape.create`. Scene nodes:
+  they are saved with the rig. A Replace on the leading control feeds its followers again
+  (`_swap_shapes` -> `_followers` / `_feed`); a Replace on a follower lets it go. TRAPS, measured in
+  Maya 2026: deleting a wired transformGeometry makes Maya bridge it — the follower was then fed by the
+  leading curve directly, unmirrored — so `_drop_links` cuts both connections first; making a control's
+  curves anew leaves the NEW shape selected, so linking left the FOLLOWER selected and the next tool
+  moved the wrong side — `_KeepSelection` (objects by uuid) wraps `_feed`, `link_mirror` and
+  `mirror_shapes_to_twins`. CVs moved by hand on a follower are tweaks on top of the link.
+  Checked: mayapy 2026 from an isolated copy (21 checks, incl. save + reopen with the link working);
+  offscreen (13 checks); windowed Maya 2026 through the panel (middle, fit, same shape, link / step /
+  Bigger / unlink, the window's height with the editor).
+- A SHAPE AS CODE, for every shape (2026-10-10, the user: "not only for you — ready code that makes
+  the curve when pasted into the Script Editor"): the grid menu of ANY shape has "Copy as a Maya script"
+  (`shapes.as_maya_code`: plain maya.cmds, nothing of msl_tools — a list of (points, degree, closed), a
+  group named <shape>_ctrl, each curve made (periodic / polygon / open) and parented under it; the shape
+  facing the axis picked now, as edited in the editor if it is) and "Copy as a library line"
+  (`shapes.as_code`, for `_shapes()`). Checked: all 89 scripts run in mayapy 2026 and give the shape.
+- CHANNELS and ATTRIBUTES (2026-10-10; the user: not a tab — like Rename, the WINDOW'S HEADER has icon
+  buttons that show / hide whole cards, and the header can carry more of them later). `attributes.py`
+  (maya.cmds, no Qt) + `panel_attributes.py` (`_AttributesMixin`): two more FoldingCards under COLOR,
+  hidden until wanted (`settings.shown` {channels, attributes}; `ControlsPanel.header_widgets()` ->
+  `ToggleIconButton#controlsHeaderToggle`, put before the theme toggle by ControlsWindow; a click on a
+  card's heading only FOLDS it like the other cards — `settings.folded` —; ONLY the header's button puts a
+  card away or brings it back, folded or open as it was left: the user's correction). Both act on the SELECTION only (the user's
+  call: not on what Create makes) and follow it (`_refresh_attributes`, from `_refresh_live`, only while
+  shown).
+  CHANNELS: move / rotate / scale X Y Z and visibility as buttons that SHOW their state
+  (`QPushButton#controlsChannel[state]`: open = the axis' color, locked = the warning tone, hidden =
+  quiet and dashed, mixed = dotted, when the selected objects differ). A click: open -> locked AND hidden,
+  anything else -> open (`set_channels`); a row's caption does its three; right click: the three states
+  by name ("locked, still shown"). "Only" Move / Rotate / Move + rotate / All (`keep_open`); in the
+  heading: open everything, values back (`reset_values`: t r -> 0, s v -> 1, own attributes -> their
+  defaults; locked and driven ones left and counted); Order = the rotate order changed without turning
+  the object (`xform -preserve -rotateOrder`).
+  ATTRIBUTES: the FIRST selected object's own attributes in the Channel Box's order (`own_attributes` /
+  `describe`: kind, range, default, names, keyable, shown, locked, driven, drives), name · what it is ·
+  marks (K keyable, L locked); add row: name, kind — Number / Whole number / On / off / List (names by
+  commas) / Separator (an enum of one name called sep, sep1…, locked and shown; its "name" is the text
+  of the line) —, min, max, default; heading buttons and the right-click menu: copy to the other
+  selected (`copy_attributes`: definition + value), keyable <-> shown only, lock, remove — on EVERY
+  selected object. DRAG A ROW to reorder (`_AttributeList`, QTreeWidget InternalMove, items not drop
+  targets; `order_changed` on the next turn). Maya has no command for the order: the Channel Box lists
+  attributes in the order they were MADE, so `reorder` takes off every attribute from the first one out
+  of place on and makes it again with its definition, value, lock, keyable state and every connection in
+  and out (keys are connections). Measured, Maya 2026: an undo puts deleted attributes back in the
+  REVERSE of the order they were deleted in — so they are deleted last first, and one undo gives the old
+  order. An attribute of a kind this tool can't make (text, compound, message) among those to be remade:
+  only what must move is remade (the longest start of the wanted order that already stands so stays);
+  if that kind itself would have to move, nothing is done and the reason is said. Referenced nodes:
+  refused. Maya's own quirk remains: undoing a REMOVE brings the attribute back at the END of the list.
+  TRAPS: `False in (0.0, …)` is True — the number fields are checked by identity; item text colors must
+  come from QSS (`color` + qproperty quietColor), not the palette: inside Maya the palette is Maya's
+  (light text on our light field).
+  Checked: mayapy 2026 from an isolated copy (31 checks: states, values back, rotate order with the world
+  matrix unchanged, every kind, reorder with a driven attribute, keys, a lock, undo / redo, text attrs,
+  copy); windowed Maya 2026 through the panel (header buttons, the window growing, channel clicks,
+  mixed, ready sets, add of four kinds on two objects, order, lock / keyable, copy, remove, undo).
+  NOT done by a real hand: dragging a row. Not built yet: proxy attributes, editing an attribute that
+  exists (rename, range), presets of channel sets, channels applied at Create.
+- ATTRIBUTES as rows of WIDGETS (2026-10-11, the user's idea — "double click the name to rename, the
+  value by a widget not text, the keyable mark clicked like a layer editor's columns" — after a mock-up;
+  their answers: a change goes to EVERY selected object, a range editor yes, key / default in a menu yes).
+  `attribute_rows.py` (Qt only): `AttributeRows` holds one `AttributeRow` per attribute —
+  grip · mark · name · value · K · lock. The GRIP drags the row (an accent line, `QFrame#controlsAttrDrop`,
+  shows where it lands; `order_changed` on the next turn). The MARK is the Channel Box's code: red = it has
+  keys, yellow = a connection feeds it (`describe()["keyed"]` / `["driven"]` — a driven value is read
+  only). The NAME: a double click puts a field in its place, Enter renames on every selected object
+  (`attributes.rename_attribute`, `cmds.renameAttr`: connections, keys and place stay), Esc gives up; a
+  separator's "name" is its text (`addAttr -e -enumName`). The VALUE by kind: `ValueSlider` for a number
+  (painted; its fill = where the value stands in the range; a drag sideways with the left or middle
+  button — the whole range across its width, Shift x10 / Ctrl x0.1 by steps —, a double click types, the
+  wheel only once it was clicked: over an unclicked field the wheel scrolls the panel), a BaseCheckbox for
+  on / off, a BaseComboBox of the names for a list. K is a button: K = keyable, · = shown only, – = hidden;
+  a click swaps keyable <-> shown only, its right click has the three by name. The LOCK is a button
+  (`on` = locked: the warning tone; the row is quiet and its value disabled). A click on a row picks it
+  (Ctrl / Shift for several): K, the lock, key / default / remove / copy then act on every picked row.
+  Right click on a value: Key it (`set_key`), Back to default (`to_default`), and for one number its RANGE
+  as three fields in the menu — min · max · default, Enter applies (`edit_range`); on a row also Rename,
+  Copy to the other selected, Remove. The heading keeps only Copy and Remove.
+  A DRAG IS ONE UNDO STEP: the in-between values go into the scene with `undoInfo(stateWithoutFlush=
+  False)` around each setAttr (never left switched off), and at the release the start values are put back
+  the same way and the final one set undoably (`_on_attr_drag_started / _dragged / _finished`).
+  `AttributeRows.set_infos` only UPDATES the rows when the same attributes of the same kinds stand in the
+  same order (an open drop-down, a typed name, a drag are never rebuilt under the hand — `is_busy()`,
+  `_attr_drag`); values follow the scene through the panel's selection / time / undo callbacks.
+  Maya's own limits, measured 2026: taking a limit OFF (`addAttr -e -hasMaxValue false`) is not undone by
+  Ctrl+Z, and an edited default comes back as 0 after an undo — `edit_range` touches a limit only when it
+  changes, the far one first (a minimum above the old maximum is refused otherwise).
+  Checked: mayapy 2026 from an isolated copy (18 checks of the scene side); windowed Maya 2026 with Qt
+  mouse and key events on the real widgets — a slider dragged (live on two objects, one undo), a number
+  typed, the check box, the list, a driven value refusing, both renames, K, the lock, hide, key / default
+  / range, a row dragged to the top by its grip (a connection kept), two rows picked and removed, a value
+  changed in Maya shown. NOT done by a real hand on the mouse.
+  A SEPARATOR ROW must read as a divider (the user: "it isn't shown" - it was a faint 1 px line, an
+  empty one nearly invisible in the dark theme): its text is bold in the primary color, the rule 1.6 px
+  at 90 % of the secondary. And a held row / a dragged value whose mouse release never came no longer
+  freezes the list: `is_busy()` and `_refresh_attributes` let go once no mouse button is down.
+- ATTRIBUTES: quick actions, the picked rows' bar, copy / paste, saved sets (2026-10-11, the user's three
+  ideas + "sets" from my list, after a mock-up; their pick of icons). The header's buttons and the cards'
+  headings use `actions/channels` (three axes from one point) and `actions/attributes` (a list with value
+  boxes) — the lock read as "lock", the sliders as "settings".
+  UNDER THE POINTER a row shows small accent buttons right after its name (`AttributeRow._quick_actions`,
+  `GlyphButton#controlsAttrQuick`; `action_requested(name, key, position)`): key it (`actions/keyframe`),
+  back to default, rename, and for a number its range (`actions/range` -> the three fields as a menu); a
+  separator has only "change its text". They act on THAT row, whatever else is picked.
+  ROWS PICKED (`AttributeRows.picked_changed`): the heading's own buttons give way to a `BulkActionBar`
+  ("2 of 5 selected", select all, key, default, lock, how it shows — keyable / shown only / hidden as a
+  menu —, copy, remove in the danger tone, the cross unpicks) — `_show_attr_heading`; no check boxes, a
+  row is picked by a click.
+  COPY / PASTE (the heading; copy also in the bar and a row's menu): `attributes.snapshot(node, names)` =
+  the first selected object's own attributes (the picked rows, or all) as plain data — kind, range,
+  default, names, how it shows, lock, value —, kept by the CLASS (`_attr_clipboard`: it outlives a closed
+  window, not Maya); `attributes.paste(nodes, infos)` makes them on whatever is selected then, in their
+  order. An attribute that is there already is LEFT as it is (value, range, connections — my call, the
+  user didn't answer), a separator whose text the object already shows is not made twice. Paste is lit
+  while something is copied. The old "select the source, then the targets" copy is gone.
+  SAVED SETS (the bookmark button's menu; `settings.attribute_sets` {name: infos}): a click puts a set on
+  the selection, a field saves what is copied (else the selection's attributes) under a name — the same
+  name saves over —, "Remove a set".
+  Checked in windowed Maya 2026 from an isolated copy with Qt hover / mouse events: the hover buttons
+  (default, key, rename in place), the bar (one row, two with Ctrl, Lock on both, select all, the cross),
+  copy all -> paste onto two objects (one had an attribute of that name: left) -> paste again (nothing
+  new), two rows copied -> saved as a set -> put on a new object -> kept in a new window -> removed.
+  A FIELD TYPED IN PLACE (a name, a number) is taken by Enter ONLY; anything else gives it up and the row
+  looks as it did (the user: it stayed open after a click elsewhere): Esc, the focus leaving it, and a mouse
+  press anywhere but on it (`attribute_rows._OutsideClick`, an application event filter that lives only
+  while the field does — most of the tool's buttons never take the focus, so the field couldn't notice
+  such a click by itself). `editingFinished` is NOT used: Qt moves the focus before anyone sees the press
+  (QApplication::notify gives focus first), so a click into another field committed the edit.
+  Checked offscreen from an isolated copy (7 checks, run three times: a K button, another row, another
+  field, the window's header, a click inside the field keeps it, Enter commits, a typed value).
+- The header puts away CONTROL and COLOR too (2026-10-11, the user's ask): `panel_attributes.MAIN_CARDS`
+  + `CARDS` = four `ToggleIconButton#controlsHeaderToggle`s in the cards' order (controls, color_pick,
+  channels, attributes); `settings.shown` holds all four, `SHOWN_AT_FIRST` = Control and Color on, the
+  other two off. A click on any card's heading still only folds it. SELECTED has no button (not asked).
+  Checked offscreen from an isolated copy (8 checks; the header fits the default width, minimum 437).
+- The COLOR card reworked (2026-10-11, the user's asks after a mock-up): palette + TWO rows (it had three).
+  Row 1 reads left to right as "a color": your color, the pipette right beside it (`actions/color_pick`
+  redrawn as a real pipette: bulb, collar, glass, a drop), save, a rule, the saved colors in the SAME row,
+  and "L / R" (by side, a word button) at its end. Row 2 is "where": `_WordToggle` Viewport
+  (`actions/viewport`: a framed cube) and Outliner — an icon AND its word, two bare icons were a riddle —,
+  Shape / Transform, and at the row's end the SCENE's colors (`scene.used_colors`, the 5 most used; read
+  on show / enter / after a color is given): a click colors the selection. The "no color" button is gone:
+  the palette's first square does it (`reset_color`: no override, no Outliner color). LINE WIDTH moved to
+  the SELECTED card's Move row (the user: "this card is about color") and now SHOWS the first selected
+  control's width.
+  A COLOR UNDER THE POINTER IS TRIED ON (`_on_color_hover` -> `scene.try_color`; palette, saved, scene):
+  the selection wears it for as long, 90 ms after the pointer settles, at most TRY_AT_MOST 150 objects;
+  `scene.color_state` is read first and `restore_color_state` puts it back — both inside `_NoTrace` (no
+  undo step, the modified mark put back). A click ends the look FIRST, then colors: one Ctrl+Z goes back
+  to what the color was, not to the tried one. hideEvent ends a look too.
+  Right click on any color square (`_color_menu_for`): color the selection, SELECT THE CONTROLS OF THIS
+  COLOR (`scene.controls_of_color`, 0.02 per channel; an index color is compared by its RGB), make it your
+  color, remove a saved one.
+  Checked in windowed Maya 2026 from an isolated copy through the panel's handlers: tried on two objects
+  and gone (undo queue and modified mark untouched), a click + one undo, the scene's colors, select by
+  index and by RGB, the first square, Viewport + Outliner, Line shown and set. Minimum width 437.
+  The hover itself was driven by calling its handler, not by a real pointer.
+  Three corrections the same day (the user tried it): (1) a tried-on color could not be SEEN — a selected
+  object is drawn in the selection's highlight — so for the look the selection steps aside
+  (`scene.selection_aside` / `selection_back`, no undo step; `ControlsPanel._trying` keeps the live preview
+  from following the emptied selection) and a click gives the color to what WAS selected; (2) + (3) the
+  scene's colors and "select by color" looked at CURVES only, so a colored mesh or joint gave nothing —
+  `scene.colored_objects` walks the DAG through the API (MItDag, at most 40000 nodes) for any object with a
+  drawing override on itself or a shape, or an Outliner color. And the SIDE COLORS are the user's own: a
+  right click on "L / R" lists Left / Middle / Right with their colors, a click opens the color dialog
+  (`settings.side_colors`; `colors.set_side_colors` changes the ONE `colors.SIDE_COLORS` dict in place, so
+  Create's Side color, mirrors, "L / R" and the previews all follow), "Back to blue · yellow · red".
+  Checked in windowed Maya 2026 from an isolated copy on a mesh, a joint, a locator and a curve.
+  TRAP, met (the user: "I press save the color and it doesn't appear"): ControlsPanel is put together from
+  mixins, and a method of the same name in the panel's OWN body silently replaces the mixin's — the
+  favorites round had added `ControlsPanel._show_saved` (a saved SHAPE is shown), which shadowed
+  `_ColorMixin._show_saved` (the saved COLORS row): colors were stored but never drawn. The panel's one is
+  `_show_saved_shape` now, and `tests/maya/test_controls.py` reads the three classes' sources (ast) and
+  fails on any method name two of them share. Grep a new method name before adding it.
+- WHERE the selection is colored (2026-10-11, the user: "you get confused what was painted, the transform
+  or the shape"; after a mock-up — in the heading, a click takes, no automatic switching of Shape /
+  Transform): three `widgets.PlaceMark`s in the COLOR card's HEADING (extras, seen folded too) — Shape,
+  Transform, Outliner. Each shows the color the selected objects wear THERE (`scene.color_places`): a
+  square in that color, a dashed empty one for none, a split square + " · N" for several different ones.
+  The Transform mark turns to the warning tone when an object has a color on its transform AND on its
+  shape — in the viewport the shape's is seen and the transform's lies under it (the tooltip says so).
+  An object without shapes (a joint, a group) wears its color on itself: that is "transform". The palette
+  rings the index color the shapes are in. A click on a mark = that color becomes yours; right click:
+  take the color off THAT place only (`scene.clear_color_at`), move it shape <-> transform
+  (`scene.move_color`: it looks the same, where it is kept changes), select everything of the color.
+  Refreshed with the live preview (selection, undo / redo) and after every coloring — never while a color
+  is tried on. Checked in windowed Maya 2026 from an isolated copy through the panel's handlers (11 states:
+  shape, + transform = warned, + Outliner, off one place, Maya's undo, moved, a click takes, two objects,
+  a joint, during a look, nothing selected); minimum width 437.
+  The look, second cut (2026-10-11, the user's idea: don't take the selection off — the Channel Box and
+  the Attribute Editor twitched): for a look the VIEWPORTS' SELECTION HIGHLIGHT steps aside
+  (`scene.highlight_aside` / `highlight_back`: `modelEditor -selectionHiliteDisplay` of every model panel
+  that had it on — a panel the user had switched off himself is left as it was), the selection STAYS.
+  Measured in windowed Maya 2026 (pictures of the viewport, colors counted): with the highlight off a
+  selected curve, mesh (color on the shape or on the transform), locator, a group over a mesh and a curve
+  worn by a joint all show their override color exactly as when not selected — but a JOINT COLORED ON
+  ITSELF is drawn in Maya's default joint color (its children too), whatever is done. So it is a hybrid:
+  `scene.colored_on_a_joint(targets, on_shape)` (a joint without shapes, or any joint when the color goes
+  to the transform) -> the first cut's way, the selection itself steps aside. The highlight is a view
+  setting, not scene data and not undoable; the panels switched off are kept by the CLASS and switched
+  back on by `_end_try` (pointer left, a click, hideEvent) and by the next showEvent.
+  Checked in windowed Maya 2026 from an isolated copy: five selections (which way each takes, what the
+  selection and each viewport's highlight are during and after), a click during a look, the window closed
+  during a look.
 
 ## Batch tool
 

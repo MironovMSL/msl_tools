@@ -11,6 +11,7 @@ from msl_tools.msl.tools.maya.controls import shapes as shape_data
 from msl_tools.msl.tools.maya.controls import colors as color_data
 from msl_tools.msl.tools.maya.controls.editor import ShapeEditor, axis_step_button
 from msl_tools.msl.tools.maya.controls.naming import DEFAULT_TEMPLATE, control_name
+from msl_tools.msl.tools.maya.controls.panel_attributes import _AttributesMixin
 from msl_tools.msl.tools.maya.controls.panel_color import _ColorMixin
 from msl_tools.msl.tools.maya.controls.preview import ShapeView, thumbnail
 from msl_tools.msl.tools.maya.controls.widgets import DragNumberField, HierarchyStrip, Swatches, TurnButton
@@ -34,7 +35,8 @@ SHAPES_FILTER = "MSL control shapes (*.json)"
 EDITOR_HEIGHT = 456
 THUMB = 38
 CELL = THUMB + 8
-FAVORITE_ROWS, LIBRARY_ROWS = 2, 3         # how tall the grid is: your shapes / the whole library
+FAVORITE_ROWS, LIBRARY_ROWS = 1, 3         # how tall the grid is: your shapes (one row that
+                                            # scrolls sideways) / the whole library
 STAR = 13                                  # the star in a tile's corner (and the spot that takes its click)
 # the shapes a fresh install starts with as favorites — the ones every rig uses
 FIRST_FAVORITES = ("circle", "square", "cube", "sphere", "diamond", "arrow", "double_arrow", "four_arrows",
@@ -76,6 +78,50 @@ class ShapeGrid(qt.QtWidgets.QListWidget):
 
     dropColor = color_property("_drop", "_repaint_stars")      # the line where a dragged tile would land
     order_changed = qt.QtCore.Signal(list)                     # the names in their new order
+
+    # ---- one row that scrolls sideways (the favorites), or rows that wrap (the library)
+
+    def set_single_row(self, on: bool) -> None:
+        if bool(on) == self._single:
+            return
+        self._single = bool(on)
+        self.setWrapping(not self._single)
+        self.setVerticalScrollBarPolicy(qt.QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff if self._single
+                                        else qt.QtCore.Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.horizontalScrollBar().setValue(0)
+        self.verticalScrollBar().setValue(0)
+        self.doItemsLayout()
+
+    def _bar(self):
+        return self.horizontalScrollBar() if self._single else self.verticalScrollBar()
+
+    def wheelEvent(self, event) -> None:
+        if self._single:
+            # the wheel turns the row sideways, a tile at a time
+            delta = event.angleDelta().y() or event.angleDelta().x()
+            if delta:
+                bar = self.horizontalScrollBar()
+                bar.setValue(bar.value() + (-CELL if delta > 0 else CELL))
+                self.viewport().update()
+            event.accept()
+            return
+        super().wheelEvent(event)
+
+    def _paint_more(self, painter) -> None:
+        """A small arrow at an end of the row while there are tiles beyond it."""
+        bar = self.horizontalScrollBar()
+        if not self._single or bar.maximum() <= 0:
+            return
+        pen = qt.QtGui.QPen(self._star_idle, 1.6)
+        pen.setCapStyle(qt.QtCore.Qt.PenCapStyle.RoundCap)
+        painter.setPen(pen)
+        middle, right = self.viewport().height() / 2.0, self.viewport().width()
+        if bar.value() > 0:
+            painter.drawPolyline([qt.QtCore.QPointF(6, middle - 4), qt.QtCore.QPointF(2.5, middle),
+                                  qt.QtCore.QPointF(6, middle + 4)])
+        if bar.value() < bar.maximum():
+            painter.drawPolyline([qt.QtCore.QPointF(right - 6, middle - 4), qt.QtCore.QPointF(right - 2.5, middle),
+                                  qt.QtCore.QPointF(right - 6, middle + 4)])
 
     def set_reorderable(self, on: bool) -> None:
         self._reorderable = bool(on)
@@ -133,6 +179,12 @@ class ShapeGrid(qt.QtWidgets.QListWidget):
                     self._hovered = ""
                     self.hovered.emit("")
             if self._dragging:
+                if self._single:        # near an end of the row: it turns under the held tile
+                    bar = self.horizontalScrollBar()
+                    if position.x() < 14:
+                        bar.setValue(bar.value() - 10)
+                    elif position.x() > self.viewport().width() - 14:
+                        bar.setValue(bar.value() + 10)
                 self._drop_index, self._drop_row_end = self._drop_index_at(position)
                 self.viewport().update()
             event.accept()
@@ -262,6 +314,7 @@ class ShapeGrid(qt.QtWidgets.QListWidget):
             pen.setCapStyle(qt.QtCore.Qt.PenCapStyle.RoundCap)
             painter.setPen(pen)
             painter.drawLine(*line)
+        self._paint_more(painter)
         painter.end()
 
     def __init__(self, parent=None):
@@ -269,7 +322,7 @@ class ShapeGrid(qt.QtWidgets.QListWidget):
         self._hovered = ""
         self._favorites, self._stars_always = set(), False
         self._star_pressed = self._star_name = ""
-        self._reorderable = self._dragging = self._drop_row_end = False
+        self._reorderable = self._dragging = self._drop_row_end = self._single = False
         self._drag_name, self._drop_index, self._new_order = "", -1, []
         self._drag_from = qt.QtCore.QPoint()
         self.setMouseTracking(True)
@@ -289,6 +342,7 @@ class ShapeGrid(qt.QtWidgets.QListWidget):
         self.setSpacing(0)
         self.setWrapping(True)
         self.setHorizontalScrollBarPolicy(qt.QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setHorizontalScrollMode(qt.QtWidgets.QAbstractItemView.ScrollMode.ScrollPerPixel)
         self.setSelectionMode(qt.QtWidgets.QAbstractItemView.SelectionMode.SingleSelection)
         self.setFocusPolicy(qt.QtCore.Qt.FocusPolicy.NoFocus)
         self.setContextMenuPolicy(qt.QtCore.Qt.ContextMenuPolicy.CustomContextMenu)
@@ -315,7 +369,7 @@ class ShapeGrid(qt.QtWidgets.QListWidget):
         # the same shapes in another order (a star clicked in a search: favorites go first) keep the
         # place too; another set of shapes starts at its top
         same = {shape.name for shape in shapes} == {shape.name for shape in self._shapes}
-        scrolled = self.verticalScrollBar().value() if same else 0
+        scrolled = self._bar().value() if same else 0
         self._shapes = list(shapes)
         self.blockSignals(True)
         self.clear()
@@ -330,9 +384,11 @@ class ShapeGrid(qt.QtWidgets.QListWidget):
                 self.setCurrentItem(item)
         self.blockSignals(False)
         self._retint()
+        self.doItemsLayout()
         if scrolled:
-            self.doItemsLayout()
-            self.verticalScrollBar().setValue(min(scrolled, self.verticalScrollBar().maximum()))
+            self._bar().setValue(min(scrolled, self._bar().maximum()))
+        elif self.currentItem() is not None:
+            self.scrollToItem(self.currentItem())        # the picked shape is in sight
 
     def _retint(self) -> None:
         ratio = self.devicePixelRatioF()
@@ -346,7 +402,7 @@ class ShapeGrid(qt.QtWidgets.QListWidget):
         return item.data(qt.QtCore.Qt.ItemDataRole.UserRole) if item is not None else ""
 
 
-class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
+class ControlsPanel(_ColorMixin, _AttributesMixin, qt.QtWidgets.QWidget):
     """The tool (shown in a ControlsWindow). Settings and the user's shapes: configsMayaMng
     "controls" (`settings`, `shapes`).
 
@@ -364,6 +420,7 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
                 "drive": "None", "own_color": "", "ghost": True, "middle": False,
                 "shape_step": 0.1, "shape_angle": 90.0, "shape_factor": 1.25, "hide_joint": True, "as_joint": False,
                 "favorites": list(FIRST_FAVORITES), "library": "favorites",
+                "shown": {"channels": False, "attributes": False},
                 "folded": {"control": False}}
 
     def __init__(self, parent=None):
@@ -431,6 +488,11 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
         picked.addWidget(self._grid)
         picked.addWidget(self._no_favorites)
         picked.addWidget(self._create)
+        # top first, like the Outliner: the zero groups, the control, an arrow to what it drives —
+        # under Create, so the preview beside them keeps its height while the library is one row
+        self._strip = HierarchyStrip()
+        self._strip.setObjectName("controlsStrip")
+        picked.addWidget(self._strip)
         shelf = qt.QtWidgets.QHBoxLayout()
         shelf.setSpacing(6)
         shelf.addLayout(picked, 1)
@@ -552,9 +614,6 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
         card.body_layout.addLayout(shelf)
         card.body_layout.addWidget(self._editor)
         # top first, like the Outliner: the zero groups, the control, an arrow to what it drives
-        self._strip = HierarchyStrip()
-        self._strip.setObjectName("controlsStrip")
-        card.body_layout.addWidget(self._strip)
         card.body_layout.addLayout(naming)
         card.body_layout.addLayout(making)
         card.body_layout.addLayout(driving)
@@ -566,6 +625,8 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
         column.addWidget(self._selected_tools())
         column.addWidget(card)
         column.addWidget(self._color_card())
+        column.addWidget(self._channels_card())          # these two: shown by the header's buttons
+        column.addWidget(self._attributes_card())
         column.addStretch(1)
         scroll = StableScrollArea()
         scroll.setObjectName("controlsScroll")
@@ -573,6 +634,14 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
         layout = qt.QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(scroll)
+
+    def content_height_change(self) -> int:
+        """How much taller (+) or shorter (-) the panel wants to be to show everything without
+        scrolling and without empty room under it — the window follows it."""
+        scroll = self.findChild(StableScrollArea, "controlsScroll")
+        if scroll is None or scroll.widget() is None:
+            return 0
+        return scroll.widget().sizeHint().height() - scroll.viewport().height()
 
     def _selected_tools(self) -> FoldingCard:
         """SELECTED: everything that works on the controls selected in the scene, on top of the window
@@ -651,6 +720,15 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
                                                                                       "(curve) under what is selected")
         self._select_all = tool("select_all", "yellow", "Controls in the scene", "Select every control (curve) in "
                                                                                "the scene")
+        self._select_same = tool("same_shape", "yellow", "Controls of the same shape", "Select every control in "
+                                 "the scene whose shape is the same as the selected one's (whatever its size and "
+                                 "color) — then Replace, color or resize them all at once\nRight click: only "
+                                 "under the selection", menu=True)
+        self._fit_button = tool("frame_fit", "orange", "Fit to its object", "The selected controls' shapes as big "
+                                "as “fit” makes a new one, across the axis the shape faces. Only the shape "
+                                "is scaled\nTo what: select the control AND the object (one object for several "
+                                "controls, or as many objects as controls) — or only controls: each is fitted "
+                                "to the object it drives, else the one its name says")
         # helpers of the rigging itself (plain)
         self._locators = tool("locator", "", "Locators on the selection", "A locator on each selected object — "
                               "at its pivot, turned like it — and on each selected vertex, CV, edge or face (its "
@@ -670,7 +748,7 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
                  (self._mirror, self._mirror_update),
                  (self._zero_groups_button, self._zero_matrix_button, self._matrix_back_button)),
                 ((self._drive_constraint, self._drive_matrix, self._drive_off),
-                 (self._on_top_button, self._select_below, self._select_all),
+                 (self._on_top_button, self._select_below, self._select_all, self._select_same),
                  (self._locators, self._joints),
                  (self._capture,)))
         for groups in rows:
@@ -710,6 +788,14 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
                                                     "(Shift: five steps)")
                 self._shifts[(index, sign)] = made
                 steps.addWidget(made)
+        # the curves' line width: a thing of the shape, so it stands here (it was in the COLOR card)
+        self._line = DragNumberField(1.0, -1.0, 20.0, 0.5, width=40, decimals=1)
+        self._line.setToolTip("Line width\nHow thick the selected controls' curves are drawn (-1 = Maya's "
+                              "preference) — drag with the middle mouse button, the wheel, Up / Down. It shows "
+                              "the first selected control's")
+        steps.addSpacing(10)
+        steps.addWidget(self._caption("Line"))
+        steps.addWidget(self._line)
         steps.addStretch(1)
         card.body_layout.addLayout(steps)
         # each number with the buttons that use it right beside it
@@ -724,6 +810,7 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
         turning.addWidget(self._shape_factor)
         turning.addWidget(self._shrink)
         turning.addWidget(self._grow)
+        turning.addWidget(self._fit_button)
         turning.addStretch(1)
         card.body_layout.addLayout(turning)
         return card
@@ -792,6 +879,10 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
         for field in (self._shape_step, self._shape_angle, self._shape_factor):
             field.value_changed.connect(self._save)
         self._replace.clicked.connect(self._on_replace)
+        self._fit_button.clicked.connect(self._fit_selected)
+        self._select_same.clicked.connect(lambda: self._select_same_shape(False))
+        self._select_same.customContextMenuRequested.connect(
+            lambda position: self._same_shape_menu().exec(self._select_same.mapToGlobal(position)))
         self._capture.clicked.connect(self._on_capture)
         self._mirror.clicked.connect(lambda: self._mirror_to_other("X"))
         self._mirror.customContextMenuRequested.connect(self._on_mirror_menu)
@@ -844,18 +935,23 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
         self._control_card.toggled.connect(lambda opened: self._save_folded("control", opened))
         self._control_card.toggled.connect(lambda _opened: self._show_heading())
         self._connect_color()
+        self._connect_attributes()
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
+        self._highlight_back()           # (left off by a look that never ended)
         self.refresh_palette()
+        self.refresh_scene_colors()
         self._watch_selection(True)
         self._refresh_live()
 
     def enterEvent(self, event) -> None:
         super().enterEvent(event)
         self._refresh_live()
+        self.refresh_scene_colors()
 
     def hideEvent(self, event) -> None:
+        self._end_try()                  # a color being tried on is never left on the objects
         self._watch_selection(False)
         self._clear_ghost()
         super().hideEvent(event)
@@ -913,7 +1009,7 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
     def _refresh_live(self) -> None:
         """The preview imitates what Create would make of the selection NOW — or, while a button of
         SELECTED is hovered, what that button would do to the selected control."""
-        if self._loading:
+        if self._loading or self._trying:       # (a color being tried on: the selection is aside for it)
             return
         try:
             if self._hovered_action:
@@ -922,6 +1018,12 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
                 self._draw_live()
         except Exception as error:      # a preview must never take the tool down — but it must say why
             self._report("The preview couldn't follow the selection", error)
+        try:
+            self._show_line_width()
+            self._show_color_places()
+            self._refresh_attributes()      # CHANNELS / ATTRIBUTES, while they are on screen
+        except Exception as error:
+            self._report("The channels couldn't follow the selection", error)
 
     def _report(self, what: str, error: Exception) -> None:
         """A failure of the preview / the ghost: in the header (once per message) and, in full, in
@@ -1368,6 +1470,7 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
         self._show_heading()
         self._show_offset_names()
         self._apply_color_settings()
+        self._apply_attribute_settings()
 
     def _save(self, *_args) -> None:
         if self._loading:
@@ -1437,9 +1540,10 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
         """The grid as tall as its rows (two of favorites, three of the library), the preview beside
         it as tall as the grid + Create; the two buttons say which is shown."""
         height = CELL * self._rows() + 6
+        self._grid.set_single_row(not self._whole())
         self._grid.setFixedHeight(height)
         self._no_favorites.setFixedHeight(height)
-        self._view.setFixedHeight(height + 6 + 22)
+        self._view.setFixedHeight(height + 6 + 22 + 6 + 24)      # the grid + Create + the line under it
         self._library_syncing = True
         try:
             self._favorites_only.setChecked(not self._whole())
@@ -1458,17 +1562,11 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
         """Your favorites, or the whole library in their place — the window gives it its row."""
         if self._library_syncing:
             return
-        before = self._rows()
         if self._settings.get("library", "favorites") != which:
             self._settings["library"] = which
         self._fit_library()
         self._show_heading()
-        self._refresh_grid()
-        grown = CELL * (self._rows() - before)
-        window = self.window()
-        if grown and not self._editor.isVisible() and window is not None and window is not self \
-                and not window.isMaximized():
-            window.resize(window.width(), max(window.minimumHeight(), window.height() + grown))
+        self._refresh_grid()         # (the window follows the card's height by itself)
 
     def _toggle_favorite(self, name: str) -> None:
         favorites = self._favorites()
@@ -1499,7 +1597,7 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
             self._settings["favorites"] = favorites
             self._refresh_grid()
 
-    def _show_saved(self) -> None:
+    def _show_saved_shape(self) -> None:
         """A shape just saved / brought in is shown: with the library open, under Mine."""
         if self._whole():
             self._categories.set_current("Mine")
@@ -1567,7 +1665,7 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
         if axis == "X":
             back = lambda q: (q[1], q[0], -q[2])       # the turn to X is its own inverse
         elif axis == "Z":
-            back = lambda q: (q[0], q[2], -q[1])
+            back = lambda q: (q[1], q[2], q[0])
         else:
             return curves
         return [shape_data.Curve([back(point) for point in curve.points], curve.degree, curve.closed) for curve in curves]
@@ -1603,8 +1701,7 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
     def _set_editing(self, on: bool) -> None:
         if on == self._editor.isVisible():
             return
-        shelf_height = self._view.height()
-        for widget in (self._grid, self._view, self._create):
+        for widget in (self._grid, self._view, self._create, self._strip):
             widget.setVisible(not on)
         self._no_favorites.hide()
         self._editor.setVisible(on)
@@ -1618,11 +1715,7 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
             # it is, to be changed, put back or saved as a shape (Reset: the library's shape instead)
             if not self._taken and self._curve_selected():
                 self._take_shape()
-        # the window gives the editor its room, and takes it back
-        window = self.window()
-        grown = EDITOR_HEIGHT - shelf_height
-        if window is not None and window is not self and not window.isMaximized():
-            window.resize(window.width(), max(window.minimumHeight(), window.height() + (grown if on else -grown)))
+        # (the window gives the editor its room and takes it back by itself: it follows the content)
 
     def _on_shape_edited(self) -> None:
         if self._taken:
@@ -1672,6 +1765,22 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
         self._say(f"The library's “{shape.title()}” is updated" +
                   ("" if shape.user else " — right click it in the library to bring the built-in one back"), "done")
 
+    def _copy_shape_code(self, name: str, for_maya: bool = True) -> None:
+        shape = self.library.get(name)
+        if shape is None:
+            return
+        if name == self._settings.get("shape") and self._edited is not None and not self._taken:
+            shape = self._edited              # as it is in the editor now
+        if for_maya:
+            # facing the axis picked now, as Create would make it
+            turned = shape_data.Shape(shape.name, shape_data.oriented(shape.curves, self._view.axis()), shape.category)
+            qt.QtWidgets.QApplication.clipboard().setText(shape_data.as_maya_code(turned))
+            self._say(f"“{shape.title()}” is on the clipboard as a script — paste it into the Script Editor "
+                      "(Python) and run it", "done")
+        else:
+            qt.QtWidgets.QApplication.clipboard().setText(shape_data.as_code(shape))
+            self._say(f"“{shape.title()}” is on the clipboard as a line for shapes.py", "done")
+
     def _restore_shape(self, name: str) -> None:
         if self.library.restore(name):
             if name == self._settings.get("shape"):
@@ -1687,7 +1796,7 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
         self._drop_edited()
         self._settings["shape"] = saved
         self._add_favorites([saved])
-        self._show_saved()
+        self._show_saved_shape()
         self._refresh_grid()
         shape = self._library_shape()
         self._editor.open(shape.curves, shape.title())
@@ -1744,6 +1853,12 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
                                 "Your short list: what the library shows by default", hint="the star")
             if shape.user:
                 self._menu_item(menu, "delete", "Remove from your shapes", lambda: self._remove_shape(name))
+            self._menu_item(menu, "code", "Copy as a Maya script", lambda: self._copy_shape_code(name, True),
+                            "A Python script on the clipboard: paste it into the Script Editor, run it — the "
+                            "curve is made. Plain maya.cmds, it needs nothing of MSL Tools")
+            self._menu_item(menu, "code", "Copy as a library line", lambda: self._copy_shape_code(name, False),
+                            "The shape as a line of shapes.py — how a fix or a new shape gets into the "
+                            "built-in library for everyone")
             if shape.changed:
                 self._menu_item(menu, "undo", "Back to the built-in shape", lambda: self._restore_shape(name),
                                 "You updated this shape — this drops your correction")
@@ -1788,7 +1903,8 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
                                   ("matrix", self._drive_matrix, "tied through the matrix"),
                                   ("zero_groups", self._zero_groups_button, "zeroed with groups"),
                                   ("zero_matrix", self._zero_matrix_button, "zeroed in the matrix"),
-                                  ("on_top", self._on_top_button, "drawn on top")):
+                                  ("on_top", self._on_top_button, "drawn on top"),
+                                  ("mirror_link", self._mirror_update, "in a live mirror link (right click: Unlink)")):
             count = int(found.get(key, 0))
             if bool(button.property("on")) != bool(count):
                 button.setProperty("on", bool(count))
@@ -1830,6 +1946,9 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
             self._say(f"Maya refused: {error}".strip(), "error")
             return
         self._made = frozenset(made)
+        if self._middle.isChecked():
+            # for this one Create: left on, it kept making ONE control of several objects, unnoticed
+            self._middle.setChecked(False)
         short = [path.rpartition("|")[2] for path in made]
         listed = ", ".join(short[:3]) + ("…" if len(short) > 3 else "")
         if drive == "shape" and targets:
@@ -1980,6 +2099,74 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
             else:
                 self._say(f"{len(controls)} drawn {'over everything' if state else 'as usual again'}", "done")
 
+    def _same_shape_menu(self) -> "qt.QtWidgets.QMenu":
+        tone = self._select_same.iconColor
+        menu = self._menu()
+        self._menu_caption(menu, "Controls of the same shape as the selected")
+        self._menu_item(menu, "same_shape", "In the scene", lambda: self._select_same_shape(False), "", tone,
+                        hint="click")
+        self._menu_item(menu, "branch", "Only under the selection", lambda: self._select_same_shape(True),
+                        "Among what is under the selected objects", tone)
+        return menu
+
+    def _select_same_shape(self, below: bool) -> None:
+        from msl_tools.msl.tools.maya.controls import scene
+        from maya import cmds
+        controls = self._selected_controls()
+        if not controls:
+            return
+        found = scene.same_shape(controls, scene.selected_transforms() if below else None)
+        cmds.select(found or controls, replace=True)
+        extra = len(found) - len([control for control in controls if control in found])
+        self._say(f"{len(found)} control{'s' if len(found) != 1 else ''} of that shape selected" +
+                  (f" — {extra} more than you had" if extra > 0 else " — no others like it"), "done" if extra > 0 else "")
+
+    def _fit_selected(self) -> None:
+        from msl_tools.msl.tools.maya.controls import scene
+        controls = self._selected_controls()
+        if not controls:
+            return
+        # objects selected WITH the controls are what to fit to — the names needn't say anything
+        objects = [node for node in scene.selected_transforms() if not scene.curve_shapes(node)]
+        if objects and len(objects) not in (1, len(controls)):
+            self._say(f"{len(controls)} controls and {len(objects)} objects: select ONE object for all the "
+                      "controls, or as many objects as controls (in the same order)", "error")
+            return
+        fitted, alone = scene.fit_controls(controls, objects)
+        if not fitted:
+            self._say("No object to fit to: " + ", ".join(alone[:3]) + " — select the control AND the object, "
+                      "or a control that drives one / is named after one", "error")
+            return
+        if objects:
+            self._say(f"{fitted} fitted to " + (objects[0].rpartition("|")[2] if len(objects) == 1 else
+                                                 f"the {len(objects)} selected objects") + " · Ctrl+Z undoes it", "done")
+            return
+        self._say(f"{fitted} fitted to {'its object' if fitted == 1 else 'their objects'}" +
+                  (f" · {len(alone)} with no object: " + ", ".join(alone[:2]) if alone else "") +
+                  " · Ctrl+Z undoes it", "done")
+
+    def _link_mirror(self, axis: str) -> None:
+        from msl_tools.msl.tools.maya.controls import scene
+        controls = self._selected_controls()
+        if not controls:
+            return
+        linked, missing = scene.link_mirror(controls, self._sides(), axis)
+        if not linked:
+            self._say("Nothing linked — the other side's control isn't there (Mirror makes one), or this one "
+                      "follows already", "error")
+            return
+        self._say(f"{linked} other-side shape{'s' if linked != 1 else ''} now FOLLOW{'S' if linked == 1 else ''} "
+                  "— change this shape and the other side is its mirror" +
+                  (f" · {len(missing)} not linked: " + ", ".join(missing[:2]) if missing else ""), "done")
+
+    def _unlink_mirror(self) -> None:
+        from msl_tools.msl.tools.maya.controls import scene
+        controls = self._selected_controls()
+        if controls:
+            freed = scene.unlink_mirror(controls)
+            self._say(f"{freed} mirror link{'s' if freed != 1 else ''} taken away — the shapes stay as they are"
+                      if freed else "No mirror link on the selection", "done" if freed else "")
+
     def _select_controls(self, below: bool) -> None:
         from msl_tools.msl.tools.maya.controls import scene
         from maya import cmds
@@ -2020,7 +2207,7 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
             return
         self._pick_saved(added[0])
         self._add_favorites(added)
-        self._show_saved()
+        self._show_saved_shape()
         self._refresh_grid()
         self._say(f"{len(added)} shape{'s' if len(added) != 1 else ''} added to Mine", "done")
 
@@ -2064,6 +2251,15 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
         for axis in shape_data.AXES:
             self._menu_item(menu, "mirror_update", f"Across {axis}", lambda axis=axis: self._mirror_shapes(axis),
                             f"The mirror plane stands across the world's {axis}", tone, hint="click" if axis == "X" else "")
+        menu.addSeparator()
+        self._menu_caption(menu, "Keep the other side following (live)")
+        for axis in shape_data.AXES:
+            self._menu_item(menu, "mirror_update", f"Link across {axis}", lambda axis=axis: self._link_mirror(axis),
+                            "From now on the other side's shape IS the mirror of this one: edit its CVs, replace "
+                            "it, resize it — the other side follows at once. Posing the controls changes nothing",
+                            tone)
+        self._menu_item(menu, "drive_off", "Unlink", self._unlink_mirror,
+                        "From either end; the shapes stay as they are", tone)
         return menu
 
     def _on_mirror_update_menu(self, position) -> None:
@@ -2249,6 +2445,6 @@ class ControlsPanel(_ColorMixin, qt.QtWidgets.QWidget):
         saved = self.library.add(name, curves)
         self._pick_saved(saved)
         self._add_favorites([saved])
-        self._show_saved()
+        self._show_saved_shape()
         self._refresh_grid()
         self._say(f"Saved the shape “{saved}” — it is among your favorites (and under Mine)", "done")

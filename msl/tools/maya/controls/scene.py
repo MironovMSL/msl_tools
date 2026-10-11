@@ -1002,8 +1002,9 @@ def states(selected: list, limit: int = 40) -> dict:
     """What is already true of the selected objects, for the SELECTED buttons to show:
     {"constraint": n, "matrix": n} = how many are tied that way (as the object, or as the control),
     {"zero_groups": n, "zero_matrix": n} = how many are zeroed that way, {"on_top": n}."""
-    found = {"constraint": 0, "matrix": 0, "zero_groups": 0, "zero_matrix": 0, "on_top": 0}
+    found = {"constraint": 0, "matrix": 0, "zero_groups": 0, "zero_matrix": 0, "on_top": 0, "mirror_link": 0}
     for node in selected[:limit]:
+        found["mirror_link"] += bool(curve_shapes(node)) and bool(_links_into(node) or _links_from(node))
         kinds = {cmds.nodeType(driver) for driver, _controls in _drivers(node)}
         for target in driven_by(node):
             kinds |= {cmds.nodeType(driver) for driver, controls in _drivers(target) if node in controls}
@@ -1084,6 +1085,12 @@ def _swap_shapes(control: str, curves: list) -> None:
     if not old:
         add_shapes(control, curves)
         return
+    # a live mirror link is between SHAPES, and these are about to be made anew: a control that
+    # leads keeps its followers (fed again below), one that follows is let go (it gets its own shape)
+    followers = _followers(control)
+    stale = _links_into(control) + _links_from(control)
+    if stale:
+        _drop_links(stale)
     temp = cmds.createNode("transform", skipSelect=True)
     cmds.parent(old[0], temp, shape=True, relative=True)   # the look to copy from
     keep = cmds.listRelatives(temp, shapes=True, fullPath=True)[0]
@@ -1091,6 +1098,8 @@ def _swap_shapes(control: str, curves: list) -> None:
         cmds.delete(old[1:])
     add_shapes(control, curves, keep_from=keep)
     cmds.delete(temp)
+    for twin_uuid, matrix in followers:
+        _feed(control, _path(twin_uuid), matrix)
 
 
 def replace(controls: list, shape: shape_data.Shape, axis: str) -> int:
@@ -1350,7 +1359,7 @@ def mirror_shapes_to_twins(controls: list, sides, axis: str = "X") -> tuple:
     hierarchy. Either way (left -> right or right -> left: by what is selected). One undo step;
     (how many updated, names whose other side isn't there)."""
     updated, missing = 0, []
-    with _Chunk():
+    with _Chunk(), _KeepSelection():
         for control in controls:
             twin = other_side(control, sides, axis)
             if twin and twin != control:
@@ -1516,6 +1525,116 @@ def reset_color(transforms: list) -> int:
     return len(transforms)
 
 
+# ---- where an object wears its color: on its shapes, on itself, in the Outliner
+
+PLACES = ("shape", "transform", "outliner")
+
+
+def _override(node: str):
+    """(rgb, index) of the node's own drawing override — (None, None) without one; index is None
+    for an RGB override."""
+    if not cmds.getAttr(node + ".overrideEnabled"):
+        return None, None
+    if cmds.getAttr(node + ".overrideRGBColors"):
+        return tuple(cmds.getAttr(node + ".overrideColorRGB")[0]), None
+    index = cmds.getAttr(node + ".overrideColor")
+    return (tuple(index_palette()[index]) if index else None), (index or None)
+
+
+def _own_shapes(transform: str) -> list:
+    return cmds.listRelatives(transform, shapes=True, fullPath=True, noIntermediate=True) or []
+
+
+def color_places(transforms: list, limit: int = 200) -> dict:
+    """Where the objects wear a color, for the three marks of the COLOR card:
+    {"shape" / "transform" / "outliner": [the different colors found there, rgb],
+     "index": the index of the shapes' color when they all wear ONE index color (else None),
+     "hidden": how many objects have a color on the transform that the shapes' own color covers}.
+    The "shape" place is an object's SHAPES; an object without shapes (a joint, a group) wears its
+    color on itself — that is "transform"."""
+    found = {"shape": [], "transform": [], "outliner": [], "index": None, "hidden": 0}
+    indexes = set()
+
+    def add(place: str, rgb) -> None:
+        if rgb is not None and not any(_same_color(rgb, each) for each in found[place]):
+            found[place].append(tuple(rgb))
+
+    for transform in transforms[:limit]:
+        shape_color = None
+        for shape in _own_shapes(transform):
+            rgb, index = _override(shape)
+            if rgb is not None:
+                shape_color = shape_color or rgb
+                add("shape", rgb)
+                indexes.add(index)
+        own, _index = _override(transform)
+        add("transform", own)
+        if own is not None and shape_color is not None:
+            found["hidden"] += 1
+        if cmds.getAttr(transform + ".useOutlinerColor"):
+            add("outliner", colors.from_outliner(cmds.getAttr(transform + ".outlinerColor")[0]))
+    if len(found["shape"]) == 1 and len(indexes) == 1:
+        found["index"] = indexes.pop()
+    return found
+
+
+def clear_color_at(transforms: list, place: str) -> int:
+    """The color taken off ONE place of the objects (their shapes, themselves, the Outliner); the
+    other places are left. One undo step; how many objects had one there."""
+    count = 0
+    with _Chunk():
+        for transform in transforms:
+            if place == "outliner":
+                if cmds.getAttr(transform + ".useOutlinerColor"):
+                    _set(transform + ".useOutlinerColor", 0)
+                    count += 1
+                continue
+            had = False
+            for node in (_own_shapes(transform) if place == "shape" else [transform]):
+                if cmds.getAttr(node + ".overrideEnabled"):
+                    had = True
+                    _set(node + ".overrideEnabled", 0)
+                    _set(node + ".overrideRGBColors", 0)
+                    _set(node + ".overrideColor", 0)
+            count += had
+    return count
+
+
+def move_color(transforms: list, source: str, target: str) -> int:
+    """Each object's color taken from one place and put on another (shape <-> transform): what it
+    looks like stays, where it is kept changes. An object without shapes can't keep it on a shape
+    and is left. One undo step; how many were moved."""
+    count = 0
+    with _Chunk():
+        for transform in transforms:
+            shapes = _own_shapes(transform)
+            if not shapes:
+                continue
+            nodes = shapes if source == "shape" else [transform]
+            rgb = index = None
+            for node in nodes:
+                rgb, index = _override(node)
+                if rgb is not None:
+                    break
+            if rgb is None:
+                continue
+            for node in (shapes if target == "shape" else [transform]):
+                if index:
+                    _set(node + ".overrideEnabled", 1)
+                    _set(node + ".overrideRGBColors", 0)
+                    _set(node + ".overrideColor", index)
+                else:
+                    _set(node + ".overrideEnabled", 1)
+                    _set(node + ".overrideRGBColors", 1)
+                    _set(node + ".overrideColorRGB", *rgb)
+            for node in nodes:
+                _set(node + ".overrideEnabled", 0)
+                _set(node + ".overrideRGBColors", 0)
+                _set(node + ".overrideColor", 0)
+            count += 1
+    return count
+
+
 def read_color(transform: str):
     """(rgb, index) the object is drawn in: its first shape's override, else its own; index None
     for an RGB override; (None, None) when it has none — then its Outliner color if it has one."""
@@ -1530,6 +1649,215 @@ def read_color(transform: str):
     return None, None
 
 
+# ---- a color tried on before it is given, the colors a scene uses, objects of a color
+
+_COLOR_PLUGS = ("overrideEnabled", "overrideRGBColors", "overrideColor", "overrideColorRGB")
+
+
+def color_state(transforms: list) -> dict:
+    """What the objects' colors ARE now, to be put back by `restore_color_state` — every plug `color`
+    can touch: the drawing override of each object and of its curve shapes, its Outliner color."""
+    state = {}
+    for transform in transforms:
+        for node in _color_nodes([transform], True) + [transform]:
+            for attr in _COLOR_PLUGS:
+                plug = f"{node}.{attr}"
+                if plug not in state:
+                    value = cmds.getAttr(plug)
+                    state[plug] = tuple(value[0]) if isinstance(value, list) else value
+        for attr in ("useOutlinerColor", "outlinerColor"):
+            value = cmds.getAttr(f"{transform}.{attr}")
+            state[f"{transform}.{attr}"] = tuple(value[0]) if isinstance(value, list) else value
+    return state
+
+
+class _NoTrace:
+    """Inside: nothing reaches the undo queue and the scene's "modified" mark is put back."""
+
+    def __enter__(self):
+        self._modified = cmds.file(query=True, modified=True)
+        self._undo = cmds.undoInfo(query=True, stateWithoutFlush=True)
+        cmds.undoInfo(stateWithoutFlush=False)
+
+    def __exit__(self, *_exc):
+        if self._undo:
+            cmds.undoInfo(stateWithoutFlush=True)
+        if not self._modified:
+            cmds.file(modified=False)
+        return False
+
+
+def restore_color_state(state: dict) -> None:
+    """The colors put back as `color_state` read them — no undo step, the scene not marked modified."""
+    with _NoTrace():
+        for plug, value in state.items():
+            if not cmds.objExists(plug):
+                continue
+            try:
+                if isinstance(value, tuple):
+                    cmds.setAttr(plug, *value)
+                else:
+                    cmds.setAttr(plug, value)
+            except RuntimeError:
+                continue
+
+
+def highlight_aside() -> list:
+    """The selection highlight switched off in every viewport that has it on, and what was changed
+    returned for `highlight_back`. The selection itself STAYS — so the Channel Box and the Attribute
+    Editor don't flicker — and a selected object is drawn in its own color. A view setting of the
+    panels: no undo step, nothing of the scene is touched. (Measured, Maya 2026: with the highlight off
+    a selected curve, mesh, locator, a group over a mesh and a curve worn by a joint all show their
+    override color; a JOINT colored on itself is drawn in Maya's default joint color instead — see
+    `colored_on_a_joint`.)"""
+    changed = []
+    for panel in cmds.getPanel(type="modelPanel") or []:
+        try:
+            if cmds.modelEditor(panel, query=True, selectionHiliteDisplay=True):
+                cmds.modelEditor(panel, edit=True, selectionHiliteDisplay=False)
+                changed.append(panel)
+        except RuntimeError:
+            continue
+    return changed
+
+
+def highlight_back(panels: list) -> None:
+    for panel in panels:
+        try:
+            if cmds.modelPanel(panel, exists=True):
+                cmds.modelEditor(panel, edit=True, selectionHiliteDisplay=True)
+        except RuntimeError:
+            continue
+
+
+def colored_on_a_joint(transforms: list, on_shape: bool = True) -> bool:
+    """Would a color given to these objects land ON A JOINT ITSELF — a joint without shapes, or any
+    joint when the color goes onto the transform? Such a joint, selected, never shows its override
+    color (whatever the highlight setting): to try a color on it the selection has to step aside."""
+    for transform in transforms:
+        if cmds.nodeType(transform) != "joint":
+            continue
+        if not on_shape or not (cmds.listRelatives(transform, shapes=True, fullPath=True, noIntermediate=True) or []):
+            return True
+    return False
+
+
+def selection_aside() -> list:
+    """The selection taken off WITHOUT a trace (no undo step), and returned to be put back by
+    `selection_back` — a selected object is drawn in the selection's highlight, so a color tried on
+    it could not be seen."""
+    held = cmds.ls(selection=True, long=True) or []
+    if held:
+        with _NoTrace():
+            cmds.select(clear=True)
+    return held
+
+
+def selection_back(held: list) -> None:
+    """What `selection_aside` took off is selected again, in its order — no undo step."""
+    alive = [item for item in held if cmds.objExists(item)]
+    with _NoTrace():
+        if alive:
+            cmds.select(alive, replace=True)
+        else:
+            cmds.select(clear=True)
+
+
+def try_color(transforms: list, rgb=None, index: "int | None" = None, viewport: bool = True, outliner: bool = False,
+              on_shape: bool = True) -> None:
+    """`color`, but as a look only: no undo step, the scene not marked modified. The owner read
+    `color_state` first and puts it back when the look is over."""
+    with _NoTrace():
+        color(transforms, rgb=rgb, index=index, viewport=viewport, outliner=outliner, on_shape=on_shape)
+
+
+def _same_color(one, other, tolerance: float = 0.02) -> bool:
+    return one is not None and other is not None and all(abs(a - b) <= tolerance for a, b in zip(one, other))
+
+
+def colored_objects(roots: "list | None" = None, most: int = 40000) -> list:
+    """Every object that wears a color: a transform with a drawing override on itself or on one of
+    its shapes, or with an Outliner color — curves, meshes, joints, locators alike (the first cut of
+    this looked at curves only: a colored mesh or joint was not found). Walked through the API (a
+    scene has tens of thousands of nodes), at most `most` nodes; ghosts and Maya's own cameras out."""
+    import maya.api.OpenMaya as om
+    found, seen, walked = [], set(), 0
+    selection = om.MSelectionList()
+    starts = []
+    for root in roots or []:
+        try:
+            selection.clear()
+            selection.add(root)
+            starts.append(selection.getDagPath(0))
+        except RuntimeError:
+            continue
+    iterators = [om.MItDag(om.MItDag.kDepthFirst)] if not roots else []
+    for start in starts:
+        iterator = om.MItDag(om.MItDag.kDepthFirst)
+        iterator.reset(start.node(), om.MItDag.kDepthFirst)
+        iterators.append(iterator)
+    for iterator in iterators:
+        while not iterator.isDone() and walked < most:
+            walked += 1
+            node = iterator.currentItem()
+            try:
+                fn = om.MFnDagNode(node)
+                colored = fn.findPlug("overrideEnabled", False).asBool()
+                if not colored and node.hasFn(om.MFn.kTransform):
+                    colored = fn.findPlug("useOutlinerColor", False).asBool()
+            except RuntimeError:
+                colored = False
+            if colored:
+                path = iterator.getPath()
+                if not node.hasFn(om.MFn.kTransform):
+                    path.pop()                      # a shape's color is its object's
+                name = path.fullPathName()
+                if name and name not in seen and not is_ghost(name):
+                    seen.add(name)
+                    found.append(name)
+            iterator.next()
+    return found
+
+
+def used_colors(limit: int = 16, most: int = 40000) -> list:
+    """The colors the scene's objects are drawn in, the most used first: [(rgb, how many)]."""
+    found = []
+    for control in colored_objects(None, most):
+        try:
+            rgb, _index = read_color(control)
+        except (RuntimeError, ValueError, IndexError):
+            continue
+        if rgb is None:
+            continue
+        for entry in found:
+            if _same_color(entry[0], rgb):
+                entry[1] += 1
+                break
+        else:
+            found.append([tuple(rgb), 1])
+    found.sort(key=lambda entry: -entry[1])
+    return [(rgb, count) for rgb, count in found[:limit]]
+
+
+def controls_of_color(rgb, roots: "list | None" = None) -> list:
+    """Every object (in the scene, or under `roots`) drawn in this color."""
+    matched = []
+    for control in colored_objects(roots):
+        try:
+            own, _index = read_color(control)
+        except (RuntimeError, ValueError, IndexError):
+            continue
+        if _same_color(own, rgb):
+            matched.append(control)
+    return matched
+
+
+def line_width(transform: str) -> "float | None":
+    """The line width of the object's first curve (None: it has no curve)."""
+    shapes = curve_shapes(transform)
+    return float(cmds.getAttr(shapes[0] + ".lineWidth")) if shapes else None
+
+
 def set_line_width(transforms: list, width: float) -> int:
     """The curves' line width (-1 = Maya's preference). One undo step; how many shapes."""
     count = 0
@@ -1538,3 +1866,210 @@ def set_line_width(transforms: list, width: float) -> int:
             for shape in curve_shapes(transform):
                 count += _set(shape + ".lineWidth", width)
     return count
+
+
+# ------------------------------------------------------------------ the same shape
+
+def _alike(one: list, other: list, tolerance: float = 0.03) -> bool:
+    """Two controls' curves (each already divided by its reach) are the same shape, whatever its size."""
+    if len(one) != len(other):
+        return False
+    for a, b in zip(one, other):
+        if a.degree != b.degree or a.closed != b.closed or len(a.points) != len(b.points):
+            return False
+        if any(abs(u - v) > tolerance for p, q in zip(a.points, b.points) for u, v in zip(p, q)):
+            return False
+    return True
+
+
+def _unit_curves(control: str) -> list:
+    return shape_data.scaled(read_curves(control), 1.0 / _reach(control))
+
+
+def same_shape(controls: list, roots: "list | None" = None) -> list:
+    """Every control (in the scene, or under `roots`) whose shape is the same as one of `controls`'
+    — the same curves point for point, whatever the size and the color. The given ones included."""
+    wanted = [_unit_curves(control) for control in controls if curve_shapes(control)]
+    found = []
+    for control in all_controls(roots):
+        curves = _unit_curves(control)
+        if any(_alike(curves, each) for each in wanted):
+            found.append(control)
+    return found
+
+
+# ------------------------------------------------------------------ a control fitted to its object
+
+def target_of(control: str) -> str:
+    """The object a control stands for: the one it drives, else the one its name says (find_target)."""
+    driven = driven_by(control)
+    return driven[0] if driven else find_target(control)[0]
+
+
+def fit_controls(controls: list, objects=()) -> tuple:
+    """Each control's shape made as big as "fit" would make it at creation: around its object, across
+    the axis the shape faces. Only the CVs are scaled, about the pivot. The object: `objects` when
+    given — the ones SELECTED with the controls (names needn't match): one object for every control,
+    or as many objects as controls, by the order picked —, else the one the control drives, else the
+    one its name says. One undo step; (how many fitted, names with no object to measure)."""
+    fitted, alone = 0, []
+    objects = list(objects)
+    if objects and len(objects) not in (1, len(controls)):
+        return 0, [control.rpartition("|")[2] for control in controls]
+    with _Chunk():
+        for index, control in enumerate(controls):
+            if objects:
+                target = objects[0] if len(objects) == 1 else objects[index]
+            else:
+                target = target_of(control) if curve_shapes(control) else ""
+            reach = world_reach(control) if target else 0.0
+            if not target or reach < 1e-9:
+                alone.append(control.rpartition("|")[2])
+                continue
+            resize([control], fit_size(target, flat_axis(control)) / reach)
+            fitted += 1
+    return fitted, alone
+
+
+# ------------------------------------------------------------------ a live mirror of a shape
+
+LINK_ATTR = "mslMirrorLink"     # on the transformGeometry nodes that carry a shape to the other side
+
+
+def _links_into(control: str) -> list:
+    """The link nodes that feed this control's shapes."""
+    found = []
+    for shape in curve_shapes(control):
+        for node in cmds.listConnections(shape + ".create", source=True, destination=False,
+                                         type="transformGeometry") or []:
+            if cmds.attributeQuery(LINK_ATTR, node=node, exists=True) and node not in found:
+                found.append(node)
+    return found
+
+
+def _links_from(control: str) -> list:
+    """The link nodes this control's shapes feed."""
+    found = []
+    for shape in curve_shapes(control):
+        for node in cmds.listConnections(shape + ".local", source=False, destination=True,
+                                         type="transformGeometry") or []:
+            if cmds.attributeQuery(LINK_ATTR, node=node, exists=True) and node not in found:
+                found.append(node)
+    return found
+
+
+class _KeepSelection:
+    """with _KeepSelection(): … = the selection is afterwards what it was (objects, by uuid: their
+    shapes may be made anew inside). Making a control's curves anew leaves the NEW shape selected."""
+
+    def __enter__(self):
+        self._uuids = [_uuid(node) for node in cmds.ls(selection=True, long=True, objectsOnly=True)]
+
+    def __exit__(self, *_exc):
+        back = [node for node in (_path(uuid) for uuid in self._uuids) if node]
+        if back:
+            cmds.select(back, replace=True)
+        else:
+            cmds.select(clear=True)
+        return False
+
+
+def _drop_links(nodes: list) -> None:
+    """Link nodes taken away. Their connections are cut FIRST: deleting a transformGeometry that is
+    still wired makes Maya bridge it — the curve it fed is then fed by the leading curve directly,
+    unmirrored (measured, Maya 2026)."""
+    for node in nodes:
+        if not cmds.objExists(node):
+            continue
+        for plug in (node + ".inputGeometry", node + ".outputGeometry"):
+            pairs = cmds.listConnections(plug, plugs=True, connections=True, source=True, destination=True) or []
+            for index in range(0, len(pairs), 2):
+                ours, other = pairs[index], pairs[index + 1]
+                source, target = (other, ours) if plug.endswith("inputGeometry") else (ours, other)
+                if cmds.isConnected(source, target):
+                    cmds.disconnectAttr(source, target)
+        cmds.delete(node)
+
+
+def _followers(control: str) -> list:
+    """[(the following control's uuid, the link's matrix)] of a control that leads."""
+    import maya.api.OpenMaya as om
+    found = {}
+    for node in _links_from(control):
+        shapes = cmds.listConnections(node + ".outputGeometry", source=False, destination=True, shapes=True) or []
+        for shape in cmds.ls(shapes, long=True):
+            twin = shape.rpartition("|")[0]
+            found.setdefault(_uuid(twin), om.MMatrix(cmds.getAttr(node + ".transform")))
+    return list(found.items())
+
+
+def _feed(control: str, twin: str, matrix) -> None:
+    """The twin's shape becomes the control's curves through `matrix` (the control's object space ->
+    the twin's), and each of its curves is fed by the control's own from now on."""
+    stale = _links_into(twin) + _links_from(twin)
+    if stale:
+        _drop_links(stale)
+    with _KeepSelection():
+        _swap_shapes(twin, _moved(read_curves(control), matrix))
+        short = twin.rpartition("|")[2].rpartition(":")[2]
+        for source, target in zip(curve_shapes(control), curve_shapes(twin)):
+            node = cmds.createNode("transformGeometry", name=short + "_mirrorLink#", skipSelect=True)
+            cmds.addAttr(node, longName=LINK_ATTR, attributeType="bool", defaultValue=True)
+            cmds.setAttr(node + ".transform", list(matrix), type="matrix")
+            cmds.connectAttr(source + ".local", node + ".inputGeometry")
+            cmds.connectAttr(node + ".outputGeometry", target + ".create")
+
+
+def mirror_linked(controls: list) -> int:
+    """How many of them are an end of a live mirror link (the one that leads, or the one that follows)."""
+    return sum(1 for control in controls if _links_into(control) or _links_from(control))
+
+
+def link_mirror(controls: list, sides, axis: str = "X") -> tuple:
+    """Each control's other-side twin FOLLOWS its shape from now on: change the control's curve
+    (its CVs, Replace, the editor) and the twin's is the mirror of it at once. The twin first gets the
+    mirror as "shape to the other side" does; then each of its curves is fed by the control's own
+    through a transformGeometry whose matrix is where the two stand to each other NOW (the control's
+    object space -> the world -> mirrored -> the twin's object space) — a constant, so posing either
+    control later changes nothing. The twin keeps its color, place and channels. One undo step;
+    (how many linked, names whose other side isn't there)."""
+    import maya.api.OpenMaya as om
+    flip = {"X": (-1, 1, 1), "Y": (1, -1, 1), "Z": (1, 1, -1)}[axis]
+    mirror = om.MMatrix((flip[0], 0, 0, 0, 0, flip[1], 0, 0, 0, 0, flip[2], 0, 0, 0, 0, 1))
+    linked, missing = 0, []
+    # the selection is put back: making the twin's curves anew leaves ITS shape selected, and the next
+    # tool would then work on the side that follows (it did: a step moved the right, not the left)
+    with _Chunk(), _KeepSelection():
+        for control in controls:
+            twin = other_side(control, sides, axis)
+            if not twin or twin == control or _links_into(control):
+                # (a control that itself follows can't lead: the two would feed each other)
+                missing.append(control.rpartition("|")[2])
+                continue
+            _feed(control, twin, _matrix(control) * mirror * _matrix(twin, "worldInverseMatrix[0]"))
+            linked += 1
+    return linked, missing
+
+
+def unlink_mirror(controls: list) -> int:
+    """The live mirror links of these controls taken away, from either end; the shapes stay as they
+    are. One undo step; how many controls were freed."""
+    freed = 0
+    with _Chunk():
+        for control in controls:
+            nodes = _links_into(control) + _links_from(control)
+            if not nodes:
+                continue
+            # the curves that follow keep what they show: read before the link goes, put back after
+            followers = set()
+            for node in nodes:
+                for shape in cmds.ls(cmds.listConnections(node + ".outputGeometry", source=False, destination=True,
+                                                          shapes=True) or [], long=True):
+                    followers.add(shape)
+            kept = {shape: _points(shape) for shape in followers}
+            _drop_links(nodes)
+            for shape, points in kept.items():
+                if cmds.objExists(shape) and _points(shape) != points:
+                    _set_points(shape, points)
+            freed += 1
+    return freed

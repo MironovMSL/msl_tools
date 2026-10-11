@@ -208,3 +208,172 @@ ControlsPanel ColorSwatchButton#controlsOwnColor {
     qproperty-borderColor: var(--border);
     qproperty-hoverBorderColor: var(--accent);
 }
+
+/* The header's buttons that show / hide a card (CHANNELS, ATTRIBUTES). */
+ControlsWindow ToggleIconButton#controlsHeaderToggle {
+    qproperty-iconColor: var(--text-secondary);
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 5px;
+    padding: 0px;
+    min-width: 24px;
+    max-width: 24px;
+    min-height: 22px;
+    max-height: 22px;
+}
+ControlsWindow ToggleIconButton#controlsHeaderToggle:hover {
+    background: alpha(var(--text-primary), 8%);
+}
+ControlsWindow ToggleIconButton#controlsHeaderToggle[on="true"] {
+    qproperty-iconColor: var(--accent);
+    background: alpha(var(--accent), 18%);
+    border: 1px solid alpha(var(--accent), 55%);
+}
+
+/* CHANNELS: a channel is a button that shows its state. Open = the axis' color on a light fill;
+   locked = the warning tone; locked and hidden = quiet and dashed; mixed = a dotted edge. */
+ControlsPanel QPushButton#controlsChannel {
+    padding: 0px;
+    font-weight: 600;
+    border-radius: 5px;
+    border: 1px solid alpha(var(--accent), 55%);
+    background: alpha(var(--accent), 16%);
+    color: var(--text-primary);
+}
+ControlsPanel QPushButton#controlsChannel[axis="X"][state="open"] { color: var(--danger); border-color: alpha(var(--danger), 55%); background: alpha(var(--danger), 14%); }
+ControlsPanel QPushButton#controlsChannel[axis="Y"][state="open"] { color: var(--success); border-color: alpha(var(--success), 55%); background: alpha(var(--success), 14%); }
+ControlsPanel QPushButton#controlsChannel[axis="Z"][state="open"] { color: var(--accent); border-color: alpha(var(--accent), 55%); background: alpha(var(--accent), 14%); }
+ControlsPanel QPushButton#controlsChannel[state="locked"] {
+    color: var(--warning);
+    border: 1px solid alpha(var(--warning), 70%);
+    background: alpha(var(--warning), 14%);
+}
+ControlsPanel QPushButton#controlsChannel[state="hidden"] {
+    color: alpha(var(--text-secondary), 70%);
+    border: 1px dashed alpha(var(--text-secondary), 60%);
+    background: transparent;
+}
+ControlsPanel QPushButton#controlsChannel[state="mixed"] {
+    color: var(--text-secondary);
+    border: 1px dotted var(--text-secondary);
+    background: alpha(var(--text-secondary), 10%);
+}
+ControlsPanel QPushButton#controlsChannel:hover { border-color: var(--accent); }
+ControlsPanel QPushButton#controlsChannel:disabled { color: alpha(var(--text-secondary), 50%); border-color: alpha(var(--border), 80%); background: transparent; }
+ControlsPanel QPushButton#controlsChannelRow {
+    color: var(--text-secondary);
+    font-size: 11px;
+    text-align: left;
+    padding: 0px 2px;
+    border: none;
+    background: transparent;
+}
+ControlsPanel QPushButton#controlsChannelRow:hover { color: var(--accent); }
+ControlsPanel QPushButton#controlsQuick {
+    padding: 0px 8px;
+    font-size: 11px;
+}
+
+/* ATTRIBUTES: each attribute is a row of widgets (attribute_rows.py). */
+ControlsPanel AttributeRow {
+    qproperty-gripColor: alpha(var(--text-secondary), 60%);
+    qproperty-hoverColor: var(--accent);
+    qproperty-selectedColor: var(--accent);
+    qproperty-keyedColor: var(--danger);
+    qproperty-drivenColor: var(--yellow);
+    qproperty-lineColor: alpha(var(--text-secondary), 90%);
+}
+ControlsPanel QLabel#controlsAttrName { color: var(--text-primary); }
+ControlsPanel QLabel#controlsAttrName[quiet="true"] { color: alpha(var(--text-secondary), 80%); }
+ControlsPanel QLabel#controlsAttrName[separator="true"] {
+    color: var(--text-primary);
+    font-weight: 700;
+}
+ControlsPanel ValueSlider#controlsAttrValue {
+    qproperty-fieldColor: var(--field);
+    qproperty-borderColor: alpha(var(--border), 90%);
+    qproperty-fillColor: var(--accent);
+    qproperty-textColor: var(--text-primary);
+    qproperty-quietColor: alpha(var(--text-secondary), 80%);
+}
+ControlsPanel QLineEdit#controlsAttrEdit {
+    min-height: 18px;
+    padding: 0px 4px;
+    border: 1px solid var(--accent);
+    border-radius: 4px;
+    background: var(--field);
+    color: var(--text-primary);
+}
+/* K: keyable = lit, shown only = a quiet dot, hidden = a dash. */
+ControlsPanel QPushButton#controlsAttrKey {
+    padding: 0px;
+    font-weight: 600;
+    font-size: 11px;
+    border-radius: 5px;
+    border: 1px solid alpha(var(--border), 90%);
+    background: transparent;
+    color: var(--text-secondary);
+}
+ControlsPanel QPushButton#controlsAttrKey[state="key"] {
+    color: var(--accent);
+    border: 1px solid alpha(var(--accent), 55%);
+    background: alpha(var(--accent), 16%);
+}
+ControlsPanel QPushButton#controlsAttrKey[state="hidden"] { border: 1px dashed alpha(var(--text-secondary), 55%); }
+ControlsPanel QPushButton#controlsAttrKey:hover { border-color: var(--accent); }
+ControlsPanel QuickButton#controlsAttrLock {
+    qproperty-iconColor: alpha(var(--text-secondary), 70%);
+    padding: 0px;
+    border-radius: 5px;
+    border: 1px solid alpha(var(--border), 90%);
+    background: transparent;
+}
+ControlsPanel QuickButton#controlsAttrLock[on="true"] {
+    qproperty-iconColor: var(--warning);
+    border: 1px solid alpha(var(--warning), 70%);
+    background: alpha(var(--warning), 14%);
+}
+ControlsPanel QuickButton#controlsAttrLock:hover { border-color: var(--accent); }
+ControlsPanel QFrame#controlsAttrDrop { background: var(--accent); border: none; border-radius: 1px; }
+ControlsPanel BaseComboBox#controlsAttrList { min-height: 20px; }
+/* The small buttons beside a hovered row's name. */
+ControlsPanel GlyphButton#controlsAttrQuick {
+    qproperty-glyphColor:       var(--accent);
+    qproperty-activeGlyphColor: var(--accent);
+    qproperty-highlightColor:   alpha(var(--accent), 18%);
+}
+
+/* COLOR: where a color goes, said in words (an icon + its word; on = the accent). */
+ControlsPanel ToggleIconButton#controlsWordToggle {
+    qproperty-iconColor: var(--text-secondary);
+    color: var(--text-secondary);
+    background: transparent;
+    border: 1px solid alpha(var(--border), 90%);
+    border-radius: 5px;
+    padding: 0px 8px 0px 6px;
+    min-height: 22px;
+    max-height: 22px;
+}
+ControlsPanel ToggleIconButton#controlsWordToggle:hover {
+    border: 1px solid alpha(var(--accent), 60%);
+}
+ControlsPanel ToggleIconButton#controlsWordToggle[on="true"] {
+    qproperty-iconColor: var(--accent);
+    color: var(--text-primary);
+    background: alpha(var(--accent), 20%);
+    border: 1px solid alpha(var(--accent), 70%);
+}
+ControlsPanel QPushButton#controlsWordButton {
+    padding: 0px 8px;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+/* COLOR: the heading's marks — where the selection wears a color. */
+ControlsPanel PlaceMark#controlsPlaceMark {
+    qproperty-textColor: var(--text-primary);
+    qproperty-quietColor: alpha(var(--text-secondary), 75%);
+    qproperty-borderColor: alpha(var(--border), 90%);
+    qproperty-warnColor: var(--warning);
+    font-size: 11px;
+}

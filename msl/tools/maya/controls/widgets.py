@@ -407,3 +407,98 @@ class Swatches(qt.QtWidgets.QWidget):
                 painter.setBrush(qt.QtCore.Qt.BrushStyle.NoBrush)
                 painter.drawRoundedRect(rect.adjusted(-0.5, -0.5, 0.5, 0.5), 3.5, 3.5)
         painter.end()
+
+
+class PlaceMark(qt.QtWidgets.QAbstractButton):
+    """A small pill that says whether something IS in a place, and what: a square in the color found
+    there (two colors: the square is split; a dashed empty one: none) and the place's word. `warn`
+    marks it in the warning tone (a color that is there but can't be seen). The colors shown are the
+    scene's data; the pill's own are qproperty textColor / quietColor / borderColor / warnColor."""
+
+    textColor = color_property("_text", "update")
+    quietColor = color_property("_quiet", "update")
+    borderColor = color_property("_border", "update")
+    warnColor = color_property("_warn", "update")
+
+    def __init__(self, word: str, parent=None):
+        super().__init__(parent)
+        from msl_tools.msl.core.theme.theme_registry import ThemeRegistry
+        theme = ThemeRegistry.fallback()
+        self._text = qt.QtGui.QColor(theme.text_primary)
+        self._quiet = qt.QtGui.QColor(theme.text_secondary)
+        self._border = qt.QtGui.QColor(theme.border)
+        self._warn = qt.QtGui.QColor(theme.warning)
+        self._word, self._colors, self._warned = word, [], False
+        self.setFixedHeight(20)
+        self.setCursor(qt.QtCore.Qt.CursorShape.PointingHandCursor)
+        self.setFocusPolicy(qt.QtCore.Qt.FocusPolicy.NoFocus)
+        self.setContextMenuPolicy(qt.QtCore.Qt.ContextMenuPolicy.CustomContextMenu)
+
+    def set_colors(self, colors: list, warn: bool = False) -> None:
+        """colors: [(r, g, b) 0..1] found in this place — none, one, or several different ones."""
+        colors = [tuple(color) for color in colors]
+        if colors != self._colors or bool(warn) != self._warned:
+            self._colors, self._warned = colors, bool(warn)
+            self.updateGeometry()
+            self.update()
+
+    def colors(self) -> list:
+        return list(self._colors)
+
+    def _label(self) -> str:
+        return self._word + (f" · {len(self._colors)}" if len(self._colors) > 1 else "")
+
+    def sizeHint(self) -> "qt.QtCore.QSize":
+        return qt.QtCore.QSize(4 + 12 + 5 + self.fontMetrics().horizontalAdvance(self._label()) + 8, 20)
+
+    def minimumSizeHint(self) -> "qt.QtCore.QSize":
+        return self.sizeHint()
+
+    def paintEvent(self, _event) -> None:
+        painter = qt.QtGui.QPainter(self)
+        painter.setRenderHint(qt.QtGui.QPainter.RenderHint.Antialiasing)
+        rect = qt.QtCore.QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        has = bool(self._colors)
+        edge = qt.QtGui.QColor(self._warn if self._warned else self._border)
+        if self._warned:
+            fill = qt.QtGui.QColor(self._warn)
+            fill.setAlpha(40)
+            painter.setBrush(fill)
+        elif self.underMouse():
+            fill = qt.QtGui.QColor(self._text)
+            fill.setAlpha(20)
+            painter.setBrush(fill)
+        else:
+            painter.setBrush(qt.QtCore.Qt.BrushStyle.NoBrush)
+        painter.setPen(qt.QtGui.QPen(edge, 1))
+        painter.drawRoundedRect(rect, rect.height() / 2, rect.height() / 2)
+        square = qt.QtCore.QRectF(5, (self.height() - 12) / 2.0, 12, 12)
+        if not has:
+            pen = qt.QtGui.QPen(self._quiet, 1, qt.QtCore.Qt.PenStyle.DashLine)
+            painter.setPen(pen)
+            painter.setBrush(qt.QtCore.Qt.BrushStyle.NoBrush)
+            painter.drawRoundedRect(square.adjusted(0.5, 0.5, -0.5, -0.5), 3, 3)
+        else:
+            path = qt.QtGui.QPainterPath()
+            path.addRoundedRect(square, 3, 3)
+            painter.setPen(qt.QtCore.Qt.PenStyle.NoPen)
+            painter.fillPath(path, qt.QtGui.QColor.fromRgbF(*self._colors[0]))
+            if len(self._colors) > 1:           # several: the square is split, the second color below
+                painter.save()
+                painter.setClipPath(path)
+                half = qt.QtGui.QPolygonF([square.topRight(), square.bottomRight(), square.bottomLeft()])
+                painter.setBrush(qt.QtGui.QColor.fromRgbF(*self._colors[1]))
+                painter.drawPolygon(half)
+                painter.restore()
+        painter.setPen(self._warn if self._warned else (self._text if has else self._quiet))
+        painter.drawText(qt.QtCore.QRectF(22, 0, self.width() - 24, self.height()),
+                         qt.QtCore.Qt.AlignmentFlag.AlignLeft | qt.QtCore.Qt.AlignmentFlag.AlignVCenter, self._label())
+        painter.end()
+
+    def enterEvent(self, event) -> None:
+        super().enterEvent(event)
+        self.update()
+
+    def leaveEvent(self, event) -> None:
+        super().leaveEvent(event)
+        self.update()
