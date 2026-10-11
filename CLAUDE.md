@@ -3239,6 +3239,14 @@ axis (`flip`). ZERO THE SELECTED (`actions/zero_out`, in the Zero row): the mode
   where they are, `off` (grey, dashed, a click does nothing, the tip says "Not used now: the curve goes
   onto the object itself"), and the round mark - still the Drive menu - shows the curve's icon (link
   kind "shape", `LINK_ICONS["shape"] = "cvs"`). `HierarchyStrip` items take `off: True` for that.
+  THIS / NEW (2026-10-11, the user: with a plain curve selected Create still makes a control on it, but
+  the groups could no longer be set - the line showed only what the selected curve is tied into, and
+  the Zero / Drive rows were gone): while the first selected object is a control that exists, the line
+  starts with a chip (`line:switch`, `settings.line_shows` "this" / "new", kept) - "this" = what the
+  selected control is tied into (blocks select), "new" = the settings of the control Create would make
+  on it (blocks edit, as for any other selection). With anything else selected there is no chip.
+  Checked in windowed Maya 2026 from an isolated copy (a curve selected: switched, two groups typed,
+  Create made grp > sdk > the control on it; the choice kept; a joint: no chip).
   THE NAME FIELD LISTS ITS TOKENS (the user: with the name wiped they had to be remembered): `_template`
   is a `TokenLineEdit` - a right click puts {side} / {name} / {#} in where the click was, and "Back to
   {side}_{name}_ctrl" (`TokenLineEdit(default=)`, a new option of the atom: the menu offers the text the

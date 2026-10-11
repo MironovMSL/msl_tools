@@ -641,7 +641,21 @@ class ControlsPanel(_ColorMixin, _AttributesMixin, _TransformsMixin, _SelectedMi
                 after = shape_data.scaled(shape_data.oriented(self._previewed_shape().curves, self._view.axis()),
                                           reach or 1.0)
             self._view.set_action(curves, after, self._color_for(own) if own is not None else None)
-            self._strip.set_items(self._strip_existing(targets[0], info, count))
+            # the line: what this control IS tied into, or - Create still makes a new one on it - the
+            # settings of that new one; the chip at its start switches (settings.line_shows)
+            icons = UiResources().iconManager
+            planned = self._settings.get("line_shows", "this") == "new"
+            switch = {"key": "line:switch", "tone": "control", "link": "gap",
+                      "icon": icons.get_icon("add" if planned else "controls", sub_folder="actions"),
+                      "text": "new" if planned else "this",
+                      "tip": ("The line shows the settings of the NEW control Create would make on the selected "
+                              "one: its zero, groups, name, drive — click them to change\nClick here: what the "
+                              "selected control itself is tied into") if planned else
+                             ("The line shows what the SELECTED control is tied into (a click on a block selects "
+                              "it)\nClick here: the settings of a new control instead — Create makes one on "
+                              "the selected control too")}
+            self._strip.set_items([switch] + (self._strip_planned(look, count, name, mode, drive) if planned
+                                              else self._strip_existing(targets[0], info, count)))
         else:
             # what WILL BE made of the selection
             becomes = drive == "Shape"         # the object itself becomes the control: one color with its curve
@@ -741,6 +755,9 @@ class ControlsPanel(_ColorMixin, _AttributesMixin, _TransformsMixin, _SelectedMi
         elif key == "control":
             self._template.setFocus()
             self._template.selectAll()
+        elif key == "line:switch":
+            self._settings["line_shows"] = "this" if self._settings.get("line_shows", "this") == "new" else "new"
+            self._refresh_live()
         elif key == "group:add":
             self._strip.edit(key, "", "suffix")
         elif key.startswith("group:"):
