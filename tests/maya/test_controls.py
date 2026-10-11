@@ -72,7 +72,10 @@ class BuiltIn(unittest.TestCase):
 
         parts = {"panel": methods("panel.py", "ControlsPanel"), "color": methods("panel_color.py", "_ColorMixin"),
                  "attributes": methods("panel_attributes.py", "_AttributesMixin"),
-                 "transforms": methods("panel_transforms.py", "_TransformsMixin")}
+                 "transforms": methods("panel_transforms.py", "_TransformsMixin"),
+                 "selected": methods("panel_selected.py", "_SelectedMixin"),
+                 "library": methods("panel_library.py", "_LibraryMixin"),
+                 "editor": methods("panel_editor.py", "_EditorMixin")}
         names = sorted(parts)
         for index, one in enumerate(names):
             for other in names[index + 1:]:

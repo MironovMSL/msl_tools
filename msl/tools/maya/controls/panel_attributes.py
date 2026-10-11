@@ -40,10 +40,21 @@ CARDS = (("channels", "channels", "Channels", "Lock and hide the move / rotate /
 
 
 # the cards the header can also put away, shown unless switched off (the two above: hidden until wanted)
-MAIN_CARDS = (("control", "controls", "Control", "The shape library and how a new control is made"),
+MAIN_CARDS = (("selected", "select_all", "Selected", "The tools that work on the selected controls: shape, "
+                                                     "mirror, zero, drive, steps"),
+              ("control", "controls", "Control", "The shape library and how a new control is made"),
               ("color", "brush", "Color", "Colors of the selected controls: the palette, your own, the "
                                                "Outliner, the line's width"))
-SHOWN_AT_FIRST = {"control": True, "color": True, "channels": False, "attributes": False, "transforms": False}
+SHOWN_AT_FIRST = {"selected": True, "control": True, "color": True, "channels": False, "attributes": False,
+                  "transforms": False}
+ALL_KEYS = tuple(SHOWN_AT_FIRST)
+# ready layouts of the window: the cards shown (the rest is put away); a layout may also say which are
+# folded and their order — these don't, so they keep what the user has
+LAYOUTS = (("Create", ("selected", "control"), "Make controls: the tools for the selected and the library"),
+           ("Color", ("selected", "color"), "Color what is selected"),
+           ("Channels & attributes", ("channels", "attributes"), "Lock channels, work on the objects' attributes"),
+           ("Transforms", ("transforms",), "Match, reset, poses, side to side"),
+           ("Everything", ALL_KEYS, "Every card (the window scrolls)"))
 
 
 class _AttributesMixin:
@@ -237,8 +248,7 @@ class _AttributesMixin:
     # ------------------------------------------------------------------ the header's buttons
 
     def header_widgets(self) -> list:
-        """Buttons for the window's header, one per card it can put away: CONTROL, COLOR, CHANNELS,
-        ATTRIBUTES — in the order the cards stand in."""
+        """Buttons for the window's header: one per card (shown / put away), then the layouts'."""
         icons = UiResources().iconManager
         self._card_toggles = {}
         for key, icon, title, text in MAIN_CARDS + CARDS:
@@ -247,14 +257,91 @@ class _AttributesMixin:
             button.setChecked(not self._card(key).isHidden())
             button.toggled.connect(lambda on, key=key: self._show_card(key, on))
             self._card_toggles[key] = button
-        return list(self._card_toggles.values())
+        from msl_tools.msl.ui.widgets.atoms.buttons.glyph_button import GlyphButton
+        self._layouts_button = GlyphButton("", "Layouts of the window\nWhich cards are shown, which are folded, in "
+                                               "what order — ready ones and the ones you saved", qt.QtCore.QSize(24, 22))
+        self._layouts_button.setObjectName("controlsHeaderGear")
+        self._layouts_button.set_icon(icons.get_icon("layout", sub_folder="actions"))
+        self._layouts_button.clicked.connect(lambda: self._layouts_menu().exec(
+            self._layouts_button.mapToGlobal(qt.QtCore.QPoint(0, self._layouts_button.height()))))
+        return list(self._card_toggles.values()) + [self._layouts_button]
+
+    # ---- layouts: the cards shown, folded, their order — under a name
+
+    def _layout_now(self) -> dict:
+        return {"shown": [key for key in ALL_KEYS if not self._card(key).isHidden()],
+                "folded": [key for key in ALL_KEYS if not self._card(key).is_open()],
+                "order": self._card_order()}
+
+    def _own_layouts(self) -> dict:
+        stored = self._settings.get("layouts", None)
+        return {str(name): dict(layout) for name, layout in dict(stored).items()} if hasattr(stored, "items") else {}
+
+    def _apply_layout(self, layout: dict, name: str = "") -> None:
+        """The cards shown / put away as the layout says; folded and ordered too when it says so."""
+        shown = set(layout.get("shown") or [])
+        if "order" in layout:
+            self._settings["card_order"] = [key for key in layout["order"] if key in ALL_KEYS]
+            self._apply_card_order()
+        for key in ALL_KEYS:
+            if "folded" in layout:
+                opened = key not in layout["folded"]
+                card = self._card(key)
+                if card.is_open() != opened:
+                    card.set_open(opened)
+                    if key in ("channels", "attributes", "transforms"):
+                        self._on_card_folded(key, opened)
+                    else:
+                        self._save_folded(key, opened)
+            self._show_card(key, key in shown)
+        self._show_heading()
+        if name:
+            self._say(f"Layout: {name}", "done")
+
+    def _save_layout(self, name: str) -> None:
+        layouts = self._own_layouts()
+        layouts[name] = self._layout_now()
+        self._settings["layouts"] = layouts
+        self._say(f"The layout “{name}” saved: the cards shown, folded and their order", "done")
+
+    def _remove_layout(self, name: str) -> None:
+        layouts = self._own_layouts()
+        if layouts.pop(name, None) is not None:
+            self._settings["layouts"] = layouts
+            self._say(f"The layout “{name}” removed", "done")
+
+    def _layouts_menu(self) -> "qt.QtWidgets.QMenu":
+        from msl_tools.msl.tools.maya.rename.panel_words import _field_action
+        menu = self._menu()
+        now = self._layout_now()
+        self._menu_caption(menu, "Layouts of the window")
+        for name, keys, tip in LAYOUTS:
+            self._menu_item(menu, "layout", name, lambda keys=keys, name=name: self._apply_layout({"shown": list(keys)}, name),
+                            tip, hint="✓" if set(keys) == set(now["shown"]) else "")
+        own = self._own_layouts()
+        if own:
+            menu.addSeparator()
+            self._menu_caption(menu, "Yours")
+            for name, layout in own.items():
+                same = (set(layout.get("shown") or []) == set(now["shown"]) and
+                        set(layout.get("folded") or []) == set(now["folded"]) and list(layout.get("order") or []) == now["order"])
+                self._menu_item(menu, "bookmark", name, lambda layout=layout, name=name: self._apply_layout(layout, name),
+                                ", ".join(layout.get("shown") or []), hint="✓" if same else "")
+        menu.addSeparator()
+        self._menu_caption(menu, "Save the window as it is — a name:")
+        _field_action(menu, "", "Layout name", self._save_layout)
+        if own:
+            removing = menu.addMenu("Remove a layout of yours")
+            for name in own:
+                self._menu_item(removing, "delete", name, lambda name=name: self._remove_layout(name))
+        return menu
 
     def _card(self, key: str) -> FoldingCard:
-        return {"control": self._control_card, "color": self._color, "channels": self._channels,
-                "transforms": self._transforms}.get(key, self._attributes)
+        return {"selected": self._selected_card, "control": self._control_card, "color": self._color,
+                "channels": self._channels, "transforms": self._transforms}.get(key, self._attributes)
 
     def _card_extras(self, key: str) -> tuple:
-        if key in ("control", "color", "transforms"):
+        if key in ("selected", "control", "color", "transforms"):
             return ()                 # (CONTROL's heading looks after its own: _show_heading)
         return self._attr_extras if key == "attributes" else (self._open_all, self._reset_values)
 

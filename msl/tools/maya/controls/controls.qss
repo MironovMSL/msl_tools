@@ -407,3 +407,10 @@ ControlsPanel QLabel#controlsHint {
     color: var(--warning);
     font-size: 11px;
 }
+
+/* The header's layouts button. */
+ControlsWindow GlyphButton#controlsHeaderGear {
+    qproperty-glyphColor:       var(--text-secondary);
+    qproperty-activeGlyphColor: var(--accent);
+    qproperty-highlightColor:   alpha(var(--accent), 16%);
+}

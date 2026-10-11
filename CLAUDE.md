@@ -226,7 +226,7 @@ msl_tools/                 (repo root)
     named by what the icon IS, not the gesture (`drag_handle`, not
     `dragAndDrop`). Categories: `window/` (chrome: close/maximize/...),
     `actions/` (row/toolbar actions: `drag_handle`, `copy`, `delete`,
-    `browse`, `folder_add`, `file_video`, `bookmark`, `bookmark_add`, `save`, `file_add`, `chevron_right`, `eye`, `folder_into`, `compress`, `scissors`, `repeat`, `text_frame`, `volume`, `gif`, `image_stack`, `clapper`, `crop`, `merge`, `split_view`, `film`, `timeline`, `folder_watch`, `pause`, `bell` (the Media actions and its queue), `clear`, `arrow_right`, `chevron_down`, `add`, `check`, `select_all`, `more`, `report`, `code`, `restart`, `power`, `play`, `edit`, `scene`, `stop`, `lock`, `search`, `rename`, and the Rename tool's quick buttons: `case_upper`, `case_capital`, `case_lower`, `case_snake` (a snake), `case_camel` (a camel's humps), `cut_prefix`, `cut_suffix`, `cut_number`, `cut_digits`, `cut_first`, `cut_last`, `namespace_out`, `magic_fix`, `sweep`, `mirror_sides`, `shape_name`, `warning`, `error`, `keyboard` (Maya Gate's EN), and the Rename strip's `names_same`, `name_bad`, `skin_joints`, `side_other`, `lock_find`, `convention_check`, `names_unique`, `name_related`, `convention_fix`, `unlock`, `sets`, `star`, `sliders`, `book`, `replace`, `skin_mesh` (the grey cube under `skin_joints`), `branch`, and the Controls tool's `controls`, `grow`, `shrink`, `outliner`, `color_pick`, `line_width`, `mirror_shape`, `mirror_update`, `zero_out`, `zero_matrix`, `matrix_out`, `on_top`, `cvs`, `paste`, `drive_constraint`, `drive_matrix`, `drive_off`, `locator`, `joint_chain`, `center`, `move`, `minus`, `smooth_curve`, `expand`, `collapse`, `undo`, `redo`, `snap_grid`, `chevron_left`, `chevron_up`, `joint_node`, `joint_shape`, `joints_separate`, `shape_off`, `eye_off`, `same_shape`, `channels`, `attributes`, `keyframe`, `range`, `viewport`, `shade_lighter`, `shade_darker`, `brush` (the COLOR card and its header button; `color_pick` stays the pipette of "take the color") (`joint_chain` = a ball and a tapering bone to a smaller ball, like Maya's own joint icon); add new action icons here),
+    `browse`, `folder_add`, `file_video`, `bookmark`, `bookmark_add`, `save`, `file_add`, `chevron_right`, `eye`, `folder_into`, `compress`, `scissors`, `repeat`, `text_frame`, `volume`, `gif`, `image_stack`, `clapper`, `crop`, `merge`, `split_view`, `film`, `timeline`, `folder_watch`, `pause`, `bell` (the Media actions and its queue), `clear`, `arrow_right`, `chevron_down`, `add`, `check`, `select_all`, `more`, `report`, `code`, `restart`, `power`, `play`, `edit`, `scene`, `stop`, `lock`, `search`, `rename`, and the Rename tool's quick buttons: `case_upper`, `case_capital`, `case_lower`, `case_snake` (a snake), `case_camel` (a camel's humps), `cut_prefix`, `cut_suffix`, `cut_number`, `cut_digits`, `cut_first`, `cut_last`, `namespace_out`, `magic_fix`, `sweep`, `mirror_sides`, `shape_name`, `warning`, `error`, `keyboard` (Maya Gate's EN), and the Rename strip's `names_same`, `name_bad`, `skin_joints`, `side_other`, `lock_find`, `convention_check`, `names_unique`, `name_related`, `convention_fix`, `unlock`, `sets`, `star`, `sliders`, `book`, `replace`, `skin_mesh` (the grey cube under `skin_joints`), `branch`, and the Controls tool's `controls`, `grow`, `shrink`, `outliner`, `color_pick`, `line_width`, `mirror_shape`, `mirror_update`, `zero_out`, `zero_matrix`, `matrix_out`, `on_top`, `cvs`, `paste`, `drive_constraint`, `drive_matrix`, `drive_off`, `locator`, `joint_chain`, `center`, `move`, `minus`, `smooth_curve`, `expand`, `collapse`, `undo`, `redo`, `snap_grid`, `chevron_left`, `chevron_up`, `layout`, `joint_node`, `joint_shape`, `joints_separate`, `shape_off`, `eye_off`, `same_shape`, `channels`, `attributes`, `keyframe`, `range`, `viewport`, `shade_lighter`, `shade_darker`, `brush` (the COLOR card and its header button; `color_pick` stays the pipette of "take the color") (`joint_chain` = a ball and a tapering bone to a smaller ball, like Maya's own joint icon); add new action icons here),
     `apps/` (third-party application logos: `maya`; later houdini, blender...
     — named after the app, not the tool that uses it, so several tools can
     share one), `tools/` (sidebar icons of our OWN hub tools, one-color like
@@ -3135,6 +3135,25 @@ axis (`flip`). ZERO THE SELECTED (`actions/zero_out`, in the Zero row): the mode
   of the SELECTED card's Drive buttons (drive_constraint, drive_matrix, drive_off) -, pink and lit while
   it drives, grey and hollow when it doesn't, a short line into it and out of it. Still clickable (the
   Drive menu for a new control). Rendered offscreen in the three states; minimum width 437.
+- Header + layouts + the panel in parts (2026-10-11, the user's picks 2 / 3 / 4):
+  SELECTED has a header button like every other card (`MAIN_CARDS` = selected, control, color; `CARDS` =
+  channels, attributes, transforms; `ALL_KEYS`); a click on a heading still only folds.
+  LAYOUTS of the window (the header's last button, GlyphButton#controlsHeaderGear, icon `actions/layout`;
+  `_layouts_menu`): ready ones (`LAYOUTS`: Create, Color, Channels & attributes, Transforms, Everything -
+  they say only which cards are SHOWN, fold state and order stay the user's) and the user's own
+  (`settings.layouts`: name -> {shown, folded, order}; `_layout_now` / `_apply_layout` / `_save_layout` /
+  `_remove_layout`; a name typed in the menu saves the window as it is); the one that fits is ticked.
+  panel.py was 2520 lines: its methods were MOVED AS THEY WERE (text slices, no line rewritten) into
+  mixins - `panel_selected.py` _SelectedMixin (the SELECTED card and what a hovered button would do),
+  `panel_library.py` _LibraryMixin + ShapeGrid / CategoryBox (the library, favorites, the grid's menu),
+  `panel_editor.py` _EditorMixin (handing a shape to the editor and back), `panel_common.py` (the fixed
+  choices and sizes, no Qt); panel.py keeps the build, the live preview, the ghost, the hierarchy line,
+  settings, Create and the cards' order. `_copied_shape` is `_SelectedMixin`'s class attribute.
+  A method named the same in two of these silently wins over the other (it happened: saved colors) -
+  the unit test `test_the_panel_and_its_mixins_share_no_method_name` lists EVERY mixin; add a new one.
+  Checked: unit tests; the offscreen tests give the same output with the split panel and with the file
+  as it was; windowed Maya 2026 from an isolated copy - the COLOR and TRANSFORMS runs pass. Layouts were
+  checked offscreen only (10 checks), the header buttons not by hand.
 
 ## Batch tool
 
