@@ -214,6 +214,27 @@ def own_attributes(node: str) -> list:
     return found
 
 
+def differing(nodes: list, names, most: int = 60) -> set:
+    """The attributes whose VALUE is not the same on every selected object that has them (the rows
+    show the first object's). At most `most` objects are looked at."""
+    found = set()
+    if len(nodes) < 2:
+        return found
+    for name in names:
+        values = []
+        for node in nodes[:most]:
+            if not cmds.attributeQuery(name, node=node, exists=True):
+                continue
+            try:
+                values.append(cmds.getAttr(f"{node}.{name}"))
+            except (RuntimeError, ValueError):
+                continue
+        if len(values) > 1 and any(isinstance(value, (int, float, bool)) and isinstance(values[0], (int, float, bool))
+                                   and abs(float(value) - float(values[0])) > 1e-6 for value in values[1:]):
+            found.add(name)
+    return found
+
+
 def summary(info: dict) -> str:
     """One quiet line about an attribute: its kind and range, or its names."""
     kind = info["kind"]

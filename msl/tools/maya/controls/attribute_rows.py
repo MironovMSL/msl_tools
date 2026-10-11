@@ -337,6 +337,7 @@ class AttributeRow(qt.QtWidgets.QWidget):
     selectedColor = color_property("_selected_color", "update")
     keyedColor = color_property("_keyed_color", "update")       # the mark: it has keys
     drivenColor = color_property("_driven_color", "update")     # the mark: a connection feeds it
+    mixedColor = color_property("_mixed_color", "update")       # "≠": the selected objects differ here
     lineColor = color_property("_line_color", "update")         # a separator's line
 
     def __init__(self, info: dict, parent=None):
@@ -347,6 +348,7 @@ class AttributeRow(qt.QtWidgets.QWidget):
         self._selected_color = qt.QtGui.QColor(theme.accent)
         self._keyed_color = qt.QtGui.QColor(theme.error)
         self._driven_color = qt.QtGui.QColor(theme.warning)
+        self._mixed_color = qt.QtGui.QColor(theme.warning)
         self._line_color = qt.QtGui.QColor(theme.text_secondary)
         self.info = dict(info)
         self.name = info["name"]
@@ -527,6 +529,12 @@ class AttributeRow(qt.QtWidgets.QWidget):
                 value.setCurrentIndex(index)
                 value.blockSignals(False)
             value.setEnabled(not read_only)
+        if info.get("mixed") and value is not None:
+            value.setToolTip((value.toolTip() + "\n" if value.toolTip() else "") +
+                             "≠ The selected objects hold DIFFERENT values here — this is the first one's; "
+                             "changing it gives them all the same")
+        elif isinstance(value, (BaseCheckbox, BaseComboBox)):
+            value.setToolTip("")
         state = "key" if info["keyable"] else "shown" if info["shown"] else "hidden"
         self._key.setText({"key": "K", "shown": "·", "hidden": "–"}[state])
         if (self._key.property("state") or "") != state:
@@ -644,6 +652,15 @@ class AttributeRow(qt.QtWidgets.QWidget):
             painter.setPen(qt.QtCore.Qt.PenStyle.NoPen)
             painter.setBrush(self._keyed_color if info.get("keyed") else self._driven_color)
             painter.drawRoundedRect(qt.QtCore.QRectF(self._grip.geometry().right() + 4, 6, 3, self.height() - 12), 1.5, 1.5)
+        if info.get("mixed") and self.kind != SEPARATOR and self._value is not None:
+            # the selected objects don't hold the same value here: "≠" right before the value
+            holder = self._value.parentWidget()
+            font = painter.font()
+            font.setBold(True)
+            painter.setFont(font)
+            painter.setPen(self._mixed_color)
+            painter.drawText(qt.QtCore.QRectF(holder.geometry().left() - 16, 0, 14, self.height()),
+                             qt.QtCore.Qt.AlignmentFlag.AlignCenter, "≠")
         painter.end()
 
 

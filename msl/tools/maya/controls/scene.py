@@ -1635,6 +1635,29 @@ def move_color(transforms: list, source: str, target: str) -> int:
     return count
 
 
+def shade_colors(transforms: list, lighter: bool) -> int:
+    """Every color the objects wear — on their shapes, on themselves, in the Outliner — a step lighter
+    or darker (colors.shaded). An INDEX color becomes an RGB one (an index can't be shaded). One undo
+    step; how many objects had a color."""
+    count = 0
+    with _Chunk():
+        for transform in transforms:
+            had = False
+            for node in _own_shapes(transform) + [transform]:
+                rgb, _index = _override(node)
+                if rgb is None:
+                    continue
+                had = True
+                _set(node + ".overrideRGBColors", 1)
+                _set(node + ".overrideColorRGB", *colors.shaded(rgb, lighter))
+            if cmds.getAttr(transform + ".useOutlinerColor"):
+                shown = colors.from_outliner(cmds.getAttr(transform + ".outlinerColor")[0])
+                _set(transform + ".outlinerColor", *colors.to_outliner(colors.shaded(shown, lighter)))
+                had = True
+            count += had
+    return count
+
+
 def read_color(transform: str):
     """(rgb, index) the object is drawn in: its first shape's override, else its own; index None
     for an RGB override; (None, None) when it has none — then its Outliner color if it has one."""

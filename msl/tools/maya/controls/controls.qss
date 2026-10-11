@@ -281,6 +281,7 @@ ControlsPanel AttributeRow {
     qproperty-selectedColor: var(--accent);
     qproperty-keyedColor: var(--danger);
     qproperty-drivenColor: var(--yellow);
+    qproperty-mixedColor: var(--warning);
     qproperty-lineColor: alpha(var(--text-secondary), 90%);
 }
 ControlsPanel QLabel#controlsAttrName { color: var(--text-primary); }

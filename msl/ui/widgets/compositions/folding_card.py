@@ -18,9 +18,14 @@ class FoldingCard(qt.QtWidgets.QFrame):
 
     Signals:
         toggled(bool) — the heading was clicked; True = open now.
+        drag_moved(card, global position) / drag_released(card) — the heading is being dragged up or
+            down (an owner that lets its cards be put in another order listens; a drag is no click:
+            the card is not folded by it).
     """
 
     toggled = qt.QtCore.Signal(bool)
+    drag_moved = qt.QtCore.Signal(object, object)
+    drag_released = qt.QtCore.Signal(object)
 
     def __init__(self, title: str, icon: "qt.QtGui.QIcon | None" = None, extras=(), parent=None):
         super().__init__(parent)
@@ -79,9 +84,27 @@ class FoldingCard(qt.QtWidgets.QFrame):
         self._summary.setText("" if self._open else text)
 
     def eventFilter(self, watched, event) -> bool:
-        if (watched is self._header and event.type() == qt.QtCore.QEvent.Type.MouseButtonRelease
-                and event.button() == qt.QtCore.Qt.MouseButton.LeftButton):
-            self.set_open(not self._open)
-            self.toggled.emit(self._open)
-            return True
+        if watched is self._header:
+            kind = event.type()
+            if kind == qt.QtCore.QEvent.Type.MouseButtonPress and event.button() == qt.QtCore.Qt.MouseButton.LeftButton:
+                self._press, self._dragging = event.globalPosition().toPoint(), False
+                return True
+            if kind == qt.QtCore.QEvent.Type.MouseMove and getattr(self, "_press", None) is not None:
+                where = event.globalPosition().toPoint()
+                if not self._dragging and abs(where.y() - self._press.y()) >= \
+                        qt.QtWidgets.QApplication.startDragDistance() + 4:
+                    self._dragging = True
+                    self._header.setCursor(qt.QtCore.Qt.CursorShape.ClosedHandCursor)
+                if self._dragging:
+                    self.drag_moved.emit(self, where)
+                return True
+            if kind == qt.QtCore.QEvent.Type.MouseButtonRelease and event.button() == qt.QtCore.Qt.MouseButton.LeftButton:
+                dragged, self._press, self._dragging = getattr(self, "_dragging", False), None, False
+                if dragged:
+                    self._header.setCursor(qt.QtCore.Qt.CursorShape.PointingHandCursor)
+                    self.drag_released.emit(self)
+                    return True
+                self.set_open(not self._open)
+                self.toggled.emit(self._open)
+                return True
         return super().eventFilter(watched, event)

@@ -226,7 +226,7 @@ msl_tools/                 (repo root)
     named by what the icon IS, not the gesture (`drag_handle`, not
     `dragAndDrop`). Categories: `window/` (chrome: close/maximize/...),
     `actions/` (row/toolbar actions: `drag_handle`, `copy`, `delete`,
-    `browse`, `folder_add`, `file_video`, `bookmark`, `bookmark_add`, `save`, `file_add`, `chevron_right`, `eye`, `folder_into`, `compress`, `scissors`, `repeat`, `text_frame`, `volume`, `gif`, `image_stack`, `clapper`, `crop`, `merge`, `split_view`, `film`, `timeline`, `folder_watch`, `pause`, `bell` (the Media actions and its queue), `clear`, `arrow_right`, `chevron_down`, `add`, `check`, `select_all`, `more`, `report`, `code`, `restart`, `power`, `play`, `edit`, `scene`, `stop`, `lock`, `search`, `rename`, and the Rename tool's quick buttons: `case_upper`, `case_capital`, `case_lower`, `case_snake` (a snake), `case_camel` (a camel's humps), `cut_prefix`, `cut_suffix`, `cut_number`, `cut_digits`, `cut_first`, `cut_last`, `namespace_out`, `magic_fix`, `sweep`, `mirror_sides`, `shape_name`, `warning`, `error`, `keyboard` (Maya Gate's EN), and the Rename strip's `names_same`, `name_bad`, `skin_joints`, `side_other`, `lock_find`, `convention_check`, `names_unique`, `name_related`, `convention_fix`, `unlock`, `sets`, `star`, `sliders`, `book`, `replace`, `skin_mesh` (the grey cube under `skin_joints`), `branch`, and the Controls tool's `controls`, `grow`, `shrink`, `outliner`, `color_pick`, `line_width`, `mirror_shape`, `mirror_update`, `zero_out`, `zero_matrix`, `matrix_out`, `on_top`, `cvs`, `paste`, `drive_constraint`, `drive_matrix`, `drive_off`, `locator`, `joint_chain`, `center`, `move`, `minus`, `smooth_curve`, `expand`, `collapse`, `undo`, `redo`, `snap_grid`, `chevron_left`, `chevron_up`, `joint_node`, `joint_shape`, `joints_separate`, `shape_off`, `eye_off`, `same_shape`, `channels`, `attributes`, `keyframe`, `range`, `viewport`, `brush` (the COLOR card and its header button; `color_pick` stays the pipette of "take the color") (`joint_chain` = a ball and a tapering bone to a smaller ball, like Maya's own joint icon); add new action icons here),
+    `browse`, `folder_add`, `file_video`, `bookmark`, `bookmark_add`, `save`, `file_add`, `chevron_right`, `eye`, `folder_into`, `compress`, `scissors`, `repeat`, `text_frame`, `volume`, `gif`, `image_stack`, `clapper`, `crop`, `merge`, `split_view`, `film`, `timeline`, `folder_watch`, `pause`, `bell` (the Media actions and its queue), `clear`, `arrow_right`, `chevron_down`, `add`, `check`, `select_all`, `more`, `report`, `code`, `restart`, `power`, `play`, `edit`, `scene`, `stop`, `lock`, `search`, `rename`, and the Rename tool's quick buttons: `case_upper`, `case_capital`, `case_lower`, `case_snake` (a snake), `case_camel` (a camel's humps), `cut_prefix`, `cut_suffix`, `cut_number`, `cut_digits`, `cut_first`, `cut_last`, `namespace_out`, `magic_fix`, `sweep`, `mirror_sides`, `shape_name`, `warning`, `error`, `keyboard` (Maya Gate's EN), and the Rename strip's `names_same`, `name_bad`, `skin_joints`, `side_other`, `lock_find`, `convention_check`, `names_unique`, `name_related`, `convention_fix`, `unlock`, `sets`, `star`, `sliders`, `book`, `replace`, `skin_mesh` (the grey cube under `skin_joints`), `branch`, and the Controls tool's `controls`, `grow`, `shrink`, `outliner`, `color_pick`, `line_width`, `mirror_shape`, `mirror_update`, `zero_out`, `zero_matrix`, `matrix_out`, `on_top`, `cvs`, `paste`, `drive_constraint`, `drive_matrix`, `drive_off`, `locator`, `joint_chain`, `center`, `move`, `minus`, `smooth_curve`, `expand`, `collapse`, `undo`, `redo`, `snap_grid`, `chevron_left`, `chevron_up`, `joint_node`, `joint_shape`, `joints_separate`, `shape_off`, `eye_off`, `same_shape`, `channels`, `attributes`, `keyframe`, `range`, `viewport`, `shade_lighter`, `shade_darker`, `brush` (the COLOR card and its header button; `color_pick` stays the pipette of "take the color") (`joint_chain` = a ball and a tapering bone to a smaller ball, like Maya's own joint icon); add new action icons here),
     `apps/` (third-party application logos: `maya`; later houdini, blender...
     — named after the app, not the tool that uses it, so several tools can
     share one), `tools/` (sidebar icons of our OWN hub tools, one-color like
@@ -3024,6 +3024,39 @@ axis (`flip`). ZERO THE SELECTED (`actions/zero_out`, in the Zero row): the mode
   Checked in windowed Maya 2026 from an isolated copy: five selections (which way each takes, what the
   selection and each viewport's highlight are during and after), a click during a look, the window closed
   during a look.
+- No scroll bar flashing while the window follows its content (2026-10-11, the user saw it on every card
+  shown from the header): between the content growing and the window growing after it (the fit timer) the
+  content is taller than the view, so the bar showed for a moment. `StableScrollArea.hold_bar(True)` keeps
+  the bar out of sight; ControlsWindow / RenameWindow hold it when a fit is scheduled (`_schedule_fit`) and
+  let go one event-loop turn after `_fit_height` — the bar then shows only if the window could not grow
+  enough (the screen ended) or was made smaller by hand. The Controls fit timer is 15 ms now.
+  Checked offscreen from an isolated copy (the bar's visibility sampled through a show / hide of cards).
+- A round of five + a Rename fix (2026-10-11, the user's picks 1, 3, 4, 9, 10 of ten):
+  TRANSFORMS card (`transforms.py` maya.cmds + `panel_transforms.py` `_TransformsMixin`; the header's fifth
+  button, icon `move`, hidden until wanted): three rows of word buttons Move / Rotate / Scale / All -
+  MATCH (every selected object but the LAST is put where the last one is: `cmds.matchTransform`), RESET
+  (channels back to 0 / scale 1) and FREEZE (`makeIdentity -apply`) - and WORLD Copy / Paste (an
+  object's world matrix kept by the CLASS; pasted with `xform -worldSpace -matrix`, parents first, so a
+  child of a moved parent lands in the same place). A locked or driven object is left and named.
+  CARDS IN THE USER'S ORDER: a card is dragged by its heading (`FoldingCard.drag_moved / drag_released`:
+  a press that travels up or down past the drag distance is a drag and does NOT fold the card; an accent
+  line shows where it lands) -> `ControlsPanel._on_card_dragged / _on_card_dropped` re-insert it in the
+  column; `settings.card_order` (keys of `self._cards`: selected, control, color, channels, attributes,
+  transforms; a hidden card keeps its place; a key missing from an older setting goes last). The header's
+  buttons keep their own fixed order.
+  COLOR: Darker / Lighter (`shade_darker` a moon, `shade_lighter` a sun; `scene.shade_colors` ->
+  `colors.shaded`: the same hue a step of 0.15 in value; at full value the saturation goes instead, so a
+  full red still gets lighter; an INDEX color becomes an RGB one; shapes, the transform and the Outliner
+  color alike) and an eye toggle that switches the look under the pointer off (`settings.try_colors`).
+  ATTRIBUTES: the rows show the FIRST selected object's values - where the others hold another one
+  (`attributes.differing`, at most 60 objects) the row paints a warning "not equal" mark before the value
+  and the tooltip says so; setting the value gives them all the same.
+  RENAME: a click on WORDS / FIND & REPLACE's heading only FOLDS the card now (`settings.card_folded`); only
+  the header's button puts it away (`settings.folded.words / .find` still means "put away", as before).
+  Checked: unit tests (the shading, no method name shared by the panel and its four parts); offscreen from
+  an isolated copy (the card order with mouse events: 11 checks); windowed Maya 2026 (match with a locked
+  object left, undo, match all, reset rotate, freeze with the points staying, world paste onto a child,
+  darker / lighter + three undos, the look off and on, mixed values, Rename's fold / hide / next window).
 
 ## Batch tool
 

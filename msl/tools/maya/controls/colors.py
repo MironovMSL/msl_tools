@@ -51,6 +51,24 @@ def from_hex(text: str) -> tuple:
     return tuple(int(text[index:index + 2], 16) / 255.0 for index in (0, 2, 4))
 
 
+SHADE_STEP = 0.15           # one click of Lighter / Darker
+
+
+def shaded(rgb, lighter: bool, step: float = SHADE_STEP) -> tuple:
+    """The same hue a step lighter or darker. Darker lowers the value; lighter raises it and — once
+    the value is full — lets the saturation go, so a full red still gets lighter (towards pink)."""
+    import colorsys
+    hue, saturation, value = colorsys.rgb_to_hsv(*[max(0.0, min(1.0, float(channel))) for channel in rgb[:3]])
+    if lighter:
+        room = 1.0 - value
+        value = min(1.0, value + step)
+        if room < step:
+            saturation = max(0.0, saturation - (step - room))
+    else:
+        value = max(0.05, value - step)
+    return tuple(round(channel, 4) for channel in colorsys.hsv_to_rgb(hue, saturation, value))
+
+
 def to_outliner(rgb) -> tuple:
     """The values to give the Outliner so it shows what the (color managed) viewport shows."""
     return tuple(round(max(0.0, min(1.0, value)) ** (1.0 / GAMMA), 4) for value in rgb)

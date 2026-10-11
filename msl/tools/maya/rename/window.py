@@ -49,7 +49,8 @@ class RenameWindow(FramelessDialog):
         self._fit_timer.setSingleShot(True)
         self._fit_timer.setInterval(40)
         self._fit_timer.timeout.connect(self._fit_height)
-        body = self.panel.findChild(qt.QtWidgets.QScrollArea, "renameScroll").widget()
+        self._scroll = self.panel.findChild(qt.QtWidgets.QScrollArea, "renameScroll")
+        body = self._scroll.widget()
         body.installEventFilter(self)
         self._body = body
         self.panel.fit_changed.connect(lambda on: self._fit_timer.start() if on else None)
@@ -80,25 +81,35 @@ class RenameWindow(FramelessDialog):
             self._fit_status()
         elif watched is getattr(self, "_body", None) and event.type() == qt.QtCore.QEvent.Type.LayoutRequest:
             if self.panel.fits_height():
+                # (the scroll bar is held back until the window has followed the content: it flashed)
+                if hasattr(self._scroll, "hold_bar"):
+                    self._scroll.hold_bar(True)
                 self._fit_timer.start()
         return super().eventFilter(watched, event)
 
     def _fit_height(self) -> None:
-        if not self.isVisible() or self.isMaximized() or not self.panel.fits_height():
-            return
-        change = self.panel.content_height_change()
-        if abs(change) < 2:
-            return
-        screen = self.screen().availableGeometry() if self.screen() is not None else None
-        top = self.geometry().top()
-        wanted = self.height() + change
-        if screen is not None:
-            wanted = min(wanted, screen.bottom() - top + 1)
-        wanted = max(wanted, self.minimumHeight())
-        if wanted != self.height():
-            self._fitting = True
-            self.resize(self.width(), wanted)
-            self._fitting = False
+        try:
+            if not self.isVisible() or self.isMaximized() or not self.panel.fits_height():
+                return
+            change = self.panel.content_height_change()
+            if abs(change) < 2:
+                return
+            screen = self.screen().availableGeometry() if self.screen() is not None else None
+            top = self.geometry().top()
+            wanted = self.height() + change
+            if screen is not None:
+                wanted = min(wanted, screen.bottom() - top + 1)
+            wanted = max(wanted, self.minimumHeight())
+            if wanted != self.height():
+                self._fitting = True
+                self.resize(self.width(), wanted)
+                self._fitting = False
+        finally:
+            qt.QtCore.QTimer.singleShot(0, self._release_bar)
+
+    def _release_bar(self) -> None:
+        if hasattr(self._scroll, "hold_bar") and not self._fit_timer.isActive():
+            self._scroll.hold_bar(False)
 
     def showEvent(self, event) -> None:
         super().showEvent(event)

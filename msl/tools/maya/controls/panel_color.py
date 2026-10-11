@@ -79,6 +79,17 @@ class _ColorMixin:
         own.addSpacing(2)
         own.addWidget(self._saved, 0, qt.QtCore.Qt.AlignmentFlag.AlignVCenter)
         own.addStretch(1)
+        self._try_toggle = ToggleIconButton(icons.get_icon("eye", sub_folder="actions"), "Try a color on",
+                                            "A color under the pointer is tried on the selection before you "
+                                            "click (the viewports' selection highlight steps aside for it). "
+                                            "Off: nothing happens until the click")
+        self._try_toggle.setObjectName("controlsToggle")
+        self._darker = self._tool_button("shade_darker", "Darker", "The selected objects' color a step darker — "
+                                         "the same hue, quieter (secondary controls)")
+        self._lighter = self._tool_button("shade_lighter", "Lighter", "The selected objects' color a step lighter")
+        own.addWidget(self._try_toggle)
+        own.addWidget(self._darker)
+        own.addWidget(self._lighter)
         own.addWidget(self._by_side)
 
         # the colors this scene's controls already wear: to hit the same ones without matching by eye
@@ -146,6 +157,9 @@ class _ColorMixin:
             toggle.toggled.connect(self._save_color_settings)
         self._color_on.current_changed.connect(self._save_color_settings)
         self._by_side.clicked.connect(self._on_by_side)
+        self._darker.clicked.connect(lambda: self._shade(False))
+        self._lighter.clicked.connect(lambda: self._shade(True))
+        self._try_toggle.toggled.connect(self._on_try_toggled)
         for place, mark in self._place_marks.items():
             mark.clicked.connect(lambda _checked=False, place=place: self._on_place_clicked(place))
             mark.customContextMenuRequested.connect(
@@ -288,6 +302,7 @@ class _ColorMixin:
     def _apply_color_settings(self) -> None:
         s = self._settings
         colors.set_side_colors(dict(s.get("side_colors") or {}))
+        self._try_toggle.setChecked(bool(s.get("try_colors", True)))
         self._to_viewport.setChecked(bool(s.get("color_viewport", True)))
         self._to_outliner.setChecked(bool(s.get("color_outliner", False)))
         target = s.get("color_on", "Shape")
@@ -302,7 +317,8 @@ class _ColorMixin:
     def _save_color_settings(self, *_args) -> None:
         if self._loading:
             return
-        values = {"color_viewport": self._to_viewport.isChecked(), "color_outliner": self._to_outliner.isChecked(),
+        values = {"try_colors": self._try_toggle.isChecked(),
+                  "color_viewport": self._to_viewport.isChecked(), "color_outliner": self._to_outliner.isChecked(),
                   "color_on": self._color_on.current(), "own_color": self._own.hex(), "line_width": self._line.value()}
         for key, value in values.items():
             if self._settings.get(key) != value:
@@ -361,12 +377,29 @@ class _ColorMixin:
     def _on_color_hover(self, kind: str, key: str) -> None:
         """The pointer is over a color (or left: key ""): the selection wears it for as long — a look
         only, no undo step; the click gives it for real."""
-        self._try_wanted = (kind, key) if key else None
-        if key:
+        self._try_wanted = (kind, key) if key and self._try_toggle.isChecked() else None
+        if self._try_wanted:
             self._try_timer.start()         # (sweeping over the palette must not flicker the scene)
         else:
             self._try_timer.stop()
             self._end_try()
+
+    def _on_try_toggled(self, _on: bool) -> None:
+        self._end_try()
+        self._save_color_settings()
+
+    def _shade(self, lighter: bool) -> None:
+        from msl_tools.msl.tools.maya.controls import scene
+        self._end_try()
+        targets = scene.selected_transforms()
+        if not targets:
+            self._say("Select the objects first", "error")
+            return
+        count = scene.shade_colors(targets, lighter)
+        self._say(f"{count} {'lighter' if lighter else 'darker'} · Ctrl+Z undoes it" if count else
+                  "Nothing to shade: the selection has no color yet", "done" if count else "")
+        self._palette.set_current("")
+        self.refresh_scene_colors()
 
     def _try_hovered(self) -> None:
         wanted = self._try_wanted

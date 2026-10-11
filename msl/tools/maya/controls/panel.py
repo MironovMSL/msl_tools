@@ -13,6 +13,7 @@ from msl_tools.msl.tools.maya.controls.editor import ShapeEditor, axis_step_butt
 from msl_tools.msl.tools.maya.controls.naming import DEFAULT_TEMPLATE, control_name
 from msl_tools.msl.tools.maya.controls.panel_attributes import _AttributesMixin
 from msl_tools.msl.tools.maya.controls.panel_color import _ColorMixin
+from msl_tools.msl.tools.maya.controls.panel_transforms import _TransformsMixin
 from msl_tools.msl.tools.maya.controls.preview import ShapeView, thumbnail
 from msl_tools.msl.tools.maya.controls.widgets import DragNumberField, HierarchyStrip, Swatches, TurnButton
 from msl_tools.msl.tools.maya.rename import rules
@@ -402,7 +403,7 @@ class ShapeGrid(qt.QtWidgets.QListWidget):
         return item.data(qt.QtCore.Qt.ItemDataRole.UserRole) if item is not None else ""
 
 
-class ControlsPanel(_ColorMixin, _AttributesMixin, qt.QtWidgets.QWidget):
+class ControlsPanel(_ColorMixin, _AttributesMixin, _TransformsMixin, qt.QtWidgets.QWidget):
     """The tool (shown in a ControlsWindow). Settings and the user's shapes: configsMayaMng
     "controls" (`settings`, `shapes`).
 
@@ -622,18 +623,84 @@ class ControlsPanel(_ColorMixin, _AttributesMixin, qt.QtWidgets.QWidget):
         column = qt.QtWidgets.QVBoxLayout(body)
         column.setContentsMargins(10, 8, 4, 8)
         column.setSpacing(6)
-        column.addWidget(self._selected_tools())
-        column.addWidget(card)
-        column.addWidget(self._color_card())
-        column.addWidget(self._channels_card())          # these two: shown by the header's buttons
-        column.addWidget(self._attributes_card())
+        self._column = column
+        # the cards, by key, in the order they are made in (the user drags them into his own:
+        # settings.card_order)
+        self._cards = {"selected": self._selected_tools(), "control": card, "color": self._color_card(),
+                       "channels": self._channels_card(), "attributes": self._attributes_card(),
+                       "transforms": self._transforms_card()}
+        for each in self._cards.values():
+            column.addWidget(each)
+            each.drag_moved.connect(self._on_card_dragged)
+            each.drag_released.connect(self._on_card_dropped)
         column.addStretch(1)
+        self._card_line = qt.QtWidgets.QFrame(body)        # where a dragged card would land
+        self._card_line.setObjectName("controlsAttrDrop")
+        self._card_line.hide()
+        self._card_drop = -1
         scroll = StableScrollArea()
         scroll.setObjectName("controlsScroll")
         scroll.setWidget(body)
         layout = qt.QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(scroll)
+
+    # ---- the cards in the user's own order: a card is dragged by its heading
+
+    def _shown_cards(self) -> list:
+        """The cards on screen, top to bottom."""
+        cards = [self._column.itemAt(index).widget() for index in range(self._column.count())]
+        return [card for card in cards if card is not None and card in self._cards.values() and not card.isHidden()]
+
+    def _card_order(self) -> list:
+        """Every card's key, top to bottom (the hidden ones too: they keep their place)."""
+        keys = {card: key for key, card in self._cards.items()}
+        cards = [self._column.itemAt(index).widget() for index in range(self._column.count())]
+        return [keys[card] for card in cards if card in keys]
+
+    def _apply_card_order(self) -> None:
+        wanted = [key for key in (self._settings.get("card_order") or []) if key in self._cards]
+        wanted += [key for key in self._cards if key not in wanted]
+        if wanted == self._card_order():
+            return
+        for key in wanted:
+            self._column.removeWidget(self._cards[key])
+        for index, key in enumerate(wanted):
+            self._column.insertWidget(index, self._cards[key])
+
+    def _on_card_dragged(self, card, position) -> None:
+        shown = self._shown_cards()
+        body = self._card_line.parentWidget()
+        y = body.mapFromGlobal(position).y()
+        index = len(shown)
+        for place, each in enumerate(shown):
+            if y < each.geometry().center().y():
+                index = place
+                break
+        self._card_drop = index
+        at = (shown[index].geometry().top() - 4) if index < len(shown) else (shown[-1].geometry().bottom() + 2)
+        self._card_line.setGeometry(card.geometry().left() + 6, max(0, at), card.width() - 12, 2)
+        self._card_line.show()
+        self._card_line.raise_()
+
+    def _on_card_dropped(self, card) -> None:
+        index, self._card_drop = self._card_drop, -1
+        self._card_line.hide()
+        shown = self._shown_cards()
+        if index < 0 or card not in shown:
+            return
+        source = shown.index(card)
+        if index in (source, source + 1):
+            return
+        before = shown[index] if index < len(shown) else None      # the card it lands in front of
+        self._column.removeWidget(card)
+        if before is None:
+            last = self._column.indexOf(shown[-1] if shown[-1] is not card else shown[-2])
+            self._column.insertWidget(last + 1, card)
+        else:
+            self._column.insertWidget(self._column.indexOf(before), card)
+        self._settings["card_order"] = self._card_order()
+        self._say("The cards are in your order — drag a card by its heading", "done")
 
     def content_height_change(self) -> int:
         """How much taller (+) or shorter (-) the panel wants to be to show everything without
@@ -1471,6 +1538,7 @@ class ControlsPanel(_ColorMixin, _AttributesMixin, qt.QtWidgets.QWidget):
         self._show_offset_names()
         self._apply_color_settings()
         self._apply_attribute_settings()
+        self._apply_card_order()
 
     def _save(self, *_args) -> None:
         if self._loading:

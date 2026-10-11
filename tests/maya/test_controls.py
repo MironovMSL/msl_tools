@@ -71,11 +71,27 @@ class BuiltIn(unittest.TestCase):
             self.fail(f"{class_name} not found in {file_name}")
 
         parts = {"panel": methods("panel.py", "ControlsPanel"), "color": methods("panel_color.py", "_ColorMixin"),
-                 "attributes": methods("panel_attributes.py", "_AttributesMixin")}
+                 "attributes": methods("panel_attributes.py", "_AttributesMixin"),
+                 "transforms": methods("panel_transforms.py", "_TransformsMixin")}
         names = sorted(parts)
         for index, one in enumerate(names):
             for other in names[index + 1:]:
                 self.assertEqual(sorted(parts[one] & parts[other]), [], f"{one} and {other} both define these")
+
+    def test_a_color_a_step_lighter_or_darker(self):
+        """The same hue, quieter or brighter; a full color still gets lighter (its saturation goes)."""
+        import colorsys
+        from msl_tools.msl.tools.maya.controls import colors
+        orange = (1.0, 0.5, 0.0)
+        darker, lighter = colors.shaded(orange, False), colors.shaded(orange, True)
+        hue = lambda rgb: round(colorsys.rgb_to_hsv(*rgb)[0], 2)
+        self.assertEqual((hue(darker), hue(lighter)), (hue(orange), hue(orange)))
+        self.assertLess(max(darker), max(orange))
+        self.assertGreater(min(lighter), min(orange))            # full value already: paler
+        self.assertLess(sum(colors.shaded(colors.shaded(orange, False), False)), sum(darker))
+        self.assertTrue(all(0.0 <= channel <= 1.0 for channel in colors.shaded((0.02, 0.02, 0.02), False)))
+        back = colors.shaded(darker, True)
+        self.assertTrue(all(abs(a - b) < 0.02 for a, b in zip(back, orange)))      # a step down, a step up
 
     def test_a_shape_as_a_maya_script(self):
         """The script for the Script Editor is plain maya.cmds and builds every curve of the shape."""

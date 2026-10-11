@@ -421,7 +421,11 @@ class RenamePanel(_WordsMixin, _FindMixin, _ObjectsMixin, qt.QtWidgets.QWidget):
         for group in self._groups:
             self._show_group(group)
         folded = dict(settings.get("folded") or {})
+        card_folded = dict(settings.get("card_folded") or {})
         for key in ("words", "find"):
+            # `folded` = put away altogether (the header's button; the name is from before a card could
+            # also be folded), `card_folded` = only folded, its heading left
+            (self._words if key == "words" else self._find).set_open(not card_folded.get(key, False))
             self._show_card(key, not folded.get(key, True), save=False)
         self._set_list_open(not dict(settings.get("folded") or {}).get("list", False), save=False)
         self._loading = False
@@ -1264,9 +1268,9 @@ class RenamePanel(_WordsMixin, _FindMixin, _ObjectsMixin, qt.QtWidgets.QWidget):
         return [self._card_toggles["words"], self._card_toggles["find"], gear]
 
     def _show_card(self, key: str, on: bool, save: bool = True) -> None:
-        """Shows a card open, or hides it altogether (its header button follows)."""
+        """The header's button: the card shown — folded or open, as it was left — or put away
+        altogether."""
         card = self._words if key == "words" else self._find
-        card.set_open(bool(on))
         if on:
             card.show()
         else:
@@ -1290,8 +1294,13 @@ class RenamePanel(_WordsMixin, _FindMixin, _ObjectsMixin, qt.QtWidgets.QWidget):
             scroll.verticalScrollBar().setValue(scroll.verticalScrollBar().maximum())
 
     def _on_card_toggled(self, key: str, opened: bool) -> None:
-        """A click on a card's heading: folding it hides it (the header's button brings it back)."""
-        self._show_card(key, opened)
+        """A click on a card's heading only FOLDS it (its heading stays, the header's button stays
+        lit); only the header's button puts a card away. Remembered (`settings.card_folded`)."""
+        folded = dict(self._settings.get("card_folded") or {})
+        folded[key] = not opened
+        self._settings["card_folded"] = folded
+        if key == "find":
+            self._on_find_folded(opened)
 
     def _on_settings_menu(self, button) -> None:
         from msl_tools.msl.ui.theme.qss import make_rounded_popup

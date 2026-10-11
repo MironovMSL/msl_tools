@@ -30,8 +30,18 @@ class StableScrollArea(qt.QtWidgets.QScrollArea):
         self.setVerticalScrollBar(SlimScrollBar(qt.QtCore.Qt.Orientation.Vertical))  # widens on hover
         self.viewport().setAutoFillBackground(False)
 
+        self._bar_held = False
         self.verticalScrollBar().rangeChanged.connect(self._on_range_changed)
         self._on_range_changed(0, self.verticalScrollBar().maximum())
+
+    def hold_bar(self, held: bool) -> None:
+        """While held, the scroll bar stays out of sight whatever the content's height. For an owner
+        whose WINDOW grows to fit the content a moment after the content grew: in between the content
+        is taller than the view, and the bar flashed up and went away again. Let go (`False`), the bar
+        shows if there is still something to scroll (the window couldn't grow: the screen ended)."""
+        if bool(held) != self._bar_held:
+            self._bar_held = bool(held)
+            self._on_range_changed(0, self.verticalScrollBar().maximum())
 
     def setWidget(self, widget: qt.QtWidgets.QWidget) -> None:
         super().setWidget(widget)
@@ -55,7 +65,7 @@ class StableScrollArea(qt.QtWidgets.QScrollArea):
     def _on_range_changed(self, _minimum: int, maximum: int) -> None:
         # Hides the bar only, never its container — the container is what
         # reserves the column, and it stays because the policy is AlwaysOn.
-        self.verticalScrollBar().setVisible(maximum > 0)
+        self.verticalScrollBar().setVisible(maximum > 0 and not self._bar_held)
 
 
 if __name__ == "__main__":

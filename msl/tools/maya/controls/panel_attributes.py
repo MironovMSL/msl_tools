@@ -34,14 +34,16 @@ STATE_WORDS = {"open": "open", "locked": "locked (still shown)", "hidden": "lock
 CARDS = (("channels", "channels", "Channels", "Lock and hide the move / rotate / scale channels of the selection, "
                                            "put values back, change the rotate order"),
          ("attributes", "attributes", "Attributes", "The selected object's own attributes: values, names, "
-                                                    "order, add and remove, copy and paste, saved sets"))
+                                                    "order, add and remove, copy and paste, saved sets"),
+         ("transforms", "move", "Transforms", "Match the selected objects to another, values back to rest, "
+                                              "freeze, a place in the world copied and pasted"))
 
 
 # the cards the header can also put away, shown unless switched off (the two above: hidden until wanted)
 MAIN_CARDS = (("control", "controls", "Control", "The shape library and how a new control is made"),
               ("color", "brush", "Color", "Colors of the selected controls: the palette, your own, the "
                                                "Outliner, the line's width"))
-SHOWN_AT_FIRST = {"control": True, "color": True, "channels": False, "attributes": False}
+SHOWN_AT_FIRST = {"control": True, "color": True, "channels": False, "attributes": False, "transforms": False}
 
 
 class _AttributesMixin:
@@ -225,7 +227,8 @@ class _AttributesMixin:
         rows.key_clicked.connect(self._on_attr_key_clicked)
         rows.lock_clicked.connect(self._on_attr_lock_clicked)
         rows.menu_requested.connect(self._on_attr_menu)
-        for key, card in (("channels", self._channels), ("attributes", self._attributes)):
+        for key, card in (("channels", self._channels), ("attributes", self._attributes),
+                          ("transforms", self._transforms)):
             # a click on the heading FOLDS the card, like the others; only the header's button puts
             # it away altogether and brings it back
             card.toggled.connect(lambda opened, key=key: self._on_card_folded(key, opened))
@@ -246,11 +249,11 @@ class _AttributesMixin:
         return list(self._card_toggles.values())
 
     def _card(self, key: str) -> FoldingCard:
-        return {"control": self._control_card, "color": self._color, "channels": self._channels}.get(
-            key, self._attributes)
+        return {"control": self._control_card, "color": self._color, "channels": self._channels,
+                "transforms": self._transforms}.get(key, self._attributes)
 
     def _card_extras(self, key: str) -> tuple:
-        if key in ("control", "color"):
+        if key in ("control", "color", "transforms"):
             return ()                 # (CONTROL's heading looks after its own: _show_heading)
         return self._attr_extras if key == "attributes" else (self._open_all, self._reset_values)
 
@@ -375,6 +378,10 @@ class _AttributesMixin:
             if scene_attributes is not None and nodes:
                 try:
                     rows = scene_attributes.own_attributes(nodes[0])
+                    # the rows show the FIRST object's values: where the others differ, say so
+                    differing = scene_attributes.differing(nodes, [info["name"] for info in rows])
+                    for info in rows:
+                        info["mixed"] = info["name"] in differing
                 except Exception as error:
                     self._report("Couldn't read the attributes", error)
             self._attr_rows.set_infos(rows)

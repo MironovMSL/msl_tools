@@ -45,9 +45,9 @@ class ControlsWindow(FramelessDialog):
         # editor — no empty room under it, nothing to scroll (clamped to the screen)
         self._fit_timer = qt.QtCore.QTimer(self)
         self._fit_timer.setSingleShot(True)
-        self._fit_timer.setInterval(40)
+        self._fit_timer.setInterval(15)
         self._fit_timer.timeout.connect(self._fit_height)
-        scroll = self.panel.findChild(qt.QtWidgets.QScrollArea, "controlsScroll")
+        scroll = self._scroll = self.panel.findChild(qt.QtWidgets.QScrollArea, "controlsScroll")
         self._body = scroll.widget() if scroll is not None else None
         if self._body is not None:
             self._body.installEventFilter(self)
@@ -77,26 +77,42 @@ class ControlsWindow(FramelessDialog):
         if watched is self.header.subtitle_label and event.type() == qt.QtCore.QEvent.Type.Resize:
             self._fit_status()
         elif watched is getattr(self, "_body", None) and event.type() == qt.QtCore.QEvent.Type.LayoutRequest:
-            self._fit_timer.start()
+            self._schedule_fit()
         return super().eventFilter(watched, event)
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
+        self._schedule_fit()
+
+    def _schedule_fit(self) -> None:
+        """The content changed its height: the window follows in a moment — and until it has, the
+        scroll bar is held back (the content is taller than the view for that moment: the bar flashed)."""
+        if self._scroll is not None and hasattr(self._scroll, "hold_bar"):
+            self._scroll.hold_bar(True)
         self._fit_timer.start()
 
     def _fit_height(self) -> None:
-        if not self.isVisible() or self.isMaximized():
-            return
-        change = self.panel.content_height_change()
-        if abs(change) < 2:
-            return
-        wanted = self.height() + change
-        screen = self.screen().availableGeometry() if self.screen() is not None else None
-        if screen is not None:
-            wanted = min(wanted, screen.bottom() - self.geometry().top() + 1)
-        wanted = max(wanted, self.minimumHeight())
-        if wanted != self.height():
-            self.resize(self.width(), wanted)
+        try:
+            if not self.isVisible() or self.isMaximized():
+                return
+            change = self.panel.content_height_change()
+            if abs(change) < 2:
+                return
+            wanted = self.height() + change
+            screen = self.screen().availableGeometry() if self.screen() is not None else None
+            if screen is not None:
+                wanted = min(wanted, screen.bottom() - self.geometry().top() + 1)
+            wanted = max(wanted, self.minimumHeight())
+            if wanted != self.height():
+                self.resize(self.width(), wanted)
+        finally:
+            # let go once the new size has been laid out: the bar then shows only if the window could
+            # not grow enough (the screen ended)
+            qt.QtCore.QTimer.singleShot(0, self._release_bar)
+
+    def _release_bar(self) -> None:
+        if self._scroll is not None and hasattr(self._scroll, "hold_bar") and not self._fit_timer.isActive():
+            self._scroll.hold_bar(False)
 
     @classmethod
     def open(cls) -> "ControlsWindow":
