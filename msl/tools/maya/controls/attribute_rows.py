@@ -50,6 +50,27 @@ class _OutsideClick(qt.QtCore.QObject):
         return False
 
 
+def relative_entry(text: str) -> "tuple | None":
+    """A typed number that means "from where it is": (operation, amount) — "+5" / "+=5" add, "-=5"
+    subtract, "*2" / "*=2" multiply, "/2" / "/=2" divide (Maya's Channel Box takes the "=" forms; a plain
+    "-5" is the number minus five). None for anything else."""
+    text = text.strip().replace(",", ".").replace(" ", "")
+    for mark, operation in (("+=", "+"), ("-=", "-"), ("*=", "*"), ("/=", "/"), ("+", "+"), ("*", "*"), ("/", "/")):
+        if text.startswith(mark):
+            try:
+                amount = float(text[len(mark):])
+            except ValueError:
+                return None
+            if operation == "/" and abs(amount) < 1e-12:
+                return None
+            return operation, amount
+    return None
+
+
+def relative_value(value: float, operation: str, amount: float) -> float:
+    return {"+": value + amount, "-": value - amount, "*": value * amount, "/": value / amount}[operation]
+
+
 class ValueSlider(qt.QtWidgets.QWidget):
     """A number as a field that is also a slider: drag it sideways (left or middle button), the
     wheel steps it, a double click types a number. With a range its fill shows where the value
@@ -59,12 +80,15 @@ class ValueSlider(qt.QtWidgets.QWidget):
         drag_started() / dragged(float) / drag_finished(float) — a drag: the in-between values, then
             the one it ended on (not sent when nothing changed)
         value_set(float) — one change that is not a drag: a typed number, the wheel
+        relative_set(str, float) — typed as "+5", "-=5", "*2", "/2": an operation and its amount, for
+            the owner to apply to EACH object from its own value (the field itself shows its own new one)
     """
 
     drag_started = qt.QtCore.Signal()
     dragged = qt.QtCore.Signal(float)
     drag_finished = qt.QtCore.Signal(float)
     value_set = qt.QtCore.Signal(float)
+    relative_set = qt.QtCore.Signal(str, float)
 
     fieldColor = color_property("_field", "update")
     borderColor = color_property("_border", "update")
@@ -248,6 +272,12 @@ class ValueSlider(qt.QtWidgets.QWidget):
         text = self._close_editor()
         if text is None:
             return
+        entry = relative_entry(text)
+        if entry is not None:
+            self._value = self._fitted(relative_value(self._value, *entry))
+            self.update()
+            self.relative_set.emit(*entry)
+            return
         try:
             new = self._fitted(float(text.replace(",", ".")))
         except ValueError:
@@ -322,6 +352,7 @@ class AttributeRow(qt.QtWidgets.QWidget):
     picked = qt.QtCore.Signal(object, object)
     renamed = qt.QtCore.Signal(str, str)
     value_set = qt.QtCore.Signal(str, object)
+    relative_set = qt.QtCore.Signal(str, str, float)       # name, "+" / "-" / "*" / "/", the amount
     drag_started = qt.QtCore.Signal(str)
     dragged = qt.QtCore.Signal(str, object)
     drag_finished = qt.QtCore.Signal(str, object)
@@ -460,6 +491,7 @@ class AttributeRow(qt.QtWidgets.QWidget):
             field.dragged.connect(lambda value: self.dragged.emit(self.name, self._typed(value)))
             field.drag_finished.connect(lambda value: self.drag_finished.emit(self.name, self._typed(value)))
             field.value_set.connect(lambda value: self.value_set.emit(self.name, self._typed(value)))
+            field.relative_set.connect(lambda operation, amount: self.relative_set.emit(self.name, operation, amount))
             return field
         if kind == SWITCH:
             box = BaseCheckbox("")
@@ -515,8 +547,9 @@ class AttributeRow(qt.QtWidgets.QWidget):
             low, high = info["minimum"], info["maximum"]
             span = (f"{low:g} … {high:g}" if low is not None and high is not None else
                     f"from {low:g}" if low is not None else f"up to {high:g}" if high is not None else "no limits")
-            value.setToolTip(f"{span} · default {info['default']:g}\nDrag sideways · double click: type a number · "
-                             "right click: key it, back to default, its range" +
+            value.setToolTip(f"{span} · default {info['default']:g}\nDrag sideways · double click: type a number "
+                             "(+5, -=5, *2, /2: each selected object from its own value) · right click: key it, "
+                             "back to default, its range" +
                              ("\nLocked" if info["locked"] else "\nFed by a connection: read only" if info["driven"] else ""))
         elif isinstance(value, BaseCheckbox):
             if value.isChecked() != bool(info["value"]):
@@ -676,6 +709,7 @@ class AttributeRows(qt.QtWidgets.QWidget):
     picked_changed = qt.QtCore.Signal()          # other rows are picked now
     renamed = qt.QtCore.Signal(str, str)
     value_set = qt.QtCore.Signal(str, object)
+    relative_set = qt.QtCore.Signal(str, str, float)
     drag_started = qt.QtCore.Signal(str)
     dragged = qt.QtCore.Signal(str, object)
     drag_finished = qt.QtCore.Signal(str, object)
@@ -741,7 +775,8 @@ class AttributeRows(qt.QtWidgets.QWidget):
             row.picked.connect(self._on_picked)
             row.grip_moved.connect(self._on_grip_moved)
             row.grip_released.connect(self._on_grip_released)
-            for signal in ("renamed", "value_set", "drag_started", "dragged", "drag_finished", "key_clicked",
+            for signal in ("renamed", "value_set", "relative_set", "drag_started", "dragged", "drag_finished",
+                           "key_clicked",
                            "lock_clicked", "menu_requested", "action_requested"):
                 getattr(row, signal).connect(getattr(self, signal))
             self._layout.addWidget(row)

@@ -464,6 +464,29 @@ def restore_values(values: dict, name: str) -> None:
         cmds.undoInfo(stateWithoutFlush=True)
 
 
+def adjust_value(nodes: list, name: str, operation: str, amount: float) -> int:
+    """The attribute of EVERY object changed from its own value: "+" / "-" add and subtract `amount`,
+    "*" / "/" multiply and divide by it — five controls at five different values each move by the same
+    step (a typed number would give them all one value). A locked or driven one is left; a whole
+    number is rounded. One undo step; how many were set."""
+    count = 0
+    with _Chunk():
+        for node in nodes:
+            if not can_set(node, name):
+                continue
+            plug = f"{node}.{name}"
+            try:
+                now = cmds.getAttr(plug)
+                if not isinstance(now, (int, float)) or isinstance(now, bool):
+                    continue
+                new = {"+": now + amount, "-": now - amount, "*": now * amount, "/": now / amount}[operation]
+                cmds.setAttr(plug, int(round(new)) if isinstance(now, int) else new)
+                count += 1
+            except (RuntimeError, TypeError, ZeroDivisionError, KeyError):
+                continue
+    return count
+
+
 def to_default(nodes: list, names) -> int:
     """These attributes back to their defaults (locked / driven ones left). One undo step."""
     count = 0

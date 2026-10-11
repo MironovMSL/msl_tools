@@ -221,6 +221,7 @@ class _AttributesMixin:
         rows.order_changed.connect(self._on_attr_order)
         rows.renamed.connect(self._on_attr_renamed)
         rows.value_set.connect(self._on_attr_value)
+        rows.relative_set.connect(self._on_attr_relative)
         rows.drag_started.connect(self._on_attr_drag_started)
         rows.dragged.connect(self._on_attr_dragged)
         rows.drag_finished.connect(self._on_attr_drag_finished)
@@ -702,6 +703,16 @@ class _AttributesMixin:
             self._say((f"The line reads “{new}”" if name == old else f"“{old}” is “{name}” now") +
                       f" on {done} · Ctrl+Z undoes it", "done")
         self._after_attribute_change()
+
+    def _on_attr_relative(self, name: str, operation: str, amount: float) -> None:
+        """Typed as +5 / -=5 / *2 / /2: every selected object from its OWN value."""
+        from msl_tools.msl.tools.maya.controls import attributes as scene_attributes
+        nodes = self._attribute_nodes()
+        if nodes:
+            count = scene_attributes.adjust_value(nodes, name, operation, amount)
+            self._say(f"{name} {operation}{amount:g} on {count} — each from its own value · Ctrl+Z undoes it" if count
+                      else f"“{name}” is locked or fed by a connection: not changed", "done" if count else "error")
+            self._after_attribute_change()
 
     def _on_attr_value(self, name: str, value) -> None:
         from msl_tools.msl.tools.maya.controls import attributes as scene_attributes

@@ -147,11 +147,13 @@ class TurnButton(qt.QtWidgets.QPushButton):
 
 
 class HierarchyStrip(qt.QtWidgets.QWidget):
-    """One line that reads like the Outliner, top first: the zero groups, the control, an arrow to the
-    object it drives — "grp › offset › lf_arm_ctrl ⇢ lf_arm_jnt". Blocks in the tone of what they are
-    (zero / control / drive / target / muted), "›" = is the parent of, an arrow = drives (solid:
-    constraints, dashed: the matrix, dots: doesn't). Long names are cut to fit. Blocks and arrows
-    with a key can be clicked.
+    """One line that reads like the Outliner, top first: the zero groups, the control, how it drives,
+    the object it drives — "grp › offset › lf_arm_ctrl [link] lf_arm_jnt". Blocks in the tone of what
+    they are (zero / control / drive / target / muted), "›" = is the parent of. Between the control and
+    its object stands a small round mark with the ICON of the way it drives — the very icons of the
+    SELECTED card's buttons (constraints, the matrix, "doesn't drive": LINK_ICONS), so one picture means
+    one thing everywhere; a bare arrow, solid or dashed, had to be decoded. Long names are cut to fit.
+    Blocks and the mark with a key can be clicked.
 
     set_items([{"key", "text", "tone", "icon", "tip", "link", "link_key"}]) — `link` is how an item
     joins the NEXT one: "into", "gap", "constraint", "matrix", "none" or "" (nothing).
@@ -169,7 +171,8 @@ class HierarchyStrip(qt.QtWidgets.QWidget):
     textColor = color_property("_text", "update")
     mutedColor = color_property("_muted", "update")
 
-    LINK_WIDTH = {"into": 12, "gap": 4, "constraint": 28, "matrix": 28, "none": 28, "": 0}
+    LINK_WIDTH = {"into": 12, "gap": 4, "constraint": 34, "matrix": 34, "none": 34, "": 0}
+    LINK_ICONS = {"constraint": "drive_constraint", "matrix": "drive_matrix", "none": "drive_off"}   # actions/
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -195,6 +198,15 @@ class HierarchyStrip(qt.QtWidgets.QWidget):
     def _tone(self, tone: str) -> "qt.QtGui.QColor":
         return {"zero": self._zero, "control": self._control, "drive": self._drive,
                 "target": self._target}.get(tone, self._muted)
+
+    def _link_icon(self, kind: str):
+        """The icon of a way of driving (read once; None when its file is missing)."""
+        cache = self.__dict__.setdefault("_link_icon_cache", {})
+        if kind not in cache:
+            from msl_tools.msl.ui.ui_resources import UiResources
+            icon = UiResources().iconManager.get_icon(self.LINK_ICONS.get(kind, ""), sub_folder="actions")
+            cache[kind] = icon if icon is not None and not icon.isNull() else None
+        return cache[kind]
 
     def _laid_out(self, metrics) -> list:
         """[(item, block rect, shown text, link rect)] — the texts cut until the line fits."""
@@ -260,18 +272,30 @@ class HierarchyStrip(qt.QtWidgets.QWidget):
                     painter.setPen(qt.QtCore.Qt.PenStyle.NoPen)
                     painter.setBrush(wash)
                     painter.drawRoundedRect(link.adjusted(1, 1, -1, -1), 5, 5)
-                pen = qt.QtGui.QPen(self._drive if kind != "none" else self._muted, 1.5)
+                drives = kind != "none"
+                color = qt.QtGui.QColor(self._drive if drives else self._muted)
+                centre = qt.QtCore.QPointF(link.center().x(), middle)
+                # a short line into the mark and out of it: the control on its left acts on what is on its right
+                line = qt.QtGui.QColor(color)
+                line.setAlpha(200 if drives else 110)
+                pen = qt.QtGui.QPen(line, 1.4)
                 pen.setCapStyle(qt.QtCore.Qt.PenCapStyle.RoundCap)
-                pen.setStyle({"matrix": qt.QtCore.Qt.PenStyle.DashLine,
-                              "none": qt.QtCore.Qt.PenStyle.DotLine}.get(kind, qt.QtCore.Qt.PenStyle.SolidLine))
                 painter.setPen(pen)
-                start, end = link.left() + 5, link.right() - 5
-                painter.drawLine(qt.QtCore.QPointF(start, middle), qt.QtCore.QPointF(end, middle))
-                if kind != "none":
-                    pen.setStyle(qt.QtCore.Qt.PenStyle.SolidLine)
-                    painter.setPen(pen)
-                    painter.drawLine(qt.QtCore.QPointF(end, middle), qt.QtCore.QPointF(end - 4, middle - 3.5))
-                    painter.drawLine(qt.QtCore.QPointF(end, middle), qt.QtCore.QPointF(end - 4, middle + 3.5))
+                painter.drawLine(qt.QtCore.QPointF(link.left() + 2, middle), qt.QtCore.QPointF(centre.x() - 10, middle))
+                painter.drawLine(qt.QtCore.QPointF(centre.x() + 10, middle), qt.QtCore.QPointF(link.right() - 2, middle))
+                # the round mark, lit while it drives
+                ring = qt.QtGui.QColor(color)
+                ring.setAlpha(190 if drives else 90)
+                fill = qt.QtGui.QColor(color)
+                fill.setAlpha(46 if drives else 0)
+                painter.setPen(qt.QtGui.QPen(ring, 1))
+                painter.setBrush(fill)
+                painter.drawEllipse(centre, 9, 9)
+                icon = self._link_icon(kind)
+                if icon is not None:
+                    from msl_tools.msl.ui.icon_manager import tint_icon
+                    painter.drawPixmap(qt.QtCore.QPointF(centre.x() - 6, middle - 6),
+                                       tint_icon(icon, 12, self.devicePixelRatioF(), color))
                 if link_key:
                     self._hits.append((link, link_key, item.get("link_tip", "")))
         painter.end()

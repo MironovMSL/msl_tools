@@ -23,6 +23,21 @@ ALL_CHANNELS = tuple(attr for _title, attrs in GROUPS for attr in attrs)
 SPACES = ("World", "Local")
 POSE_FILTER = "MSL pose (*.json)"
 STATES = ("on", "inv", "off")           # a channel: taken, taken inverted, left out
+# ready sets of the grid ("+" taken, "-" taken inverted, "." left out; move xyz, rotate xyz, scale xyz)
+GRID_SETS = (
+    ("Move + rotate", "+++ +++ ...", "The usual: place and turn, scale left alone"),
+    ("Everything", "+++ +++ +++", "All nine channels"),
+    ("Move only", "+++ ... ...", ""),
+    ("Rotate only", "... +++ ...", ""),
+    # the two below were MEASURED (mayapy 2026: a pose carried over, then points riding on both sides
+    # compared across X) — which set makes the mirrored pose depends on how the other side was made
+    ("Mirror · controls", "-++ +-- ...", "For controls mirrored by THIS tool's Mirror, and for objects whose axes "
+                                         "look the same way on both sides (world-aligned): move X and the turns "
+                                         "about Y and Z go over inverted — the other side makes the mirrored pose"),
+    ("Mirror · joint behavior", "--- +++ ...", "For joints (and controls on them) mirrored with Maya's Mirror "
+                                               "Joints, Behavior: the whole move goes over inverted, the turns "
+                                               "as they are"),
+)
 
 
 class _TransformsMixin:
@@ -71,8 +86,17 @@ class _TransformsMixin:
                 number.dragged.connect(lambda value, attr=attr: self._on_number_dragged(attr, value))
                 number.drag_finished.connect(lambda value, attr=attr: self._on_number_drag_finished(attr, value))
                 number.value_set.connect(lambda value, attr=attr: self._on_number_set(attr, value))
+                number.relative_set.connect(lambda operation, amount, attr=attr:
+                                            self._on_number_relative(attr, operation, amount))
                 self._numbers[attr] = number
                 row.addWidget(number)
+            if title == "Move":
+                # ready sets of the grid (nine clicks for a mirror set otherwise) and your own
+                self._grid_sets = self._tool_button("bookmark", "Sets of channels", "Ready sets of the grid — the "
+                                                    "usual ones, two for carrying a pose to the other side — and "
+                                                    "the ones you saved")
+                row.addSpacing(4)
+                row.addWidget(self._grid_sets)
             row.addStretch(1)
             card.body_layout.addLayout(row)
         # said in the card itself while NO channel is taken: every button under the grid then does nothing
@@ -134,6 +158,8 @@ class _TransformsMixin:
         sides.addStretch(1)
         card.body_layout.addLayout(sides)
 
+        self._grid_sets.clicked.connect(lambda: self._grid_sets_menu().exec(
+            self._grid_sets.mapToGlobal(qt.QtCore.QPoint(0, self._grid_sets.height()))))
         self._space.current_changed.connect(self._on_space)
         self._match.clicked.connect(self._on_match)
         self._reset_pick.clicked.connect(self._on_reset_pick)
@@ -198,6 +224,64 @@ class _TransformsMixin:
             self._show_pick(attr, state)
         self._save_picks()
 
+    # ---- sets of the grid: ready ones and the user's own
+
+    def _grid_text(self) -> str:
+        """The grid as nine marks, "+++ +++ ..." (move xyz, rotate xyz, scale xyz)."""
+        mark = {"on": "+", "inv": "-", "off": "."}
+        return " ".join("".join(mark[self._pick_state(attr)] for attr in attrs) for _title, attrs in GROUPS)
+
+    def _apply_grid_text(self, text: str, name: str = "") -> None:
+        marks = [char for char in text if char in "+-."]
+        if len(marks) != len(ALL_CHANNELS):
+            return
+        state = {"+": "on", "-": "inv", ".": "off"}
+        for attr, char in zip(ALL_CHANNELS, marks):
+            self._show_pick(attr, state[char])
+        self._save_picks()
+        if name:
+            self._say(f"The channels: {name}", "done")
+
+    def _own_grid_sets(self) -> dict:
+        stored = self._settings.get("transform_sets", None)
+        return {str(name): str(text) for name, text in dict(stored).items()} if hasattr(stored, "items") else {}
+
+    def _save_grid_set(self, name: str) -> None:
+        sets = self._own_grid_sets()
+        sets[name] = self._grid_text()
+        self._settings["transform_sets"] = sets
+        self._say(f"The set “{name}” saved: {self._grid_text()}", "done")
+
+    def _remove_grid_set(self, name: str) -> None:
+        sets = self._own_grid_sets()
+        if sets.pop(name, None) is not None:
+            self._settings["transform_sets"] = sets
+            self._say(f"The set “{name}” removed", "done")
+
+    def _grid_sets_menu(self) -> "qt.QtWidgets.QMenu":
+        from msl_tools.msl.tools.maya.rename.panel_words import _field_action
+        menu = self._menu()
+        now = self._grid_text()
+        self._menu_caption(menu, "The channels taken")
+        for name, text, tip in GRID_SETS:
+            self._menu_item(menu, "move", name, lambda text=text, name=name: self._apply_grid_text(text, name),
+                            tip or text, hint="✓" if text == now else "")
+        own = self._own_grid_sets()
+        if own:
+            menu.addSeparator()
+            self._menu_caption(menu, "Yours")
+            for name, text in own.items():
+                self._menu_item(menu, "bookmark", name, lambda text=text, name=name: self._apply_grid_text(text, name),
+                                text, hint="✓" if text == now else "")
+        menu.addSeparator()
+        self._menu_caption(menu, "Save the grid as it is — a name:")
+        _field_action(menu, "", "Set name", self._save_grid_set)
+        if own:
+            removing = menu.addMenu("Remove a set of yours")
+            for name in own:
+                self._menu_item(removing, "delete", name, lambda name=name: self._remove_grid_set(name))
+        return menu
+
     def _picked_channels(self) -> dict:
         """{channel: +1 / -1} of the channels taken."""
         return {attr: (-1 if self._pick_state(attr) == "inv" else 1) for attr in ALL_CHANNELS
@@ -232,8 +316,9 @@ class _TransformsMixin:
             if attr in values:
                 number.set_value(values[attr])
             number.setToolTip(f"{attr} of {node.rpartition('|')[2]} (the first selected) — drag sideways, double "
-                              "click: type a number\nIt goes to EVERY selected object — also to the one you "
-                              "match to" if node else "Select an object")
+                              "click: type a number\nA plain number gives EVERY selected object that value (also "
+                              "the one you match to) · +5, -=5, *2, /2 change each from its own value"
+                              if node else "Select an object")
         self._show_pose()
 
     def _transform_nodes(self) -> list:
@@ -248,6 +333,16 @@ class _TransformsMixin:
         nodes = scene.selected_transforms()
         if nodes and not attributes.set_value(nodes, attr, float(value)):
             self._say(f"{attr} is locked or driven on the selection: not changed", "error")
+
+    def _on_number_relative(self, attr: str, operation: str, amount: float) -> None:
+        """Typed as +5 / -=5 / *2 / /2: every selected object from its OWN value."""
+        from msl_tools.msl.tools.maya.controls import attributes, scene
+        nodes = scene.selected_transforms()
+        if nodes:
+            count = attributes.adjust_value(nodes, attr, operation, amount)
+            self._say(f"{attr} {operation}{amount:g} on {count} — each from its own value · Ctrl+Z undoes it" if count
+                      else f"{attr} is locked or driven on the selection: not changed", "done" if count else "error")
+            self._refresh_transform_values()
 
     def _on_number_drag_started(self, attr: str) -> None:
         from msl_tools.msl.tools.maya.controls import attributes, scene

@@ -3110,6 +3110,31 @@ axis (`flip`). ZERO THE SELECTED (`actions/zero_out`, in the Zero row): the mode
   `matched` is no longer needed by the panel but kept). The numbers' tooltip says they go to EVERY
   selected object, the one matched to included.
   Checked offscreen from an isolated copy (9 checks, real clicks on the heading's widgets) and in mayapy.
+- RELATIVE ENTRY and SETS OF THE GRID (2026-10-11, the user's picks 2 and 3).
+  A number typed as "+5" / "+=5", "-=5", "*2" / "*=2", "/2" / "/=2" (`attribute_rows.relative_entry`; a
+  plain "-5" is the number minus five) changes EVERY selected object from its OWN value
+  (`ValueSlider.relative_set(operation, amount)` -> `attributes.adjust_value`, one undo step) - in the
+  TRANSFORMS numbers and in the ATTRIBUTES rows alike; a plain number still gives them all one value.
+  The TRANSFORMS grid has ready SETS (a bookmark button at the end of the Move row; `GRID_SETS`, each a
+  text of nine marks "+++ +++ ..." = move xyz, rotate xyz, scale xyz: + taken, - inverted, . left out):
+  Move + rotate, Everything, Move only, Rotate only, and two for carrying a pose to the other side; the
+  one that is on is ticked; the user's own are saved under a name (`settings.transform_sets`) and removed
+  from the same menu.
+  WHICH CHANNELS TO INVERT FOR A MIRRORED POSE - MEASURED, mayapy 2026 (a pose carried L -> R, then points
+  riding on both controls compared across X; I had the two the wrong way round before measuring):
+  "-++ +--" (move X, turns about Y and Z inverted) for controls mirrored by THIS tool's Mirror - its
+  S.M.S negates one axis only - and for world-aligned objects; "--- +++" (the whole move inverted, the
+  turns as they are) for joints mirrored with Maya's Mirror Joints, Behavior. Each set fails on the
+  other's case by whole units.
+  Checked: mayapy 2026 from an isolated copy (8 checks: the three mirror cases, +5 / *2 / -=2 / /4, undo,
+  a locked one left); offscreen (9 checks: the entry parser, the menu, a set applied / ticked / saved /
+  removed, "+=3" typed into a field). Minimum width 425. Not opened in a windowed Maya.
+- The hierarchy line says HOW a control drives with an icon, not an arrow (2026-10-11, the user: the
+  solid / dashed / dotted arrow had to be decoded): between the control's block and its object stands a
+  small round mark holding the icon of the way it drives - `HierarchyStrip.LINK_ICONS`, the very icons
+  of the SELECTED card's Drive buttons (drive_constraint, drive_matrix, drive_off) -, pink and lit while
+  it drives, grey and hollow when it doesn't, a short line into it and out of it. Still clickable (the
+  Drive menu for a new control). Rendered offscreen in the three states; minimum width 437.
 
 ## Batch tool
 
