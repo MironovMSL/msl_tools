@@ -2262,7 +2262,7 @@ window's checks, written anew for this framework). Hotkeys: MSLRename, MSLRename
 
 ## Controls tool (inside Maya)
 
-`msl/tools/maya/controls/` (MSL menu > Controls, hotkey MSLControls; Maya 2025+, PySide6; started
+`msl/tools/maya/controls/` (MSL menu > Controls, hotkey MSLControls + the MSLControls… actions of `quick.py`; Maya 2025+, PySide6; started
 2026-10-09). A set of tools for rig controls, grown step by step with the user — their words: not
 like the hub (no sidebar of sections), everything as icons, intuitive; one window of CARDS that fold
 (like Rename's), the visuals improved as it grows; tabs only if a part really needs its own room;
@@ -3154,6 +3154,23 @@ axis (`flip`). ZERO THE SELECTED (`actions/zero_out`, in the Zero row): the mode
   Checked: unit tests; the offscreen tests give the same output with the split panel and with the file
   as it was; windowed Maya 2026 from an isolated copy - the COLOR and TRANSFORMS runs pass. Layouts were
   checked offscreen only (10 checks), the header buttons not by hand.
+- HOTKEYS and SAVED POSES (2026-10-11, the user's picks 4 and 5):
+  `quick.py` (maya.cmds; Qt only for the clipboard) = what the busiest buttons do, for hotkeys: `mirror`
+  (across X), `zero` (groups or the matrix, as `settings.offsets` says; None counts as groups),
+  `select_controls` (under the selection, nothing selected = the scene), `copy_pose` / `paste_pose`,
+  `match`, `reset`. While the Controls window is OPEN a call is handed to its panel (`quick._panel()`:
+  the same handler as the button, said in the header); with it CLOSED the action runs with the settings
+  the window was left with (Rename's sides, side_color, offset_names, transform_channels /
+  transform_space) and says what it did with an inViewMessage. Runtime commands in tools/maya/hotkeys.py:
+  MSLControlsMirror / Zero / Select / PoseCopy / PosePaste / Match / Reset.
+  SAVED POSES: a bookmark button after Paste in TRANSFORMS (`_poses`, `_poses_menu`): a click on a pose
+  puts it onto the selection like Paste (the taken channels, World / Local), a name typed in the menu
+  saves the selected objects' pose, "Remove a pose"; `settings.poses` {name: pose}, the newest last, the
+  same name saves over, POSES_AT_MOST 40 (the oldest goes).
+  Checked in windowed Maya 2026 from an isolated copy: the eight commands registered; every action with
+  the window closed (mirror, zero + one undo, select, copy -> clipboard text, paste, match, reset) and
+  three through the open window; poses saved, pasted by name onto two objects, saved over, removed, kept
+  for the next window. Minimum width 453. The hotkeys were not pressed as keys.
 
 ## Batch tool
 

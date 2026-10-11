@@ -22,6 +22,7 @@ GROUPS = (("Move", ("tx", "ty", "tz")), ("Rotate", ("rx", "ry", "rz")), ("Scale"
 ALL_CHANNELS = tuple(attr for _title, attrs in GROUPS for attr in attrs)
 SPACES = ("World", "Local")
 POSE_FILTER = "MSL pose (*.json)"
+POSES_AT_MOST = 40           # saved poses kept (the oldest goes first)
 STATES = ("on", "inv", "off")           # a channel: taken, taken inverted, left out
 # ready sets of the grid ("+" taken, "-" taken inverted, "." left out; move xyz, rotate xyz, scale xyz)
 GRID_SETS = (
@@ -141,6 +142,10 @@ class _TransformsMixin:
         doing.addWidget(self._caption("Pose"))
         doing.addWidget(self._pose_copy)
         doing.addWidget(self._pose_paste)
+        self._poses = self._tool_button("bookmark", "Saved poses", "Poses kept under a name — a click puts one "
+                                        "onto the selection (the chosen channels, World / Local as set); save the "
+                                        "selected objects' pose from the same menu")
+        doing.addWidget(self._poses)
         card.body_layout.addLayout(doing)
 
         self._side_buttons = {"left": word("L → R", "The LEFT side's values onto the right: each selected object "
@@ -165,6 +170,8 @@ class _TransformsMixin:
         self._reset_pick.clicked.connect(self._on_reset_pick)
         self._freeze.clicked.connect(self._on_freeze)
         self._pose_copy.clicked.connect(self._on_pose_copy)
+        self._poses.clicked.connect(lambda: self._poses_menu().exec(
+            self._poses.mapToGlobal(qt.QtCore.QPoint(0, self._poses.height()))))
         self._pose_paste.clicked.connect(self._on_pose_paste)
         self._pose_copy.customContextMenuRequested.connect(
             lambda position: self._pose_menu(True).exec(self._pose_copy.mapToGlobal(position)))
@@ -486,6 +493,51 @@ class _TransformsMixin:
             self._menu_caption(menu, "A pose onto the selection")
             self._menu_item(menu, "paste", "Paste", self._on_pose_paste, "From the clipboard", hint="click")
             self._menu_item(menu, "file_add", "Load from a file…", self._on_pose_load, "A pose saved with Copy's menu")
+        return menu
+
+    # ---- poses kept under a name (settings.poses)
+
+    def _saved_poses(self) -> dict:
+        stored = self._settings.get("poses", None)
+        return {str(name): dict(pose) for name, pose in dict(stored).items()} if hasattr(stored, "items") else {}
+
+    def _save_pose_as(self, name: str) -> None:
+        from msl_tools.msl.tools.maya.controls import transforms
+        nodes = self._transform_nodes()
+        if not nodes:
+            return
+        poses = self._saved_poses()
+        poses.pop(name, None)                    # the same name saves over, and goes last (the newest)
+        poses[name] = transforms.pose_of(nodes)
+        while len(poses) > POSES_AT_MOST:
+            poses.pop(next(iter(poses)))
+        self._settings["poses"] = poses
+        self._say(f"The pose “{name}” saved: {len(nodes)} object{'s' if len(nodes) != 1 else ''}", "done")
+
+    def _remove_pose(self, name: str) -> None:
+        poses = self._saved_poses()
+        if poses.pop(name, None) is not None:
+            self._settings["poses"] = poses
+            self._say(f"The pose “{name}” removed", "done")
+
+    def _poses_menu(self) -> "qt.QtWidgets.QMenu":
+        from msl_tools.msl.tools.maya.rename.panel_words import _field_action
+        menu = self._menu()
+        poses = self._saved_poses()
+        self._menu_caption(menu, "Saved poses — onto the selection" if poses else "No pose saved yet")
+        for name, pose in poses.items():
+            objects = pose.get("objects") or []
+            names = ", ".join(str(entry.get("name", "")) for entry in objects[:4]) + ("…" if len(objects) > 4 else "")
+            self._menu_item(menu, "bookmark", name, lambda pose=pose: self._paste_pose(pose),
+                            f"{len(objects)} object{'s' if len(objects) != 1 else ''}: {names}",
+                            hint=str(len(objects)))
+        menu.addSeparator()
+        self._menu_caption(menu, "Save the selected objects' pose — a name:")
+        _field_action(menu, "", "Pose name", self._save_pose_as)
+        if poses:
+            removing = menu.addMenu("Remove a pose")
+            for name in poses:
+                self._menu_item(removing, "delete", name, lambda name=name: self._remove_pose(name))
         return menu
 
     def _on_pose_save(self) -> None:
