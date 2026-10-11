@@ -10,6 +10,7 @@ import msl_tools.msl.ui.qt_bindings as qt
 from msl_tools.msl.tools.maya.controls import shapes as shape_data
 from msl_tools.msl.tools.maya.controls.editor import ShapeEditor, axis_step_button
 from msl_tools.msl.tools.maya.controls.widgets import DragNumberField, HierarchyStrip, Swatches, TurnButton
+from msl_tools.msl.tools.maya.rename.buttons import GroupButton
 from msl_tools.msl.ui.theme.qss import color_property, make_rounded_popup, repolish
 from msl_tools.msl.ui.ui_resources import UiResources
 from msl_tools.msl.ui.widgets.compositions.folding_card import FoldingCard
@@ -18,14 +19,20 @@ from msl_tools.msl.ui.widgets.compositions.folding_card import FoldingCard
 class _SelectedMixin:
 
     def _selected_tools(self) -> FoldingCard:
-        """SELECTED: everything that works on the controls selected in the scene, on top of the window
-        — two rows of icon buttons in groups, each group in its own color (the `tone` property)."""
+        """SELECTED: everything that works on the controls selected in the scene, in TWO rows. Row 1:
+        edit the CVs, six GROUP buttons (another shape, the other side, zero, drive, show and select,
+        make) and save; a group shows the action used last, a click repeats it, its corner / a right
+        click / holding it opens the group. Row 2: the "steps" button (the numbers) and the buttons
+        that use them — turn, smaller / bigger / fit, the six steps along the axes."""
         icons = UiResources().iconManager
         card = self._selected_card = FoldingCard("SELECTED", icons.get_icon("select_all", sub_folder="actions"))
+
+        self._tool_icons = {}
 
         def tool(icon, tone, text, tooltip, menu=False):
             button = self._tool_button(icon, text, tooltip)
             button.setProperty("tone", tone)
+            self._tool_icons[button] = icon
             if menu:
                 button.setContextMenuPolicy(qt.QtCore.Qt.ContextMenuPolicy.CustomContextMenu)
             return button
@@ -34,12 +41,12 @@ class _SelectedMixin:
         self._turns = {}
         for axis in shape_data.AXES:
             self._turns[axis] = TurnButton(axis, f"Turn about {axis}\nThe selected controls' shapes about their "
-                                                 f"own {axis}, by the angle beside it (Shift: the other way)")
+                                                 f"own {axis}, by the angle under the steps button (Shift: the other way)")
             self._turns[axis].setObjectName("controlsTool")
         self._shrink = tool("shrink", "orange", "Smaller", "The selected controls' shapes smaller: divided by "
-                                                           "the number beside it")
-        self._grow = tool("grow", "orange", "Bigger", "The selected controls' shapes bigger: times the number "
-                                                      "beside it")
+                                                           "the factor under the steps button")
+        self._grow = tool("grow", "orange", "Bigger", "The selected controls' shapes bigger: times the factor "
+                                                      "under the steps button")
         self._cvs = tool("cvs", "orange", "Edit the shape", "The selected controls' CVs get selected: move, turn "
                          "and scale the SHAPE with Maya's own tools, the control's channels stay as they are · "
                          "again: back to the controls")
@@ -116,78 +123,196 @@ class _SelectedMixin:
         self._capture = tool("bookmark_add", "green", "Save as a shape", "Save the selected curves as a shape of "
                                                                          "yours (it goes under Mine)")
 
-        # (the turn and bigger / smaller buttons stand in the rows below, beside their numbers)
-        rows = (((self._cvs,),
-                 (self._replace, self._add_shape, self._copy_shape, self._paste_shape, self._combine, self._strip_shape),
-                 (self._mirror, self._mirror_update),
-                 (self._zero_groups_button, self._zero_matrix_button, self._matrix_back_button)),
-                ((self._drive_constraint, self._drive_matrix, self._drive_off),
-                 (self._on_top_button, self._select_below, self._select_all, self._select_same),
-                 (self._locators, self._joints),
-                 (self._capture,)))
-        for groups in rows:
-            line = qt.QtWidgets.QHBoxLayout()
-            line.setSpacing(3)
-            for index, group in enumerate(groups):
-                if index:
-                    rule = qt.QtWidgets.QFrame()
-                    rule.setObjectName("controlsRule")
-                    rule.setFixedSize(1, 16)
-                    line.addSpacing(2)
-                    line.addWidget(rule)
-                    line.addSpacing(2)
-                for button in group:
-                    line.addWidget(button)
-            line.addStretch(1)
-            card.body_layout.addLayout(line)
+        # ---- row 1: the actions, in groups (each member button lives on, unseen: its click is the action)
+        groups = (("shape", "blue", "Another shape",
+                   (("replace", self._replace, "replace", None), ("add", self._add_shape, "add", None),
+                    ("copy", self._copy_shape, "", None), ("paste", self._paste_shape, "paste", None),
+                    ("combine", self._combine, "", None), ("strip", self._strip_shape, "", None))),
+                  ("side", "teal", "The other side",
+                   (("mirror", self._mirror, "mirror", "_mirror_menu"),
+                    ("mirror_update", self._mirror_update, "mirror_update", "_mirror_update_menu"))),
+                  ("zero", "violet", "Zero",
+                   (("zero_groups", self._zero_groups_button, "zero_groups", None),
+                    ("zero_matrix", self._zero_matrix_button, "zero_matrix", None),
+                    ("matrix_back", self._matrix_back_button, "matrix_back", None))),
+                  ("drive", "pink", "Drive",
+                   (("constraint", self._drive_constraint, "", None), ("matrix", self._drive_matrix, "", None),
+                    ("off", self._drive_off, "", None))),
+                  ("select", "yellow", "Show and select",
+                   (("below", self._select_below, "", None), ("all", self._select_all, "", None),
+                    ("same", self._select_same, "", "_same_shape_menu"), ("on_top", self._on_top_button, "", None))),
+                  ("make", "", "Make on the selection",
+                   (("locators", self._locators, "", "_locators_menu"), ("joints", self._joints, "", "_joints_menu"))))
+        self._groups = {}
+        line = qt.QtWidgets.QHBoxLayout()
+        line.setSpacing(3)
+        line.addWidget(self._cvs)
+        line.addSpacing(2)
+        line.addWidget(self._rule())
+        line.addSpacing(2)
+        for key, tone, title, members in groups:
+            face = GroupButton(tone, icon_size=16)
+            face.setObjectName("controlsTool")
+            face.setFixedSize(32, 22)
+            for _member, button, _hover, _menu_name in members:
+                button.setParent(card)
+                button.hide()
+            self._groups[key] = {"face": face, "title": title, "members": members}
+            face.run_requested.connect(lambda key=key: self._run_group(key))
+            face.menu_requested.connect(lambda key=key: self._open_group(key))
+            face.hovered.connect(lambda on, key=key: self._on_group_hover(key, on))
+            line.addWidget(face)
+        line.addSpacing(2)
+        line.addWidget(self._rule())
+        line.addSpacing(2)
+        line.addWidget(self._capture)
+        line.addStretch(1)
+        card.body_layout.addLayout(line)
 
-        # the shape of a control that exists, by exact steps: off its pivot along an axis; how much a
-        # turn turns and a "bigger" grows
-        self._shape_step = DragNumberField(0.1, 0.001, 1000.0, 0.05, width=44, decimals=3)
-        self._shape_step.setToolTip("The step of the six buttons beside it — drag with the middle mouse button, the wheel")
-        self._shape_angle = DragNumberField(90.0, 1.0, 180.0, 5.0, width=38, decimals=1)
-        self._shape_angle.setToolTip("The angle, in degrees: the three buttons beside it turn the shape by it "
-                                     "about X, Y or Z (Shift + click: the other way)")
-        self._shape_factor = DragNumberField(1.25, 1.01, 10.0, 0.05, width=40, decimals=2)
-        self._shape_factor.setToolTip("The factor: the two buttons beside it make the shape that much smaller / bigger")
-        steps = qt.QtWidgets.QHBoxLayout()
-        steps.setSpacing(3)
-        steps.addWidget(self._caption("Move"))
-        steps.addWidget(self._shape_step)
+        # ---- the numbers: how far a step goes, how much a turn turns, how much "bigger" grows, the line
+        self._shape_step = DragNumberField(0.1, 0.001, 1000.0, 0.05, width=56, decimals=3)
+        self._shape_step.setToolTip("The step of the six −X … +Z buttons — drag with the middle mouse button, the wheel")
+        self._shape_angle = DragNumberField(90.0, 1.0, 180.0, 5.0, width=56, decimals=1)
+        self._shape_angle.setToolTip("The angle, in degrees, the turn buttons X / Y / Z turn the shape by "
+                                     "(Shift + click: the other way)")
+        self._shape_factor = DragNumberField(1.25, 1.01, 10.0, 0.05, width=56, decimals=2)
+        self._shape_factor.setToolTip("The factor Smaller / Bigger change the shape by")
         self._shifts = {}
         for index, axis in enumerate(shape_data.AXES):
             for sign, mark in ((-1, "−"), (1, "+")):
-                made = axis_step_button(axis, mark, f"The selected controls' shapes one step along their own "
-                                                    f"{mark}{axis}: off the pivot, the control itself stays "
-                                                    "(Shift: five steps)")
-                self._shifts[(index, sign)] = made
-                steps.addWidget(made)
+                self._shifts[(index, sign)] = axis_step_button(
+                    axis, mark, f"The selected controls' shapes one step along their own {mark}{axis}: off the "
+                                "pivot, the control itself stays (Shift: five steps) — the step is under the "
+                                "steps button")
         # the curves' line width: a thing of the shape, so it stands here (it was in the COLOR card)
-        self._line = DragNumberField(1.0, -1.0, 20.0, 0.5, width=40, decimals=1)
+        self._line = DragNumberField(1.0, -1.0, 20.0, 0.5, width=56, decimals=1)
         self._line.setToolTip("Line width\nHow thick the selected controls' curves are drawn (-1 = Maya's "
                               "preference) — drag with the middle mouse button, the wheel, Up / Down. It shows "
                               "the first selected control's")
-        steps.addSpacing(10)
-        steps.addWidget(self._caption("Line"))
-        steps.addWidget(self._line)
+        self._steps_button = tool("sliders", "orange", "Steps", "")
+        holder = qt.QtWidgets.QWidget()
+        form = qt.QtWidgets.QGridLayout(holder)
+        form.setContentsMargins(10, 6, 10, 6)
+        form.setHorizontalSpacing(8)
+        form.setVerticalSpacing(4)
+        for row, (caption, field, unit) in enumerate((("Move step", self._shape_step, "the −X … +Z buttons"),
+                                                      ("Turn angle", self._shape_angle, "degrees, the X Y Z buttons"),
+                                                      ("Scale factor", self._shape_factor, "Smaller / Bigger"),
+                                                      ("Line width", self._line, "of the selected curves"))):
+            form.addWidget(self._caption(caption), row, 0)
+            form.addWidget(field, row, 1)
+            form.addWidget(self._caption(unit), row, 2)
+        self._steps_menu = self._menu()          # kept: it owns the four fields
+        action = qt.QtWidgets.QWidgetAction(self._steps_menu)
+        action.setDefaultWidget(holder)
+        self._steps_menu.addAction(action)
+        self._steps_button.clicked.connect(lambda: self._steps_menu.exec(
+            self._steps_button.mapToGlobal(qt.QtCore.QPoint(0, self._steps_button.height()))))
+        for field in (self._shape_step, self._shape_angle, self._shape_factor, self._line):
+            field.value_changed.connect(self._show_steps)
+
+        # ---- row 2: the steps button, then the buttons that use its numbers (tight: this row is the
+        # card's widest, and the window's minimum width must stay under its default)
+        steps = qt.QtWidgets.QHBoxLayout()
+        steps.setSpacing(2)
+        steps.addWidget(self._steps_button)
+        steps.addWidget(self._rule())
+        for axis in shape_data.AXES:
+            steps.addWidget(self._turns[axis])
+        steps.addWidget(self._rule())
+        for button in (self._shrink, self._grow, self._fit_button):
+            steps.addWidget(button)
+        steps.addWidget(self._rule())
+        for button in self._shifts.values():
+            steps.addWidget(button)
         steps.addStretch(1)
         card.body_layout.addLayout(steps)
-        # each number with the buttons that use it right beside it
-        turning = qt.QtWidgets.QHBoxLayout()
-        turning.setSpacing(3)
-        turning.addWidget(self._caption("Turn"))
-        turning.addWidget(self._shape_angle)
-        for axis in shape_data.AXES:
-            turning.addWidget(self._turns[axis])
-        turning.addSpacing(14)
-        turning.addWidget(self._caption("Scale"))
-        turning.addWidget(self._shape_factor)
-        turning.addWidget(self._shrink)
-        turning.addWidget(self._grow)
-        turning.addWidget(self._fit_button)
-        turning.addStretch(1)
-        card.body_layout.addLayout(turning)
+        self._show_steps()
+        self._show_groups()
         return card
+
+    @staticmethod
+    def _rule() -> "qt.QtWidgets.QFrame":
+        rule = qt.QtWidgets.QFrame()
+        rule.setObjectName("controlsRule")
+        rule.setFixedSize(1, 16)
+        return rule
+
+    def _show_steps(self, *_args) -> None:
+        """The steps button says its numbers (they are out of sight until it is clicked)."""
+        self._steps_button.setToolTip(
+            f"Steps\nMove {self._shape_step.value():g} · Turn {self._shape_angle.value():g}° · "
+            f"Scale ×{self._shape_factor.value():g} · Line {self._line.value():g}\nClick: change them — how far "
+            "the −X … +Z buttons move the shape, the angle of the turn buttons, the factor of Smaller / Bigger, "
+            "the selected curves' line width")
+
+    # ------------------------------------------------------------------ groups of actions
+
+    def _group_last(self, key: str):
+        """(member key, button, hover key, menu builder's name) of the group's action used last."""
+        members = self._groups[key]["members"]
+        last = dict(self._settings.get("tool_last") or {}).get(key, "")
+        return next((member for member in members if member[0] == last), members[0])
+
+    def _show_groups(self) -> None:
+        """Each group button shows the action used last: its icon, its tooltip — and is lit while
+        any of the group's actions is already true of the selection."""
+        icons = UiResources().iconManager
+        for key, group in self._groups.items():
+            face = group["face"]
+            member, button, _hover, _menu_name = self._group_last(key)
+            if face.property("member") != member:
+                face.setProperty("member", member)
+                face.set_source_icon(icons.get_icon(self._tool_icons.get(button, ""), sub_folder="actions"))
+            lit = any(bool(each[1].property("on")) for each in group["members"])
+            if bool(face.property("on")) != lit:
+                face.setProperty("on", lit)
+                repolish(face)
+            face.setToolTip(f"{button.toolTip()}\n\n{group['title']}: the corner, a right click or holding the "
+                            "button opens the rest of the group")
+
+    def _run_group(self, key: str, member: str = "") -> None:
+        """The group's action: the one named (it becomes the group's button), else the one used last."""
+        members = self._groups[key]["members"]
+        picked = next((each for each in members if each[0] == member), None) or self._group_last(key)
+        if member and dict(self._settings.get("tool_last") or {}).get(key) != member:
+            last = dict(self._settings.get("tool_last") or {})
+            last[key] = member
+            self._settings["tool_last"] = last
+            self._show_groups()
+        picked[1].click()
+
+    def _group_menu(self, key: str) -> "qt.QtWidgets.QMenu":
+        group = self._groups[key]
+        last = self._group_last(key)[0]
+        menu = self._menu()
+        self._menu_caption(menu, group["title"])
+        for member, button, hover, menu_name in group["members"]:
+            button.ensurePolished()          # an unseen button still takes its color from the stylesheet
+            name, _line, tip = button.toolTip().partition("\n")
+            action = self._menu_item(menu, self._tool_icons.get(button, ""), name + (" ●" if button.property("on") else ""),
+                                     lambda key=key, member=member: self._run_group(key, member), tip,
+                                     color=button.iconColor, hint="last" if member == last else "")
+            if hover:
+                action.hovered.connect(lambda hover=hover: self._on_action_hover(hover, True))
+            if menu_name:
+                more = getattr(self, menu_name)()
+                more.setTitle(f"{name} — more")
+                menu.addMenu(more)
+        menu.aboutToHide.connect(lambda: self._on_group_hover(key, False))
+        return menu
+
+    def _open_group(self, key: str) -> None:
+        face = self._groups[key]["face"]
+        self._group_menu(key).exec(face.mapToGlobal(qt.QtCore.QPoint(0, face.height())))
+
+    def _on_group_hover(self, key: str, on: bool) -> None:
+        hover = self._group_last(key)[2]
+        if on and hover:
+            self._on_action_hover(hover, True)
+        elif not on and self._hovered_action:
+            self._hovered_action = ""
+            self._refresh_live()
 
     _hovered_action = ""
 
@@ -292,6 +417,7 @@ class _SelectedMixin:
         if bool(self._drive_off.property("on")) != tied:
             self._drive_off.setProperty("on", tied)
             repolish(self._drive_off)
+        self._show_groups()
 
     def _selected_controls(self) -> list:
         from msl_tools.msl.tools.maya.controls import scene

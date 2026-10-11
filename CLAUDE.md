@@ -3171,6 +3171,30 @@ axis (`flip`). ZERO THE SELECTED (`actions/zero_out`, in the Zero row): the mode
   the window closed (mirror, zero + one undo, select, copy -> clipboard text, paste, match, reset) and
   three through the open window; poses saved, pasted by name onto two objects, saved over, removed, kept
   for the next window. Minimum width 453. The hotkeys were not pressed as keys.
+- SELECTED in TWO ROWS (2026-10-11, the user's pick of a mock-up, variant B; it was four rows of 34
+  buttons). Row 1: edit the CVs · six GROUP buttons · save as a shape. A group (Rename's `GroupButton`,
+  objectName controlsTool so the tone rules apply; `_SelectedMixin._groups`: shape / side / zero / drive /
+  select / make) shows the action used LAST (`settings.tool_last` {group: member}; its first one until
+  then): a click repeats it, the corner / a right click / holding it opens the group's menu
+  (`_group_menu`: icon + name per action in the member's own color, "last" marked, "●" on what is
+  already true of the selection; an action that has a menu of its own - Mirror, Shape to the other side,
+  same shape, locators, joints - is followed by it as a submenu "<name> - more"); a pick runs it and
+  becomes the button (`_run_group`). THE MEMBER BUTTONS LIVE ON, unseen (children of the card, never in
+  a layout): every handler, `_refresh_states`' `on` marks and the tooltips still hang on them, a group
+  only clicks its member (`button.click()`). An unseen button is not polished until asked -
+  `ensurePolished()` before its `iconColor` is read for a menu. The group is lit while ANY of its
+  members is (`_show_groups`, at the end of `_refresh_states`), hovering it previews its action
+  (`_on_group_hover`).
+  Row 2: the "steps" button (`_steps_button`, icon `sliders`) · turn X Y Z · smaller / bigger / fit · the
+  six -X ... +Z steps. The NUMBERS (move step, turn angle, scale factor, line width - the same four
+  DragNumberFields as before) sit in a menu the steps button opens (`_steps_menu`, kept for the panel's
+  life: it owns the fields); the button's tooltip says them ("Move 0.1 · Turn 90° · Scale ×1.25 ·
+  Line 1"). The user chose this knowing the numbers are a click away (variant A kept them in sight).
+  This row is the card's widest: 2 px spacing, no room around its rules - the window's minimum is 439.
+  Checked: offscreen from an isolated copy (16 checks, real clicks on a group); windowed Maya 2026
+  (zero by the group and by its menu, the lit mark, mirror, Mirror's submenu, an unseen member's tone,
+  Bigger / a step / the line width with numbers set through the fields, the hover, select). The corner
+  triangle and holding the button were not tried with a real mouse.
 
 ## Batch tool
 

@@ -414,3 +414,8 @@ ControlsWindow GlyphButton#controlsHeaderGear {
     qproperty-activeGlyphColor: var(--accent);
     qproperty-highlightColor:   alpha(var(--accent), 16%);
 }
+
+/* A group button of the SELECTED card (GroupButton): the corner triangle needs a little room. */
+ControlsPanel GroupButton#controlsTool {
+    padding: 0 6px 0 0;
+}
