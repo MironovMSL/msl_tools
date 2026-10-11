@@ -1102,8 +1102,10 @@ not every commit. The notes are the release's description on GitHub:
   banner offers "Update now" (see "One-click update") — or, where the copy
   can't update itself (a git checkout), "Get it on GitHub" + the reason.
 - Releasing: bump `msl/__init__.py:__version_tuple__`, commit, push, then
-  publish a GitHub release tagged `v<version>` with the notes. No `gh` CLI
-  on this machine — the release is created in the browser.
+  publish a GitHub release tagged `v<version>` with the notes: `gh release create v<version> --target <the
+  version commit's sha> --title ... --notes-file ...` (`gh` is at `C:\Program Files\GitHub CLI\gh.exe`, signed in
+  since 2026-10-11) - only AFTER the push and only on the user's word. A release made before the push puts the tag
+  on a commit with the old version, and "Update now" refuses it (it happened with 0.5.0).
 - Which number (Semantic Versioning, MAJOR.MINOR.PATCH — agreed with the
   user 2026-10-07; propose the number by these rules before a release):
   - PATCH (0.2.0 -> 0.2.1): only fixes and small improvements, nothing
@@ -3172,7 +3174,7 @@ axis (`flip`). ZERO THE SELECTED (`actions/zero_out`, in the Zero row): the mode
   three through the open window; poses saved, pasted by name onto two objects, saved over, removed, kept
   for the next window. Minimum width 453. The hotkeys were not pressed as keys.
 - SELECTED in TWO ROWS (2026-10-11, the user's pick of a mock-up, variant B; it was four rows of 34
-  buttons). Row 1: edit the CVs · six GROUP buttons · save as a shape. A group (Rename's `GroupButton`,
+  buttons). Row 1: six GROUP buttons · save as a shape. A group (Rename's `GroupButton`,
   objectName controlsTool so the tone rules apply; `_SelectedMixin._groups`: shape / side / zero / drive /
   select / make) shows the action used LAST (`settings.tool_last` {group: member}; its first one until
   then): a click repeats it, the corner / a right click / holding it opens the group's menu
@@ -3185,12 +3187,12 @@ axis (`flip`). ZERO THE SELECTED (`actions/zero_out`, in the Zero row): the mode
   `ensurePolished()` before its `iconColor` is read for a menu. The group is lit while ANY of its
   members is (`_show_groups`, at the end of `_refresh_states`), hovering it previews its action
   (`_on_group_hover`).
-  Row 2: the "steps" button (`_steps_button`, icon `sliders`) · turn X Y Z · smaller / bigger / fit · the
+  Row 2: the "steps" button (`_steps_button`, icon `sliders`) and edit the CVs (moved here the same day, the user: it is about editing the points) · turn X Y Z · smaller / bigger / fit · the
   six -X ... +Z steps. The NUMBERS (move step, turn angle, scale factor, line width - the same four
   DragNumberFields as before) sit in a menu the steps button opens (`_steps_menu`, kept for the panel's
   life: it owns the fields); the button's tooltip says them ("Move 0.1 · Turn 90° · Scale ×1.25 ·
   Line 1"). The user chose this knowing the numbers are a click away (variant A kept them in sight).
-  This row is the card's widest: 2 px spacing, no room around its rules - the window's minimum is 439.
+  This row is the card's widest: 2 px spacing, no room around its rules, the -X ... +Z buttons 22 px wide (`#controlsAxisStep`, the editor's too) - the window's minimum is 455.
   Checked: offscreen from an isolated copy (16 checks, real clicks on a group); windowed Maya 2026
   (zero by the group and by its menu, the lit mark, mirror, Mirror's submenu, an unseen member's tone,
   Bigger / a step / the line width with numbers set through the fields, the hover, select). The corner

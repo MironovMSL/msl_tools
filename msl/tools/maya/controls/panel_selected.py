@@ -20,10 +20,10 @@ class _SelectedMixin:
 
     def _selected_tools(self) -> FoldingCard:
         """SELECTED: everything that works on the controls selected in the scene, in TWO rows. Row 1:
-        edit the CVs, six GROUP buttons (another shape, the other side, zero, drive, show and select,
+        six GROUP buttons (another shape, the other side, zero, drive, show and select,
         make) and save; a group shows the action used last, a click repeats it, its corner / a right
-        click / holding it opens the group. Row 2: the "steps" button (the numbers) and the buttons
-        that use them — turn, smaller / bigger / fit, the six steps along the axes."""
+        click / holding it opens the group. Row 2: the "steps" button (the numbers) and the tools of
+        the shape itself — edit the CVs, turn, smaller / bigger / fit, the six steps along the axes."""
         icons = UiResources().iconManager
         card = self._selected_card = FoldingCard("SELECTED", icons.get_icon("select_all", sub_folder="actions"))
 
@@ -146,10 +146,6 @@ class _SelectedMixin:
         self._groups = {}
         line = qt.QtWidgets.QHBoxLayout()
         line.setSpacing(3)
-        line.addWidget(self._cvs)
-        line.addSpacing(2)
-        line.addWidget(self._rule())
-        line.addSpacing(2)
         for key, tone, title, members in groups:
             face = GroupButton(tone, icon_size=16)
             face.setObjectName("controlsTool")
@@ -216,6 +212,7 @@ class _SelectedMixin:
         steps = qt.QtWidgets.QHBoxLayout()
         steps.setSpacing(2)
         steps.addWidget(self._steps_button)
+        steps.addWidget(self._cvs)               # editing the points belongs with the shape's own tools
         steps.addWidget(self._rule())
         for axis in shape_data.AXES:
             steps.addWidget(self._turns[axis])

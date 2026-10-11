@@ -122,8 +122,8 @@ ControlsPanel QPushButton#controlsAxisStep {
     border: 1px solid alpha(var(--border), 70%);
     border-radius: 5px;
     padding: 0px;
-    min-width: 24px;
-    max-width: 24px;
+    min-width: 22px;
+    max-width: 22px;
     min-height: 22px;
     max-height: 22px;
     font-size: 11px;
