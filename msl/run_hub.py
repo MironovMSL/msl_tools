@@ -29,7 +29,7 @@ from msl_tools.msl.ui.theme import ThemeHotReloader
 from msl_tools.msl.ui.ui_resources import UiResources
 from msl_tools.msl.tools.desktop.registry import TOOLS
 from msl_tools.msl.ui.process_launcher.process_launcher import ProcessLauncher
-from msl_tools.msl.ui.maya_link import MayaLinkServer
+from msl_tools.msl.ui.maya_link import AssistantServer, MayaLinkServer
 from msl_tools.msl.ui.widgets.atoms.header.link_status_button import LinkStatusButton
 from msl_tools.msl.ui.widgets.windows.confirm_dialog import ConfirmDialog
 from msl_tools.msl.ui.widgets.windows.hub import HubWindow
@@ -241,6 +241,9 @@ def main() -> None:
         _add_link_indicator(window, link)
         link.media_requested.connect(lambda paths: _open_in_media(window, paths))  # e.g. a playblast from Maya
         link.ensure_listening()
+        # The assistant's channel (off unless the user switched it on); created now so it keeps
+        # the Mayas' logs from the start.
+        AssistantServer.instance().ensure_listening()
         if last_update is not None:
             qt.QtCore.QTimer.singleShot(300, lambda: report_update(last_update))
         instance_link = InstanceLink(instance_name, window)

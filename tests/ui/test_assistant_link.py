@@ -1,0 +1,202 @@
+"""The assistant's channel into the hub (core/link/assistant.py + ui/maya_link/assistant_server.py):
+only a client that knows the channel's own token is served, and only the fixed requests.
+
+Both servers listen on PRIVATE ports with private tokens — never ensure_listening(): a real
+Maya (or a real assistant) on this machine would join the test.
+"""
+import os
+import socket
+import threading
+import time
+import unittest
+
+from msl_tools.msl.core.link import assistant
+from msl_tools.msl.core.link import protocol
+
+try:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    import msl_tools.msl.ui.qt_bindings as qt
+    from msl_tools.msl.ui.maya_link.assistant_server import AssistantServer
+    from msl_tools.msl.ui.maya_link.server import MayaLinkServer
+except ImportError:  # no PySide6 in this Python
+    qt = None
+
+MAYA_TOKEN = "f00d" * 8
+TOKEN = "cafe" * 8
+
+
+def _free_port() -> int:
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]
+
+
+class LogBookTest(unittest.TestCase):
+    def test_reading_again_gives_only_what_came_since(self):
+        book = assistant.LogBook()
+        book.add(7, [("error", "a"), ("warning", "b")])
+        entries, last = book.read(7)
+        self.assertEqual(([entry["text"] for entry in entries], last), (["a", "b"], 2))
+        book.add(7, [("info", "c")])
+        entries, last = book.read(7, after=last)
+        self.assertEqual(([entry["text"] for entry in entries], last), (["c"], 3))
+        self.assertEqual(book.read(7, after=last), ([], 3))
+
+    def test_levels_limit_and_counts(self):
+        book = assistant.LogBook()
+        book.add(7, [("error", "e1"), ("info", "i"), ("warning", "w"), ("error", "e2")])
+        self.assertEqual([entry["text"] for entry in book.read(7, levels=["error"])[0]], ["e1", "e2"])
+        self.assertEqual([entry["text"] for entry in book.read(7, limit=2)[0]], ["w", "e2"])  # the newest
+        self.assertEqual(book.problems(7), (2, 1))
+        self.assertEqual((book.knows(8), book.read(8)), (False, ([], 0)))
+
+    def test_only_the_last_entries_and_mayas_are_kept(self):
+        book = assistant.LogBook()
+        book.add(1, [("info", str(number)) for number in range(book.PER_MAYA + 5)])
+        entries, last = book.read(1, limit=assistant.MAX_READ)
+        self.assertEqual((entries[-1]["seq"], last), (book.PER_MAYA + 5, book.PER_MAYA + 5))
+        for pid in range(2, book.MAYAS + 2):
+            book.add(pid, [("info", "x")])
+        self.assertFalse(book.knows(1))  # the one written to longest ago went
+
+    def test_address_of_a_missing_or_broken_file(self):
+        self.assertEqual(assistant.read_address(os.path.join(os.path.dirname(__file__), "no_such.json")),
+                         (0, "", False))
+
+
+@unittest.skipIf(qt is None, "PySide6 is not installed")
+class Channel(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.app = qt.QtWidgets.QApplication.instance() or qt.QtWidgets.QApplication([])
+
+    def setUp(self):
+        self.link = MayaLinkServer()
+        self.assertTrue(self.link.listen(_free_port(), MAYA_TOKEN))
+        self.link._ping_timer.stop()
+        self.addCleanup(self.link.close)
+        self.server = AssistantServer(self.link)
+        self.assertTrue(self.server.listen(_free_port(), TOKEN))
+        self.addCleanup(self.server.close)
+
+    def pump(self, until, seconds=3.0) -> bool:
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline:
+            self.app.processEvents()
+            if until():
+                return True
+            time.sleep(0.005)
+        return until()
+
+    def ask(self, action):
+        """Runs `action` (blocking client calls) on a thread while the hub's event loop turns."""
+        outcome = {}
+
+        def work():
+            try:
+                outcome["value"] = action()
+            except Exception as error:  # handed to the test's thread
+                outcome["error"] = error
+
+        thread = threading.Thread(target=work, daemon=True)
+        thread.start()
+        self.assertTrue(self.pump(lambda: not thread.is_alive(), seconds=8.0), "the client never finished")
+        if "error" in outcome:
+            raise outcome["error"]
+        return outcome["value"]
+
+    def client(self, token=TOKEN) -> "assistant.AssistantClient":
+        client = assistant.AssistantClient(self.server.port(), token, timeout=3.0)
+        self.addCleanup(client.close)
+        return client
+
+    def join_maya(self, pid=4242) -> socket.socket:
+        """A Maya on the Maya link (the older hello with the token: one message)."""
+        maya = socket.create_connection(("127.0.0.1", self.link.port()), timeout=3)
+        self.addCleanup(maya.close)
+        before = len(self.link.sessions())
+        maya.sendall(protocol.encode(protocol.event(protocol.HELLO, pid=pid, version="2025", environment="Dev",
+                                                    scene="C:/shots/a.ma", console=True, token=MAYA_TOKEN)))
+        self.assertTrue(self.pump(lambda: len(self.link.sessions()) == before + 1))
+        return maya
+
+    def test_sessions_and_their_log(self):
+        maya = self.join_maya()
+        maya.sendall(protocol.encode(protocol.event(protocol.LOG, entries=[["error", "boom"], ["warning", "hm"]])))
+        self.assertTrue(self.pump(lambda: self.server.log.knows(4242)))
+        client = self.client()
+        sessions = self.ask(lambda: client.request(assistant.SESSIONS))["sessions"]
+        self.assertEqual(len(sessions), 1)
+        self.assertEqual((sessions[0]["pid"], sessions[0]["environment"], sessions[0]["scene"],
+                          sessions[0]["console"], sessions[0]["errors"], sessions[0]["warnings"]),
+                         (4242, "Dev", "C:/shots/a.ma", True, 1, 1))
+        self.assertEqual(self.server.clients(), 1)
+        log = self.ask(lambda: client.request(assistant.READ_LOG, pid=4242))
+        self.assertEqual(([entry["text"] for entry in log["entries"]], log["last"], log["known"]),
+                         (["boom", "hm"], 2, True))
+        log = self.ask(lambda: client.request(assistant.READ_LOG, pid=4242, after=log["last"]))
+        self.assertEqual(log["entries"], [])
+        self.assertFalse(self.ask(lambda: client.request(assistant.READ_LOG, pid=1))["known"])
+
+    def test_the_maya_token_does_not_open_it(self):
+        client = self.client(token=MAYA_TOKEN)
+        with self.assertRaises(assistant.AssistantError):
+            self.ask(lambda: client.request(assistant.SESSIONS))
+        self.assertEqual(self.server.clients(), 0)
+
+    def test_an_unknown_request_is_refused(self):
+        client = self.client()
+        with self.assertRaises(assistant.AssistantError) as raised:
+            self.ask(lambda: client.request("run_python", code="1"))
+        self.assertIn("run_python", str(raised.exception))
+
+    def test_a_request_without_the_handshake_is_dropped(self):
+        raw = socket.create_connection(("127.0.0.1", self.server.port()), timeout=3)
+        self.addCleanup(raw.close)
+        raw.sendall(protocol.encode(protocol.request(assistant.SESSIONS, 1)))
+        raw.settimeout(0.05)
+
+        def closed() -> bool:
+            try:
+                return raw.recv(1024) == b""
+            except socket.timeout:
+                return False
+            except OSError:
+                return True
+
+        self.assertTrue(self.pump(closed))
+
+    def test_a_hello_that_is_not_an_assistants_is_dropped(self):
+        raw = socket.create_connection(("127.0.0.1", self.server.port()), timeout=3)
+        self.addCleanup(raw.close)
+        raw.sendall(protocol.encode(protocol.event(protocol.HELLO, pid=1, nonce=protocol.new_nonce())))
+        raw.settimeout(0.05)
+
+        def closed() -> bool:
+            try:
+                return raw.recv(1024) == b""
+            except socket.timeout:
+                return False
+            except OSError:
+                return True
+
+        self.assertTrue(self.pump(closed))
+
+    def test_the_client_finds_the_hub_again_after_it_was_away(self):
+        client = self.client()
+        port = self.server.port()
+        self.assertEqual(self.ask(lambda: client.request(assistant.SESSIONS))["sessions"], [])
+        self.server.close()
+        self.pump(lambda: False, seconds=0.1)
+        self.assertTrue(self.server.listen(port, TOKEN))
+        self.assertEqual(self.ask(lambda: client.request(assistant.SESSIONS))["sessions"], [])
+
+    def test_nobody_listens(self):
+        self.server.close()
+        client = assistant.AssistantClient(_free_port(), TOKEN, timeout=1.0)
+        with self.assertRaises(assistant.AssistantError):
+            self.ask(lambda: client.request(assistant.SESSIONS))
+
+
+if __name__ == "__main__":
+    unittest.main()

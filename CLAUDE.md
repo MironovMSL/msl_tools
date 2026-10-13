@@ -895,6 +895,21 @@ What changed vs. the original (all deliberate, not oversights):
   request refused, Maya's own auto-load list intact after loading a plug-in
   this way. All four planned steps of the link are built.
   Long work in Maya must answer later by `id`, never block the socket.
+- The assistant's channel (2026-10-13, step 1 of an MCP server of our own; the user's plan: a coding
+  assistant sees the connected Mayas and their logs, later runs code in ANY session that has the
+  console - the user's call): a SECOND local server beside the Maya link, `ui/maya_link/
+  assistant_server.py` `AssistantServer` (`instance()`; run_hub creates it and calls
+  `ensure_listening()`): 127.0.0.1, port 47631 (next free of 10), its OWN token, all in
+  `configs/desktop/maya_assistant` with `enabled` - OFF on a fresh install (`set_enabled()`; no
+  switch in the UI yet). Same framing and handshake as the Maya link, the client in Maya's part
+  (hello with role "assistant" + nonce, welcome, proof); 4 clients at most; nothing received is
+  executed - requests are looked up in `_HANDLERS`: `sessions`, `read_log` {pid, after, limit,
+  levels} so far. `core/link/assistant.py` (Qt-free): the names, `describe(session)`, `LogBook`
+  (per PID, the last 2000 entries of the last 8 Mayas, a `seq` per entry so a second read gives
+  only what came since - kept from the hub's start, listening or not), `read_address(file)` and
+  the blocking `AssistantClient` (reconnects after the hub was away). Tests:
+  `tests/ui/test_assistant_link.py` (private ports). NOT built: the MCP server itself + `.mcp.json`,
+  the switch on the Sessions tab, `run_python` for the assistant.
 - Before a launch (2026-10-04): `launch_check.py` (Qt-free)
   `check(variables, script, boost_enabled, boost_blocked)` -> one line
   per thing worth a look: a folder / file a variable names that isn't
