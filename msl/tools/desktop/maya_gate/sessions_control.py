@@ -88,6 +88,28 @@ class _ControlMixin:
                                 self._menu_danger_color if danger else self._menu_icon_color,
                                 self.devicePixelRatioF(), self.MENU_ICON_SIZE)
 
+    def _add_assistant_item(self, menu, session) -> None:
+        """A tick in a Maya's menu: may the assistant ACT in this one (run code, reload, close)?
+        Shown only while the assistant is allowed to act at all; off for this Maya it can still
+        look. Kept until the hub restarts (AssistantServer.set_session_denied)."""
+        assistant = self._assistant
+        if assistant is None or not assistant.code_allowed() or not session.console:
+            return
+        menu.addSeparator()
+        action = menu.addAction("Assistant may act in this Maya")
+        action.setCheckable(True)
+        if session.environment in assistant.off_environments():
+            action.setChecked(False)
+            action.setEnabled(False)
+            action.setToolTip(f"The assistant only looks at Mayas of “{session.environment}” — set at the "
+                              "robot’s head in the window’s header (right click)")
+            return
+        action.setChecked(not assistant.session_denied(session.pid))
+        action.setToolTip("Ticked: the assistant may run Python in this Maya, reload its code and close it."
+                          + chr(10) + "Unticked: it only looks at this one (until MSL Tools restarts).")
+        pid = session.pid
+        action.toggled.connect(lambda allowed: assistant.set_session_denied(pid, not allowed))
+
     def _on_row_menu(self, session_id: int) -> None:
         """Everything that can be asked of one running Maya, as a menu under the
         row's button. While that Maya works on a request, or doesn't answer at
@@ -120,6 +142,7 @@ class _ControlMixin:
         if session.skipped:
             add("Load plug-ins…", ("plugin", "plugins"), "Load plug-ins that boost start left out — in this "
                 "running Maya, no restart", lambda: self._on_plugins(session_id), enabled=reachable)
+        self._add_assistant_item(menu, session)
         menu.addSeparator()
         if self._launch is not None:
             add("Restart Maya…", ("restart", "actions"), "Close this Maya and start it again: same version, "

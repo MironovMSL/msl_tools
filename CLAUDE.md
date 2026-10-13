@@ -704,12 +704,18 @@ What changed vs. the original (all deliberate, not oversights):
     traceback go into that Maya's log and don't count as its problems.
     Verified with real Maya 2023 + 2025.
   - Around the sessions (seen without opening the tab):
-    - Header indicator: `LinkStatusButton` (atoms/header/) left of the
-      theme toggle, put there by run_hub (`_add_link_indicator`,
-      `HubWindow.add_header_widget()`): hollow ring = not listening, green
-      dot + the number of connected Mayas = listening, red pulsing dot =
-      unread errors. A click = `HubWindow.open_tool("maya_gate")` +
-      `MayaGatePage.show_sessions()`. The atom knows nothing about Maya.
+    - On Maya Gate's SIDEBAR TILE (since 2026-10-14, the user's pick: the
+      header's green dot said nothing and stood beside the robot like one
+      more lamp): `run_hub._show_link_on_tile` -> `HubWindow.set_tool_badge(
+      tool_id, text, tone, tooltip)` -> `IconTileButton.set_badge()` (a pill
+      on the icon's corner, `QLabel#tileBadge[tone]` in widgets.qss): a green
+      count of the connected Mayas, a red count of unread errors, a red "!"
+      when the link isn't listening, nothing while no Maya is connected; the
+      tile's tooltip says it in words. A click on the tile while it is red
+      also opens the Sessions tab (`HubWindow.tool_button()` / `tool_page()`
+      - not open_tool(), which would click the tile again). The header's
+      `LinkStatusButton` (atoms/header/) is no longer used by the hub; the
+      atom stays.
     - Unread errors: `MayaLinkServer.unread_errors()` /
       `set_unread_errors()` + `attention_changed`. The Sessions tab counts
       errors (and Mayas that ended unexpectedly) that arrive while it is
@@ -1055,6 +1061,42 @@ What changed vs. the original (all deliberate, not oversights):
   "finished in 6.0 s" with its print and result; a failing job's traceback came back as the tool's
   error; an unknown job number said so.
   A snippet's whole code shows in that Maya's log like any assistant code - long, but nothing is hidden.
+  THREE GUARDS besides the one switch (2026-10-14, item 5 of the plan, the user's "all three"):
+  (1) A JOURNAL in a file: `core/link/assistant_guard.py` `Journal(folder).record(what, where, body,
+  outcome)` appends to `logs/desktop/maya_gate/assistant/<date>.log` (never raises; files older than
+  60 days swept; 400 lines per entry) - every run of Python with its code and outcome, every
+  launch, reload and close, and each of the user's Allowed / Refused. `AssistantServer.set_journal`
+  (given the folder by `ensure_listening()`, so a test's `listen()` server keeps none unless told);
+  the robot's menu ends with "Show the journal of what it did".
+  (2) A QUESTION before dangerous code: `assistant_guard.risks(code)` reads the code with `ast`,
+  never runs it, and returns plain-word reasons - cmds.file with save / rename / new / open / export
+  / removeReference (not in query mode, not `flag=False`), quit, pm.saveFile and the like, os.remove
+  / unlink / rmdir / rmtree, os.system / subprocess, exec / eval, mel.eval of a text that saves /
+  opens / quits or of one it can't read; [] for code that isn't Python (Maya refuses that itself).
+  A guard against a MISTAKE, not a wall: code written to hide what it does gets through. With
+  reasons and `confirms()` (config `confirm`, on; the menu's "Ask me first") the server takes the
+  Maya (`_running`) and calls the confirmer on the next turn of the event loop -
+  `run_hub._confirm_assistant_code`: ConfirmDialog kind "danger" (Enter = Refuse), the reasons, the
+  Maya, 14 lines of the code, `QApplication.alert`, closing itself unanswered after
+  `assistant.CONFIRM_SECONDS` 120 = refused (ConfirmDialog.ask got `timeout_ms=` and `width=`; a
+  width only holds as a MINIMUM width - `_build()` ends in adjustSize()). Refused = nothing is sent
+  to Maya and the tool's error says what the code would have done. The MCP client waits
+  CONFIRM_SECONDS longer for a run. The tools' own snippets ask nothing (tested).
+  (3) WHERE it may act: `may_act(session)` -> "" or why not: the code switch, then
+  `off_environments()` (config `code_off_environments`, empty = every environment; the menu's "IT
+  MAY ACT IN MAYAS OF" switches) and `session_denied(pid)` (in memory until the hub restarts; a tick
+  "Assistant may act in this Maya" in a session row's menu - `_ControlMixin._add_assistant_item`).
+  It covers run_python, reload, close, and launch_maya for an environment that is off; looking
+  (sessions, log, report) is never closed. `maya_sessions` marks only what it may act in.
+  The menu: OptionMenu got `add_switch(text, on) -> action` (`toggled`; a one-line yes / no that
+  does NOT close the menu - `#menuSwitch` in widgets.qss).
+  Tests: tests/core/test_assistant_guard.py, two more in test_assistant_link (a confirmer stub; the
+  private fields set directly - the setters write the hub's config). Rendered offscreen: the menu
+  with its switches (a click on "Stable" flipped it and the menu stayed), the question. Seen with
+  the user's hub and Maya 2026: plain code ran unasked; code deleting a probe file of mine brought
+  the question, the user answered Allow after 31 s, the file was gone; the journal held all three
+  entries. NOT seen live: a Refuse, the two-minute timeout, the environment and per-Maya switches
+  (they need the user's clicks).
 - Before a launch (2026-10-04): `launch_check.py` (Qt-free)
   `check(variables, script, boost_enabled, boost_blocked)` -> one line
   per thing worth a look: a folder / file a variable names that isn't

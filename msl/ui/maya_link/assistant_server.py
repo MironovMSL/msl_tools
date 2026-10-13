@@ -24,6 +24,7 @@ import time
 
 import msl_tools.msl.ui.qt_bindings as qt
 from msl_tools.msl.core.link import assistant
+from msl_tools.msl.core.link import assistant_guard as guard
 from msl_tools.msl.core.link import protocol
 from msl_tools.msl.ui.maya_link.server import MayaLinkServer
 
@@ -86,6 +87,13 @@ class AssistantServer(qt.QtCore.QObject):
         # (a test) never opens the hub's config.
         self._code_allowed = False
         self._running: set[int] = set()          # pids with an assistant's code out
+        # Finer than the one switch (see may_act()): environments in which it may not act, and
+        # single Mayas (by pid, for this run of the hub) it may not act in.
+        self._off_environments: set[str] = set()
+        self._denied: set[int] = set()
+        self._confirms = True      # ask the user before code that saves, opens, closes or deletes
+        self._confirmer = None     # set_confirmer(): puts that question
+        self._journal = None       # set_journal(): the file record of what an assistant did
         self._launch = None        # set_launcher(): starts a Maya
         self._environments: list = []
         self._window = None        # set_window(): the hub's window
@@ -102,7 +110,7 @@ class AssistantServer(qt.QtCore.QObject):
             from msl_tools.msl.core.resources import Resources
             self._config = Resources().configsDesktopHubMng.get_config(
                 assistant.CONFIG_NAME, defaults={"port": assistant.DEFAULT_PORT, "token": "", "enabled": False,
-                                                 "code": False})
+                                                 "code": False, "confirm": True, "code_off_environments": []})
         return self._config
 
     def code_allowed(self) -> bool:
@@ -114,6 +122,72 @@ class AssistantServer(qt.QtCore.QObject):
         self._code_allowed = bool(allowed)
         self._settings()["code"] = self._code_allowed
         self.access_changed.emit()
+
+    def confirms(self) -> bool:
+        """Is the user asked before code that saves, opens, closes or deletes (on unless switched off)."""
+        return self._confirms
+
+    def set_confirms(self, on: bool) -> None:
+        self._confirms = bool(on)
+        self._settings()["confirm"] = self._confirms
+        self.access_changed.emit()
+
+    def off_environments(self) -> set:
+        """Environments in which an assistant may not act though the code switch is on."""
+        return set(self._off_environments)
+
+    def set_environment_allowed(self, environment: str, allowed: bool) -> None:
+        if allowed:
+            self._off_environments.discard(environment)
+        else:
+            self._off_environments.add(environment)
+        self._settings()["code_off_environments"] = sorted(self._off_environments)
+        self.access_changed.emit()
+
+    def session_denied(self, pid: int) -> bool:
+        """This one Maya was closed to the assistant's actions (until the hub restarts)."""
+        return pid in self._denied
+
+    def set_session_denied(self, pid: int, denied: bool) -> None:
+        if denied:
+            self._denied.add(pid)
+        else:
+            self._denied.discard(pid)
+        self.access_changed.emit()
+
+    def may_act(self, session) -> str:
+        """"" if an assistant may act in `session` (run code, reload, close), else why not."""
+        if not self.code_allowed():
+            return ("Acting in a Maya is switched off for the assistant in MSL Tools "
+                    "(right click the robot’s head in the window’s header).")
+        if session.environment in self._off_environments:
+            return ("The assistant may only look at Mayas of the environment “%s” (set in MSL Tools: "
+                    "right click the robot’s head)." % session.environment)
+        if session.pid in self._denied:
+            return "The user closed this Maya to the assistant’s actions (its row’s menu on the Sessions tab)."
+        return ""
+
+    def set_confirmer(self, confirm) -> None:
+        """`confirm(session, code, reasons, answer)` puts the question "may it?" to the user and
+        calls `answer(True / False)` - once, later, never from inside the call."""
+        self._confirmer = confirm
+
+    def set_journal(self, folder) -> None:
+        """Where the file record of an assistant's actions goes (None: none is kept)."""
+        self._journal = guard.Journal(folder) if folder else None
+
+    def journal_file(self):
+        """Today's journal file (it may not exist yet), or None."""
+        return self._journal.file_for() if self._journal is not None else None
+
+    def _record(self, what: str, session=None, body: str = "", outcome: str = "") -> None:
+        if self._journal is None:
+            return
+        where = ""
+        if session is not None:
+            where = "Maya %s · %s · pid %d · %s" % (session.version, session.environment or "no environment",
+                                                           session.pid, session.scene or "untitled")
+        self._journal.record(what, where, body, outcome)
 
     def running(self) -> set:
         """Pids of the Mayas that have an assistant's code out right now."""
@@ -139,6 +213,11 @@ class AssistantServer(qt.QtCore.QObject):
             return True
         config = self._settings()
         self._code_allowed = bool(config["code"])
+        self._confirms = bool(config["confirm"])
+        self._off_environments = {str(name) for name in config["code_off_environments"] or []}
+        if self._journal is None:
+            from msl_tools.msl.core.fs.manager import FileSystemManager
+            self.set_journal(FileSystemManager.logsDesktop / "maya_gate" / "assistant")
         token = str(config["token"] or "")
         if not token:
             token = secrets.token_hex(16)
@@ -285,7 +364,7 @@ class AssistantServer(qt.QtCore.QObject):
         described = []
         for session in self._link.sessions():
             entry = assistant.describe(session, self.log.problems(session.pid))
-            entry["runs_code"] = bool(session.console and self.code_allowed())
+            entry["runs_code"] = bool(session.console and not self.may_act(session))
             described.append(entry)
         return {"sessions": described}
 
@@ -306,6 +385,10 @@ class AssistantServer(qt.QtCore.QObject):
         assistant can't start a Maya."""
         self._launch = launch
         self._environments = [str(name) for name in environments]
+
+    def environments(self) -> list:
+        """The environments a Maya can be started in ([] until Maya Gate's page gave them)."""
+        return list(self._environments)
 
     def set_window(self, window) -> None:
         """The hub's window, for pictures of it (anything with grab(); `open_tool(id)` and
@@ -335,8 +418,12 @@ class AssistantServer(qt.QtCore.QObject):
             why = "Maya “%s” isn’t installed here. Installed: %s." % (version, ", ".join(versions) or "none")
         elif environment not in self._environments:
             why = "There is no environment “%s”. Environments: %s." % (environment, ", ".join(self._environments))
+        elif environment in self._off_environments:
+            why = ("The assistant may only look at Mayas of the environment “%s” - it can’t start one "
+                   "there (set in MSL Tools: right click the robot’s head)." % environment)
         else:
             why = self._launch(version, environment, scene)
+            self._record("started Maya %s in %s" % (version, environment), body=scene, outcome=why or "started")
         return {"success": False, "error": why} if why else {"started": True}
 
     def _hub_screenshot(self, client: _Client, request_id: int, data: dict) -> None:
@@ -381,16 +468,16 @@ class AssistantServer(qt.QtCore.QObject):
         session = next((s for s in self._link.sessions() if s.pid == pid), None)
         if session is None:
             why = "MSL Tools knows no connected Maya with pid %d." % pid
-        elif changes and not self.code_allowed():
-            why = ("That changes the Maya, which is switched off for the assistant in MSL Tools "
-                   "(right click the robot’s head in the window’s header).")
         else:
-            why = ""
+            why = self.may_act(session) if changes else ""
         if why:
             client.socket.write(protocol.encode(protocol.reply(request_id, False, why)))
             return
 
         def done(reply: dict) -> None:
+            if changes:
+                self._record("asked for " + name, session,
+                             outcome="done" if reply.get("success") else str(reply.get("error") or "failed"))
             if client not in self._clients:
                 return
             if reply.get("success"):
@@ -409,11 +496,13 @@ class AssistantServer(qt.QtCore.QObject):
 
         pid, code = int(data.get("pid") or 0), data.get("code")
         session = next((s for s in self._link.sessions() if s.pid == pid), None)
-        if not self.code_allowed():
-            return refuse("Running code is switched off for the assistant in MSL Tools "
+        if not self.code_allowed():   # said first: whether such a Maya exists is not the point then
+            return refuse("Acting in a Maya is switched off for the assistant in MSL Tools "
                           "(right click the robot’s head in the window’s header).")
         if session is None:
             return refuse("MSL Tools knows no connected Maya with pid %d." % pid)
+        if self.may_act(session):
+            return refuse(self.may_act(session))
         if not session.console:
             return refuse("That Maya takes no code (it was not started from MSL Tools with the console allowed).")
         if not isinstance(code, str) or not code.strip() or len(code) > assistant.MAX_CODE:
@@ -433,14 +522,10 @@ class AssistantServer(qt.QtCore.QObject):
             self._jobs[job] = {"done": False, "pid": pid, "started": time.time()}
             while len(self._jobs) > assistant.JOBS_KEPT:
                 self._jobs.pop(next(iter(self._jobs)))
+            client.socket.write(protocol.encode(protocol.reply(request_id, job=job)))
 
-        def done(reply: dict) -> None:
-            self._running.discard(pid)
-            self.code_finished.emit(pid, reply)
-            result = reply.get("data") or {}
-            outcome = {"output": str(result.get("output") or ""), "result": str(result.get("result") or ""),
-                       "traceback": str(result.get("traceback") or "")}
-            failure = "" if reply.get("success") else str(reply.get("error") or "the request failed")
+        def finish(outcome: dict, failure: str) -> None:
+            """The run is over (or never started): tell whoever waits."""
             if job is not None:
                 if job in self._jobs:
                     self._jobs[job].update(outcome, done=True, error=failure,
@@ -451,12 +536,41 @@ class AssistantServer(qt.QtCore.QObject):
             answer = protocol.reply(request_id, False, failure) if failure else protocol.reply(request_id, **outcome)
             client.socket.write(protocol.encode(answer))
 
-        self._running.add(pid)
-        self.code_started.emit(pid, code)
-        self._link.request(session.session_id, protocol.RUN_PYTHON, on_reply=done,
-                           timeout_ms=seconds * 1000, code=code)
-        if job is not None:
-            client.socket.write(protocol.encode(protocol.reply(request_id, job=job)))
+        def done(reply: dict) -> None:
+            self._running.discard(pid)
+            self.code_finished.emit(pid, reply)
+            result = reply.get("data") or {}
+            outcome = {"output": str(result.get("output") or ""), "result": str(result.get("result") or ""),
+                       "traceback": str(result.get("traceback") or "")}
+            failure = "" if reply.get("success") else str(reply.get("error") or "the request failed")
+            self._record("ran Python", session, code, failure or "\n".join(
+                part for part in (outcome["output"].rstrip("\n"), outcome["traceback"].rstrip("\n"),
+                                  "# Result: " + outcome["result"] if outcome["result"] else "") if part) or "(nothing)")
+            finish(outcome, failure)
+
+        def start() -> None:
+            if self._link.session(session.session_id) is None:   # it left while the user was asked
+                self._running.discard(pid)
+                return finish({}, "That Maya is no longer connected.")
+            self.code_started.emit(pid, code)
+            self._link.request(session.session_id, protocol.RUN_PYTHON, on_reply=done,
+                               timeout_ms=seconds * 1000, code=code)
+
+        self._running.add(pid)   # from here on that Maya is taken: also while the user is asked
+        reasons = guard.risks(code) if self._confirms and self._confirmer is not None else []
+        if not reasons:
+            return start()
+
+        def answered(allowed: bool) -> None:
+            if allowed:
+                self._record("the user ALLOWED code that " + ", ".join(reasons), session)
+                return start()
+            self._running.discard(pid)
+            self._record("the user REFUSED code that " + ", ".join(reasons), session, code)
+            finish({}, "The user did not allow it in MSL Tools - the code " + ", ".join(reasons) + ". Nothing was run.")
+
+        # Asked on the next turn of the event loop: never from inside this socket's own slot.
+        qt.QtCore.QTimer.singleShot(0, lambda: self._confirmer(session, code, reasons, answered))
 
     def _job(self, data: dict) -> dict:
         """Where a detached run_python stands: {"done": false, "seconds"} or its outcome."""

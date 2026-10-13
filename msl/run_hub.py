@@ -21,6 +21,7 @@ from pathlib import Path
 import msl_tools.msl.ui.qt_bindings as qt
 from msl_tools.msl import __version__
 from msl_tools.msl.core.installer.hub_updater import HubUpdater, UpdateResult
+from msl_tools.msl.core.link import assistant as assistant_names
 from msl_tools.msl.core.resources import Resources
 from msl_tools.msl.core.version.version import Version
 from msl_tools.msl.ui.app.application_context import QtApplicationContext
@@ -32,7 +33,6 @@ from msl_tools.msl.ui.process_launcher.process_launcher import ProcessLauncher
 from msl_tools.msl.ui.maya_link import AssistantServer, MayaLinkServer
 from msl_tools.msl.ui.widgets.atoms.header.assistant_button import AssistantButton
 from msl_tools.msl.ui.widgets.compositions.option_menu import OptionMenu
-from msl_tools.msl.ui.widgets.atoms.header.link_status_button import LinkStatusButton
 from msl_tools.msl.ui.widgets.windows.confirm_dialog import ConfirmDialog
 from msl_tools.msl.ui.widgets.windows.hub import HubWindow
 from msl_tools.msl.ui.widgets.windows.whats_new_dialog import WhatsNewDialog
@@ -88,38 +88,41 @@ def _watch_for_update(window: HubWindow) -> None:
 
 
 MAYA_GATE_TOOL_ID = "maya_gate"
+CONFIRM_CODE_LINES = 14   # of an assistant's code shown in the question "may it run this?"
+CONFIRM_WIDTH = 480        # ... wide enough for lines of code
 
 
-def _add_link_indicator(window: HubWindow, link: MayaLinkServer) -> None:
-    """The header's indicator of the hub <-> Maya link: off / listening, how
-    many Mayas are connected, and an alert when one of them reported an
-    error nobody looked at yet. A click opens Maya Gate's Sessions tab."""
-    indicator = LinkStatusButton()
-
+def _show_link_on_tile(window: HubWindow, link: MayaLinkServer) -> None:
+    """The hub <-> Maya link, told on Maya Gate's sidebar tile - seen from every tool: a green
+    count of the connected Mayas, or a red one of the errors a Maya reported that nobody
+    looked at yet (red "!" too when the link itself isn't listening). A click on the tile
+    while it is red opens the Sessions tab."""
     def refresh() -> None:
         sessions, errors = len(link.sessions()), link.unread_errors()
         if not link.is_listening():
-            indicator.set_state(LinkStatusButton.OFF)
-            indicator.setToolTip("Maya link: not listening" + (f"\n{link.error_text()}" if link.error_text() else ""))
-            return
-        indicator.set_state(LinkStatusButton.ATTENTION if errors else LinkStatusButton.ON, sessions)
-        lines = [f"Maya link: listening on port {link.port()}",
-                 "No Maya connected" if not sessions else f"{sessions} Maya session(s) connected"]
-        if errors:
-            lines.append(f"{errors} new error(s) in Maya \u2014 click to see")
-        indicator.setToolTip("\n".join(lines))
+            window.set_tool_badge(MAYA_GATE_TOOL_ID, "!", "attention",
+                                  "Maya link: not listening" + (f" - {link.error_text()}" if link.error_text() else ""))
+        elif errors:
+            window.set_tool_badge(MAYA_GATE_TOOL_ID, str(errors), "attention",
+                                  f"{errors} new error(s) in Maya — click to see")
+        elif sessions:
+            window.set_tool_badge(MAYA_GATE_TOOL_ID, str(sessions), "",
+                                  "1 Maya connected" if sessions == 1 else f"{sessions} Mayas connected")
+        else:
+            window.set_tool_badge(MAYA_GATE_TOOL_ID, "")
 
-    def open_sessions() -> None:
-        page = window.open_tool(MAYA_GATE_TOOL_ID)
-        show = getattr(page, "show_sessions", None)
-        if show is not None:
-            show()
+    def on_tile_clicked(*_args) -> None:
+        if link.unread_errors():   # the page is open by now (the tile's own click came first)
+            show = getattr(window.tool_page(MAYA_GATE_TOOL_ID), "show_sessions", None)   # not open_tool():
+            if show is not None:                                                        # that clicks the tile again
+                show()
 
     link.listening_changed.connect(refresh)
     link.sessions_changed.connect(refresh)
     link.attention_changed.connect(refresh)
-    indicator.clicked.connect(open_sessions)
-    window.add_header_widget(indicator)
+    tile = window.tool_button(MAYA_GATE_TOOL_ID)
+    if tile is not None:
+        tile.clicked.connect(on_tile_clicked)
     refresh()
 
 
@@ -139,6 +142,15 @@ def _assistant_menu(button: AssistantButton, assistant: AssistantServer, toggle)
                      face(True), checked=not code).triggered.connect(lambda: assistant.set_code_allowed(False))
     popup.add_option("Look and run Python", "Also runs code in the connected Mayas — shown in their logs",
                      face(True, True), checked=code).triggered.connect(lambda: assistant.set_code_allowed(True))
+    if code:   # finer than the one switch: where it may act, and whether it asks first
+        if assistant.environments():
+            popup.add_caption("IT MAY ACT IN MAYAS OF")
+            off = assistant.off_environments()
+            for environment in assistant.environments():
+                popup.add_switch(environment, environment not in off).toggled.connect(
+                    lambda allowed, environment=environment: assistant.set_environment_allowed(environment, allowed))
+        popup.add_caption("BEFORE IT SAVES, OPENS OR CLOSES A SCENE, OR DELETES FILES")
+        popup.add_switch("Ask me first", assistant.confirms()).toggled.connect(assistant.set_confirms)
     popup.addSeparator()
     if listening:
         who = "%d connected now" % clients if clients else "nobody connected now"
@@ -147,7 +159,26 @@ def _assistant_menu(button: AssistantButton, assistant: AssistantServer, toggle)
     else:
         popup.add_option("Switch on", "Off — no assistant can connect",
                          face(True, code)).triggered.connect(toggle)
+    journal = assistant.journal_file()
+    if journal is not None:
+        popup.addAction("Show the journal of what it did").triggered.connect(
+            lambda: ProcessLauncher.open_file_explorer(journal if journal.exists() else journal.parent))
     return popup
+
+
+def _confirm_assistant_code(window: HubWindow, session, code: str, reasons: list, answer) -> None:
+    """Asks the user whether an assistant's code that saves, opens, closes or deletes may run
+    (AssistantServer.set_confirmer). Unanswered for CONFIRM_SECONDS = refused."""
+    lines = code.strip("\n").split("\n")
+    shown = "\n".join(lines[:CONFIRM_CODE_LINES]) + (
+        "\n… %d more lines" % (len(lines) - CONFIRM_CODE_LINES) if len(lines) > CONFIRM_CODE_LINES else "")
+    where = "Maya %s · %s · %s" % (session.version, session.environment or "no environment", session.scene_name)
+    qt.QtWidgets.QApplication.alert(window)   # the taskbar button, if the hub is not in front
+    choice = ConfirmDialog.ask(
+        window, "The assistant asks", "The assistant wants to run code that " + ", ".join(reasons) + ".",
+        details=where + "\n\n" + shown, choices=[("allow", "Allow"), ("refuse", "Refuse")], kind="danger",
+        timeout_ms=assistant_names.CONFIRM_SECONDS * 1000, width=CONFIRM_WIDTH)
+    answer(choice == "allow")
 
 
 def _add_assistant_button(window: HubWindow, assistant: AssistantServer) -> None:
@@ -305,13 +336,15 @@ def main() -> None:
         # The hub <-> Maya link: listen from the start, so a Maya that outlived the
         # previous hub (it retries every few seconds) finds this one.
         link = MayaLinkServer.instance()
-        _add_link_indicator(window, link)
+        _show_link_on_tile(window, link)
         link.media_requested.connect(lambda paths: _open_in_media(window, paths))  # e.g. a playblast from Maya
         link.ensure_listening()
         # The assistant's channel (off unless the user switched it on); created now so it keeps
         # the Mayas' logs from the start.
         assistant = AssistantServer.instance()
         assistant.set_window(window)   # an assistant may ask for a picture of the hub
+        assistant.set_confirmer(lambda session, code, reasons, answer: _confirm_assistant_code(
+            window, session, code, reasons, answer))
         assistant.ensure_listening()
         _add_assistant_button(window, assistant)
         if last_update is not None:

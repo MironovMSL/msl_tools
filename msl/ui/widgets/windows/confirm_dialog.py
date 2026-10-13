@@ -85,7 +85,7 @@ class ConfirmDialog(FramelessDialog):
 
     def __init__(self, title: str, message: str, details: str | None = None,
                  choices: Sequence[tuple[str, str]] = (("ok", "OK"),), kind: str = "question",
-                 parent=None):
+                 parent=None, width: int = 0):
         """
         Args:
             title: Window title (chrome header).
@@ -94,13 +94,16 @@ class ConfirmDialog(FramelessDialog):
             choices: (key, label) pairs, left to right; the first is primary.
             kind: "question", "warning" or "danger" (see the class docstring).
             parent: Widget the dialog is modal to (centered over its window).
+            width: Wider than WIDTH, for details that are lines of code or paths (0 = WIDTH).
         """
         self._kind = kind if kind in self.KINDS else "question"
-        super().__init__(title=title, width=self.WIDTH, height=10,
+        super().__init__(title=title, width=max(int(width), self.WIDTH), height=10,
                          show_minimize_button=False, show_maximize_button=False,
                          show_theme_toggle=False, parent=parent)
         self.setProperty("kind", self._kind)  # widgets.qss: badge tone per kind
         self._choice: str | None = None
+        if width > self.WIDTH:
+            self.setMinimumWidth(int(width))   # _build() ends in adjustSize(), which would shrink it to its texts
         self._build(message, details, choices)
 
     def _build(self, message: str, details: str | None, choices: Sequence[tuple[str, str]]) -> None:
@@ -168,9 +171,14 @@ class ConfirmDialog(FramelessDialog):
 
     @classmethod
     def ask(cls, parent, title: str, message: str, details: str | None = None,
-            choices: Sequence[tuple[str, str]] = (("ok", "OK"),), kind: str = "question") -> str | None:
-        """Shows the dialog modally and returns the chosen key (None if closed)."""
-        dialog = cls(title, message, details, choices, kind, parent)
+            choices: Sequence[tuple[str, str]] = (("ok", "OK"),), kind: str = "question",
+            timeout_ms: int = 0, width: int = 0) -> str | None:
+        """Shows the dialog modally and returns the chosen key (None if closed).
+        With `timeout_ms` it closes itself after that long, unanswered (None) - for a
+        question something else is waiting on."""
+        dialog = cls(title, message, details, choices, kind, parent, width)
+        if timeout_ms > 0:
+            qt.QtCore.QTimer.singleShot(timeout_ms, dialog.reject)
         window = parent.window() if parent is not None else None
         blur = getattr(window, "set_blurred", None)
         if blur is not None:

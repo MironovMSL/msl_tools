@@ -74,6 +74,9 @@ MAX_READ = 500                   # entries one read_log may return
 MAX_CODE = 1024 * 1024           # characters of code one run_python may carry
 RUN_SECONDS = (5, 600)           # how long a run_python may ask the hub to wait for Maya: least, most
 RUN_SECONDS_DEFAULT = 60
+# How long the hub waits for the USER when it asks before running code that saves, opens, closes or
+# deletes (core/link/assistant_guard.py); unanswered = refused. A client waits this much longer.
+CONFIRM_SECONDS = 120
 
 
 def describe(session: MayaSession, problems: tuple[int, int] = (0, 0), now: float | None = None) -> dict:

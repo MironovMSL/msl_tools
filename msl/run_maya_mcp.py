@@ -121,8 +121,9 @@ class MayaTools:
                             detach=True).get("job")
             return ("Job %s is running in Maya %d (up to %d s; Maya is busy meanwhile). "
                     "Ask maya_job with job=%s for its outcome." % (job, pid, seconds, job))
-        answer = self._ask(assistant.RUN_PYTHON, wait=seconds + 10, again=False, pid=pid, code=str(code),
-                           seconds=seconds)
+        # ... and the hub may first ask the user (code that saves, opens, closes): that is waited for too.
+        answer = self._ask(assistant.RUN_PYTHON, wait=seconds + 10 + assistant.CONFIRM_SECONDS, again=False,
+                           pid=pid, code=str(code), seconds=seconds)
         return self._tell_run(answer)
 
     def job(self, job: int = 0, wait: int = 0) -> str:

@@ -238,6 +238,70 @@ class Channel(unittest.TestCase):
         self.assertEqual(self.server.running(), set())
         self.assertTrue(self.ask(lambda: client.request(assistant.SESSIONS))["sessions"][0]["runs_code"])
 
+    def test_code_that_saves_is_put_to_the_user_first(self):
+        maya = self.join_maya()
+        self.server._code_allowed = True
+        folder = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, folder, True)
+        self.server.set_journal(folder)
+        asked, verdict, seen = [], [False], []
+
+        def confirm(session, code, reasons, answer):
+            asked.append((session.pid, reasons))
+            answer(verdict[0])
+
+        self.server.set_confirmer(confirm)
+        client = self.client()
+        answering = self.answering(maya, seen, output="", result="None", traceback="")
+        with self.assertRaises(assistant.AssistantError) as raised:
+            self.ask(lambda: client.request(assistant.RUN_PYTHON, again=False, pid=4242,
+                                            code="cmds.file(save=True)"), answering)
+        self.assertIn("did not allow", str(raised.exception))
+        self.assertIn("saves the scene", str(raised.exception))
+        self.assertEqual((asked, seen, self.server.running()), ([(4242, ["saves the scene"])], [], set()))
+        verdict[0] = True
+        self.ask(lambda: client.request(assistant.RUN_PYTHON, again=False, pid=4242, code="cmds.file(save=True)"),
+                 answering)
+        self.assertEqual(seen, ["cmds.file(save=True)"])
+        self.ask(lambda: client.request(assistant.RUN_PYTHON, again=False, pid=4242, code="cmds.ls()"), answering)
+        self.assertEqual(len(asked), 2)   # plain code is not asked about
+        self.server.set_confirmer(confirm)
+        self.server._confirms = False     # the user switched the questions off
+        self.ask(lambda: client.request(assistant.RUN_PYTHON, again=False, pid=4242, code="cmds.file(save=True)"),
+                 answering)
+        self.assertEqual(len(asked), 2)
+        with open(self.server.journal_file(), encoding="utf-8") as handle:
+            journal = handle.read()
+        self.assertIn("the user REFUSED code that saves the scene", journal)
+        self.assertIn("the user ALLOWED code that saves the scene", journal)
+        self.assertEqual(journal.count("  ran Python  |  Maya 2025 \u00b7 Dev \u00b7 pid 4242 \u00b7 C:/shots/a.ma"), 3)
+        self.assertIn("cmds.ls()\n--- outcome\n# Result: None", journal)
+
+    def test_it_may_only_look_where_the_user_said_so(self):
+        maya = self.join_maya()
+        self.server._code_allowed = True
+        client, seen = self.client(), []
+        answering = self.answering(maya, seen, output="", result="1", traceback="")
+
+        def refused() -> str:
+            with self.assertRaises(assistant.AssistantError) as raised:
+                self.ask(lambda: client.request(assistant.RUN_PYTHON, again=False, pid=4242, code="1"), answering)
+            return str(raised.exception)
+
+        self.server._off_environments = {"Dev"}   # (set_environment_allowed would write the hub's config)
+        self.assertIn("only look at Mayas of the environment", refused())
+        self.assertFalse(self.ask(lambda: client.request(assistant.SESSIONS))["sessions"][0]["runs_code"])
+        with self.assertRaises(assistant.AssistantError):   # nor reload / close there
+            self.ask(lambda: client.request(assistant.RELOAD_CODE, again=False, pid=4242), answering)
+        self.assertEqual(self.ask(lambda: client.request(assistant.READ_LOG, pid=4242))["known"], True)   # it still looks
+        self.server._off_environments = set()
+        self.server._denied = {4242}              # this one Maya, from its row's menu
+        self.assertIn("closed this Maya", refused())
+        self.server._denied = set()
+        self.assertEqual(self.ask(lambda: client.request(assistant.RUN_PYTHON, again=False, pid=4242, code="1"),
+                                  answering)["result"], "1")
+        self.assertEqual(seen, ["1"])
+
     def test_a_detached_run_answers_with_a_job_and_keeps_its_outcome(self):
         maya = self.join_maya()
         self.server._code_allowed = True

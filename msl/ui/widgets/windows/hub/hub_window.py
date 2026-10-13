@@ -256,6 +256,24 @@ class HubWindow(FramelessDialog):
         button.click()
         return self._pages.get(tool_id)
 
+    def set_tool_badge(self, tool_id: str, text: str, tone: str = "", tooltip: str = "") -> None:
+        """A small pill on a tool's sidebar tile (IconTileButton.set_badge) - "" removes it -
+        and, with it, what the tile's tooltip says under the tool's name. For a tool's owner
+        to show from anywhere in the hub that something is going on in it."""
+        button = self._nav_buttons.get(tool_id)
+        if button is None:
+            return
+        button.set_badge(text, tone)
+        button.setToolTip(button.text() + ("\n" + tooltip if tooltip else ""))
+
+    def tool_button(self, tool_id: str) -> "qt.QtWidgets.QAbstractButton | None":
+        """A tool's sidebar tile (None if there is no such tool) - e.g. to hear its clicks."""
+        return self._nav_buttons.get(tool_id)
+
+    def tool_page(self, tool_id: str) -> qt.QtWidgets.QWidget | None:
+        """A tool's page if it was built already (None otherwise) - without opening it."""
+        return self._pages.get(tool_id)
+
     def tool_ids(self) -> list[str]:
         """Ids of the tools in the sidebar, in its order."""
         return list(self._nav_buttons)

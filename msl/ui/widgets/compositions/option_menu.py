@@ -55,6 +55,44 @@ class _OptionRow(qt.QtWidgets.QFrame):
         super().mouseReleaseEvent(event)
 
 
+class _SwitchRow(qt.QtWidgets.QFrame):
+    """Private: a one-line yes / no of an OptionMenu - a text and a check mark; a click
+    flips it and the menu STAYS open (several are often set in one go)."""
+
+    def __init__(self, action: qt.QtWidgets.QWidgetAction, text: str, parent=None):
+        super().__init__(parent)
+        self._action = action
+        self.setObjectName("menuSwitch")   # widgets.qss
+        self.setAttribute(qt.QtCore.Qt.WidgetAttribute.WA_Hover, True)
+        self.setCursor(qt.QtCore.Qt.CursorShape.PointingHandCursor)
+        label = qt.QtWidgets.QLabel(text)
+        label.setObjectName("menuSwitchText")
+        self._check = TintedIcon(UiResources().iconManager.get_icon("check", sub_folder="actions"), size=14)
+        self._check.setObjectName("menuOptionCheck")
+        policy = self._check.sizePolicy()
+        policy.setRetainSizeWhenHidden(True)
+        self._check.setSizePolicy(policy)
+        layout = qt.QtWidgets.QHBoxLayout(self)
+        layout.setContentsMargins(9, 4, 10, 4)
+        layout.setSpacing(10)
+        layout.addWidget(label, 1)
+        layout.addWidget(self._check, 0, qt.QtCore.Qt.AlignmentFlag.AlignVCenter)
+        action.toggled.connect(self._show)
+        self._show(action.isChecked())
+
+    def _show(self, on: bool) -> None:
+        self._check.setVisible(bool(on))
+        self.setProperty("on", bool(on))
+        repolish(self)
+
+    def mouseReleaseEvent(self, event) -> None:
+        if event.button() == qt.QtCore.Qt.MouseButton.LeftButton and self.rect().contains(event.position().toPoint()):
+            self._action.toggle()
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+
 class OptionMenu(qt.QtWidgets.QMenu):
     """A menu whose choices can be READ: each option is a row with a picture, a
     title and a line saying what it means, the chosen one ticked and framed;
@@ -95,6 +133,16 @@ class OptionMenu(qt.QtWidgets.QMenu):
         action.setDefaultWidget(row)
         self.addAction(action)
         repolish(row)
+        return action
+
+    def add_switch(self, text: str, on: bool = False) -> qt.QtWidgets.QWidgetAction:
+        """Adds a one-line yes / no; its action's `toggled(bool)` fires on a click and the
+        menu stays open."""
+        action = qt.QtWidgets.QWidgetAction(self)
+        action.setCheckable(True)
+        action.setChecked(bool(on))
+        action.setDefaultWidget(_SwitchRow(action, text, self))
+        self.addAction(action)
         return action
 
 

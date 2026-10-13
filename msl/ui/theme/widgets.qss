@@ -93,6 +93,21 @@ OptionMenu QLabel#menuOptionNote {
     font-size: 11px;
     background: transparent;
 }
+OptionMenu QFrame#menuSwitch {                          /* a one-line yes / no */
+    background-color: transparent;
+    border-radius: 5px;
+}
+OptionMenu QFrame#menuSwitch:hover {
+    background-color: alpha(var(--accent), 18%);
+}
+OptionMenu QLabel#menuSwitchText {
+    color: var(--text-secondary);
+    font-size: 12px;
+    background: transparent;
+}
+OptionMenu QFrame#menuSwitch[on="true"] QLabel#menuSwitchText {
+    color: var(--text-primary);
+}
 OptionMenu QLabel#menuCaption {
     color: var(--text-secondary);
     font-size: 10px;
@@ -480,6 +495,21 @@ IconTileButton#hubNavButton:checked {
     border: 1px solid transparent;
     color: var(--text-primary);
     font-weight: 600;
+}
+/* A tile's badge: a count on the icon's corner; "attention" = something there needs a look. */
+IconTileButton QLabel#tileBadge {
+    color: var(--on-accent);
+    background-color: var(--success);
+    border-radius: 7px;
+    padding: 0px 4px;
+    min-height: 14px;
+    max-height: 14px;
+    min-width: 6px;
+    font-size: 10px;
+    font-weight: 700;
+}
+IconTileButton QLabel#tileBadge[tone="attention"] {
+    background-color: var(--error);
 }
 HubSidebar {
     qproperty-pillTopColor:        var(--nav-top);
