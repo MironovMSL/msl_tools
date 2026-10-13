@@ -35,6 +35,7 @@ _make_package_importable()
 
 from msl_tools.msl import __version__  # noqa: E402
 from msl_tools.msl.core.link import assistant  # noqa: E402
+from msl_tools.msl.core.link import maya_snippets as snippets  # noqa: E402
 from msl_tools.msl.core.link.mcp_stdio import Picture, StdioServer, Tool  # noqa: E402
 
 CONFIG_FILE = ROOT / "configs" / "desktop" / assistant.CONFIG_NAME / "config.json"
@@ -53,6 +54,7 @@ class MayaTools:
     def __init__(self, config_file=CONFIG_FILE):
         self._config_file = config_file
         self._client = None
+        self._read_up_to: dict = {}   # pid -> the log's sequence number this server read up to (maya_log new_only)
 
     def _ask(self, name: str, **data) -> dict:
         if self._client is None:
@@ -84,12 +86,16 @@ class MayaTools:
             return "No Maya is connected to MSL Tools."
         return "\n".join(_session_line(session) for session in sessions)
 
-    def log(self, pid: int = 0, after: int = 0, limit: int = 100, problems_only: bool = False) -> str:
+    def log(self, pid: int = 0, after: int = 0, limit: int = 100, problems_only: bool = False,
+            new_only: bool = False) -> str:
         pid = int(pid) or self._only_pid()
         levels = ["error", "warning"] if problems_only else None
+        if new_only and not int(after):
+            after = self._read_up_to.get(pid, 0)   # where this server's last read of that Maya ended
         answer = self._ask(assistant.READ_LOG, pid=pid, after=int(after), limit=int(limit), levels=levels)
         if not answer.get("known"):
             raise assistant.AssistantError("MSL Tools knows no Maya with pid %d." % pid)
+        self._read_up_to[pid] = int(answer.get("last", 0))
         entries = answer.get("entries") or []
         lines = ["%s  %-7s  %s" % (time.strftime("%H:%M:%S", time.localtime(entry["time"])),
                                    entry["level"], entry["text"]) for entry in entries]
@@ -98,7 +104,8 @@ class MayaTools:
         return "\n".join(lines)
 
 
-    def run_python(self, code: str = "", pid: int = 0, timeout: int = assistant.RUN_SECONDS_DEFAULT) -> str:
+    def run_python(self, code: str = "", pid: int = 0, timeout: int = assistant.RUN_SECONDS_DEFAULT,
+                   background: bool = False) -> str:
         if not str(code).strip():
             raise assistant.AssistantError("No code was given.")
         sessions = self._ask(assistant.SESSIONS)["sessions"]   # also: the connection is fresh for the one send
@@ -106,11 +113,50 @@ class MayaTools:
         session = next((entry for entry in sessions if entry.get("pid") == pid), None)
         if session is None:
             raise assistant.AssistantError("No Maya with pid %d is connected to MSL Tools." % pid)
-        least, most = assistant.RUN_SECONDS
+        least, most = assistant.RUN_SECONDS[0], (assistant.JOB_SECONDS if background else assistant.RUN_SECONDS[1])
         seconds = min(max(int(timeout), least), most)
         # Sent ONCE: a request repeated after a broken line could run the code twice.
+        if background:
+            job = self._ask(assistant.RUN_PYTHON, again=False, pid=pid, code=str(code), seconds=seconds,
+                            detach=True).get("job")
+            return ("Job %s is running in Maya %d (up to %d s; Maya is busy meanwhile). "
+                    "Ask maya_job with job=%s for its outcome." % (job, pid, seconds, job))
         answer = self._ask(assistant.RUN_PYTHON, wait=seconds + 10, again=False, pid=pid, code=str(code),
                            seconds=seconds)
+        return self._tell_run(answer)
+
+    def job(self, job: int = 0, wait: int = 0) -> str:
+        deadline = time.time() + min(max(int(wait), 0), 600)
+        while True:
+            answer = self._ask(assistant.JOB, job=int(job))
+            if answer.get("done"):
+                return "Job %d finished in %s s.\n%s" % (int(job), answer.get("seconds"), self._tell_run(answer))
+            if time.time() >= deadline:
+                return "Job %d is still running in Maya %s: %s s so far." % (
+                    int(job), answer.get("pid"), answer.get("seconds"))
+            time.sleep(2.0)
+
+    def _snippet(self, code: str, pid: int) -> dict:
+        """Runs a ready-made question (core/link/maya_snippets.py) and returns its answer."""
+        answer = snippets.parse(self.run_python(code=code, pid=pid, timeout=60))
+        if answer is None:
+            raise assistant.AssistantError("Maya gave no answer to that question.")
+        return answer
+
+    def scene(self, pid: int = 0) -> str:
+        pid = int(pid) or self._only_pid()
+        return snippets.tell_scene(self._snippet(snippets.SCENE_CODE % {"mark": snippets.MARK}, pid))
+
+    def node(self, node: str = "", pid: int = 0) -> str:
+        if not str(node).strip():
+            raise assistant.AssistantError("Say which node (its name or full path).")
+        pid = int(pid) or self._only_pid()
+        answer = self._snippet(snippets.NODE_CODE % {"mark": snippets.MARK, "node": str(node)}, pid)
+        return snippets.tell_node(answer, str(node))
+
+    @staticmethod
+    def _tell_run(answer: dict) -> str:
+        """What a run printed and gave back, as text; a traceback is raised as the tool's error."""
         output = str(answer.get("output") or "").rstrip("\n")
         if answer.get("traceback"):
             raise assistant.AssistantError("\n".join(part for part in (output, str(answer["traceback"]).rstrip("\n"))
@@ -293,7 +339,28 @@ def build_server(tools: MayaTools) -> StdioServer:
                                                              "(the `last` of an earlier call). Default 0: all kept."},
                  "limit": {"type": "integer", "description": "At most this many entries, the newest "
                                                              "(default 100, at most %d)." % assistant.MAX_READ},
-                 "problems_only": {"type": "boolean", "description": "Only errors and warnings."}}),
+                 "problems_only": {"type": "boolean", "description": "Only errors and warnings."},
+                 "new_only": {"type": "boolean", "description": "Only what came since this tool last read "
+                                                                "that Maya's log (instead of passing `after`)."}}),
+        Tool("maya_scene",
+             "What is in a Maya's scene, in one look and without writing code: the file and whether it has "
+             "unsaved changes, time and units, how many joints / meshes / curves / constraints ... it holds, "
+             "what is selected, what stands at the top of the hierarchy, namespaces and references. "
+             "Read-only. Start here before asking about nodes. Needs a session marked [runs code].",
+             tools.scene,
+             properties={"pid": {"type": "integer", "description": "The Maya's process id; may be left out "
+                                                                   "while exactly one Maya is connected."}}),
+        Tool("maya_node",
+             "Everything about one node of a Maya's scene, without writing code: its type, parent, children "
+             "and shapes, its translate / rotate / scale, world pivot and size, locked channels, its own "
+             "(user) attributes with values, and what feeds it and what it feeds. Read-only. A short name "
+             "that several nodes share comes back as the list of their full paths. Needs [runs code].",
+             tools.node,
+             properties={
+                 "node": {"type": "string", "description": "The node's name or full path (|group|child)."},
+                 "pid": {"type": "integer", "description": "The Maya's process id; may be left out while "
+                                                           "exactly one Maya is connected."}},
+             required=("node",)),
         Tool("maya_run_python",
              "Run Python in a connected Maya, in its main thread, as its Script Editor would: names persist "
              "in __main__, the value of a final expression is the result, one undo step. Returns what the "
@@ -309,8 +376,21 @@ def build_server(tools: MayaTools) -> StdioServer:
                  "timeout": {"type": "integer", "description": "Seconds to wait for Maya (default %d, %d to %d). "
                                                                "Maya is blocked while the code runs."
                                                                % ((assistant.RUN_SECONDS_DEFAULT,)
-                                                                  + assistant.RUN_SECONDS)}},
+                                                                  + assistant.RUN_SECONDS)},
+                 "background": {"type": "boolean", "description": "For long work: returns a job number at "
+                                                                  "once instead of waiting (then `timeout` "
+                                                                  "may be up to %d s); ask maya_job for the "
+                                                                  "outcome." % assistant.JOB_SECONDS}},
              required=("code",)),
+        Tool("maya_job",
+             "Where a maya_run_python started with background=true stands: still running (and for how "
+             "long), or what it printed and gave back. A traceback comes back as the tool's error.",
+             tools.job,
+             properties={
+                 "job": {"type": "integer", "description": "The job number maya_run_python returned."},
+                 "wait": {"type": "integer", "description": "Wait up to this many seconds for it to finish "
+                                                            "(default 0: just say where it stands; at most 600)."}},
+             required=("job",)),
         Tool("maya_viewport_image",
              "Look at a Maya's 3D viewport: returns a picture of it as it is now (the panel with the focus, "
              "else the first on screen), with its camera and frame. Nothing in the scene changes. Use it to "

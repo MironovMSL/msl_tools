@@ -20,6 +20,7 @@ the console allowed. What was sent and what came back is announced
 (code_started / code_finished) so the Sessions tab shows it in that Maya's log.
 """
 import secrets
+import time
 
 import msl_tools.msl.ui.qt_bindings as qt
 from msl_tools.msl.core.link import assistant
@@ -89,7 +90,10 @@ class AssistantServer(qt.QtCore.QObject):
         self._environments: list = []
         self._window = None        # set_window(): the hub's window
         self._HANDLERS = {assistant.SESSIONS: self._sessions, assistant.READ_LOG: self._read_log,
-                          assistant.HUB_INFO: self._hub_info, assistant.LAUNCH_MAYA: self._launch_maya}
+                          assistant.HUB_INFO: self._hub_info, assistant.LAUNCH_MAYA: self._launch_maya,
+                          assistant.JOB: self._job}
+        self._jobs: dict[int, dict] = {}   # detached run_python: number -> where it stands / its outcome
+        self._next_job = 1
 
     # --- listening ---------------------------------------------------------------
 
@@ -416,30 +420,58 @@ class AssistantServer(qt.QtCore.QObject):
             return refuse("No code to run (or more than %d characters of it)." % assistant.MAX_CODE)
         if pid in self._running:
             return refuse("That Maya is still running the assistant’s previous code.")
-        least, most = assistant.RUN_SECONDS
+        detach = bool(data.get("detach"))
+        least, most = assistant.RUN_SECONDS[0], (assistant.JOB_SECONDS if detach else assistant.RUN_SECONDS[1])
         try:
             seconds = min(max(int(data.get("seconds") or assistant.RUN_SECONDS_DEFAULT), least), most)
         except (TypeError, ValueError):
             seconds = assistant.RUN_SECONDS_DEFAULT
+        job = None
+        if detach:   # answered at once with a number; the outcome is kept for `job`
+            job = self._next_job
+            self._next_job += 1
+            self._jobs[job] = {"done": False, "pid": pid, "started": time.time()}
+            while len(self._jobs) > assistant.JOBS_KEPT:
+                self._jobs.pop(next(iter(self._jobs)))
 
         def done(reply: dict) -> None:
             self._running.discard(pid)
             self.code_finished.emit(pid, reply)
+            result = reply.get("data") or {}
+            outcome = {"output": str(result.get("output") or ""), "result": str(result.get("result") or ""),
+                       "traceback": str(result.get("traceback") or "")}
+            failure = "" if reply.get("success") else str(reply.get("error") or "the request failed")
+            if job is not None:
+                if job in self._jobs:
+                    self._jobs[job].update(outcome, done=True, error=failure,
+                                           seconds=round(time.time() - self._jobs[job]["started"], 1))
+                return
             if client not in self._clients:
                 return   # the assistant left meanwhile; the Sessions tab still shows what came back
-            if reply.get("success"):
-                result = reply.get("data") or {}
-                answer = protocol.reply(request_id, output=str(result.get("output") or ""),
-                                        result=str(result.get("result") or ""),
-                                        traceback=str(result.get("traceback") or ""))
-            else:
-                answer = protocol.reply(request_id, False, str(reply.get("error") or "the request failed"))
+            answer = protocol.reply(request_id, False, failure) if failure else protocol.reply(request_id, **outcome)
             client.socket.write(protocol.encode(answer))
 
         self._running.add(pid)
         self.code_started.emit(pid, code)
         self._link.request(session.session_id, protocol.RUN_PYTHON, on_reply=done,
                            timeout_ms=seconds * 1000, code=code)
+        if job is not None:
+            client.socket.write(protocol.encode(protocol.reply(request_id, job=job)))
+
+    def _job(self, data: dict) -> dict:
+        """Where a detached run_python stands: {"done": false, "seconds"} or its outcome."""
+        try:
+            job = self._jobs.get(int(data.get("job") or 0))
+        except (TypeError, ValueError):
+            job = None
+        if job is None:
+            return {"success": False, "error": "MSL Tools keeps no such job (the last %d are kept, "
+                                               "until the hub restarts)." % assistant.JOBS_KEPT}
+        if not job["done"]:
+            return {"done": False, "pid": job["pid"], "seconds": round(time.time() - job["started"], 1)}
+        if job["error"]:
+            return {"success": False, "error": job["error"]}
+        return {key: job[key] for key in ("done", "pid", "seconds", "output", "result", "traceback")}
 
     def _read_log(self, data: dict) -> dict:
         pid, after, limit = int(data.get("pid") or 0), int(data.get("after") or 0), int(data.get("limit") or 200)

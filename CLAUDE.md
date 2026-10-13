@@ -1034,6 +1034,27 @@ What changed vs. the original (all deliberate, not oversights):
   server starts from `.mcp.json` (the repo root is its working directory, `${LOCALAPPDATA}`
   expands), its tools are offered without an approval prompt, they return, and a Picture reaches
   the assistant as an IMAGE.
+  READY-MADE QUESTIONS instead of raw code (2026-10-14, item 4 of the plan):
+  `core/link/maya_snippets.py` (Qt-free) holds code TEMPLATES the tools send through run_python -
+  READ-ONLY, maya.cmds only - each printing one line `MSL_ANSWER <json>`, `parse()` to find it, and
+  `tell_scene()` / `tell_node()` to say the answer as text. MCP tools `maya_scene` (file, unsaved,
+  time and units, counts of what the scene holds - zeros left out -, selection, the top of the
+  hierarchy with how much is under each, namespaces, references) and `maya_node` {node} (type,
+  parent, children, shapes, t / r / s, world pivot and size - the size left out when Maya's box is
+  inside out: a bare joint -, locked channels, its own attributes, what feeds it / it feeds; several
+  nodes of one short name = the list of their full paths). `maya_log` got `new_only` (the MCP
+  process remembers per pid where its last read ended). LONG WORK: run_python {"detach": true}
+  answers at once with {"job": n}, may take up to JOB_SECONDS 3600, and the hub keeps the outcome
+  (`AssistantServer._jobs`, the last 20, until the hub restarts); request `job` {job} -> where it
+  stands or the outcome; MCP `maya_run_python(background=true)` + `maya_job` {job, wait}. Tests:
+  tests/core/test_maya_snippets.py (the filled templates compile, a name with a quote / backslash /
+  Cyrillic stays one literal; the telling), the detached run in test_assistant_link. Seen with the
+  user's Maya 2026 (their Rename test scene): the scene's summary, two nodes, a name that isn't
+  there; and with the hub restarted a background job: the tool returned at once with job 1, "still
+  running", a second run refused meanwhile ("still running the assistant's previous code"), then
+  "finished in 6.0 s" with its print and result; a failing job's traceback came back as the tool's
+  error; an unknown job number said so.
+  A snippet's whole code shows in that Maya's log like any assistant code - long, but nothing is hidden.
 - Before a launch (2026-10-04): `launch_check.py` (Qt-free)
   `check(variables, script, boost_enabled, boost_blocked)` -> one line
   per thing worth a look: a folder / file a variable names that isn't

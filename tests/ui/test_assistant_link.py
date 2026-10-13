@@ -238,6 +238,22 @@ class Channel(unittest.TestCase):
         self.assertEqual(self.server.running(), set())
         self.assertTrue(self.ask(lambda: client.request(assistant.SESSIONS))["sessions"][0]["runs_code"])
 
+    def test_a_detached_run_answers_with_a_job_and_keeps_its_outcome(self):
+        maya = self.join_maya()
+        self.server._code_allowed = True
+        client, seen = self.client(), []
+        self.assertEqual(self.ask(lambda: client.request(assistant.RUN_PYTHON, again=False, pid=4242, code="slow()",
+                                                         detach=True, seconds=2000)), {"job": 1})
+        standing = self.ask(lambda: client.request(assistant.JOB, job=1))
+        self.assertEqual((standing["done"], standing["pid"]), (False, 4242))
+        self.assertEqual(self.server.running(), {4242})
+        answer = self.answering(maya, seen, output="done\n", result="7", traceback="")
+        self.assertTrue(self.pump(lambda: (answer(), not self.server.running())[1]))
+        outcome = self.ask(lambda: client.request(assistant.JOB, job=1))
+        self.assertEqual((outcome["done"], outcome["output"], outcome["result"], seen), (True, "done\n", "7", ["slow()"]))
+        with self.assertRaises(assistant.AssistantError):
+            self.ask(lambda: client.request(assistant.JOB, job=99))
+
     def test_code_is_refused_for_a_maya_without_the_console_or_unknown_or_busy_with_it(self):
         maya = socket.create_connection(("127.0.0.1", self.link.port()), timeout=3)
         self.addCleanup(maya.close)

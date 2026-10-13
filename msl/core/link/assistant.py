@@ -61,8 +61,14 @@ HUB_INFO = "hub_info"            # {} -> {"versions": [...], "environments": [..
 # {"tool": id or ""} -> {"path", "tool", "width", "height"}: a picture of the hub's own window (read-only;
 # naming a tool opens that tool's page first, as a click on its sidebar tile would).
 HUB_SCREENSHOT = "hub_screenshot"
+# run_python with {"detach": true} answers at once with {"job": n} and may take up to JOB_SECONDS;
+# `job` {"job": n} -> {"done": false, "pid", "seconds"} while it runs, then the outcome
+# ({"done": true, "output", "result", "traceback", "seconds"}). The last JOBS_KEPT are kept by the hub.
+JOB = "job"
+JOB_SECONDS = 3600
+JOBS_KEPT = 20
 REQUESTS = (SESSIONS, READ_LOG, RUN_PYTHON, LAUNCH_REPORT, RELOAD_CODE, CLOSE_MAYA, LAUNCH_MAYA, HUB_INFO,
-            HUB_SCREENSHOT)
+            HUB_SCREENSHOT, JOB)
 
 MAX_READ = 500                   # entries one read_log may return
 MAX_CODE = 1024 * 1024           # characters of code one run_python may carry
