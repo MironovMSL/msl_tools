@@ -92,7 +92,7 @@ class SessionsTab(_ConsoleMixin, _ControlMixin, qt.QtWidgets.QWidget):
     switch is remembered ("log_wrap").
 
     The console (under the log, only while the selected Maya allows it —
-    one started in a Dev environment): a small Python editor; Ctrl+Enter or
+    one started from the hub): a small Python editor; Ctrl+Enter or
     "Run" sends the code to that Maya (RUN_PYTHON), which runs it like its
     Script Editor would. The code, what it printed, its result or its
     traceback go into that Maya's log. Whether a Maya accepts code is

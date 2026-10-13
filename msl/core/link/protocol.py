@@ -70,7 +70,7 @@ SET_LOG_LEVEL = "set_log_level"   # {"all": bool}: also send plain messages, not
 QUIT = "quit_maya"                # {"save": bool, "discard": bool} -> {"quitting": true}
 QUIT_UNSAVED = "the scene has unsaved changes now - nothing was closed"
 # The one request that runs code. Maya refuses it unless it was started with the console
-# allowed (MSL_GATE_CONSOLE=1 - Maya Gate sets it for the Dev environment only).
+# allowed (MSL_GATE_CONSOLE=1 - Maya Gate sets it in every environment).
 RUN_PYTHON = "run_python"         # {"code": str} -> {"output": str, "result": str, "traceback": str}
 
 # Levels of a log entry.

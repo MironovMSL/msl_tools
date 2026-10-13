@@ -12,7 +12,7 @@ the names out itself — tests/core/test_maya_gate.py checks it uses these.
 
 ENVIRONMENT = "MSL_GATE_ENVIRONMENT"          # the Maya Gate environment of this launch
 VARIABLES = "MSL_GATE_VARIABLES"              # os.pathsep-joined names of the variables this launch set
-CONSOLE = "MSL_GATE_CONSOLE"                  # "1": this Maya may be sent code (Maya Gate: the Dev environment)
+CONSOLE = "MSL_GATE_CONSOLE"                  # "1": this Maya may be sent code (Maya Gate sets it at launch)
 KEEP_ENGLISH = "MSL_GATE_KEEP_ENGLISH"        # "1": English keyboard while Maya is active (tools/maya/keyboard_keeper.py)
 
 LINK_PORT = "MSL_GATE_LINK_PORT"              # the hub's link server

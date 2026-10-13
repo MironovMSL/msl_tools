@@ -106,7 +106,7 @@ class MayaGatePage(qt.QtWidgets.QWidget):
     VARIABLES_VARIABLE = variables.VARIABLES   # names of the variables this launch sets (os.pathsep-joined)
     # Environments whose Mayas accept code from the Sessions tab's console. The launched Maya
     # is told with MSL_GATE_CONSOLE=1 and enforces it itself (tools/maya/hub_link.py).
-    CONSOLE_ENVIRONMENTS = ("Dev",)
+    CONSOLE_ENVIRONMENTS = tuple(ENVIRONMENTS)
     RECENT_SCENES_SHOWN = 8   # in a version's right-click menu
     HIDDEN_VARIABLES = (MayaLinkServer.TOKEN_VARIABLE,)   # never shown in a launch preview
 

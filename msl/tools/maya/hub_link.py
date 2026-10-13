@@ -388,7 +388,7 @@ class HubLink(QtCore.QObject):
         hub hides the console for such sessions, but the decision is made
         HERE, by the process that would run the code."""
         if not console_allowed():
-            raise PermissionError("the console is off for this Maya (it is on only in a Dev environment)")
+            raise PermissionError("the console is off for this Maya (it was not started from MSL Tools)")
         import ast
         import contextlib
         import io

@@ -688,7 +688,8 @@ What changed vs. the original (all deliberate, not oversights):
     step, and BaseException is caught (`sys.exit()` must not take Maya
     down).
     WHO MAY: only a Maya launched with `MSL_GATE_CONSOLE=1`, which Maya
-    Gate sets for `MayaGatePage.CONSOLE_ENVIRONMENTS` = ("Dev",). The
+    Gate sets for `MayaGatePage.CONSOLE_ENVIRONMENTS` = every environment
+    (since 2026-10-12, the user's ask and own edit; it was ("Dev",)). The
     decision is made in Maya (`hub_link.console_allowed()`, checked on
     every call) — the hub merely hides the console for sessions whose
     hello says `console: false`. Run is locked PER MAYA
