@@ -57,6 +57,7 @@ class AssistantServer(qt.QtCore.QObject):
 
     listening_changed = qt.QtCore.Signal()
     clients_changed = qt.QtCore.Signal()
+    access_changed = qt.QtCore.Signal()   # the second switch (may it run code) was set
     code_started = qt.QtCore.Signal(int, str)
     code_finished = qt.QtCore.Signal(int, dict)
 
@@ -103,6 +104,7 @@ class AssistantServer(qt.QtCore.QObject):
         """Remembers the second switch in the hub's config."""
         self._code_allowed = bool(allowed)
         self._settings()["code"] = self._code_allowed
+        self.access_changed.emit()
 
     def running(self) -> set:
         """Pids of the Mayas that have an assistant's code out right now."""
@@ -289,7 +291,7 @@ class AssistantServer(qt.QtCore.QObject):
             why = "MSL Tools knows no connected Maya with pid %d." % pid
         elif changes and not self.code_allowed():
             why = ("That changes the Maya, which is switched off for the assistant in MSL Tools "
-                   "(Maya Gate > Sessions: right click “Assistant”).")
+                   "(right click the robot’s head in the window’s header).")
         else:
             why = ""
         if why:
@@ -317,7 +319,7 @@ class AssistantServer(qt.QtCore.QObject):
         session = next((s for s in self._link.sessions() if s.pid == pid), None)
         if not self.code_allowed():
             return refuse("Running code is switched off for the assistant in MSL Tools "
-                          "(Maya Gate > Sessions: right click “Assistant”).")
+                          "(right click the robot’s head in the window’s header).")
         if session is None:
             return refuse("MSL Tools knows no connected Maya with pid %d." % pid)
         if not session.console:

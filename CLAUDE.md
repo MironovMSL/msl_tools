@@ -958,7 +958,51 @@ What changed vs. the original (all deliberate, not oversights):
   frame, size and the path. Seen with the user's Maya 2026: the picture, scene unmodified, selection
   kept, no helper name left in __main__. NOT seen live: the report and reload through the channel
   (the running hub was older code), and all of it from a real assistant session (so far the tools'
-  code was called from a terminal).
+  code was called from a terminal). The report (162 lines) and reload (28 modules, the session back
+  under the same pid) were then seen with the user's Maya 2026 too.
+  THE SWITCH MOVED INTO THE HUB'S HEADER (2026-10-13, the user's ask: an icon that plays when
+  clicked, and no trip to the Sessions tab): `atoms/header/assistant_button.py` `AssistantButton` -
+  a painted ROBOT'S HEAD (the user's pick the same day; the first cut was a four-pointed spark)
+  that only shows what it is told, `set_state(on, acting, peers, working)`: grey with its eyes shut
+  (two lines) = off, lit with open eyes, a calm straight mouth and a GREY antenna ball = on (it only
+  looks), eyes in the glow color, an open GRIN (a flat top, a round bottom, filled - after the
+  user's sketch) and a GREEN ball (qproperty antennaColor = --success) = it may also act (run code;
+  the user's picks over a spark beside the head: "may act" is told by the face, no mark next to it).
+  Every change between states is animated (the user's ask): `_mood` (0 = looks, 1 = may act) and
+  `_peer` (the dot) GLIDE to their new value (GLIDE_MS 360, `_glide`; at once while off screen) -
+  the mouth is ONE path that opens from the line into the grin, eyes and ball change color, the
+  ball hops, the dot grows in and shrinks away. The head that may act is also `GROWN` (1.10) times
+  bigger (the user's ask), growing with the mood; the waking swell was lowered to 0.16 so the bigger
+  head stays inside the button. A green dot = an assistant is connected, and while its code runs in a Maya it
+  looks left and right and its antenna glows in time. A change of on / off plays once (PLAY_MS 520:
+  it opens its eyes, shakes its head, swells and settles, a ring spreads - kept inside the button;
+  off = it shuts its eyes and goes grey). IN COLOR, from the palettes (the user's ask): awake = the
+  head in the primary button's gradient (qproperty headTopColor / headBottomColor = --primary-top /
+  -bottom), eyes and mouth in faceColor (--on-accent), the eyes of one that may act in glowColor
+  (--yellow); asleep = everything in offColor; switching, each color runs from one look to the other
+  (`_mix`). THE HEAD STANDS IN THE BUTTON'S MIDDLE in every state (button 30 x 26,
+  drawn `SCALE` 1.15 bigger than its 14 x 11 units - the user's ask: bigger, and no spare room at
+  one side under the hover tint): the dot sits ON the head's corner like a badge, nothing beside it
+  needs room. A first cut moved the head 1.5 px to make room for a spark and the icon jumped between
+  modes (the user saw it); a second kept room for the dot at the right, which showed as empty space
+  when hovered. Right click -> `menu_requested(global pos)`. qproperty
+  offColor / peerColor / hoverColor / pressedColor too (widgets.qss). `run_hub._add_assistant_button`
+  wires it: click = `set_enabled`, the menu = `run_hub._assistant_menu(button, assistant, toggle)`
+  (it RETURNS the menu, so a test can look at it), an `OptionMenu` (compositions/option_menu.py, new
+  and generic - the user: the plain one-line items were hard to read): a rounded QMenu of ROWS, each
+  a picture + a bold title + a line saying what it means, the one in effect framed in the accent and
+  ticked; `add_caption(text)`, `add_option(title, note, picture, checked) -> action` (a click
+  triggers it and closes the menu; the picture takes no clicks), plain addAction / addSeparator
+  still work; rules `OptionMenu ...` in widgets.qss. Here: caption "WHAT THE ASSISTANT MAY DO",
+  "Look only" / "Look and run Python" pictured by the head AS IT LOOKS in that mode (an
+  AssistantButton as the picture), a rule, "Switch off" (its note: port, who is connected) / "Switch
+  on". The tooltip = state, port, who is connected; it follows listening_changed / clients_changed /
+  `access_changed` (new: the code switch was set) / code_started / code_finished. The text button
+  "Assistant" on the Sessions tab is GONE (the tab still shows an assistant's code in the log).
+  Checked offscreen on a private config: the states and five frames of the switch rendered, the
+  wiring through a click, the code switch, working on / off; the colored head in BOTH themes (a row
+  styled with `StylesheetBuilder.build(registry.get(name))` - a window's own theme can't be switched
+  for a render without the shared ThemeManager). NOT seen in the real hub, nor moving.
 - Before a launch (2026-10-04): `launch_check.py` (Qt-free)
   `check(variables, script, boost_enabled, boost_blocked)` -> one line
   per thing worth a look: a folder / file a variable names that isn't

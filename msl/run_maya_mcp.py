@@ -60,7 +60,7 @@ class MayaTools:
             if not port or not token or not enabled:
                 raise assistant.AssistantError(
                     "The assistant access of MSL Tools is switched off (or the hub never ran here). "
-                    "Start MSL Tools and switch it on: Maya Gate > Sessions.")
+                    "Start MSL Tools and switch it on: the robot's head in the window's header.")
             self._client = assistant.AssistantClient(port, token)
         try:
             return self._client.request(name, **data)

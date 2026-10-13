@@ -48,6 +48,62 @@ LinkStatusButton {
     qproperty-pressedColor:   alpha(var(--text-primary), 16%);
 }
 
+/* --- AssistantButton (header): how far an assistant's access goes ----------- */
+
+AssistantButton {
+    qproperty-headTopColor:    var(--primary-top);      /* awake: the primary button's gradient */
+    qproperty-headBottomColor: var(--primary-bottom);
+    qproperty-faceColor:       var(--on-accent);        /* eyes and mouth on that fill */
+    qproperty-glowColor:       var(--yellow);           /* its eyes when it may act */
+    qproperty-antennaColor:    var(--success);          /* the antenna's ball when it may act (grey otherwise) */
+    qproperty-offColor:     var(--text-secondary);
+    qproperty-peerColor:    var(--success);
+    qproperty-hoverColor:   alpha(var(--text-primary), 9%);
+    qproperty-pressedColor: alpha(var(--text-primary), 16%);
+}
+
+/* --- OptionMenu: a menu of rows that say what each choice means -------------- */
+
+OptionMenu {
+    padding: 5px;
+}
+OptionMenu QFrame#menuOption {
+    background-color: transparent;
+    border: 1px solid transparent;
+    border-radius: 6px;
+}
+OptionMenu QFrame#menuOption:hover {
+    background-color: alpha(var(--accent), 18%);
+}
+OptionMenu QFrame#menuOption[checked="true"] {          /* the choice in effect */
+    background-color: alpha(var(--accent), 10%);
+    border: 1px solid alpha(var(--accent), 55%);
+}
+OptionMenu QFrame#menuOption[checked="true"]:hover {
+    background-color: alpha(var(--accent), 20%);
+}
+OptionMenu QLabel#menuOptionTitle {
+    color: var(--text-primary);
+    font-size: 12px;
+    font-weight: 600;
+    background: transparent;
+}
+OptionMenu QLabel#menuOptionNote {
+    color: var(--text-secondary);
+    font-size: 11px;
+    background: transparent;
+}
+OptionMenu QLabel#menuCaption {
+    color: var(--text-secondary);
+    font-size: 10px;
+    font-weight: 600;
+    padding: 4px 9px 3px 9px;
+    background: transparent;
+}
+OptionMenu TintedIcon#menuOptionCheck {
+    qproperty-iconColor: var(--accent);
+}
+
 /* --- GlyphButton ------------------------------------------------------------ */
 
 GlyphButton {

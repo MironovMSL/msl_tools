@@ -30,6 +30,8 @@ from msl_tools.msl.ui.ui_resources import UiResources
 from msl_tools.msl.tools.desktop.registry import TOOLS
 from msl_tools.msl.ui.process_launcher.process_launcher import ProcessLauncher
 from msl_tools.msl.ui.maya_link import AssistantServer, MayaLinkServer
+from msl_tools.msl.ui.widgets.atoms.header.assistant_button import AssistantButton
+from msl_tools.msl.ui.widgets.compositions.option_menu import OptionMenu
 from msl_tools.msl.ui.widgets.atoms.header.link_status_button import LinkStatusButton
 from msl_tools.msl.ui.widgets.windows.confirm_dialog import ConfirmDialog
 from msl_tools.msl.ui.widgets.windows.hub import HubWindow
@@ -118,6 +120,71 @@ def _add_link_indicator(window: HubWindow, link: MayaLinkServer) -> None:
     link.attention_changed.connect(refresh)
     indicator.clicked.connect(open_sessions)
     window.add_header_widget(indicator)
+    refresh()
+
+
+def _assistant_menu(button: AssistantButton, assistant: AssistantServer, toggle) -> OptionMenu:
+    """The menu of the header's assistant switch: what the assistant may do (each choice
+    pictured by the head as it then looks), and switching the channel on / off."""
+    def face(on: bool, acting: bool = False) -> AssistantButton:
+        """The head as it looks in a state - the picture of a menu row."""
+        picture = AssistantButton()
+        picture.set_state(on, acting)
+        return picture
+
+    listening, code, clients = assistant.is_listening(), assistant.code_allowed(), assistant.clients()
+    popup = OptionMenu(button)
+    popup.add_caption("WHAT THE ASSISTANT MAY DO")
+    popup.add_option("Look only", "Sees which Mayas are connected and reads their logs",
+                     face(True), checked=not code).triggered.connect(lambda: assistant.set_code_allowed(False))
+    popup.add_option("Look and run Python", "Also runs code in the connected Mayas — shown in their logs",
+                     face(True, True), checked=code).triggered.connect(lambda: assistant.set_code_allowed(True))
+    popup.addSeparator()
+    if listening:
+        who = "%d connected now" % clients if clients else "nobody connected now"
+        popup.add_option("Switch off", "On, port %d · %s" % (assistant.port(), who),
+                         face(False, code)).triggered.connect(toggle)
+    else:
+        popup.add_option("Switch on", "Off — no assistant can connect",
+                         face(True, code)).triggered.connect(toggle)
+    return popup
+
+
+def _add_assistant_button(window: HubWindow, assistant: AssistantServer) -> None:
+    """The header's switch of the assistant's channel (ui/maya_link/assistant_server.py): a
+    click switches it on / off, a right click says what the assistant may do. It also shows
+    whether an assistant is connected and when its code is running in a Maya."""
+    button = AssistantButton()
+
+    def refresh(*_args) -> None:
+        listening, code, clients = assistant.is_listening(), assistant.code_allowed(), assistant.clients()
+        button.set_state(listening, code, clients, bool(assistant.running()))
+        if listening:
+            state = "Assistant access: ON · port %d · %s" % (
+                assistant.port(), "%d connected" % clients if clients else "nobody connected")
+        elif assistant.is_enabled():
+            state = "Assistant access: switched on, but no port could be taken"
+        else:
+            state = "Assistant access: off"
+        button.setToolTip(
+            state + "\nLets a coding assistant on this computer (the msl-maya MCP server) see which Mayas "
+                    "are connected and read their logs"
+            + (" — and RUN PYTHON in them (shown in each Maya’s log)." if code else ".")
+            + "\nThis computer only, with a key of its own.\nClick: on / off  ·  right click: what it may do")
+
+    def toggle() -> None:
+        assistant.set_enabled(not assistant.is_listening())
+        refresh()
+
+    def menu(position) -> None:
+        _assistant_menu(button, assistant, toggle).exec(position)
+
+    for signal in (assistant.listening_changed, assistant.clients_changed, assistant.access_changed,
+                   assistant.code_started, assistant.code_finished):
+        signal.connect(refresh)
+    button.clicked.connect(toggle)
+    button.menu_requested.connect(menu)
+    window.add_header_widget(button)
     refresh()
 
 
@@ -243,7 +310,9 @@ def main() -> None:
         link.ensure_listening()
         # The assistant's channel (off unless the user switched it on); created now so it keeps
         # the Mayas' logs from the start.
-        AssistantServer.instance().ensure_listening()
+        assistant = AssistantServer.instance()
+        assistant.ensure_listening()
+        _add_assistant_button(window, assistant)
         if last_update is not None:
             qt.QtCore.QTimer.singleShot(300, lambda: report_update(last_update))
         instance_link = InstanceLink(instance_name, window)
