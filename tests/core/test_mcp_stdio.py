@@ -3,7 +3,7 @@ import io
 import json
 import unittest
 
-from msl_tools.msl.core.link.mcp_stdio import METHOD_NOT_FOUND, StdioServer, Tool, VERSIONS
+from msl_tools.msl.core.link.mcp_stdio import METHOD_NOT_FOUND, Picture, StdioServer, Tool, VERSIONS
 
 
 def _fail(**_arguments):
@@ -46,6 +46,20 @@ class Messages(unittest.TestCase):
     def test_a_failing_tool_is_a_result_not_a_protocol_error(self):
         result = _server().handle(_call("tools/call", name="fail"))["result"]
         self.assertEqual((result["isError"], result["content"][0]["text"]), (True, "no Maya"))
+
+    def test_a_picture_comes_back_as_text_and_the_image_itself(self):
+        import base64
+        import os
+        import tempfile
+        handle, path = tempfile.mkstemp(suffix=".png")
+        os.write(handle, b"\x89PNG not really")
+        os.close(handle)
+        self.addCleanup(os.remove, path)
+        server = StdioServer("test", "1.0", [Tool("look", "a picture", lambda: Picture(path, "the viewport"))])
+        content = server.handle(_call("tools/call", name="look"))["result"]["content"]
+        self.assertEqual(content[0], {"type": "text", "text": "the viewport"})
+        self.assertEqual((content[1]["type"], content[1]["mimeType"], base64.b64decode(content[1]["data"])),
+                         ("image", "image/png", b"\x89PNG not really"))
 
     def test_unknown_tool_and_unknown_method_are_errors(self):
         self.assertIn("error", _server().handle(_call("tools/call", name="nope")))

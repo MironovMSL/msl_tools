@@ -943,7 +943,22 @@ What changed vs. the original (all deliberate, not oversights):
   (a first cut read it lazily and a test run wrote `"code": false` into the live file).
   The auto-mode guard stops edits that widen what may run code (the console in every environment,
   this request): the user then confirms or makes the edit.
-  NOT built: launch report / reload code / a viewport picture for the assistant (step 4).
+  Seen with the user's real Maya 2026: print + a result, a dict of scene facts, a NameError as
+  the tool's error.
+  Step 4, the same day: `launch_report` {pid} (read-only) and `reload_code` {pid} (needs the code
+  switch: it changes that Maya) are PASSED ON as the link's own fixed requests
+  (`AssistantServer._FORWARDED`: ours -> (the link's, ms to wait, needs the switch); nothing of
+  the assistant's goes with them); MCP tools `maya_launch_report`, `maya_reload_code`,
+  `maya_viewport_image` {pid, width 160..1920}. The picture is no new request: the tool sends a
+  fixed snippet through run_python (`VIEWPORT_CODE` in run_maya_mcp.py) - a ONE-frame playblast of
+  the model panel with the focus (else the first on screen) at the current time into
+  `%TEMP%/msl_tools/assistant/viewport_<pid>_<time>.png` (the last 20 kept), the scene's modified
+  mark put back, the PNG's alpha dropped with Maya's own Qt (alpha 0 showed as white) - and returns
+  a `mcp_stdio.Picture`: the image itself (MCP image content, base64) + a line with panel, camera,
+  frame, size and the path. Seen with the user's Maya 2026: the picture, scene unmodified, selection
+  kept, no helper name left in __main__. NOT seen live: the report and reload through the channel
+  (the running hub was older code), and all of it from a real assistant session (so far the tools'
+  code was called from a terminal).
 - Before a launch (2026-10-04): `launch_check.py` (Qt-free)
   `check(variables, script, boost_enabled, boost_blocked)` -> one line
   per thing worth a look: a folder / file a variable names that isn't

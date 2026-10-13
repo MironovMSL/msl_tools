@@ -18,6 +18,8 @@ Requests (assistant -> hub):
     sessions   {}                                  -> {"sessions": [session, ...]}
     read_log   {"pid", "after", "limit", "levels"} -> {"entries": [entry, ...], "last": seq, "known": bool}
     run_python {"pid", "code", "seconds"}          -> {"output", "result", "traceback"}
+    launch_report {"pid"}                          -> {"text"}
+    reload_code   {"pid"}                          -> {"modules": how many were dropped}
 
 run_python is the one request that carries code. The hub passes it to that
 Maya as the Sessions tab's console would (protocol.RUN_PYTHON) - only while
@@ -45,7 +47,9 @@ ROLE = "assistant"               # the hello's "role"
 SESSIONS = "sessions"
 READ_LOG = "read_log"
 RUN_PYTHON = "run_python"
-REQUESTS = (SESSIONS, READ_LOG, RUN_PYTHON)
+LAUNCH_REPORT = "launch_report"  # {"pid"} -> {"text"}: that Maya's launch report (read-only)
+RELOAD_CODE = "reload_code"      # {"pid"} -> {"modules"}: msl_tools reloaded in that Maya (needs the code switch)
+REQUESTS = (SESSIONS, READ_LOG, RUN_PYTHON, LAUNCH_REPORT, RELOAD_CODE)
 
 MAX_READ = 500                   # entries one read_log may return
 MAX_CODE = 1024 * 1024           # characters of code one run_python may carry

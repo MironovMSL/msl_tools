@@ -237,6 +237,9 @@ class AssistantServer(qt.QtCore.QObject):
         if name == assistant.RUN_PYTHON:
             self._run_python(client, request_id, data)   # answered when Maya is back
             return
+        if name in self._FORWARDED:
+            self._forward(client, request_id, name, data)
+            return
         handler = self._HANDLERS.get(name)
         if handler is None:
             answer = protocol.reply(request_id, False, "MSL Tools doesn’t know the request “%s”." % name)
@@ -271,6 +274,39 @@ class AssistantServer(qt.QtCore.QObject):
             entry["runs_code"] = bool(session.console and self.code_allowed())
             described.append(entry)
         return {"sessions": described}
+
+    # Requests passed on to the Maya they name as they are - fixed ones of the hub <-> Maya link,
+    # no arguments of the assistant's go with them:
+    # ours -> (the link's request, ms to wait, needs the code switch because it changes that Maya)
+    _FORWARDED = {assistant.LAUNCH_REPORT: (protocol.LAUNCH_REPORT, 15_000, False),
+                  assistant.RELOAD_CODE: (protocol.RELOAD_CODE, 20_000, True)}
+
+    def _forward(self, client: _Client, request_id: int, name: str, data: dict) -> None:
+        link_name, timeout_ms, changes = self._FORWARDED[name]
+        pid = int(data.get("pid") or 0)
+        session = next((s for s in self._link.sessions() if s.pid == pid), None)
+        if session is None:
+            why = "MSL Tools knows no connected Maya with pid %d." % pid
+        elif changes and not self.code_allowed():
+            why = ("That changes the Maya, which is switched off for the assistant in MSL Tools "
+                   "(Maya Gate > Sessions: right click “Assistant”).")
+        else:
+            why = ""
+        if why:
+            client.socket.write(protocol.encode(protocol.reply(request_id, False, why)))
+            return
+
+        def done(reply: dict) -> None:
+            if client not in self._clients:
+                return
+            if reply.get("success"):
+                answer = protocol.reply(request_id, **{key: value for key, value in (reply.get("data") or {}).items()
+                                                       if key not in ("message_id", "success", "error")})
+            else:
+                answer = protocol.reply(request_id, False, str(reply.get("error") or "the request failed"))
+            client.socket.write(protocol.encode(answer))
+
+        self._link.request(session.session_id, link_name, on_reply=done, timeout_ms=timeout_ms)
 
     def _run_python(self, client: _Client, request_id: int, data: dict) -> None:
         """Passes an assistant's code to the Maya it names and answers when that Maya did."""

@@ -11,6 +11,7 @@ The hub must be running with the assistant access switched on; until then
 every tool answers with what to do about it.
 """
 import sys
+import tempfile
 import time
 import types
 from pathlib import Path
@@ -34,7 +35,7 @@ _make_package_importable()
 
 from msl_tools.msl import __version__  # noqa: E402
 from msl_tools.msl.core.link import assistant  # noqa: E402
-from msl_tools.msl.core.link.mcp_stdio import StdioServer, Tool  # noqa: E402
+from msl_tools.msl.core.link.mcp_stdio import Picture, StdioServer, Tool  # noqa: E402
 
 CONFIG_FILE = ROOT / "configs" / "desktop" / assistant.CONFIG_NAME / "config.json"
 
@@ -118,6 +119,72 @@ class MayaTools:
         return "\n".join(parts) or "(ran; no output, no result)"
 
 
+    def launch_report(self, pid: int = 0) -> str:
+        pid = int(pid) or self._only_pid()
+        return str(self._ask(assistant.LAUNCH_REPORT, wait=25, pid=pid).get("text") or "(Maya sent an empty report)")
+
+    def reload_code(self, pid: int = 0) -> str:
+        pid = int(pid) or self._only_pid()
+        answer = self._ask(assistant.RELOAD_CODE, wait=30, again=False, pid=pid)
+        return ("Reloaded: %s msl_tools modules were dropped in Maya %d; they are imported fresh on next use. "
+                "Its link to MSL Tools restarts - the session is back in a moment; windows of msl_tools that "
+                "were open still run the old code until reopened." % (answer.get("modules", "?"), pid))
+
+    def viewport_image(self, pid: int = 0, width: int = 960) -> Picture:
+        pid = int(pid) or self._only_pid()
+        width = min(max(int(width), 160), 1920)
+        folder = Path(tempfile.gettempdir()) / "msl_tools" / "assistant"
+        folder.mkdir(parents=True, exist_ok=True)
+        for old in sorted(folder.glob("viewport_*.png"), key=lambda path: path.stat().st_mtime)[:-VIEWPORT_KEPT]:
+            try:
+                old.unlink()
+            except OSError:
+                pass
+        target = folder / ("viewport_%d_%s.png" % (pid, time.strftime("%H%M%S")))
+        output = self.run_python(code=VIEWPORT_CODE % {"path": str(target), "width": width}, pid=pid, timeout=60)
+        if not target.is_file():
+            raise assistant.AssistantError("Maya made no picture: %s" % output)
+        return Picture(str(target), "%s\nSaved as %s" % (output.split("\n# Result")[0], target))
+
+
+VIEWPORT_KEPT = 20   # pictures left in %TEMP%/msl_tools/assistant
+# Runs in Maya: one frame of a model panel as it is (the one with the focus, else the first on
+# screen) into a PNG. A playblast of ONE frame at the current time - nothing in the scene is
+# changed, and its "modified" mark is put back in case Maya set it.
+VIEWPORT_CODE = '''
+import maya.cmds as cmds
+def _msl_viewport(path, width):
+    panels = [p for p in [cmds.getPanel(withFocus=True)] + (cmds.getPanel(visiblePanels=True) or [])
+              if p and cmds.getPanel(typeOf=p) == "modelPanel"]
+    if not panels:
+        raise RuntimeError("no 3D viewport is on screen in this Maya")
+    panel = panels[0]
+    ratio = float(cmds.control(panel, query=True, height=True)) / max(cmds.control(panel, query=True, width=True), 1)
+    height = max(int(width * ratio) // 2 * 2, 2)
+    modified = cmds.file(query=True, modified=True)
+    try:
+        cmds.playblast(frame=[cmds.currentTime(query=True)], format="image", compression="png",
+                       completeFilename=path, editorPanelName=panel, widthHeight=[width, height], percent=100,
+                       viewer=False, showOrnaments=True, offScreen=True, forceOverwrite=True, quality=100)
+    finally:
+        cmds.file(modified=modified)
+    try:   # a playblast PNG has alpha 0 everywhere (it shows as white): keep the colors, drop the alpha
+        try:
+            from PySide6 import QtGui
+        except ImportError:
+            from PySide2 import QtGui
+        image = QtGui.QImage(path)
+        if not image.isNull():
+            image.convertToFormat(QtGui.QImage.Format_RGB888).save(path, "PNG")
+    except Exception:
+        pass
+    camera = cmds.modelPanel(panel, query=True, camera=True)
+    print("Viewport %%s, camera %%s, frame %%s, %%dx%%d" %% (panel, camera, cmds.currentTime(query=True), width, height))
+_msl_viewport(%(path)r, %(width)d)
+del _msl_viewport
+'''
+
+
 def _session_line(session: dict) -> str:
     minutes = int(session.get("connected_seconds", 0)) // 60
     marks = [mark for mark, on in (("unsaved changes", session.get("modified")), ("BUSY", session.get("busy")),
@@ -165,6 +232,29 @@ def build_server(tools: MayaTools) -> StdioServer:
                                                                % ((assistant.RUN_SECONDS_DEFAULT,)
                                                                   + assistant.RUN_SECONDS)}},
              required=("code",)),
+        Tool("maya_viewport_image",
+             "Look at a Maya's 3D viewport: returns a picture of it as it is now (the panel with the focus, "
+             "else the first on screen), with its camera and frame. Nothing in the scene changes. Use it to "
+             "SEE the result of what was done instead of guessing. Needs a session marked [runs code].",
+             tools.viewport_image,
+             properties={
+                 "pid": {"type": "integer", "description": "The Maya's process id; may be left out while "
+                                                           "exactly one Maya is connected."},
+                 "width": {"type": "integer", "description": "Picture width in pixels (default 960, 160 to 1920)."}}),
+        Tool("maya_launch_report",
+             "A Maya's launch report (read-only): its environment, preference folders, the variables MSL "
+             "Tools set, userSetup files, boost (plug-ins loaded / skipped / failed), loaded plug-ins and "
+             "modules. For questions like 'why is this plug-in not loaded' or 'which paths does Maya see'.",
+             tools.launch_report,
+             properties={"pid": {"type": "integer", "description": "The Maya's process id; may be left out "
+                                                                   "while exactly one Maya is connected."}}),
+        Tool("maya_reload_code",
+             "Make a Maya drop its msl_tools modules so the next use imports the code as it is on disk now - "
+             "after editing msl_tools' Maya-side code. Its session leaves and rejoins within a moment; "
+             "msl_tools windows already open keep the old code until reopened. Needs [runs code].",
+             tools.reload_code,
+             properties={"pid": {"type": "integer", "description": "The Maya's process id; may be left out "
+                                                                   "while exactly one Maya is connected."}}),
     ])
 
 

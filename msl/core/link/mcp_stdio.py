@@ -8,11 +8,12 @@ a tool. Only that part is here — tools, no resources or prompts — which is
 why no package is needed for it.
 
 A tool is a function taking the call's arguments as keywords and returning
-text; an exception it raises becomes the tool's error text (isError), which
+text (or a Picture: an image file shown to the assistant); an exception it raises becomes the tool's error text (isError), which
 the assistant reads — it is not a protocol failure.
 """
 from __future__ import annotations
 
+import base64
 import json
 import sys
 from dataclasses import dataclass, field
@@ -22,6 +23,21 @@ VERSIONS = ("2025-06-18", "2025-03-26", "2024-11-05")   # protocol revisions thi
 
 METHOD_NOT_FOUND = -32601
 INVALID_PARAMS = -32602
+
+
+@dataclass
+class Picture:
+    """What a tool returns to SHOW a picture: the assistant gets the image itself, and `text` beside it."""
+
+    path: str
+    text: str = ""
+    mime: str = "image/png"
+
+    def content(self) -> list[dict]:
+        with open(self.path, "rb") as handle:
+            data = base64.b64encode(handle.read()).decode("ascii")
+        parts = [{"type": "text", "text": self.text}] if self.text else []
+        return parts + [{"type": "image", "data": data, "mimeType": self.mime}]
 
 
 @dataclass
@@ -72,10 +88,12 @@ class StdioServer:
             arguments = params.get("arguments") if isinstance(params.get("arguments"), dict) else {}
             arguments = {key: value for key, value in arguments.items() if key in tool.properties}
             try:
-                text, failed = str(tool.function(**arguments)), False
+                made = tool.function(**arguments)
+                content = made.content() if isinstance(made, Picture) else [{"type": "text", "text": str(made)}]
+                failed = False
             except Exception as error:  # the tool's own failure: told to the assistant as its result
-                text, failed = str(error) or type(error).__name__, True
-            return self._result(message_id, {"content": [{"type": "text", "text": text}], "isError": failed})
+                content, failed = [{"type": "text", "text": str(error) or type(error).__name__}], True
+            return self._result(message_id, {"content": content, "isError": failed})
         return self._error(message_id, METHOD_NOT_FOUND, "Method not found: %s" % method)
 
     @staticmethod

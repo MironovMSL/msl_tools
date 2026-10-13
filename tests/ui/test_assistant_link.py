@@ -279,6 +279,35 @@ class Channel(unittest.TestCase):
         self.assertIn("NameError: boom", str(raised.exception))
         self.assertIn("[runs code]", self.ask(tools.sessions))
 
+    def test_the_report_is_passed_on_and_reload_needs_the_code_switch(self):
+        maya = self.join_maya()
+        maya.setblocking(False)
+        decoder, asked = protocol.FrameDecoder(), []
+
+        def answer():
+            try:
+                data = maya.recv(65536)
+            except (BlockingIOError, InterruptedError):
+                return
+            for message in decoder.feed(data):
+                asked.append((message["name"], message["data"]))
+                result = {"text": "the report"} if message["name"] == protocol.LAUNCH_REPORT else {"modules": 12}
+                maya.sendall(protocol.encode(protocol.reply(message["id"], **result)))
+
+        client = self.client()
+        self.assertEqual(self.ask(lambda: client.request(assistant.LAUNCH_REPORT, pid=4242, extra="x"), answer),
+                         {"text": "the report"})
+        self.assertEqual(asked, [(protocol.LAUNCH_REPORT, {})])   # nothing of the assistant's goes with it
+        with self.assertRaises(assistant.AssistantError) as raised:
+            self.ask(lambda: client.request(assistant.RELOAD_CODE, again=False, pid=4242), answer)
+        self.assertIn("switched off", str(raised.exception))
+        self.assertEqual(len(asked), 1)
+        self.server._code_allowed = True
+        self.assertEqual(self.ask(lambda: client.request(assistant.RELOAD_CODE, again=False, pid=4242), answer),
+                         {"modules": 12})
+        with self.assertRaises(assistant.AssistantError):
+            self.ask(lambda: client.request(assistant.LAUNCH_REPORT, pid=1))
+
     def test_the_mcp_tools_end_to_end(self):
         from msl_tools.msl.run_maya_mcp import MayaTools, build_server
         folder = tempfile.mkdtemp()
