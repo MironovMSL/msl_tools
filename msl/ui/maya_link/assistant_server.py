@@ -54,6 +54,7 @@ class AssistantServer(qt.QtCore.QObject):
     PORT_ATTEMPTS = 10
     HELLO_TIMEOUT_MS = 5000
     MAX_CLIENTS = 4
+    SCREENSHOT_DELAY_MS = 350   # after opening a tool's page, before its picture is taken
 
     listening_changed = qt.QtCore.Signal()
     clients_changed = qt.QtCore.Signal()
@@ -84,7 +85,11 @@ class AssistantServer(qt.QtCore.QObject):
         # (a test) never opens the hub's config.
         self._code_allowed = False
         self._running: set[int] = set()          # pids with an assistant's code out
-        self._HANDLERS = {assistant.SESSIONS: self._sessions, assistant.READ_LOG: self._read_log}
+        self._launch = None        # set_launcher(): starts a Maya
+        self._environments: list = []
+        self._window = None        # set_window(): the hub's window
+        self._HANDLERS = {assistant.SESSIONS: self._sessions, assistant.READ_LOG: self._read_log,
+                          assistant.HUB_INFO: self._hub_info, assistant.LAUNCH_MAYA: self._launch_maya}
 
     # --- listening ---------------------------------------------------------------
 
@@ -242,6 +247,9 @@ class AssistantServer(qt.QtCore.QObject):
         if name in self._FORWARDED:
             self._forward(client, request_id, name, data)
             return
+        if name == assistant.HUB_SCREENSHOT:
+            self._hub_screenshot(client, request_id, data)   # answered once the page has laid out
+            return
         handler = self._HANDLERS.get(name)
         if handler is None:
             answer = protocol.reply(request_id, False, "MSL Tools doesn’t know the request “%s”." % name)
@@ -281,7 +289,87 @@ class AssistantServer(qt.QtCore.QObject):
     # no arguments of the assistant's go with them:
     # ours -> (the link's request, ms to wait, needs the code switch because it changes that Maya)
     _FORWARDED = {assistant.LAUNCH_REPORT: (protocol.LAUNCH_REPORT, 15_000, False),
-                  assistant.RELOAD_CODE: (protocol.RELOAD_CODE, 20_000, True)}
+                  assistant.RELOAD_CODE: (protocol.RELOAD_CODE, 20_000, True),
+                  # protocol.QUIT without "save" / "discard": Maya itself refuses while the scene has
+                  # unsaved changes, so an assistant can't close work away.
+                  assistant.CLOSE_MAYA: (protocol.QUIT, 15_000, True)}
+
+    # --- the hub itself: what its owner (run_hub, Maya Gate's page) lets an assistant reach -------------
+
+    def set_launcher(self, launch, environments) -> None:
+        """`launch(version, environment, scene) -> "" or an error` starts a Maya as the hub does;
+        `environments` are the names it takes. Given by Maya Gate's page; without it an
+        assistant can't start a Maya."""
+        self._launch = launch
+        self._environments = [str(name) for name in environments]
+
+    def set_window(self, window) -> None:
+        """The hub's window, for pictures of it (anything with grab(); `open_tool(id)` and
+        `tool_ids()` are used when it has them)."""
+        self._window = window
+
+    def _tool_ids(self) -> list:
+        ids = getattr(self._window, "tool_ids", None)
+        return list(ids()) if callable(ids) else []
+
+    def _hub_info(self, _data: dict) -> dict:
+        from msl_tools.msl.core.fs.maya_paths import MayaPaths
+        return {"versions": sorted(str(version) for version in MayaPaths.get_available_installs()),
+                "environments": list(self._environments), "tools": self._tool_ids()}
+
+    def _launch_maya(self, data: dict) -> dict:
+        from msl_tools.msl.core.fs.maya_paths import MayaPaths
+        version, environment = str(data.get("version") or ""), str(data.get("environment") or "")
+        scene = data.get("scene") if isinstance(data.get("scene"), str) else ""
+        versions = sorted(str(found) for found in MayaPaths.get_available_installs())
+        if not self.code_allowed():
+            why = ("Starting a Maya is switched off for the assistant in MSL Tools "
+                   "(right click the robot’s head in the window’s header).")
+        elif self._launch is None:
+            why = "Maya Gate has not been opened in MSL Tools yet - open it once (hub_screenshot with tool maya_gate)."
+        elif version not in versions:
+            why = "Maya “%s” isn’t installed here. Installed: %s." % (version, ", ".join(versions) or "none")
+        elif environment not in self._environments:
+            why = "There is no environment “%s”. Environments: %s." % (environment, ", ".join(self._environments))
+        else:
+            why = self._launch(version, environment, scene)
+        return {"success": False, "error": why} if why else {"started": True}
+
+    def _hub_screenshot(self, client: _Client, request_id: int, data: dict) -> None:
+        """A picture of the hub's window - after opening the tool it names and letting it lay out."""
+        def refuse(why: str) -> None:
+            client.socket.write(protocol.encode(protocol.reply(request_id, False, why)))
+
+        window, tool = self._window, str(data.get("tool") or "")
+        if window is None:
+            return refuse("This MSL Tools has no window to show.")
+        if tool:
+            if tool not in self._tool_ids():
+                return refuse("There is no tool “%s”. Tools: %s." % (tool, ", ".join(self._tool_ids())))
+            window.open_tool(tool)
+
+        def shoot() -> None:
+            if client not in self._clients:
+                return
+            import tempfile
+            import time
+            from pathlib import Path
+            folder = Path(tempfile.gettempdir()) / "msl_tools" / "assistant"
+            try:
+                folder.mkdir(parents=True, exist_ok=True)
+                path = folder / ("hub_%s.png" % time.strftime("%H%M%S"))
+                picture = window.grab()
+                saved = picture.save(str(path), "PNG")
+            except (OSError, RuntimeError) as error:
+                return refuse("The picture could not be made: %s" % error)
+            if not saved:
+                return refuse("The picture could not be saved.")
+            current = getattr(window, "current_tool_id", None)
+            client.socket.write(protocol.encode(protocol.reply(
+                request_id, path=str(path), tool=str(current() if callable(current) else tool),
+                width=picture.width(), height=picture.height())))
+
+        qt.QtCore.QTimer.singleShot(self.SCREENSHOT_DELAY_MS if tool else 0, shoot)
 
     def _forward(self, client: _Client, request_id: int, name: str, data: dict) -> None:
         link_name, timeout_ms, changes = self._FORWARDED[name]

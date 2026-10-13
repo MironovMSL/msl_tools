@@ -311,6 +311,7 @@ def main() -> None:
         # The assistant's channel (off unless the user switched it on); created now so it keeps
         # the Mayas' logs from the start.
         assistant = AssistantServer.instance()
+        assistant.set_window(window)   # an assistant may ask for a picture of the hub
         assistant.ensure_listening()
         _add_assistant_button(window, assistant)
         if last_update is not None:

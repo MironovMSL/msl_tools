@@ -256,6 +256,14 @@ class HubWindow(FramelessDialog):
         button.click()
         return self._pages.get(tool_id)
 
+    def tool_ids(self) -> list[str]:
+        """Ids of the tools in the sidebar, in its order."""
+        return list(self._nav_buttons)
+
+    def current_tool_id(self) -> str:
+        """Id of the tool that is open ("" before the first one is)."""
+        return self._current_tool_id or ""
+
     def set_footer_notice(self, tooltip: str) -> None:
         """Marks the footer as carrying news (accent color, widgets.qss
         `QPushButton#hubFooter[notice="true"]`) with `tooltip` saying what;

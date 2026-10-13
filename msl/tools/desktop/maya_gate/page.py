@@ -198,6 +198,9 @@ class MayaGatePage(qt.QtWidgets.QWidget):
                                          launch=self._launch_scene, settings=self._ui,
                                          snippets=self._snippet_store,
                                          assistant=AssistantServer.instance())
+        # An assistant allowed to act starts a Maya the way a click here does (its environment's
+        # variables, userSetup, boost) - through this page, never around it.
+        AssistantServer.instance().set_launcher(self._launch_scene, self.ENVIRONMENTS)
         self._tabs.addTab(self._indented(self._sessions_tab), self.SESSIONS_TAB_TITLE)
         self._link.sessions_changed.connect(self._update_sessions_tab_title)
         self._link.attention_changed.connect(self._update_sessions_tab_title)

@@ -1003,6 +1003,37 @@ What changed vs. the original (all deliberate, not oversights):
   wiring through a click, the code switch, working on / off; the colored head in BOTH themes (a row
   styled with `StylesheetBuilder.build(registry.get(name))` - a window's own theme can't be switched
   for a render without the shared ThemeManager). NOT seen in the real hub, nor moving.
+  EYES AND HANDS FOR THE HUB (2026-10-14, the user's picks 2 and 3 of a plan; "launching not only
+  for tests"): four more requests of the channel and five MCP tools.
+  `hub_info` {} -> versions installed, the environments, the hub's tool ids. `hub_screenshot`
+  {tool} (read-only) -> the hub's own window grabbed into `%TEMP%/msl_tools/assistant/hub_<time>.png`
+  (`AssistantServer.set_window(window)` by run_hub; a named tool is opened first - `HubWindow.
+  open_tool`, new `tool_ids()` / `current_tool_id()` - and the picture taken SCREENSHOT_DELAY_MS 350
+  later, so the reply is asynchronous). `launch_maya` {version, environment, scene} (needs the code
+  switch) -> the page's own `_launch_scene` (`set_launcher(launch, environments)`, given by
+  MayaGatePage when it is built - a hub that never opened Maya Gate says so): the environment's
+  variables, userSetup and boost, exactly a click on the tile; version and environment are checked
+  against what the hub has BEFORE the launcher is called. `close_maya` {pid} (needs the switch) =
+  the link's QUIT passed on WITHOUT save / discard, so Maya itself refuses on unsaved changes - an
+  assistant can't close work away. MCP tools: `hub_info`, `hub_screenshot`, `maya_launch` (waits,
+  polling `sessions` every 2 s up to `wait` 180 s, for the new pid and returns its line),
+  `maya_close`, and `maya_window_image` {pid, window} - no new request: a fixed snippet through
+  run_python (`WINDOW_CODE`) lists Maya's visible windows (title, class, object name, size) and,
+  when `window` matches exactly one, grabs it onto Maya's grey (a rounded window's corners are
+  see-through) - for looking at OUR tool windows inside Maya in their real theme and font.
+  Pictures of a kind are swept to the last 20 (`MayaTools._picture_file`). Tests in
+  test_assistant_link (a stub launcher, MayaPaths patched; a fake window). Seen with the user's
+  Maya 2026: the window list, and a picture of Maya's main window (1916 x 1141; the 3D viewport is
+  BLACK in a Qt grab - it is a GPU surface: use maya_viewport_image for it). Then with the hub
+  restarted: hub_info (2020, 2023-2026; three environments; five tools), the hub's picture (965 x
+  804, the real dark theme and font, the robot awake in the header) incl. after opening "media",
+  Maya 2025 started in Dev by `maya_launch` - connected in 32 s, with boost -, asked a question,
+  closed by `maya_close` (it stays listed, BUSY, for a few seconds while it shuts down; ~10 s later
+  the process and the session were gone).
+  THE REAL MCP PATH WORKS (checked 2026-10-14 by a fresh Claude Code session in the repo): the
+  server starts from `.mcp.json` (the repo root is its working directory, `${LOCALAPPDATA}`
+  expands), its tools are offered without an approval prompt, they return, and a Picture reaches
+  the assistant as an IMAGE.
 - Before a launch (2026-10-04): `launch_check.py` (Qt-free)
   `check(variables, script, boost_enabled, boost_blocked)` -> one line
   per thing worth a look: a folder / file a variable names that isn't

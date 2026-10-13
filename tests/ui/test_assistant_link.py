@@ -12,6 +12,7 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest import mock
 
 from msl_tools.msl.core.link import assistant
 from msl_tools.msl.core.link import protocol
@@ -307,6 +308,92 @@ class Channel(unittest.TestCase):
                          {"modules": 12})
         with self.assertRaises(assistant.AssistantError):
             self.ask(lambda: client.request(assistant.LAUNCH_REPORT, pid=1))
+
+    def test_a_maya_is_started_only_when_allowed_and_only_what_the_hub_has(self):
+        asked = []
+
+        def launch(version, environment, scene):
+            asked.append((version, environment, scene))
+            return "" if scene != "gone.ma" else "That scene isn\u2019t there any more: gone.ma"
+
+        client = self.client()
+        installs = mock.patch("msl_tools.msl.core.fs.maya_paths.MayaPaths.get_available_installs",
+                              return_value={"2025": None, "2026": None})
+        installs.start()
+        self.addCleanup(installs.stop)
+
+        def refused(**data) -> str:
+            with self.assertRaises(assistant.AssistantError) as raised:
+                self.ask(lambda: client.request(assistant.LAUNCH_MAYA, again=False, **data))
+            return str(raised.exception)
+
+        self.server._code_allowed = True
+        self.assertIn("Maya Gate has not been opened", refused(version="2026", environment="Dev"))
+        self.server.set_launcher(launch, ["<default>", "Stable", "Dev"])
+        self.server._code_allowed = False
+        self.assertIn("switched off", refused(version="2026", environment="Dev"))
+        self.server._code_allowed = True
+        self.assertIn("isn\u2019t installed", refused(version="2019", environment="Dev"))
+        self.assertIn("no environment", refused(version="2026", environment="Prod"))
+        self.assertIn("gone.ma", refused(version="2026", environment="Dev", scene="gone.ma"))
+        self.assertEqual(asked, [("2026", "Dev", "gone.ma")])   # the refusals above never reached the launcher
+        self.assertEqual(self.ask(lambda: client.request(assistant.LAUNCH_MAYA, again=False, version="2025",
+                                                         environment="Stable", scene="C:/a.ma")), {"started": True})
+        self.assertEqual(asked[-1], ("2025", "Stable", "C:/a.ma"))
+        self.assertEqual(self.ask(lambda: client.request(assistant.HUB_INFO)),
+                         {"versions": ["2025", "2026"], "environments": ["<default>", "Stable", "Dev"], "tools": []})
+
+    def test_closing_is_the_links_quit_without_save_or_discard(self):
+        maya = self.join_maya()
+        maya.setblocking(False)
+        decoder, asked = protocol.FrameDecoder(), []
+
+        def answer():
+            try:
+                data = maya.recv(65536)
+            except (BlockingIOError, InterruptedError):
+                return
+            for message in decoder.feed(data):
+                asked.append((message["name"], message["data"]))
+                maya.sendall(protocol.encode(protocol.reply(message["id"], False, protocol.QUIT_UNSAVED)))
+
+        client = self.client()
+        with self.assertRaises(assistant.AssistantError) as raised:   # the switch is off
+            self.ask(lambda: client.request(assistant.CLOSE_MAYA, again=False, pid=4242), answer)
+        self.assertEqual(asked, [])
+        self.server._code_allowed = True
+        with self.assertRaises(assistant.AssistantError) as raised:   # Maya's own refusal comes through
+            self.ask(lambda: client.request(assistant.CLOSE_MAYA, again=False, pid=4242, discard=True), answer)
+        self.assertIn("unsaved changes", str(raised.exception))
+        self.assertEqual(asked, [(protocol.QUIT, {})])   # no "discard" of the assistant's goes with it
+
+    def test_a_picture_of_the_hubs_window(self):
+        class Window(qt.QtWidgets.QWidget):
+            opened = ""
+
+            def tool_ids(self):
+                return ["maya_gate", "media"]
+
+            def open_tool(self, tool):
+                self.opened = tool
+
+            def current_tool_id(self):
+                return self.opened or "maya_gate"
+
+        client = self.client()
+        with self.assertRaises(assistant.AssistantError):   # no window was given
+            self.ask(lambda: client.request(assistant.HUB_SCREENSHOT))
+        window = Window()
+        window.resize(320, 200)
+        self.server.set_window(window)
+        self.server.SCREENSHOT_DELAY_MS = 10
+        with self.assertRaises(assistant.AssistantError) as raised:
+            self.ask(lambda: client.request(assistant.HUB_SCREENSHOT, tool="nope"))
+        self.assertIn("maya_gate, media", str(raised.exception))
+        answer = self.ask(lambda: client.request(assistant.HUB_SCREENSHOT, tool="media"))
+        self.addCleanup(lambda: os.path.exists(answer["path"]) and os.remove(answer["path"]))
+        self.assertEqual((window.opened, answer["tool"], answer["width"], answer["height"]), ("media", "media", 320, 200))
+        self.assertTrue(os.path.getsize(answer["path"]) > 0)
 
     def test_the_mcp_tools_end_to_end(self):
         from msl_tools.msl.run_maya_mcp import MayaTools, build_server

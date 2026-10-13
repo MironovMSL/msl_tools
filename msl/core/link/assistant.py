@@ -20,6 +20,10 @@ Requests (assistant -> hub):
     run_python {"pid", "code", "seconds"}          -> {"output", "result", "traceback"}
     launch_report {"pid"}                          -> {"text"}
     reload_code   {"pid"}                          -> {"modules": how many were dropped}
+    close_maya    {"pid"}                          -> {"quitting": true}
+    launch_maya   {"version", "environment", "scene"} -> {"started": true}
+    hub_info      {}                               -> {"versions", "environments", "tools"}
+    hub_screenshot {"tool"}                        -> {"path", "tool", "width", "height"}
 
 run_python is the one request that carries code. The hub passes it to that
 Maya as the Sessions tab's console would (protocol.RUN_PYTHON) - only while
@@ -49,7 +53,16 @@ READ_LOG = "read_log"
 RUN_PYTHON = "run_python"
 LAUNCH_REPORT = "launch_report"  # {"pid"} -> {"text"}: that Maya's launch report (read-only)
 RELOAD_CODE = "reload_code"      # {"pid"} -> {"modules"}: msl_tools reloaded in that Maya (needs the code switch)
-REQUESTS = (SESSIONS, READ_LOG, RUN_PYTHON, LAUNCH_REPORT, RELOAD_CODE)
+CLOSE_MAYA = "close_maya"        # {"pid"} -> {"quitting": true}; Maya refuses while its scene has unsaved changes
+# {"version", "environment", "scene"} -> {"started": true}: the hub starts a Maya as a click on its
+# version tile would (that environment's variables, userSetup, boost). Needs the code switch.
+LAUNCH_MAYA = "launch_maya"
+HUB_INFO = "hub_info"            # {} -> {"versions": [...], "environments": [...], "tools": [...]}: what can be asked for
+# {"tool": id or ""} -> {"path", "tool", "width", "height"}: a picture of the hub's own window (read-only;
+# naming a tool opens that tool's page first, as a click on its sidebar tile would).
+HUB_SCREENSHOT = "hub_screenshot"
+REQUESTS = (SESSIONS, READ_LOG, RUN_PYTHON, LAUNCH_REPORT, RELOAD_CODE, CLOSE_MAYA, LAUNCH_MAYA, HUB_INFO,
+            HUB_SCREENSHOT)
 
 MAX_READ = 500                   # entries one read_log may return
 MAX_CODE = 1024 * 1024           # characters of code one run_python may carry
