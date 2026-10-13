@@ -17,6 +17,12 @@ Requests (assistant -> hub):
 
     sessions   {}                                  -> {"sessions": [session, ...]}
     read_log   {"pid", "after", "limit", "levels"} -> {"entries": [entry, ...], "last": seq, "known": bool}
+    run_python {"pid", "code", "seconds"}          -> {"output", "result", "traceback"}
+
+run_python is the one request that carries code. The hub passes it to that
+Maya as the Sessions tab's console would (protocol.RUN_PYTHON) - only while
+the user allowed code for the assistant, and Maya itself still decides
+whether it takes code at all. `seconds` is how long the hub waits for Maya.
 
 A session is described by `describe()`; an entry is {"seq", "time", "level",
 "text"}. `after` is the last `seq` already read (0 = from the start of what
@@ -38,9 +44,13 @@ ROLE = "assistant"               # the hello's "role"
 
 SESSIONS = "sessions"
 READ_LOG = "read_log"
-REQUESTS = (SESSIONS, READ_LOG)
+RUN_PYTHON = "run_python"
+REQUESTS = (SESSIONS, READ_LOG, RUN_PYTHON)
 
 MAX_READ = 500                   # entries one read_log may return
+MAX_CODE = 1024 * 1024           # characters of code one run_python may carry
+RUN_SECONDS = (5, 600)           # how long a run_python may ask the hub to wait for Maya: least, most
+RUN_SECONDS_DEFAULT = 60
 
 
 def describe(session: MayaSession, problems: tuple[int, int] = (0, 0), now: float | None = None) -> dict:
@@ -167,8 +177,14 @@ class AssistantClient:
             raise AssistantError("MSL Tools can’t be reached (is it running, with the assistant "
                                  "access switched on?): %s" % error)
 
-    def request(self, name: str, **data) -> dict:
+    def request(self, name: str, wait: float | None = None, again: bool = True, **data) -> dict:
         """Asks the hub `name` and returns the reply's data.
+
+        Args:
+            wait: seconds to wait for the answer (None = the client's timeout).
+            again: ask once more if the connection turns out to be gone. Pass
+                False for a request that must not be done twice (run_python:
+                the first one may have reached Maya before the line broke).
 
         Raises:
             AssistantError: the hub can't be reached, or answered with a failure.
@@ -176,6 +192,7 @@ class AssistantClient:
         for attempt in (1, 2):   # a connection the hub closed since is noticed only on use
             if self._socket is None:
                 self.connect()
+            self._socket.settimeout(self.timeout if wait is None else wait)
             request_id = self._next_id
             self._next_id += 1
             try:
@@ -186,7 +203,7 @@ class AssistantClient:
                         break
             except (OSError, protocol.ProtocolError, AssistantError) as error:
                 self.close()
-                if attempt == 2:
+                if attempt == 2 or not again:
                     raise AssistantError("MSL Tools stopped answering: %s" % error)
                 continue
             if not message.get("success"):

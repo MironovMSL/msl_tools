@@ -10,8 +10,14 @@ launched Maya is given must not open it.
 Safety, as for the Maya link: 127.0.0.1 only; a connection is served only
 after it proved it knows the token, the hub having proven itself first;
 before that a peer may send 64 KB per message and has HELLO_TIMEOUT_MS.
-Nothing that arrives is executed: every request is looked up in _HANDLERS,
-anything else is refused.
+Nothing that arrives is executed HERE: every request is looked up in
+_HANDLERS, anything else is refused. One request carries code, `run_python`:
+the hub hands it to the Maya it names exactly as the Sessions tab's console
+does (protocol.RUN_PYTHON) - only while the user allowed code for the
+assistant (`code_allowed`, off at first, a switch of its own), one run per
+Maya at a time, and Maya's side still refuses it unless it was launched with
+the console allowed. What was sent and what came back is announced
+(code_started / code_finished) so the Sessions tab shows it in that Maya's log.
 """
 import secrets
 
@@ -41,6 +47,8 @@ class AssistantServer(qt.QtCore.QObject):
     Signals:
         listening_changed() — it started or stopped listening.
         clients_changed() — an assistant proved itself, or left.
+        code_started(int, str) — (Maya's pid, code): an assistant's code went to that Maya.
+        code_finished(int, dict) — (pid, the link's reply): it came back, or failed.
     """
 
     PORT_ATTEMPTS = 10
@@ -49,6 +57,8 @@ class AssistantServer(qt.QtCore.QObject):
 
     listening_changed = qt.QtCore.Signal()
     clients_changed = qt.QtCore.Signal()
+    code_started = qt.QtCore.Signal(int, str)
+    code_finished = qt.QtCore.Signal(int, dict)
 
     _instance: "AssistantServer | None" = None
 
@@ -69,6 +79,10 @@ class AssistantServer(qt.QtCore.QObject):
         self._config = None
         self.log = assistant.LogBook()
         link.log_received.connect(self._on_log)
+        # Read from the config by ensure_listening() only: a server given its port by listen()
+        # (a test) never opens the hub's config.
+        self._code_allowed = False
+        self._running: set[int] = set()          # pids with an assistant's code out
         self._HANDLERS = {assistant.SESSIONS: self._sessions, assistant.READ_LOG: self._read_log}
 
     # --- listening ---------------------------------------------------------------
@@ -77,8 +91,22 @@ class AssistantServer(qt.QtCore.QObject):
         if self._config is None:
             from msl_tools.msl.core.resources import Resources
             self._config = Resources().configsDesktopHubMng.get_config(
-                assistant.CONFIG_NAME, defaults={"port": assistant.DEFAULT_PORT, "token": "", "enabled": False})
+                assistant.CONFIG_NAME, defaults={"port": assistant.DEFAULT_PORT, "token": "", "enabled": False,
+                                                 "code": False})
         return self._config
+
+    def code_allowed(self) -> bool:
+        """May an assistant run code in the connected Mayas (the user's second switch; off at first)."""
+        return self._code_allowed
+
+    def set_code_allowed(self, allowed: bool) -> None:
+        """Remembers the second switch in the hub's config."""
+        self._code_allowed = bool(allowed)
+        self._settings()["code"] = self._code_allowed
+
+    def running(self) -> set:
+        """Pids of the Mayas that have an assistant's code out right now."""
+        return set(self._running)
 
     def is_enabled(self) -> bool:
         """The user's switch (kept in the hub's config; off on a fresh install)."""
@@ -99,6 +127,7 @@ class AssistantServer(qt.QtCore.QObject):
         if self.is_listening():
             return True
         config = self._settings()
+        self._code_allowed = bool(config["code"])
         token = str(config["token"] or "")
         if not token:
             token = secrets.token_hex(16)
@@ -205,6 +234,9 @@ class AssistantServer(qt.QtCore.QObject):
         if not isinstance(request_id, int):
             client.socket.abort()
             return
+        if name == assistant.RUN_PYTHON:
+            self._run_python(client, request_id, data)   # answered when Maya is back
+            return
         handler = self._HANDLERS.get(name)
         if handler is None:
             answer = protocol.reply(request_id, False, "MSL Tools doesn’t know the request “%s”." % name)
@@ -233,8 +265,55 @@ class AssistantServer(qt.QtCore.QObject):
     # --- requests ------------------------------------------------------------------
 
     def _sessions(self, _data: dict) -> dict:
-        return {"sessions": [assistant.describe(session, self.log.problems(session.pid))
-                             for session in self._link.sessions()]}
+        described = []
+        for session in self._link.sessions():
+            entry = assistant.describe(session, self.log.problems(session.pid))
+            entry["runs_code"] = bool(session.console and self.code_allowed())
+            described.append(entry)
+        return {"sessions": described}
+
+    def _run_python(self, client: _Client, request_id: int, data: dict) -> None:
+        """Passes an assistant's code to the Maya it names and answers when that Maya did."""
+        def refuse(why: str) -> None:
+            client.socket.write(protocol.encode(protocol.reply(request_id, False, why)))
+
+        pid, code = int(data.get("pid") or 0), data.get("code")
+        session = next((s for s in self._link.sessions() if s.pid == pid), None)
+        if not self.code_allowed():
+            return refuse("Running code is switched off for the assistant in MSL Tools "
+                          "(Maya Gate > Sessions: right click “Assistant”).")
+        if session is None:
+            return refuse("MSL Tools knows no connected Maya with pid %d." % pid)
+        if not session.console:
+            return refuse("That Maya takes no code (it was not started from MSL Tools with the console allowed).")
+        if not isinstance(code, str) or not code.strip() or len(code) > assistant.MAX_CODE:
+            return refuse("No code to run (or more than %d characters of it)." % assistant.MAX_CODE)
+        if pid in self._running:
+            return refuse("That Maya is still running the assistant’s previous code.")
+        least, most = assistant.RUN_SECONDS
+        try:
+            seconds = min(max(int(data.get("seconds") or assistant.RUN_SECONDS_DEFAULT), least), most)
+        except (TypeError, ValueError):
+            seconds = assistant.RUN_SECONDS_DEFAULT
+
+        def done(reply: dict) -> None:
+            self._running.discard(pid)
+            self.code_finished.emit(pid, reply)
+            if client not in self._clients:
+                return   # the assistant left meanwhile; the Sessions tab still shows what came back
+            if reply.get("success"):
+                result = reply.get("data") or {}
+                answer = protocol.reply(request_id, output=str(result.get("output") or ""),
+                                        result=str(result.get("result") or ""),
+                                        traceback=str(result.get("traceback") or ""))
+            else:
+                answer = protocol.reply(request_id, False, str(reply.get("error") or "the request failed"))
+            client.socket.write(protocol.encode(answer))
+
+        self._running.add(pid)
+        self.code_started.emit(pid, code)
+        self._link.request(session.session_id, protocol.RUN_PYTHON, on_reply=done,
+                           timeout_ms=seconds * 1000, code=code)
 
     def _read_log(self, data: dict) -> dict:
         pid, after, limit = int(data.get("pid") or 0), int(data.get("after") or 0), int(data.get("limit") or 200)

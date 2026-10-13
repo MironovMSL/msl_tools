@@ -91,8 +91,9 @@ class Channel(unittest.TestCase):
             time.sleep(0.005)
         return until()
 
-    def ask(self, action):
-        """Runs `action` (blocking client calls) on a thread while the hub's event loop turns."""
+    def ask(self, action, meanwhile=lambda: None):
+        """Runs `action` (blocking client calls) on a thread while the hub's event loop turns
+        (and `meanwhile` is called: a fake Maya answering)."""
         outcome = {}
 
         def work():
@@ -103,7 +104,8 @@ class Channel(unittest.TestCase):
 
         thread = threading.Thread(target=work, daemon=True)
         thread.start()
-        self.assertTrue(self.pump(lambda: not thread.is_alive(), seconds=8.0), "the client never finished")
+        self.assertTrue(self.pump(lambda: (meanwhile(), not thread.is_alive())[1], seconds=8.0),
+                        "the client never finished")
         if "error" in outcome:
             raise outcome["error"]
         return outcome["value"]
@@ -150,8 +152,19 @@ class Channel(unittest.TestCase):
     def test_an_unknown_request_is_refused(self):
         client = self.client()
         with self.assertRaises(assistant.AssistantError) as raised:
-            self.ask(lambda: client.request("run_python", code="1"))
-        self.assertIn("run_python", str(raised.exception))
+            self.ask(lambda: client.request("quit_maya", pid=1))
+        self.assertIn("quit_maya", str(raised.exception))
+
+    def test_code_is_refused_while_the_user_has_not_allowed_it(self):
+        maya = self.join_maya()
+        maya.setblocking(False)
+        client = self.client()
+        with self.assertRaises(assistant.AssistantError) as raised:
+            self.ask(lambda: client.request(assistant.RUN_PYTHON, again=False, pid=4242, code="1 + 1"))
+        self.assertIn("switched off", str(raised.exception))
+        self.pump(lambda: False, seconds=0.2)
+        with self.assertRaises(BlockingIOError):
+            maya.recv(65536)   # nothing was passed on to Maya
 
     def test_a_request_without_the_handshake_is_dropped(self):
         raw = socket.create_connection(("127.0.0.1", self.server.port()), timeout=3)
@@ -193,6 +206,78 @@ class Channel(unittest.TestCase):
         self.pump(lambda: False, seconds=0.1)
         self.assertTrue(self.server.listen(port, TOKEN))
         self.assertEqual(self.ask(lambda: client.request(assistant.SESSIONS))["sessions"], [])
+
+    def answering(self, maya: socket.socket, seen: list, **result):
+        """A `meanwhile` for ask(): the fake Maya answers each RUN_PYTHON it gets with `result`."""
+        maya.setblocking(False)
+        decoder = protocol.FrameDecoder()
+
+        def step():
+            try:
+                data = maya.recv(65536)
+            except (BlockingIOError, InterruptedError):
+                return
+            for message in decoder.feed(data):
+                if message.get("name") == protocol.RUN_PYTHON:
+                    seen.append(message["data"]["code"])
+                    maya.sendall(protocol.encode(protocol.reply(message["id"], **result)))
+        return step
+
+    def test_allowed_code_goes_to_maya_once_and_its_answer_comes_back(self):
+        maya = self.join_maya()
+        self.server._code_allowed = True   # the user's switch (set_code_allowed would write the hub's config)
+        started, finished, seen = [], [], []
+        self.server.code_started.connect(lambda pid, code: started.append((pid, code)))
+        self.server.code_finished.connect(lambda pid, reply: finished.append((pid, reply["success"])))
+        client = self.client()
+        answer = self.ask(lambda: client.request(assistant.RUN_PYTHON, again=False, pid=4242, code="1 + 1"),
+                          self.answering(maya, seen, output="hi\n", result="2", traceback=""))
+        self.assertEqual(answer, {"output": "hi\n", "result": "2", "traceback": ""})
+        self.assertEqual((seen, started, finished), (["1 + 1"], [(4242, "1 + 1")], [(4242, True)]))
+        self.assertEqual(self.server.running(), set())
+        self.assertTrue(self.ask(lambda: client.request(assistant.SESSIONS))["sessions"][0]["runs_code"])
+
+    def test_code_is_refused_for_a_maya_without_the_console_or_unknown_or_busy_with_it(self):
+        maya = socket.create_connection(("127.0.0.1", self.link.port()), timeout=3)
+        self.addCleanup(maya.close)
+        maya.sendall(protocol.encode(protocol.event(protocol.HELLO, pid=77, version="2025", token=MAYA_TOKEN)))
+        self.assertTrue(self.pump(lambda: len(self.link.sessions()) == 1))
+        self.server._code_allowed = True
+        client = self.client()
+
+        def refused(**data) -> str:
+            with self.assertRaises(assistant.AssistantError) as raised:
+                self.ask(lambda: client.request(assistant.RUN_PYTHON, again=False, **data))
+            return str(raised.exception)
+
+        self.assertIn("takes no code", refused(pid=77, code="1"))
+        self.assertIn("no connected Maya", refused(pid=5, code="1"))
+        self.join_maya(pid=4242)
+        self.assertIn("No code", refused(pid=4242, code="  "))
+        self.server._running.add(4242)
+        self.assertIn("previous code", refused(pid=4242, code="1"))
+
+    def test_the_run_tool_end_to_end(self):
+        from msl_tools.msl.run_maya_mcp import MayaTools
+        folder = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, folder, True)
+        config = os.path.join(folder, "config.json")
+        with open(config, "w", encoding="utf-8") as handle:
+            json.dump({"port": self.server.port(), "token": TOKEN, "enabled": True}, handle)
+        tools = MayaTools(config)
+        maya = self.join_maya()
+        with self.assertRaises(assistant.AssistantError):   # not allowed yet
+            self.ask(lambda: tools.run_python(code="1 + 1"))
+        self.server._code_allowed = True
+        seen = []
+        text = self.ask(lambda: tools.run_python(code="print('hi'); 1 + 1"),
+                        self.answering(maya, seen, output="hi\n", result="2", traceback=""))
+        self.assertEqual((text, seen), ("hi\n# Result: 2", ["print('hi'); 1 + 1"]))
+        with self.assertRaises(assistant.AssistantError) as raised:
+            self.ask(lambda: tools.run_python(code="boom"),
+                     self.answering(maya, seen, output="", result="", traceback="NameError: boom"))
+        self.assertIn("NameError: boom", str(raised.exception))
+        self.assertIn("[runs code]", self.ask(tools.sessions))
 
     def test_the_mcp_tools_end_to_end(self):
         from msl_tools.msl.run_maya_mcp import MayaTools, build_server

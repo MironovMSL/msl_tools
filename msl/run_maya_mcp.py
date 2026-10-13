@@ -41,7 +41,8 @@ CONFIG_FILE = ROOT / "configs" / "desktop" / assistant.CONFIG_NAME / "config.jso
 INSTRUCTIONS = ("Tools for the Autodesk Maya sessions connected to the MSL Tools hub on this machine. "
                 "Call maya_sessions first: it lists the running Mayas with their pid. maya_log reads what "
                 "a Maya's Script Editor reported (errors and warnings; plain prints only while the hub's "
-                "log switch is on All).")
+                "log switch is on All). maya_run_python runs Python in a Maya the user allowed it for - "
+                "it is their live scene: do not change or save it unless they asked.")
 
 
 class MayaTools:
@@ -96,10 +97,32 @@ class MayaTools:
         return "\n".join(lines)
 
 
+    def run_python(self, code: str = "", pid: int = 0, timeout: int = assistant.RUN_SECONDS_DEFAULT) -> str:
+        if not str(code).strip():
+            raise assistant.AssistantError("No code was given.")
+        sessions = self._ask(assistant.SESSIONS)["sessions"]   # also: the connection is fresh for the one send
+        pid = int(pid) or self._only_pid()
+        session = next((entry for entry in sessions if entry.get("pid") == pid), None)
+        if session is None:
+            raise assistant.AssistantError("No Maya with pid %d is connected to MSL Tools." % pid)
+        least, most = assistant.RUN_SECONDS
+        seconds = min(max(int(timeout), least), most)
+        # Sent ONCE: a request repeated after a broken line could run the code twice.
+        answer = self._ask(assistant.RUN_PYTHON, wait=seconds + 10, again=False, pid=pid, code=str(code),
+                           seconds=seconds)
+        output = str(answer.get("output") or "").rstrip("\n")
+        if answer.get("traceback"):
+            raise assistant.AssistantError("\n".join(part for part in (output, str(answer["traceback"]).rstrip("\n"))
+                                                     if part))
+        parts = [part for part in (output, "# Result: %s" % answer["result"] if answer.get("result") else "") if part]
+        return "\n".join(parts) or "(ran; no output, no result)"
+
+
 def _session_line(session: dict) -> str:
     minutes = int(session.get("connected_seconds", 0)) // 60
     marks = [mark for mark, on in (("unsaved changes", session.get("modified")), ("BUSY", session.get("busy")),
-                                   ("boost", session.get("boosted")), ("console", session.get("console"))) if on]
+                                   ("boost", session.get("boosted")),
+                                   ("runs code", session.get("runs_code"))) if on]
     return "pid %s  Maya %s  %s  scene: %s  connected %d min  errors %d, warnings %d%s" % (
         session.get("pid"), session.get("version"), session.get("environment") or "(no environment)",
         session.get("scene") or "untitled", minutes, session.get("errors", 0), session.get("warnings", 0),
@@ -125,6 +148,23 @@ def build_server(tools: MayaTools) -> StdioServer:
                  "limit": {"type": "integer", "description": "At most this many entries, the newest "
                                                              "(default 100, at most %d)." % assistant.MAX_READ},
                  "problems_only": {"type": "boolean", "description": "Only errors and warnings."}}),
+        Tool("maya_run_python",
+             "Run Python in a connected Maya, in its main thread, as its Script Editor would: names persist "
+             "in __main__, the value of a final expression is the result, one undo step. Returns what the "
+             "code printed and its result; a traceback comes back as the tool's error. The code and its "
+             "outcome are shown to the user in MSL Tools and in Maya's Script Editor. It runs in the user's "
+             "LIVE scene: read freely, but change the scene only when the user asked for it. Works only in "
+             "sessions marked [runs code] by maya_sessions (the user allows it in MSL Tools).",
+             tools.run_python,
+             properties={
+                 "code": {"type": "string", "description": "The Python to run (maya.cmds etc. are importable)."},
+                 "pid": {"type": "integer", "description": "The Maya's process id (from maya_sessions). "
+                                                           "May be left out while exactly one Maya is connected."},
+                 "timeout": {"type": "integer", "description": "Seconds to wait for Maya (default %d, %d to %d). "
+                                                               "Maya is blocked while the code runs."
+                                                               % ((assistant.RUN_SECONDS_DEFAULT,)
+                                                                  + assistant.RUN_SECONDS)}},
+             required=("code",)),
     ])
 
 

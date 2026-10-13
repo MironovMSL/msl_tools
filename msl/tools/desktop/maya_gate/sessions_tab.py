@@ -110,6 +110,7 @@ class SessionsTab(_ConsoleMixin, _ControlMixin, qt.QtWidgets.QWidget):
 
     REFRESH_MS = 30_000  # "12 min" labels
     CONSOLE_TIMEOUT_MS = 600_000  # code may run long; Maya is busy meanwhile anyway
+    ASSISTANT_MARK = "# sent by the assistant"   # first line of an assistant's code in a Maya's log
     MESSAGE_MS = 8000    # how long the last request's outcome stays
     REPORT_TIMEOUT_MS = 15_000
     RELOAD_TIMEOUT_MS = 20_000
@@ -190,6 +191,10 @@ class SessionsTab(_ConsoleMixin, _ControlMixin, qt.QtWidgets.QWidget):
         else:
             self._assistant.listening_changed.connect(self._show_assistant)
             self._assistant.clients_changed.connect(self._show_assistant)
+            self._assistant.code_started.connect(self._on_assistant_code)
+            self._assistant.code_finished.connect(self._show_code_reply)
+            self._assistant_toggle.setContextMenuPolicy(qt.QtCore.Qt.ContextMenuPolicy.CustomContextMenu)
+            self._assistant_toggle.customContextMenuRequested.connect(self._on_assistant_menu)
 
         self._list = qt.QtWidgets.QWidget()
         self._list_layout = qt.QtWidgets.QVBoxLayout(self._list)
@@ -360,11 +365,31 @@ class SessionsTab(_ConsoleMixin, _ControlMixin, qt.QtWidgets.QWidget):
         self._assistant.set_enabled(checked)
         self._show_assistant()
 
+    def _on_assistant_menu(self, position) -> None:
+        """Right click on the switch: what the assistant may do."""
+        menu = qt.QtWidgets.QMenu(self)
+        group = qt.QtGui.QActionGroup(menu)
+        for allowed, text in ((False, "Read only — which Mayas are connected, and their logs"),
+                              (True, "Read, and run Python in the connected Mayas")):
+            action = menu.addAction(text)
+            action.setCheckable(True)
+            action.setChecked(allowed == self._assistant.code_allowed())
+            group.addAction(action)
+            action.triggered.connect(lambda _checked=False, allowed=allowed: self._set_assistant_code(allowed))
+        self._assistant_menu = menu  # for tests
+        menu.exec(self._assistant_toggle.mapToGlobal(position))
+
+    def _set_assistant_code(self, allowed: bool) -> None:
+        self._assistant.set_code_allowed(allowed)
+        self._show_assistant()
+
     def _show_assistant(self) -> None:
         """The switch as the assistant's channel stands: lit while it listens."""
         if self._assistant is None:
             return
         listening = self._assistant.is_listening()
+        code = self._assistant.code_allowed()
+        self._assistant_toggle.setText("Assistant + code" if code else "Assistant")
         self._assistant_toggle.setChecked(listening)
         self._assistant_toggle.setProperty("on", listening)
         repolish(self._assistant_toggle)
@@ -378,7 +403,9 @@ class SessionsTab(_ConsoleMixin, _ControlMixin, qt.QtWidgets.QWidget):
             state = "off"
         self._assistant_toggle.setToolTip(
             state + "\nLets a coding assistant on this computer (the msl-maya MCP server) see which Mayas "
-                    "are connected and read their logs.\nThis computer only, with a key of its own.")
+                    "are connected and read their logs"
+            + (" — and RUN PYTHON in them (shown in each Maya’s log)." if code else ".")
+            + "\nThis computer only, with a key of its own.  Right click: what it may do.")
 
     def _place_split(self) -> None:
         """The console at its remembered height (the first time: just its few lines)."""

@@ -33,29 +33,42 @@ class _ConsoleMixin:
         self._console_running.add(pid)
         self._sync_run_button()
 
-        def done(reply: dict) -> None:
-            self._console_running.discard(pid)
-            self._sync_run_button()
-            row = self._rows.get(session.session_id)
-            if row is not None:
-                row.set_busy(False)
-            data = reply.get("data") or {}
-            if not reply.get("success"):
-                self._add_to_log(pid, protocol.LOG_ERROR, reply.get("error") or "the request failed")
-                return
-            if data.get("output"):
-                self._add_to_log(pid, protocol.LOG_INFO, str(data["output"]).rstrip("\n"))
-            if data.get("traceback"):
-                self._add_to_log(pid, protocol.LOG_ERROR, str(data["traceback"]).rstrip("\n"))
-            elif data.get("result"):
-                self._add_to_log(pid, protocol.LOG_INFO, str(data["result"]))
-
         row = self._rows.get(session.session_id)
         if row is not None:
             row.set_busy(True)
-        self._server.request(session.session_id, protocol.RUN_PYTHON, on_reply=done,
-                             timeout_ms=self.CONSOLE_TIMEOUT_MS, code=code)
+        self._server.request(session.session_id, protocol.RUN_PYTHON, timeout_ms=self.CONSOLE_TIMEOUT_MS, code=code,
+                             on_reply=lambda reply: self._show_code_reply(pid, reply))
         return True
+
+    def _show_code_reply(self, pid: int, reply: dict) -> None:
+        """What came back for code sent to Maya `pid` (from here or by an assistant), into its log."""
+        self._console_running.discard(pid)
+        self._sync_run_button()
+        session = self._session_by_pid(pid)
+        row = self._rows.get(session.session_id) if session is not None else None
+        if row is not None:
+            row.set_busy(False)
+        data = reply.get("data") or {}
+        if not reply.get("success"):
+            self._add_to_log(pid, protocol.LOG_ERROR, reply.get("error") or "the request failed")
+            return
+        if data.get("output"):
+            self._add_to_log(pid, protocol.LOG_INFO, str(data["output"]).rstrip("\n"))
+        if data.get("traceback"):
+            self._add_to_log(pid, protocol.LOG_ERROR, str(data["traceback"]).rstrip("\n"))
+        elif data.get("result"):
+            self._add_to_log(pid, protocol.LOG_INFO, str(data["result"]))
+
+    def _on_assistant_code(self, pid: int, code: str) -> None:
+        """An assistant's code went to Maya `pid` (AssistantServer.code_started): shown like the
+        console's own, marked, and that Maya's Run waits for it."""
+        self._add_to_log(pid, protocol.LOG_INPUT, self.ASSISTANT_MARK + "\n" + code)
+        self._console_running.add(pid)
+        self._sync_run_button()
+        session = self._session_by_pid(pid)
+        row = self._rows.get(session.session_id) if session is not None else None
+        if row is not None:
+            row.set_busy(True)
 
     # --- snippets ------------------------------------------------------------------------
 

@@ -924,8 +924,26 @@ What changed vs. the original (all deliberate, not oversights):
   the port and how many assistants are connected. Tests: `tests/core/test_mcp_stdio.py`, the tools
   end to end in test_assistant_link. Checked: the server answered initialize / tools/list / a call
   when run with the runtime Python; the switch rendered and clicked offscreen on a private config.
-  NOT yet seen working from a real assistant session, nor with a real Maya. NOT built: `run_python`
-  for the assistant (step 3), launch report / reload code / a viewport picture (step 4).
+  Seen with a real Maya 2026 (the user's hub, 2026-10-13): the session listed, its log read.
+  Step 3, the same day - CODE (the user's call: any session that has the console): the channel's
+  `run_python` {pid, code, seconds 5..600} -> {output, result, traceback}. The hub hands it to that
+  Maya as the tab's console does (protocol.RUN_PYTHON; Maya still decides by MSL_GATE_CONSOLE) and
+  answers when Maya did. Refused: `code_allowed()` off - a SECOND switch, config `code`, off at
+  first: right click on "Assistant" -> Read only / Read, and run Python (the button then reads
+  "Assistant + code") -, no such pid, a Maya without the console, empty code or > 1 MB, that Maya
+  still running the assistant's previous code (`_running`). `code_started(pid, code)` /
+  `code_finished(pid, reply)` -> the Sessions tab: the code goes into that Maya's log as input under
+  the line "# sent by the assistant" (`ASSISTANT_MARK`), the row is busy and Run waits, the outcome
+  is shown by `_show_code_reply` (the console's own reply handler, now shared). The client sends it
+  ONCE (`request(again=False)`: a repeat after a broken line could run it twice; `wait=` is the
+  socket timeout), the tool asks `sessions` first so the connection is fresh. MCP tool
+  `maya_run_python` {code, pid, timeout}: output + "# Result: ..."; a traceback is the tool's error.
+  `maya_sessions` marks such sessions "[runs code]". `code_allowed` is read from the config only by
+  `ensure_listening()` - a server given its port by `listen()` (a test) never opens the hub's config
+  (a first cut read it lazily and a test run wrote `"code": false` into the live file).
+  The auto-mode guard stops edits that widen what may run code (the console in every environment,
+  this request): the user then confirms or makes the edit.
+  NOT built: launch report / reload code / a viewport picture for the assistant (step 4).
 - Before a launch (2026-10-04): `launch_check.py` (Qt-free)
   `check(variables, script, boost_enabled, boost_blocked)` -> one line
   per thing worth a look: a folder / file a variable names that isn't
