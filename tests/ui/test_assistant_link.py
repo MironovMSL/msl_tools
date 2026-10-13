@@ -4,8 +4,11 @@ only a client that knows the channel's own token is served, and only the fixed r
 Both servers listen on PRIVATE ports with private tokens — never ensure_listening(): a real
 Maya (or a real assistant) on this machine would join the test.
 """
+import json
 import os
+import shutil
 import socket
+import tempfile
 import threading
 import time
 import unittest
@@ -190,6 +193,44 @@ class Channel(unittest.TestCase):
         self.pump(lambda: False, seconds=0.1)
         self.assertTrue(self.server.listen(port, TOKEN))
         self.assertEqual(self.ask(lambda: client.request(assistant.SESSIONS))["sessions"], [])
+
+    def test_the_mcp_tools_end_to_end(self):
+        from msl_tools.msl.run_maya_mcp import MayaTools, build_server
+        folder = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, folder, True)
+        config = os.path.join(folder, "config.json")
+        tools = MayaTools(config)
+        server = build_server(tools)
+
+        def call(name, **arguments):
+            message = {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                       "params": {"name": name, "arguments": arguments}}
+            result = self.ask(lambda: server.handle(message))["result"]
+            return result["isError"], result["content"][0]["text"]
+
+        failed, text = call("maya_sessions")   # no config file: the hub never ran / is switched off
+        self.assertTrue(failed)
+        self.assertIn("switched off", text)
+        with open(config, "w", encoding="utf-8") as handle:
+            json.dump({"port": self.server.port(), "token": TOKEN, "enabled": True}, handle)
+        self.assertEqual(call("maya_sessions"), (False, "No Maya is connected to MSL Tools."))
+        maya = self.join_maya()
+        maya.sendall(protocol.encode(protocol.event(protocol.LOG, entries=[["error", "boom"], ["info", "fine"]])))
+        self.assertTrue(self.pump(lambda: self.server.log.knows(4242)))
+        failed, text = call("maya_sessions")
+        self.assertFalse(failed)
+        self.assertIn("pid 4242  Maya 2025  Dev  scene: C:/shots/a.ma", text)
+        self.assertIn("errors 1, warnings 0", text)
+        failed, text = call("maya_log", problems_only=True)   # one Maya: no pid needed
+        self.assertFalse(failed)
+        self.assertIn("error    boom", text)
+        self.assertNotIn("fine", text)
+        self.assertIn("last=2", text)
+        self.join_maya(pid=5)
+        failed, text = call("maya_log")
+        self.assertTrue(failed)
+        self.assertIn("Several Mayas", text)
+        self.assertEqual(call("maya_log", pid=99)[0], True)
 
     def test_nobody_listens(self):
         self.server.close()

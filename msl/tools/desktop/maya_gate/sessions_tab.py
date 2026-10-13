@@ -14,6 +14,8 @@ from msl_tools.msl.tools.desktop.maya_gate.session_history import (LOG_FOLDER_NA
 from msl_tools.msl.ui.maya_link.server import MayaLinkServer
 from msl_tools.msl.core.theme import ThemeRegistry
 from msl_tools.msl.ui.theme.qss import color_property, repolish
+from msl_tools.msl.ui.ui_resources import UiResources
+from msl_tools.msl.ui.widgets.atoms.buttons.icon_push_button import IconPushButton
 from msl_tools.msl.ui.widgets.atoms.editors import LogView
 from msl_tools.msl.ui.widgets.atoms.layouts import FlowLayout
 from msl_tools.msl.ui.widgets.atoms.segmented.segmented_control import SegmentedControl
@@ -130,8 +132,9 @@ class SessionsTab(_ConsoleMixin, _ControlMixin, qt.QtWidgets.QWidget):
     HISTORY_CAPTION_HEIGHT = 24
 
     def __init__(self, server: MayaLinkServer, history: SessionHistory | None = None, launch=None,
-                 settings=None, snippets: SnippetStore | None = None, parent=None):
+                 settings=None, snippets: SnippetStore | None = None, assistant=None, parent=None):
         super().__init__(parent)
+        self._assistant = assistant               # the hub's AssistantServer; None: no switch for it
         fallback = ThemeRegistry.fallback()  # until QSS applies
         self._menu_icon_color = qt.QtGui.QColor(fallback.text_secondary)
         self._menu_danger_color = qt.QtGui.QColor(fallback.error)
@@ -173,6 +176,20 @@ class SessionsTab(_ConsoleMixin, _ControlMixin, qt.QtWidgets.QWidget):
         self._summary_label.setObjectName("sessionsSummary")
         self._status_label = qt.QtWidgets.QLabel()
         self._status_label.setObjectName("sessionsStatus")
+        # Lets a coding assistant ask the hub about these Mayas (ui/maya_link/assistant_server.py).
+        self._assistant_toggle = IconPushButton(UiResources().iconManager.get_icon("code", sub_folder="actions"),
+                                                fallback_text="AI")
+        self._assistant_toggle.setText("Assistant")
+        self._assistant_toggle.setObjectName("sessionsAssistant")
+        self._assistant_toggle.setCheckable(True)
+        self._assistant_toggle.setCursor(qt.QtCore.Qt.CursorShape.PointingHandCursor)
+        self._assistant_toggle.setFocusPolicy(qt.QtCore.Qt.FocusPolicy.NoFocus)
+        self._assistant_toggle.clicked.connect(self._on_assistant_clicked)
+        if self._assistant is None:
+            self._assistant_toggle.hide()
+        else:
+            self._assistant.listening_changed.connect(self._show_assistant)
+            self._assistant.clients_changed.connect(self._show_assistant)
 
         self._list = qt.QtWidgets.QWidget()
         self._list_layout = qt.QtWidgets.QVBoxLayout(self._list)
@@ -285,6 +302,7 @@ class SessionsTab(_ConsoleMixin, _ControlMixin, qt.QtWidgets.QWidget):
         header.setSpacing(6)
         header.addWidget(self._title_label)
         header.addWidget(self._summary_label, 1)
+        header.addWidget(self._assistant_toggle)
         header.addWidget(self._status_label)
 
         layout = qt.QtWidgets.QVBoxLayout(self)
@@ -335,7 +353,32 @@ class SessionsTab(_ConsoleMixin, _ControlMixin, qt.QtWidgets.QWidget):
         self._timer.timeout.connect(self.refresh)
         self._server.sessions_changed.connect(self.refresh)
         self._server.listening_changed.connect(self.refresh)
+        self._show_assistant()
         self.refresh()
+
+    def _on_assistant_clicked(self, checked: bool) -> None:
+        self._assistant.set_enabled(checked)
+        self._show_assistant()
+
+    def _show_assistant(self) -> None:
+        """The switch as the assistant's channel stands: lit while it listens."""
+        if self._assistant is None:
+            return
+        listening = self._assistant.is_listening()
+        self._assistant_toggle.setChecked(listening)
+        self._assistant_toggle.setProperty("on", listening)
+        repolish(self._assistant_toggle)
+        if listening:
+            connected = self._assistant.clients()
+            state = "ON · port %d · %s" % (
+                self._assistant.port(), "%d connected" % connected if connected else "nobody connected")
+        elif self._assistant.is_enabled():
+            state = "Switched on, but no port could be taken"
+        else:
+            state = "off"
+        self._assistant_toggle.setToolTip(
+            state + "\nLets a coding assistant on this computer (the msl-maya MCP server) see which Mayas "
+                    "are connected and read their logs.\nThis computer only, with a key of its own.")
 
     def _place_split(self) -> None:
         """The console at its remembered height (the first time: just its few lines)."""

@@ -27,7 +27,7 @@ from msl_tools.msl.tools.desktop.maya_gate.boost_tab import BoostTab
 from msl_tools.msl.tools.desktop.maya_gate.session_history import SessionHistory
 from msl_tools.msl.tools.desktop.maya_gate.snippets import SnippetStore
 from msl_tools.msl.tools.desktop.maya_gate.sessions_tab import SessionsTab
-from msl_tools.msl.ui.maya_link import MayaLinkServer
+from msl_tools.msl.ui.maya_link import AssistantServer, MayaLinkServer
 from msl_tools.msl.tools.desktop.maya_gate.maya_variables import VariableKind, launch_values, spec_of
 from msl_tools.msl.ui.widgets.compositions import BrowseMode, ValueSpec
 
@@ -196,7 +196,8 @@ class MayaGatePage(qt.QtWidgets.QWidget):
         self._link = MayaLinkServer.instance()  # the hub's one server; run_hub starts it listening
         self._sessions_tab = SessionsTab(self._link, self._session_history,
                                          launch=self._launch_scene, settings=self._ui,
-                                         snippets=self._snippet_store)
+                                         snippets=self._snippet_store,
+                                         assistant=AssistantServer.instance())
         self._tabs.addTab(self._indented(self._sessions_tab), self.SESSIONS_TAB_TITLE)
         self._link.sessions_changed.connect(self._update_sessions_tab_title)
         self._link.attention_changed.connect(self._update_sessions_tab_title)

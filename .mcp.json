@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "msl-maya": {
+      "command": "${LOCALAPPDATA}/MSL/runtime/.venv/Scripts/python.exe",
+      "args": ["msl/run_maya_mcp.py"]
+    }
+  }
+}

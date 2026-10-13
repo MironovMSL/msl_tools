@@ -908,8 +908,24 @@ What changed vs. the original (all deliberate, not oversights):
   (per PID, the last 2000 entries of the last 8 Mayas, a `seq` per entry so a second read gives
   only what came since - kept from the hub's start, listening or not), `read_address(file)` and
   the blocking `AssistantClient` (reconnects after the hub was away). Tests:
-  `tests/ui/test_assistant_link.py` (private ports). NOT built: the MCP server itself + `.mcp.json`,
-  the switch on the Sessions tab, `run_python` for the assistant.
+  `tests/ui/test_assistant_link.py` (private ports).
+  Step 2, the same day: THE MCP SERVER is `msl/run_maya_mcp.py`, run BY PATH by the assistant
+  (`.mcp.json` at the root: server "msl-maya", the hub's runtime Python
+  `${LOCALAPPDATA}/MSL/runtime/.venv/Scripts/python.exe`); it aliases the package like
+  run_installer, imports no Qt, reads the channel's address from the config FILE (never through
+  Resources: the hub owns that config) again whenever it has no connection. MCP itself is
+  `core/link/mcp_stdio.py` - stdlib only, NO `mcp` package (decided against installing one into
+  the runtime): JSON-RPC, one message per line on stdin / stdout as UTF-8 bytes; initialize, ping,
+  tools/list, tools/call; a tool is a function returning text, its exception = the tool's error
+  text (isError). Tools: `maya_sessions`, `maya_log` {pid - optional while one Maya is connected -,
+  after, limit, problems_only}. THE SWITCH: "Assistant" in the Sessions tab's header
+  (`IconPushButton#sessionsAssistant`, `on` -> maya_gate.qss; `SessionsTab(assistant=)`, handed
+  `AssistantServer.instance()` by the page) = `set_enabled`; lit while it listens, the tooltip says
+  the port and how many assistants are connected. Tests: `tests/core/test_mcp_stdio.py`, the tools
+  end to end in test_assistant_link. Checked: the server answered initialize / tools/list / a call
+  when run with the runtime Python; the switch rendered and clicked offscreen on a private config.
+  NOT yet seen working from a real assistant session, nor with a real Maya. NOT built: `run_python`
+  for the assistant (step 3), launch report / reload code / a viewport picture (step 4).
 - Before a launch (2026-10-04): `launch_check.py` (Qt-free)
   `check(variables, script, boost_enabled, boost_blocked)` -> one line
   per thing worth a look: a folder / file a variable names that isn't
