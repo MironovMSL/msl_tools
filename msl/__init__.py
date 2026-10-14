@@ -1,5 +1,5 @@
 # Package Variables
-__version_tuple__ = (0, 6, 0)
+__version_tuple__ = (0, 7, 0)
 __version_suffix__ = ""
 __version__ = ".".join(str(n) for n in __version_tuple__) + __version_suffix__
 __authors__ = ["Mironov Sergey Leonidovich"]
