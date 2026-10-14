@@ -1,12 +1,13 @@
 # tools/desktop/scene_paths/page.py
 import os
+import time
 from pathlib import Path
 
 import msl_tools.msl.ui.qt_bindings as qt
 from msl_tools.msl.core.batch import environments
 from msl_tools.msl.core.resources import Resources
 from msl_tools.msl.core.fs.maya_paths import MayaPaths
-from msl_tools.msl.core.scene_paths import coverage, finder, ma_paths, mb_paths
+from msl_tools.msl.core.scene_paths import coverage, finder, ma_paths, mb_paths, undo
 from msl_tools.msl.core.scene_paths.roots import roots_from, why_not
 from msl_tools.msl.core.theme import ThemeRegistry
 from msl_tools.msl.tools.desktop.maya_gate.maya_variables import KNOWN_VARIABLES
@@ -100,6 +101,7 @@ class ScenePathsPage(qt.QtWidgets.QWidget):
         self._found: dict[str, list] = {}      # a missing path (finder.key_of) -> files of its name, best first
         self._picked: dict[str, str] = {}      # the user's pick for one ("" = don't relink it)
         self._searching = False
+        self._find_after: set[str] = set()   # scenes whose missing files are looked for once they are read
         self._coverage: dict = {}            # variable -> coverage.Coverage (where it is set)
         self._coverage_names: list = []
         self._workers: list = []
@@ -167,10 +169,13 @@ class ScenePathsPage(qt.QtWidgets.QWidget):
         self._add_files = self._link("+ Scenes")
         self._add_folder = self._link("+ Folder")
         self._clear = self._link("Clear")
+        self._undo = self._link("Undo last replace")
+        self._undo.setToolTip("Puts the scenes of the last replace back from their .bak copies —\n"
+                              "a scene saved again since is left as it is")
         self._find = self._link("Find missing ▾")
         self._find.setToolTip("Missing files looked for by their name — in the ticked variables’ folders\n"
                               "and in folders you add; a found file is written through the variable")
-        for widget in (self._show_all, self._find, self._add_files, self._add_folder, self._clear):
+        for widget in (self._show_all, self._undo, self._find, self._add_files, self._add_folder, self._clear):
             scenes_heading.addWidget(widget)
         self._tree = qt.QtWidgets.QTreeWidget()
         self._tree.setObjectName("pathsTree")
@@ -249,6 +254,7 @@ class ScenePathsPage(qt.QtWidgets.QWidget):
         self._drop_folder.clicked.connect(self._on_choose_folder)
         self._clear.clicked.connect(self._on_clear)
         self._find.clicked.connect(self._on_find_menu)
+        self._undo.clicked.connect(self._on_undo)
         self._coverage_details.clicked.connect(self._on_coverage_details)
         self._show_all.toggled.connect(self._on_show_all)
         self._backup.toggled.connect(lambda checked: self._settings.__setitem__("backup", bool(checked)))
@@ -323,11 +329,17 @@ class ScenePathsPage(qt.QtWidgets.QWidget):
 
     # --- scenes -------------------------------------------------------------------------------------
 
-    def add(self, paths) -> None:
-        """Scenes and folders to look at (a folder: every scene under it). Repeats are dropped."""
+    def add(self, paths, find: bool = False) -> None:
+        """Scenes and folders to look at (a folder: every scene under it). Repeats are dropped.
+        `find`: their missing files are looked for as soon as they are read (a render job's link)."""
         scenes, cut = ma_paths.collect_scenes(paths)
         known = {os.path.normcase(str(scene)) for scene in self._scenes}
         fresh = [scene for scene in scenes if os.path.normcase(str(scene)) not in known]
+        if find:
+            self._find_after.update(str(scene) for scene in scenes)
+            if not fresh:   # listed already: look now, if they are read
+                self._maybe_find()
+                return
         if not fresh:
             self._say("No new Maya scenes there (.ma / .mb; incrementalSave folders are left out).",
                       "error" if not scenes else "")
@@ -378,6 +390,21 @@ class ScenePathsPage(qt.QtWidgets.QWidget):
         self._set_busy(False)
         self._show()
         self._read_binary()
+        self._maybe_find()
+
+    def _maybe_find(self) -> None:
+        """Looks for the missing files of the scenes handed over with find=True, once all of them are
+        read (a binary one waits for its Maya)."""
+        if not self._find_after or self._busy or self._searching:
+            return
+        if any(path not in self._scans or path in self._mb_reading for path in self._find_after):
+            return
+        wanted, self._find_after = self._find_after, set()
+        missing = sum(len(self._scans[path].missing) for path in wanted if not self._scans[path].error)
+        if missing:
+            self._find_missing()
+        else:
+            self._say("No missing files in " + ", ".join(Path(path).name for path in sorted(wanted)) + ".")
 
     def _read_binary(self) -> None:
         """Binary scenes nobody has read yet go to a mayapy (one per Maya version, ~15 s and more each)."""
@@ -407,6 +434,7 @@ class ScenePathsPage(qt.QtWidgets.QWidget):
             if path in wanted:   # (a scene left out meanwhile stays out)
                 self._scans[path] = mb_paths.scan_from_raw(path, found, roots, environment, cache)
         self._show()
+        self._maybe_find()
 
     def _on_failed(self, token: int, error) -> None:
         if token == self._reading:
@@ -435,6 +463,10 @@ class ScenePathsPage(qt.QtWidgets.QWidget):
         self._clear.setVisible(not empty)
         self._show_all.setVisible(not empty)
         self._find.setVisible(not empty)
+        last = self._last_run()
+        self._undo.setVisible(bool(last))
+        self._undo.setText(f"Undo last replace ({len(last)})" if last else "Undo last replace")
+        self._undo.setEnabled(not self._busy)
         opened = {self._tree.topLevelItem(index).data(0, PATH_ROLE)
                   for index in range(self._tree.topLevelItemCount()) if self._tree.topLevelItem(index).isExpanded()}
         self._tree.clear()
@@ -789,6 +821,51 @@ class ScenePathsPage(qt.QtWidgets.QWidget):
         self._picked[key] = file
         self._show()
 
+
+    # --- undoing the last replace -----------------------------------------------------------------------
+
+    def _last_run(self) -> list:
+        """The scenes of the last replace that can be put back (entries of undo.entry_for)."""
+        last = self._settings.get("last_run") or {}
+        return [dict(entry) for entry in (last.get("entries") or []) if isinstance(entry, dict) or hasattr(entry, "get")]
+
+    def _on_undo(self) -> None:
+        entries = self._last_run()
+        if not entries:
+            return
+        when = (self._settings.get("last_run") or {}).get("time") or 0
+        stamp = time.strftime("%H:%M", time.localtime(when)) if when else "the last replace"
+        details = "\n".join(str(entry.get("scene")) for entry in entries[:12])
+        if len(entries) > 12:
+            details += f"\n… and {len(entries) - 12} more"
+        choice = ConfirmDialog.ask(self, "Undo last replace",
+                                   f"Put {len(entries)} scene{'s' if len(entries) != 1 else ''} of the replace at "
+                                   f"{stamp} back as they were, from their .bak copies? A scene saved again since "
+                                   f"is left as it is.", details, (("undo", "Put back"), ("cancel", "Cancel")),
+                                   kind="warning")
+        if choice != "undo":
+            return
+        self._set_busy(True)
+        self._summary.setText(f"Putting {len(entries)} scene{'s' if len(entries) != 1 else ''} back…")
+
+        def put_back() -> list:
+            return [(entry, undo.restore(entry)) for entry in entries]
+
+        run_in_background(put_back, self._on_undone, self._on_write_failed, keep=self._workers, parent=self)
+
+    def _on_undone(self, outcome: list) -> None:
+        self._set_busy(False)
+        back = [entry for entry, error in outcome if not error]
+        failed = [error for _entry, error in outcome if error]
+        self._settings["last_run"] = {}   # done (what couldn't be put back was said, its copy stays)
+        text = f"Put back: {len(back)} scene{'s' if len(back) != 1 else ''}."
+        if failed:
+            text += "  " + "; ".join(failed[:4]) + ("…" if len(failed) > 4 else "")
+        self._say(text, "error" if failed else "done")
+        for entry in back:   # a binary scene is read again by Maya
+            self._mb_raw.pop(str(entry.get("scene")), None)
+        self._read()
+
     # --- writing --------------------------------------------------------------------------------------
 
     def _open_in_maya(self) -> dict:
@@ -864,13 +941,20 @@ class ScenePathsPage(qt.QtWidgets.QWidget):
             if binary_scans:   # each in the Maya it was saved with (mb_paths.maya_to_write)
                 outcome += mb_paths.apply_binary(binary_scans, roots_now, MayaPaths.get_available_installs(),
                                                  environment, backup=backup)
-            return outcome
+            # each written scene as the write left it, with its copy: what "Undo last replace" needs
+            entries = [undo.entry_for(path, done.backup) for path, done, _error in outcome
+                       if done is not None and done.changed and done.backup]
+            return outcome, [entry for entry in entries if entry]
 
-        run_in_background(write, lambda outcome: self._on_written(outcome, held), self._on_write_failed,
+        run_in_background(write, lambda answer: self._on_written(*answer, held), self._on_write_failed,
                           keep=self._workers, parent=self)
 
-    def _on_written(self, outcome: list, held: list) -> None:
+    def _on_written(self, outcome: list, entries: list, held: list) -> None:
         self._set_busy(False)
+        if entries:   # this replace becomes the one to undo (kept across restarts of the hub)
+            self._settings["last_run"] = {"time": time.time(), "entries": entries}
+        elif any(done is not None and done.changed for _path, done, _error in outcome):
+            self._settings["last_run"] = {}   # written without copies: nothing to undo any more
         written = [done for _path, done, error in outcome if done is not None and done.changed]
         failed = [error for _path, _done, error in outcome if error]
         paths = sum(done.changed for done in written)

@@ -84,6 +84,7 @@ class BatchPage(qt.QtWidgets.QWidget):
     # Signals for the Scenes tool around it (tools/desktop/scenes): this scene's paths wanted in
     # the Paths tab; the page wants to be the tab on screen (a click on the "queue done" notice).
     paths_requested = qt.QtCore.Signal(list)
+    missing_requested = qt.QtCore.Signal(list)   # the same, and look for their missing files at once
     focus_requested = qt.QtCore.Signal()
 
     def __init__(self, parent=None, embedded: bool = False):
@@ -227,6 +228,7 @@ class BatchPage(qt.QtWidgets.QWidget):
         strip_holder.addWidget(self._drop_strip)
         jobs_layout.addWidget(self._scroll, 1)
         jobs_layout.addLayout(drop_holder, 1)
+        self._drop_holder = drop_holder   # _show_empty gives the card's height to the one on screen
         jobs_layout.addLayout(strip_holder)
 
         # the message line and the shutdown notice
@@ -337,6 +339,14 @@ class BatchPage(qt.QtWidgets.QWidget):
         empty = not self.jobs
         self._scroll.setVisible(not empty)
         self._drop.setVisible(empty)
+        # A layout holding only a hidden widget still took its stretch: the queue got half the card.
+        card_layout = self._jobs_card.layout()
+        for index in range(card_layout.count()):
+            item = card_layout.itemAt(index)
+            if item.widget() is self._scroll:
+                card_layout.setStretch(index, 0 if empty else 1)
+            elif item.layout() is self._drop_holder:
+                card_layout.setStretch(index, 1 if empty else 0)
         self._drop_strip.setVisible(not empty)
         self._jobs_title.setText(f"QUEUE  ·  {len(self.jobs)}" if self.jobs else "QUEUE")
 
@@ -363,11 +373,13 @@ class BatchPage(qt.QtWidgets.QWidget):
 
     def _add_job(self, job: BatchJob, save: bool = True) -> None:
         self.jobs.append(job)
-        row = JobRow(job, self.runner.installed(), environments.names(self.runner.gate_config))
+        row = JobRow(job, self.runner.installed(), environments.names(self.runner.gate_config),
+                     paths_link=self._embedded)
         row.picked.connect(self._pick)
         row.split.connect(self._split)
         row.changed.connect(self._on_row_changed)
         row.reread.connect(self._on_reread)
+        row.missing_wanted.connect(self._on_missing_wanted)
         row.menu_requested.connect(self._on_row_menu)
         self._rows[job.id] = row
         self._list.insertWidget(self._list.count() - 1, row)
@@ -529,7 +541,7 @@ class BatchPage(qt.QtWidgets.QWidget):
                 qt.QtCore.QUrl.fromLocalFile(job.video)))
             menu.addAction("Open the video in Media").triggered.connect(lambda: self._to_media(job.video))
         menu.addAction("Show the scene").triggered.connect(lambda: ProcessLauncher.open_file_explorer(Path(job.scene)))
-        if self._embedded and job.scene.lower().endswith(".ma"):
+        if self._embedded:
             menu.addAction("Check its paths (Paths tab)").triggered.connect(lambda: self.paths_requested.emit([job.scene]))
         menu.addSeparator()
         menu.addAction("Sooner").triggered.connect(lambda: self._move(job_id, -1))
@@ -634,6 +646,11 @@ class BatchPage(qt.QtWidgets.QWidget):
             self._move(copy.id, index + offset - self.jobs.index(copy))
         self._save()
         self._say(f"{job.name}: a job for each of its {len(values)} {kind}s.")
+
+    def _on_missing_wanted(self, job_id: str) -> None:
+        job = self.runner.find(job_id)
+        if job is not None:
+            self.missing_requested.emit([job.scene])
 
     def _reset(self, job_id: str) -> None:
         job = self.runner.find(job_id)

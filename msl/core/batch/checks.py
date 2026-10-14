@@ -20,6 +20,14 @@ SLOW_AA = 7          # Arnold camera samples above this: every frame takes long
 LISTED = 4           # missing files named in a line; the rest are in its detail
 
 
+def missing_files(probe: dict) -> list:
+    """Every file the probe found missing: animation caches, references, textures."""
+    probe = probe or {}
+    gone = [path for path, there in probe.get("caches") or [] if not there]
+    lost = [path for path, there in probe.get("references") or [] if not there]
+    return gone + lost + list(probe.get("missing_textures") or [])
+
+
 @dataclass(frozen=True)
 class Issue:
     level: str

@@ -3754,6 +3754,25 @@ mayapy (step 2, the same day — see the last bullet).
   ticked roots and turns into a "warning". Re-checked on show and when the variables in play change.
   Checked: tests; offscreen from an isolated copy against the user's real registry and Maya.env files
   (read only): Dev only -> three gaps, the broken Maya.env line named with both reasons.
+- UNDO LAST REPLACE (2026-10-14): `core/scene_paths/undo.py` — `entry_for(scene, backup)` = the scene as
+  the write left it (size + mtime_ns, stat'ed in the write's worker right after it, Maya's save included)
+  with its .bak; `restore(entry)` puts it back byte for byte (write_bytes_atomic) ONLY while it is still
+  as the write left it (saved again since = left alone, the copy kept) and then removes the .bak. The page
+  keeps the last write's entries in `settings.last_run` {time, entries} (survives a restart; a write
+  without copies clears it), "Undo last replace (N)" in the FILES heading asks first (warning), then
+  restores on a worker and reads again (a .mb's raw answer dropped).
+- RENDER -> PATHS (same day): `checks.missing_files(probe)` (caches + references + textures the probe
+  found missing); an unfolded render job shows "Find the N missing files in Paths →" (`JobRow(paths_link=)`,
+  only inside Scenes; `missing_wanted` -> `BatchPage.missing_requested` -> `ScenesPage._to_paths_finding`
+  -> `ScenePathsPage.add(scenes, find=True)`): the Paths tab opens with the scene and `_maybe_find` runs
+  Find missing once every handed-over scene is read (a .mb waits for its Maya). The job menu's "Check its
+  paths" works for .mb too now.
+  Found on the way, an old Batch bug: the queue got HALF the card — the drop area's layout, holding only a
+  hidden widget, kept its stretch 1 (an unfolded job was cut off). `_show_empty` now gives the stretch to
+  whichever is on screen. Perforce check-out was offered and dropped: the branch is SVN (.svn, TortoiseSVN
+  without the command-line svn, no read-only scenes) — not needed (the user, 2026-10-14).
+  Checked: tests; offscreen from an isolated copy on a scene copy: the job's link -> Paths, the search ran
+  by itself (4 found again), Replace wrote 5 paths, Undo put the scene back byte for byte, the .bak gone.
 
 ## Maya module
 

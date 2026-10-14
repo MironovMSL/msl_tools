@@ -67,6 +67,7 @@ class ScenesPage(qt.QtWidgets.QWidget):
 
         self._tabs.currentChanged.connect(self._on_tab)
         self.render.paths_requested.connect(self._to_paths)
+        self.render.missing_requested.connect(self._to_paths_finding)
         self.render.focus_requested.connect(lambda: self.show_tab(self.RENDER))
         self.paths.render_requested.connect(self._to_render)
 
@@ -88,6 +89,11 @@ class ScenesPage(qt.QtWidgets.QWidget):
     def _to_paths(self, scenes: list) -> None:
         self.show_tab(self.PATHS)
         self.paths.add(scenes)
+
+    def _to_paths_finding(self, scenes: list) -> None:
+        """A render job's missing files: the scene into Paths, and the search right after it is read."""
+        self.show_tab(self.PATHS)
+        self.paths.add(scenes, find=True)
 
     def _to_render(self, scenes: list) -> None:
         self.show_tab(self.RENDER)

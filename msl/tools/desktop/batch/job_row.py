@@ -3,7 +3,7 @@
 from pathlib import Path
 
 import msl_tools.msl.ui.qt_bindings as qt
-from msl_tools.msl.core.batch.checks import ERROR, OK, WARNING, check, choose_renderer, worst
+from msl_tools.msl.core.batch.checks import missing_files, ERROR, OK, WARNING, check, choose_renderer, worst
 from msl_tools.msl.core.batch.frames import FramesError, format_frames, parse_frames
 from msl_tools.msl.core.batch.job import (ARNOLD, AUTO, CANCELLED, CHECKING, DONE, FAILED, HW2,
                                           MODE_HEADLESS, MODE_WINDOW, REDSHIFT, RENDERER_TITLES, RUNNING, SIZES,
@@ -75,9 +75,11 @@ class JobRow(qt.QtWidgets.QFrame):
     reread = qt.QtCore.Signal(str)
     menu_requested = qt.QtCore.Signal(str, object)
     split = qt.QtCore.Signal(str, str)
+    missing_wanted = qt.QtCore.Signal(str)   # job id: find its missing files in the Paths tab (Scenes)
 
-    def __init__(self, job: BatchJob, installed=(), environments=(), parent=None):
+    def __init__(self, job: BatchJob, installed=(), environments=(), parent=None, paths_link: bool = False):
         super().__init__(parent)
+        self.paths_link = paths_link   # inside Scenes: offer "Find the missing files in Paths"
         self._environments = list(environments)
         self._testing = False
         self._press = None
@@ -206,6 +208,17 @@ class JobRow(qt.QtWidgets.QFrame):
         search_line.addWidget(self._search_button)
         details.addLayout(search_line)
         details.addWidget(self._video)
+        # Scenes' Paths tab finds missing files by name and writes the paths into the SCENE — the
+        # "Missing files" folder above only points this render at them.
+        self._find_in_paths = qt.QtWidgets.QPushButton()
+        self._find_in_paths.setObjectName("batchLink")
+        self._find_in_paths.setFlat(True)
+        self._find_in_paths.setCursor(qt.QtCore.Qt.CursorShape.PointingHandCursor)
+        self._find_in_paths.setToolTip("Opens the scene in the Paths tab and looks for the missing files there\n"
+                                       "by name — the paths found are written into the scene itself")
+        self._find_in_paths.clicked.connect(lambda: self.missing_wanted.emit(self._job.id))
+        self._find_in_paths.hide()
+        details.addWidget(self._find_in_paths, 0, qt.QtCore.Qt.AlignmentFlag.AlignLeft)
         self._details.hide()
         self.set_open(False)
 
@@ -359,6 +372,9 @@ class JobRow(qt.QtWidgets.QFrame):
         self._search.setToolTip(job.search_folder or "Missing textures and Alembic caches are looked for BY FILE "
                                                      "NAME in this folder (3 levels down) — for the render only")
         self._search_clear.setVisible(bool(job.search_folder))
+        lost = len(missing_files(job.probe)) if self.paths_link else 0
+        self._find_in_paths.setText(f"Find the {lost} missing file{'s' if lost != 1 else ''} in Paths  →")
+        self._find_in_paths.setVisible(bool(lost))
         self._video.blockSignals(True)
         self._video.set_checked_immediate(job.make_video)
         self._video.blockSignals(False)

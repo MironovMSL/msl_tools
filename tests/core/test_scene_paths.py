@@ -7,7 +7,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from msl_tools.msl.core.scene_paths import coverage, finder, ma_paths, mb_paths
+from msl_tools.msl.core.batch import checks
+from msl_tools.msl.core.scene_paths import coverage, finder, ma_paths, mb_paths, undo
 from msl_tools.msl.core.scene_paths.roots import Root, normalized, roots_from, why_not
 
 SCENE = (
@@ -319,6 +320,45 @@ class WhereAVariableIsSet(unittest.TestCase):
         found = coverage.coverage(["WG_ANIM"], self.gate, ["2024"], self.documents,
                                   windows={"user": {"WG_ANIM": "E:/branches/Animation"}})["WG_ANIM"]
         self.assertEqual((found.in_windows, found.gaps()), ("E:/branches/Animation", []))
+
+
+class UndoingAReplace(unittest.TestCase):
+    """undo.py: a written scene put back from its .bak — only while nobody saved it since."""
+
+    def setUp(self):
+        self.folder = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.folder, True)
+        self.scene = self.folder / "shot.ma"
+        self.scene.write_bytes(SCENE.encode("cp1252"))
+        self.original = self.scene.read_bytes()
+
+    def replace(self):
+        done = ma_paths.apply(ma_paths.scan(self.scene, ROOTS, environment={}, check_files=False))
+        return undo.entry_for(self.scene, done.backup), done.backup
+
+    def test_put_back_byte_for_byte_and_the_copy_goes(self):
+        entry, backup = self.replace()
+        self.assertNotEqual(self.scene.read_bytes(), self.original)
+        self.assertEqual(undo.restore(entry), "")
+        self.assertEqual(self.scene.read_bytes(), self.original)
+        self.assertFalse(backup.exists())
+
+    def test_a_scene_saved_again_since_is_left_alone(self):
+        entry, backup = self.replace()
+        self.scene.write_bytes(self.scene.read_bytes() + b"// more work\n")
+        self.assertIn("saved again", undo.restore(entry))
+        self.assertTrue(backup.exists())
+        self.assertIsNone(undo.entry_for(self.scene, None))          # written without a copy: nothing to undo
+        backup.unlink()
+        self.scene.write_bytes(self.original)
+        entry = undo.entry_for(self.scene, backup)
+        self.assertIn("gone", undo.restore(entry))
+
+    def test_the_missing_files_a_render_check_found(self):
+        probe = {"caches": [["E:/c.abc", False], ["E:/d.abc", True]], "references": [["E:/rig.ma", False]],
+                 "missing_textures": ["E:/t.png"]}
+        self.assertEqual(checks.missing_files(probe), ["E:/c.abc", "E:/rig.ma", "E:/t.png"])
+        self.assertEqual(checks.missing_files({}), [])
 
 
 if __name__ == "__main__":
