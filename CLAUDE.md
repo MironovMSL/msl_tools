@@ -1097,6 +1097,17 @@ What changed vs. the original (all deliberate, not oversights):
   the question, the user answered Allow after 31 s, the file was gone; the journal held all three
   entries. NOT seen live: a Refuse, the two-minute timeout, the environment and per-Maya switches
   (they need the user's clicks).
+  CONNECTING AN ASSISTANT TO AN INSTALLED COPY (2026-10-14, before releasing 0.6.0 - the user's
+  call): an install copies `msl/` only, so it has no `.mcp.json`. The robot's menu has "Connect a
+  coding assistant…" -> `tools/desktop/assistant/connect_dialog.py` `ConnectAssistantDialog` (not
+  a hub tool): the ONE line for Claude Code (`claude mcp add --scope user msl-maya -- "<python>"
+  "<script>"`: every project on the computer) with Copy; "Write .mcp.json into a folder…" (one
+  project; merged - other servers in the file stay, a broken file is moved aside by safe_json);
+  the JSON block for other assistants with Copy. Texts from `core/link/assistant_setup.py`
+  (Qt-free): FULL paths of this install - `console_python()` = python.exe beside the hub's
+  pythonw.exe (an MCP server talks through stdin / stdout, which pythonw has not), `server_script()`
+  = this install's msl/run_maya_mcp.py. Tests: tests/core/test_assistant_setup.py. Rendered
+  offscreen, a write into a temp folder checked; the claude line itself was NOT run.
 - Before a launch (2026-10-04): `launch_check.py` (Qt-free)
   `check(variables, script, boost_enabled, boost_blocked)` -> one line
   per thing worth a look: a folder / file a variable names that isn't

@@ -28,6 +28,7 @@ from msl_tools.msl.ui.app.application_context import QtApplicationContext
 from msl_tools.msl.ui.app.instance_link import InstanceLink
 from msl_tools.msl.ui.theme import ThemeHotReloader
 from msl_tools.msl.ui.ui_resources import UiResources
+from msl_tools.msl.tools.desktop.assistant.connect_dialog import ConnectAssistantDialog
 from msl_tools.msl.tools.desktop.registry import TOOLS
 from msl_tools.msl.ui.process_launcher.process_launcher import ProcessLauncher
 from msl_tools.msl.ui.maya_link import AssistantServer, MayaLinkServer
@@ -159,6 +160,8 @@ def _assistant_menu(button: AssistantButton, assistant: AssistantServer, toggle)
     else:
         popup.add_option("Switch on", "Off — no assistant can connect",
                          face(True, code)).triggered.connect(toggle)
+    popup.addAction("Connect a coding assistant…").triggered.connect(
+        lambda: ConnectAssistantDialog.show_for(button))
     journal = assistant.journal_file()
     if journal is not None:
         popup.addAction("Show the journal of what it did").triggered.connect(

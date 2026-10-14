@@ -363,6 +363,28 @@ LogView {
 
 /* --- TextDialog: a report to read and copy ----------------------------------------- */
 
+/* --- ConnectAssistantDialog (tools/desktop/assistant): how to give an assistant our tools --- */
+ConnectAssistantDialog QLabel#connectCaption {
+    color: var(--text-primary);
+    font-weight: 600;
+}
+ConnectAssistantDialog QLabel#connectHint {
+    color: var(--text-secondary);
+}
+ConnectAssistantDialog QLabel#connectStatus[state="done"] {
+    color: var(--success);
+}
+ConnectAssistantDialog QLabel#connectStatus[state="error"] {
+    color: var(--error);
+}
+ConnectAssistantDialog QPlainTextEdit#connectJson {
+    background-color: var(--editor-background);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px;
+    selection-background-color: alpha(var(--accent), 35%);
+}
 TextDialog QPlainTextEdit#textDialogView {
     background-color: var(--editor-background);
     color: var(--text-primary);
