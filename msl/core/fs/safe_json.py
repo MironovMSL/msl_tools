@@ -108,12 +108,18 @@ def write_json_atomic(path: str | Path, data: Any, indent: int | None = 4) -> No
 def write_text_atomic(path: str | Path, text: str) -> None:
     """Writes ``text`` (UTF-8) into ``path`` all at once — the same way as
     write_json_atomic(), for the user's text files (scripts). Raises OSError."""
+    write_bytes_atomic(path, text.encode("utf-8"))
+
+
+def write_bytes_atomic(path: str | Path, data: bytes) -> None:
+    """Writes ``data`` into ``path`` all at once, byte for byte — the same way as
+    write_json_atomic(), for files whose encoding is the caller's (Maya scenes). Raises OSError."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     handle, temporary = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
     try:
-        with os.fdopen(handle, "w", encoding="utf-8", newline="") as stream:
-            stream.write(text)
+        with os.fdopen(handle, "wb") as stream:
+            stream.write(data)
             stream.flush()
             os.fsync(stream.fileno())
         _retrying(lambda: os.replace(temporary, path))

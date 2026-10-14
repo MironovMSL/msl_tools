@@ -30,6 +30,7 @@ from msl_tools.msl.ui.theme import ThemeHotReloader
 from msl_tools.msl.ui.ui_resources import UiResources
 from msl_tools.msl.tools.desktop.assistant.connect_dialog import ConnectAssistantDialog
 from msl_tools.msl.tools.desktop.registry import TOOLS
+from msl_tools.msl.tools.desktop.scenes import REPLACED_TOOL_IDS as SCENES_REPLACED
 from msl_tools.msl.ui.process_launcher.process_launcher import ProcessLauncher
 from msl_tools.msl.ui.maya_link import AssistantServer, MayaLinkServer
 from msl_tools.msl.ui.widgets.atoms.header.assistant_button import AssistantButton
@@ -269,7 +270,10 @@ def main() -> None:
         # The hub's own state (which tool is open) lives in configs/desktop/hub/.
         hub_config = Resources().configsDesktopHubMng.get_config("hub", defaults=HUB_CONFIG_DEFAULTS)
         icon = UiResources().iconManager.get_icon("hub", sub_folder="brand")
-        window = HubWindow(tools=TOOLS, current_tool_id=hub_config["current_tool"], icon=icon,
+        current_tool = str(hub_config["current_tool"] or "")
+        if current_tool in SCENES_REPLACED:   # Batch / Paths are tabs of Scenes now
+            current_tool = "scenes"
+        window = HubWindow(tools=TOOLS, current_tool_id=current_tool, icon=icon,
                            footer_text=f"v{__version__}", footer_tooltip="What\u2019s new")
 
         # One-click update (core/installer/hub_updater.py): "What's new" downloads + checks the

@@ -39,6 +39,7 @@ msl_tools/                 (repo root)
         core/                 Qt-FREE layer: config, fs, logger,
                               environment, theme, version, installer, network,
                               media (ffmpeg: find it, probe files, image sequences, recipes),
+                              scene_paths (absolute paths in .ma scenes -> $VARIABLE, see "Paths tool"),
                               resources.py (core.Resources singleton)
                               (no Qt at all since 2026-10-04: the unused IniConfig / QtPaths
                               went; core/ imports with PySide6 blocked — keep it that way;
@@ -56,7 +57,9 @@ msl_tools/                 (repo root)
             desktop/            NEW: tools that run as part of the desktop hub
                 maya_gate/        fully ported Maya Gate tool (see below)
                 media/            Media: video and image sequences through ffmpeg (see "Media tool")
-                batch/            Batch: Maya scenes rendered one after another, Maya closed (see "Batch tool")
+                scenes/           Scenes: ONE hub tool, tabs Render (batch/) and Paths (scene_paths/) (see "Scenes tool")
+                batch/            BatchPage = the Render tab: Maya scenes rendered one after another, Maya closed (see "Batch tool")
+                scene_paths/      ScenePathsPage = the Paths tab: absolute paths swapped for Maya Gate's variables (see "Paths tool")
                 installer/        InstallerView — the setup window (not a hub tool, not in the registry)
                 stub_a/, stub_b/  placeholder tools used to test hub navigation
             maya/               Maya-side tools (the MSL menu, hub_link, launch_report, batch_runner)
@@ -1108,6 +1111,50 @@ What changed vs. the original (all deliberate, not oversights):
   pythonw.exe (an MCP server talks through stdin / stdout, which pythonw has not), `server_script()`
   = this install's msl/run_maya_mcp.py. Tests: tests/core/test_assistant_setup.py. Rendered
   offscreen, a write into a temp folder checked; the claude line itself was NOT run.
+- SCENE tab (2026-10-14, the user's ask: Maya starts new scenes at 24 fps, their scenes are 30;
+  first part built: the rate and a check on opening): `scene_tab.py` `SceneTab` per environment,
+  config `"scene": {"<env>": {"fps": "" | "24".."60", "check": bool}}` (fps "" = "As is": Maya's own
+  preference left alone, nothing passed; check on by default). A launch with a rate carries
+  `MSL_GATE_SCENE_FPS` (+ `MSL_GATE_SCENE_CHECK=1`; core/link/variables). Inside Maya
+  `tools/maya/scene_defaults.py` (Python 3.9-valid, never raises), started by `hub_link.start()` -
+  i.e. in EVERY launch from Maya Gate, also when the hub is away -, writes the unit into Maya's
+  own preferences (optionVars workingUnitTime / workingUnitTimeDefault: they persist in that
+  environment's MAYA_APP_DIR), gives it to the untouched start scene (no file, no changes; the
+  modified mark kept) and to every new one (MSceneMessage kAfterNew), and with the check, after
+  kAfterOpen, compares the scene's rate and each .ma reference's (`core/link/scene_rate.py`
+  `file_unit`: the `currentUnit ... -t` line of the file's head; .mb can't be read and is skipped)
+  -> `cmds.warning` "MSL: Dev works at 30 fps, but the scene: 24 fps (nothing was changed)" (it
+  reaches the hub's log) + an inViewMessage. An existing scene is NEVER changed (its keys would
+  move). Callbacks are kept on maya.cmds and removed by the next start() ("Reload code").
+  The user's prefs here held workingUnitTime "film" (24) - read with the assistant, 2026-10-14.
+  Tests: tests/core/test_scene_rate.py. Checked in mayapy 2024 with a throwaway MAYA_APP_DIR (12 of
+  12: prefs, the start scene, File > New, a 24 fps scene opened keeps 24 and its key on frame 10 and
+  is named, a 30 fps scene's 24 fps .ma reference named alone, the check off, no doubled callbacks,
+  no rate = nothing); the tab rendered offscreen on a throwaway config. NOT seen in a windowed Maya
+  (the viewport message) nor in the real hub.
+  SECOND PART (2026-10-14, the user: "let's go on with this tab" — the rest of the mock-up): NEW SCENES
+  also Range ("1-120": playback + animation range), Units (mm / cm / m), Up axis (Y / Z); ANIMATION (set
+  once when Maya starts) Playback (every frame / real-time / × 0.5 / × 2), New keys (global tangents:
+  Auto, Spline, Clamped, Linear, Flat, Plateau, Stepped = auto in / step out), Auto key (on / off). Every
+  one starts "As is" = nothing passed. `core/link/scene_settings.py` (Qt-free, 3.9-valid): the choices,
+  `parse_range` ("1-120", "1 120", "1..120", "1–120"; start < end), `cleaned(stored)` (unknown values ->
+  ""), `to_environment` / `from_environment` (MSL_GATE_SCENE_RANGE / _UNITS / _UP / _SPEED / _TANGENTS /
+  _AUTO_KEY in core/link/variables), `describe`. Config: the same `scene.<env>` node gets the keys
+  range / units / up / speed / tangents / autokey. MEASURED with mayapy 2024 (throwaway MAYA_APP_DIR):
+  File > New takes the linear unit and the playback range from optionVars (workingUnitLinear(Default),
+  playbackMin / Max / MinRange / MaxRange + *Default) — scene_defaults writes them, and gives units /
+  range to the untouched start scene and every new one (kAfterNew); up axis, playback speed, key tangents
+  and auto key outlast File > New on their own and are set once (`_set_session`, each on its own, the
+  start scene's modified mark kept). Checked in mayapy 2024 with all six set: start scene and File > New
+  got them, an existing scene opened kept its own cm and 5-10 range. Layout: Playback and New keys are
+  BaseComboBoxes and Up axis its own row — a five-option SegmentedControl / Units + Up axis side by side
+  made the window 653 / 626 px at least; now the Scene tab is as wide as Boost start (468). Rendered
+  offscreen in both themes (isolated copy), the launch preview lists the variables. NOT seen in a windowed
+  Maya (playback speed and auto key are UI-session things).
+  TRAP, met the same day: the first cut named the tab's settings `scene` inside `_prepare_launch`,
+  whose PARAMETER `scene` is the scene's path - every launch then got `-file <a dict>` (QProcess
+  passed it as "") and Maya opened with "Unrecognized file type" (the user saw it). Now `rate`;
+  `tests/core/test_maya_gate_launch.py` fails if `scene` is ever assigned in `_prepare_launch`.
 - Before a launch (2026-10-04): `launch_check.py` (Qt-free)
   `check(variables, script, boost_enabled, boost_blocked)` -> one line
   per thing worth a look: a folder / file a variable names that isn't
@@ -1198,6 +1245,7 @@ maya_gate/
     user_setup_tab.py      UserSetupTab (CodeEditor for the script, debounced autosave)
     boost.py               BoostStore (Maya's auto-load list, the boosted launch + its loader, reports, backups, Qt-free)
     boost_tab.py           BoostTab (per-environment plug-in list: checked = loaded at startup)
+    scene_tab.py           SceneTab (per-environment frame rate of new scenes + the check on opening one)
     sessions_tab.py        SessionsTab (the Mayas connected to the hub right now; the finished ones while none is)
     session_rows.py        its rows: _SessionRow, _EndedRow, _HistoryRow, _SceneLabel (+ size / duration helpers)
     sessions_console.py    _ConsoleMixin: the console + snippets  (methods of SessionsTab, moved as they were)
@@ -3471,10 +3519,28 @@ axis (`flip`). ZERO THE SELECTED (`actions/zero_out`, in the Zero row): the mode
   can be tried by a click to see what it does, and given a key there (instead of a mere list in the
   settings menu).
 
+## Scenes tool
+
+`msl/tools/desktop/scenes/` (hub sidebar "Scenes", icon `tools/scenes`; 2026-10-14, the user's call:
+Batch and Paths both work on many scenes with Maya closed, so one tool) — `ScenesPage`: a heading and a
+BaseTabWidget with the two pages built `embedded=True` (no heading of their own, no outer margins):
+**Render** = BatchPage, **Paths** = ScenePathsPage. EACH TAB KEEPS ITS OWN LIST, deliberately: Render
+reads every scene added in Maya (~10 s each) — a shared list would turn a folder of 300 scenes dropped for
+their paths into 300 Mayas. They hand scenes over instead: a render job's menu "Check its paths (Paths
+tab)" (`BatchPage.paths_requested`, .ma only) and a Paths row's "Render it (Render tab)"
+(`ScenePathsPage.render_requested`). `BatchPage._load()` reads its kept queue before ANY add (the first
+`add_scenes` on a never-shown page used to save over queue.json). The open tab: configsDesktopHubMng
+"scenes" `settings.tab`; the pages keep their configs "batch" / "scene_paths" and Batch its queue
+folder. `open(paths)` goes to the tab on screen. The queue-done notice opens tool "scenes"
+(`BatchPage.HUB_TOOL_ID`) and `focus_requested` brings the Render tab up. Old hub ids "batch" /
+"scene_paths" (`scenes.REPLACED_TOOL_IDS`) remembered as the open tool are read as "scenes" by run_hub.
+Checked offscreen from an isolated copy (no Maya started — the runner's probe stubbed): both tabs, both
+hand-overs, the tab kept.
+
 ## Batch tool
 
-`msl/tools/desktop/batch/` (hub sidebar "Batch", icon `tools/batch`; built 2026-10-05 after a
-spike, see below) — Maya scenes rendered one after another without the user opening Maya. Laid
+`msl/tools/desktop/batch/` (now the Render tab of Scenes — see "Scenes tool"; was the hub tool "Batch",
+icon `tools/batch`; built 2026-10-05 after a spike, see below) — Maya scenes rendered one after another without the user opening Maya. Laid
 out after the user's reference (a Blender "Batch Render Creator"; second round the same day, the
 user's three asks: a drop target as clear as Media's, timers, the settings ON the queue):
 - RENDER PROGRESS card: two `RingGauge`s (frames x/y, scenes x/y), "time left" as a big clock
@@ -3585,6 +3651,109 @@ by the hub closing waits and goes on from its first missing frame.
   `runner.environment["MAYA_APP_DIR"]`): add -> probe (10 s) -> three jobs of the same scene
   (headless Arnold, with Maya, Viewport), 3 frames each, all done, a video each. NOT tried: a long
   real render, pause / the watchdog on a real hang, Redshift, a drop from the real Explorer.
+
+## Paths tool
+
+`msl/tools/desktop/scene_paths/` (the Paths tab of Scenes — see "Scenes tool"; its card of files is
+"FILES", since "SCENES" is the tool's name; icon `tools/paths` on its drop area; built 2026-10-14, the user's ask
+after fixing one scene by a script: textures and references pointing at E:/branches/Animation should read
+`$WG_ANIM/...`, for many scenes at once and without opening Maya). .ma as text (step 1); .mb through
+mayapy (step 2, the same day — see the last bullet).
+- `core/scene_paths/roots.py` (no Qt, no I/O): `Root(name, value)` = a variable that names ONE absolute
+  folder (`why_not()`: not a list, no %X% / $X inside, not a bare drive / share — "E:/" would take every
+  path); `roots_from(variables)` deepest folder first, so a path under two roots gets the more exact one.
+- `core/scene_paths/ma_paths.py`: `scan(path, roots, environment, exists_cache)` -> `SceneScan` of
+  `PathUse`s. A path = a string that starts right after a `"` with a drive, a share or `$NAME/` — so also
+  strings INSIDE strings (`\"W:/...\"`, reference edits). Kinds by the line: reference (`file -r/-rdi`,
+  node = its -rfn), texture (`.ftn`), reference history (`.fn[n]`), reference edit (`2 "file5" "attr"`),
+  attribute (any other setAttr; node from the last createNode / select -ne above), SCRIPT (a string inside
+  MEL code — the UI layout's script node: never changed, state LEFT: MEL wouldn't expand $NAME there; its
+  paths don't count as missing). States CHANGE / VARIABLE / OUTSIDE / LEFT. The file is BYTES throughout,
+  decoded only to show (its `//Codeset:` — 1252 -> cp1252); a root matches any case and any slash, escaped
+  or not, and must end at a separator or the string's end (AnimationOld isn't under Animation).
+  `rewrite()` swaps only the root's bytes for `$NAME` — CRLF, the rest of the path's own slashes, every
+  other byte stay. `apply(scan, backup)` refuses a scene changed since its scan (size + mtime_ns) and a
+  read-only one (Perforce), copies it to `<scene>.ma.<stamp>.bak` (Maya's dialogs don't list .bak), writes
+  through `safe_json.write_bytes_atomic` (new: the byte form of write_text_atomic). `collect_scenes()`:
+  folders all the way down, `incrementalSave` and dot folders left out, at most 5000.
+- `page.py` ScenePathsPage (+ scene_paths.qss): VARIABLES = a Maya Gate environment
+  (`core/batch/environments`) and its folder variables as toggle chips — Maya's catalog ones
+  (`maya_variables.KNOWN_VARIABLES`: MAYA_APP_DIR ...) off until ticked, the custom ones on; kept per
+  environment (`settings.off`). SCENES = a DropArea, then a QTreeWidget: a row per scene ("1 to change",
+  "12 paths · 3 through a variable · 7 files missing"), unfolded: changes + missing files ("Every path"
+  = all); rows colored from qproperty changeColor / missingColor / quietColor; middle elision keeps file
+  names readable. Reads and writes run on workers; a newer read wins. "Replace in N" asks first
+  (ConfirmDialog; "warning" without backups) and LEAVES OUT scenes open in a Maya connected to the hub
+  (`MayaLinkServer.sessions()`): that Maya would save its own paths over ours.
+  Config: configsDesktopHubMng "scene_paths" (`settings`: environment, off, backup, show_all, last_folder).
+- Tests: `tests/core/test_scene_paths.py`. Checked offscreen in the styled hub (both themes) from an
+  ISOLATED copy, on COPIES of the user's two Labrador scenes: found exactly what the scenes hold (Maya's
+  own `$WG_ANIM` references, the reference's `.fn[0]` history, a texture, W:/ and C:/Users/... reference
+  edits as missing), replaced, one line changed per scene, backups byte-equal to the originals.
+  NOT tried: a scene written this way opened in Maya (Maya itself writes `$WG_ANIM/...` into `.ftn` and
+  reference lines, so the form is its own), the native file dialogs, a real drop.
+- BINARY SCENES (.mb): `core/scene_paths/mb_paths.py` + `tools/maya/scene_paths_runner.py` (runs in
+  mayapy by path; self-contained, Python-2.7-valid, plain ASCII like batch_runner). One mayapy per Maya
+  version for all scenes of a run. `read_raw()` = mode "list" with NO roots: every absolute path the
+  scene holds — its own references' unresolved names, and every attribute of `filePathEditor
+  -listRegisteredTypes` + file / AlembicNode / gpuCache; on a referenced node only where THIS scene
+  holds a setAttr edit of it (`referenceQuery -editStrings`), else marked `inside` ("fix it in the
+  referenced file") — the same line the text road draws. The page KEEPS that raw answer
+  (`_mb_raw`): a change of roots / environment only re-sorts it (`scan_from_raw`), no Maya; Maya reads
+  a .mb again only when it is added, on "Read again" or after a write. `apply_binary()`: refuses a
+  file changed since the read, copies it aside (.bak) in the hub, then mode "apply" opens it
+  (executeScriptNodes off), reloads each reference under its new name (an unloaded one is unloaded
+  again), setAttr's the rest (locked plugs left), saves in place with its own type. Reading may use
+  the oldest NEWER Maya installed; WRITING only the version it was saved with (`maya_to_write`:
+  a newer Maya would make it unreadable in the old one). The mayapy gets `environment_for(Maya Gate
+  variables)`: the hub's environment cleaned, the environment's variables (so $VAR references resolve,
+  plug-ins are found), MAYA_SKIP_USERSETUP_PY=1.
+  Checked with real Maya 2024: a COPY of the user's Rig_Husky.mb (read 14 s, the texture swapped and
+  saved, read back as $WG_ANIM); a built test shot (scratch) with a loaded and an unloaded reference, a
+  reference edit on the rig's texture and a texture of its own — all four swapped, the loaded reference
+  still loaded and the unloaded one unloaded after the save, the edit's value $TESTROOT/...; the rig's
+  own texture not listed (it lives in rig.mb). And through the page offscreen (isolated copy): .ma shown
+  at once, the .mb row "reading it in Maya…" until mayapy answered (13 s), the environment switched to
+  Stable and back re-sorted with no Maya, Replace wrote both (.bak each) and read the .mb again.
+  NOT tried: a Maya 2020 (Python 2) scene, a scene whose plug-ins (Redshift…) aren't installed (Maya
+  keeps unknown nodes on save, but untested here), nested references' edits.
+- FIND MISSING (the FILES card's "Find missing ▾", 2026-10-14): `core/scene_paths/finder.py` —
+  `build_index(folders)` walks the ticked roots' folders + the user's own (`settings.search_in`, "Also
+  look in a folder…") ONCE per search (hidden / incrementalSave folders out, at most 400 000 files;
+  E:/branches/Animation = 26 492 files in 0.6 s), `candidates(missing, index)` = files of the same NAME
+  (any case), the most path parts in common counted from the file up first; `best()` takes the top one
+  only when it is AHEAD of the second — a tie is the user's (the real case: bake_normal.png had 7 files of
+  that name, some in other characters' folders). A found file is written through the deepest root
+  (`through_root`: $WG_ANIM/...). `PathUse.relink` = the WHOLE new path; `SceneScan.relinks` / `writes`
+  (= changes + relinks; `changes` no longer counts relinked ones); `rewrite()` replaces the path's whole
+  span for a relink; the binary road sends `{use.key: relink}` per scene and the runner sets them (not on
+  a path that lives in a referenced file). The page keeps `_found` (finder.key_of(path) -> candidates) and
+  `_picked` (the user's choice, "" = leave it missing) for the session and re-applies them on every
+  `_show` (`_relink`), so a re-read keeps them; a missing row with several candidates says so and its
+  right-click menu lists them ("USE THE FILE" + "Leave it missing"). Reference history entries (`.fn[n]`,
+  OLD file names) and script paths are not "missing" any more: nothing loads them.
+  Checked: tests (finder + a relink inside a string inside a string); offscreen from an isolated copy on a
+  COPY of Labrador_showoff_polish.ma: 4 of the W:/ textures found under $WG_ANIM, the tie picked through
+  the page, Replace wrote 7 paths, the scene read back with nothing missing but the history entry.
+- WHERE A VARIABLE IS SET (2026-10-14): `core/scene_paths/coverage.py` `coverage(names, gate_config,
+  years, documents_prefs)` -> {name: Coverage}: each Maya Gate environment's value, Windows' user /
+  system value (the REGISTRY, not this process's environment), and every Maya.env a Maya on this
+  machine reads: `<Documents/maya>/<year>/Maya.env` and `<an environment's MAYA_APP_DIR>/<year>/Maya.env`.
+  MEASURED with mayapy 2024 (a temp MAYA_APP_DIR): Maya reads ONLY the versioned file (`<prefs>/Maya.env`
+  is not read), trims values, and a variable already in the process (Maya Gate's, Windows') wins over
+  Maya.env. Names compare in any case (Windows). `gaps()` = the ways a Maya here would start WITHOUT it:
+  "a Maya not started from Maya Gate" (no Documents Maya.env sets it), "Maya Gate · <env>" (neither it
+  nor the Maya.env that environment reads) — none when Windows sets it. `problems` = Maya.env lines meant
+  for it that don't set it: "$NAME = …" (Maya then sets a variable called "$NAME") and a value ending in
+  ";" (a list: $NAME/x.png -> "E:\…;/x.png") — the user's own Documents/maya/2024/Maya.env held exactly
+  "$WG_anim = E:ranches\Animation;" (both). The page: a line under the VARIABLES chips for the
+  variables the listed scenes depend on (ticked roots + every $NAME a path already starts with) — ⚠
+  warning tone with the gaps, ✗ lines for the problems, else ✓ "set for every Maya on this machine…
+  another machine or a render farm needs it too" (that can't be checked from here); "Where it is set"
+  opens every place in a TextDialog with how to set one; the Replace question carries the gaps of the
+  ticked roots and turns into a "warning". Re-checked on show and when the variables in play change.
+  Checked: tests; offscreen from an isolated copy against the user's real registry and Maya.env files
+  (read only): Dev only -> three gaps, the broken Maya.env line named with both reasons.
 
 ## Maya module
 

@@ -1,0 +1,82 @@
+/*
+ * Paths tool styles (template) — registered with StylesheetBuilder.register_template() by
+ * page.py, appended after ui/theme/base.qss + widgets.qss. Same var()/alpha() syntax.
+ */
+
+/* The list's row colors (QTreeWidget items can't be styled one by one: the page paints them). */
+ScenePathsPage {
+    qproperty-changeColor:  var(--accent);
+    qproperty-missingColor: var(--warning);
+    qproperty-quietColor:   var(--text-secondary);
+}
+ScenePathsPage QFrame#pathsCard {
+    background-color: var(--surface-raised);
+    border: 1px solid var(--border);
+    border-radius: 9px;
+}
+ScenePathsPage QFrame#pathsCard[dragging="true"] {
+    border: 1px solid var(--accent);
+    background-color: alpha(var(--accent), 6%);
+}
+ScenePathsPage QLabel#pathsCardTitle {
+    color: var(--text-primary);
+    font-size: 11px;
+    font-weight: 700;
+}
+ScenePathsPage TintedIcon#pathsCardIcon {
+    qproperty-iconColor: var(--accent);
+}
+ScenePathsPage QLabel#pathsSubtitle,
+ScenePathsPage QLabel#pathsCaption,
+ScenePathsPage QLabel#pathsSummary {
+    color: var(--text-secondary);
+}
+ScenePathsPage QLabel#pathsHint {
+    color: var(--text-secondary);
+    font-size: 11px;
+}
+ScenePathsPage QPushButton#pathsLink {
+    color: var(--accent);
+    padding: 2px 6px;
+    font-size: 11px;
+}
+ScenePathsPage QPushButton#pathsLink:disabled {
+    color: var(--text-secondary);
+}
+ScenePathsPage QLabel#pathsMessage                { color: var(--text-secondary); }
+ScenePathsPage QLabel#pathsMessage[state="done"]  { color: var(--success); }
+ScenePathsPage QLabel#pathsMessage[state="error"] { color: var(--error); }
+
+ScenePathsPage QTreeWidget#pathsTree {
+    background-color: transparent;
+    border: none;
+    color: var(--text-primary);
+    outline: 0;
+}
+ScenePathsPage QTreeWidget#pathsTree::item {
+    padding: 2px 0;
+}
+ScenePathsPage QTreeWidget#pathsTree::item:hover {
+    background-color: alpha(var(--text-primary), 5%);
+}
+ScenePathsPage QTreeWidget#pathsTree::item:selected {
+    background-color: alpha(var(--accent), 14%);
+    color: var(--text-primary);
+}
+ScenePathsPage QTreeWidget#pathsTree QHeaderView {
+    background-color: transparent;
+    border: none;
+}
+ScenePathsPage QTreeWidget#pathsTree QHeaderView::section {
+    background-color: transparent;
+    color: var(--text-secondary);
+    border: none;
+    border-bottom: 1px solid alpha(var(--border), 70%);
+    padding: 3px 6px;
+    font-size: 11px;
+}
+
+/* Where the variables are set: a warning while a Maya on this machine would start without one. */
+ScenePathsPage QLabel#pathsCoverage                  { color: var(--text-secondary); font-size: 11px; }
+ScenePathsPage QLabel#pathsCoverage[state="warning"] { color: var(--warning); }
+ScenePathsPage QLabel#pathsCoverage[state="ok"]      { color: var(--success); }

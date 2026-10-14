@@ -74,14 +74,21 @@ class BatchPage(qt.QtWidgets.QWidget):
     closed) goes on from its first missing frame.
     """
 
-    TOOL_NAME = "batch"
+    TOOL_NAME = "batch"          # its config and queue folder (configs/desktop/batch) — kept from when it was a tool
+    HUB_TOOL_ID = "scenes"       # the hub tool it is a tab of now (tools/desktop/scenes)
     PICTURE = qt.QtCore.QSize(128, 72)
     MESSAGE_MS = 9000
     WHEN_DONE = {"": "Nothing", "sound": "Play a sound", "shutdown": "Shut the computer down"}
     CORES_FREE = (0, 1, 2, 4)   # Arnold leaves that many cores to the person at the computer
 
-    def __init__(self, parent=None):
+    # Signals for the Scenes tool around it (tools/desktop/scenes): this scene's paths wanted in
+    # the Paths tab; the page wants to be the tab on screen (a click on the "queue done" notice).
+    paths_requested = qt.QtCore.Signal(list)
+    focus_requested = qt.QtCore.Signal()
+
+    def __init__(self, parent=None, embedded: bool = False):
         super().__init__(parent)
+        self._embedded = embedded   # a tab of Scenes: no heading of its own (the tool has one)
         resources = Resources()
         self._config = resources.configsDesktopHubMng.get_config(self.TOOL_NAME, defaults={"settings": {}})
         self._settings = self._config["settings"]
@@ -279,9 +286,10 @@ class BatchPage(qt.QtWidgets.QWidget):
         bottom_layout.addWidget(self._start)
 
         layout = qt.QtWidgets.QVBoxLayout(self)
-        layout.setContentsMargins(16, 10, 12, 10)
+        layout.setContentsMargins(*((0, 8, 0, 0) if self._embedded else (16, 10, 12, 10)))
         layout.setSpacing(10)
-        layout.addLayout(header)
+        if not self._embedded:   # embedded: the heading's widgets are never put anywhere, so never shown
+            layout.addLayout(header)
         layout.addLayout(top)
         layout.addWidget(self._message)
         layout.addWidget(self._shutdown_bar)
@@ -310,6 +318,11 @@ class BatchPage(qt.QtWidgets.QWidget):
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
+        self._load()
+
+    def _load(self) -> None:
+        """The kept queue, once — on first show, or before scenes are added to a page never shown
+        (the Paths tab handing scenes over): adding first would save over the kept queue."""
         if not self._loaded:
             self._loaded = True
             for job in self._store.load():
@@ -331,6 +344,7 @@ class BatchPage(qt.QtWidgets.QWidget):
 
     def add_scenes(self, paths) -> None:
         """Puts these scenes at the end of the queue (repeats and non-scenes are left out); each is read."""
+        self._load()
         added = 0
         for path in paths:
             path = Path(path)
@@ -515,6 +529,8 @@ class BatchPage(qt.QtWidgets.QWidget):
                 qt.QtCore.QUrl.fromLocalFile(job.video)))
             menu.addAction("Open the video in Media").triggered.connect(lambda: self._to_media(job.video))
         menu.addAction("Show the scene").triggered.connect(lambda: ProcessLauncher.open_file_explorer(Path(job.scene)))
+        if self._embedded and job.scene.lower().endswith(".ma"):
+            menu.addAction("Check its paths (Paths tab)").triggered.connect(lambda: self.paths_requested.emit([job.scene]))
         menu.addSeparator()
         menu.addAction("Sooner").triggered.connect(lambda: self._move(job_id, -1))
         menu.addAction("Later").triggered.connect(lambda: self._move(job_id, 1))
@@ -722,7 +738,8 @@ class BatchPage(qt.QtWidgets.QWidget):
         window = self.window()
         open_tool = getattr(window, "open_tool", None)
         if callable(open_tool):
-            open_tool(self.TOOL_NAME)
+            open_tool(self.HUB_TOOL_ID)
+        self.focus_requested.emit()
         if window.isMinimized():
             window.showNormal()
         window.raise_()
