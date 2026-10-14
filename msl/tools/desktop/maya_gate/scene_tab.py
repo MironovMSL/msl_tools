@@ -71,6 +71,12 @@ class SceneTab(qt.QtWidgets.QWidget):
         self._check.setToolTip("A warning in Maya’s Script Editor (and so in this hub’s log) and a "
                                "message in the viewport.\nNothing in the scene is changed — a scene’s "
                                "rate changed afterwards moves its keys. References: .ma files only.")
+        self._paths_check = BaseCheckbox("When a scene opens, say so if its paths could use a variable")
+        self._paths_check.setToolTip("A warning in Maya (and in this hub’s log) when an opened scene has paths "
+                                     "under a folder\none of this environment’s variables names (WG_ANIM = "
+                                     "E:/branches/Animation) — MSL › Scene › Paths to Variables\nor the "
+                                     "session’s ⋯ menu here swaps them. Nothing "
+                                     "is changed by the check.")
         self._note = qt.QtWidgets.QLabel()
         self._note.setObjectName("sceneNote")
         self._note.setWordWrap(True)
@@ -106,6 +112,7 @@ class SceneTab(qt.QtWidgets.QWidget):
         layout.addWidget(hint)
         layout.addLayout(grid)
         layout.addWidget(self._check)
+        layout.addWidget(self._paths_check)
         layout.addSpacing(8)
         layout.addWidget(animation)
         layout.addWidget(animation_hint)
@@ -118,6 +125,7 @@ class SceneTab(qt.QtWidgets.QWidget):
         self._show_environment()
         self._rate.current_changed.connect(self._on_rate)
         self._check.toggled.connect(self._on_check)
+        self._paths_check.toggled.connect(lambda checked: self._store("paths_check", bool(checked)))
         self._range.editingFinished.connect(self._on_range)
         self._range.textEdited.connect(self._on_range_typed)
         self._units.current_changed.connect(lambda text: self._store("units", "" if text == self.KEEP else text))
@@ -163,7 +171,8 @@ class SceneTab(qt.QtWidgets.QWidget):
         stored = self._config.get(environment) if hasattr(self._config, "get") else None
         fps = str(stored.get("fps", "") if stored is not None else "")
         check = bool(stored.get("check", True)) if stored is not None else True
-        settings = {"fps": fps if fps in self.RATES else "", "check": check}
+        paths_check = bool(stored.get("paths_check", True)) if stored is not None else True
+        settings = {"fps": fps if fps in self.RATES else "", "check": check, "paths_check": paths_check}
         settings.update(scene_settings.cleaned(stored))
         return settings
 
@@ -178,6 +187,7 @@ class SceneTab(qt.QtWidgets.QWidget):
             self._title.setText("New scenes in %s" % self._environment)
             self._rate.set_current(settings["fps"] or self.KEEP)
             self._check.setChecked(settings["check"])
+            self._paths_check.setChecked(settings["paths_check"])
             span = scene_settings.parse_range(settings["range"])
             self._range.setText("%s-%s" % span if span else "")
             self._set_range_state("")
@@ -236,6 +246,8 @@ class SceneTab(qt.QtWidgets.QWidget):
             said.append("new scenes at %s fps%s" % (settings["fps"], ", a word when an opened scene or a reference "
                                                     "isn’t" if settings["check"] else ""))
         said += scene_settings.describe(settings)
+        if settings["paths_check"]:
+            said.append("a word when an opened scene’s paths could use a variable")
         if said:
             self._note.setText("→ from the next start of a Maya in %s: %s." % (self._environment, "; ".join(said)))
         else:

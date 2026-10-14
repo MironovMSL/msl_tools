@@ -18,6 +18,10 @@ into Maya's preferences too (File > New reads them) and onto the untouched start
 new one; the up axis, playback speed, the tangents of new keys and auto key are set once at the
 start (they outlast File > New on their own).
 
+MSL_GATE_SCENE_PATHS_CHECK = "1" (on its own, no rate needed): after a scene is opened, say so when
+its paths start with a folder one of this Maya's variables stands for (scene_paths_tool.py counts
+them) - "MSL > Paths to Variables" swaps them. Nothing is changed.
+
 Runs in Maya 2023+ (PySide2 / 6), so Python 3.9-valid; never raises - a failure here must not
 spoil Maya's start.
 """
@@ -42,6 +46,10 @@ def checks() -> bool:
     return os.environ.get(variables.SCENE_CHECK, "") == "1"
 
 
+def checks_paths() -> bool:
+    return os.environ.get(variables.SCENE_PATHS_CHECK, "") == "1"
+
+
 def wanted() -> dict:
     """The rest of the tab's settings this launch carries ({key: "" or the value})."""
     return scene_settings.from_environment(os.environ)
@@ -54,7 +62,7 @@ def start() -> bool:
         import maya.cmds as cmds
         _remove_callbacks(cmds)
         unit, settings = wanted_unit(), wanted()
-        if not unit and not any(settings.values()):
+        if not unit and not any(settings.values()) and not checks_paths():
             return False
         if unit:
             for name in ("workingUnitTime", "workingUnitTimeDefault"):
@@ -66,7 +74,7 @@ def start() -> bool:
         ids = []
         if unit or settings["units"] or settings["range"]:
             ids.append(om.MSceneMessage.addCallback(om.MSceneMessage.kAfterNew, _after_new))
-        if unit and checks():
+        if (unit and checks()) or checks_paths():
             ids.append(om.MSceneMessage.addCallback(om.MSceneMessage.kAfterOpen, _after_open))
         setattr(cmds, _CALLBACKS, ids)
         return True
@@ -172,20 +180,48 @@ def mismatches(unit: str) -> list:
 
 def _after_open(*_args) -> None:
     try:
-        unit = wanted_unit()
-        if not unit:
-            return
-        found = mismatches(unit)
-        if not found:
-            return
         import maya.cmds as cmds
-        if cmds.about(batch=True):
-            _report(unit, found)
-        else:
-            # Said at Maya's next idle moment, not inside the open: a scene opened by code the hub
-            # sent (the console, an assistant) opens while the hub's log stream is paused, and the
-            # warning would never reach it.
-            cmds.evalDeferred(lambda: _report(unit, found))
+        reports = []
+        unit = wanted_unit()
+        if unit and checks():
+            found = mismatches(unit)
+            if found:
+                reports.append(lambda: _report(unit, found))
+        if checks_paths():
+            count, roots = _count_paths(cmds)
+            if count:
+                reports.append(lambda: _report_paths(count, roots))
+        for report in reports:
+            if cmds.about(batch=True):
+                report()
+            else:
+                # Said at Maya's next idle moment, not inside the open: a scene opened by code the hub
+                # sent (the console, an assistant) opens while the hub's log stream is paused, and the
+                # warning would never reach it.
+                cmds.evalDeferred(report)
+    except Exception:
+        pass
+
+
+def _count_paths(cmds) -> tuple:
+    try:
+        from msl_tools.msl.tools.maya import scene_paths_tool
+        return scene_paths_tool.count_changes(cmds)
+    except Exception:
+        return 0, []
+
+
+def _report_paths(count: int, roots: list) -> None:
+    try:
+        import maya.cmds as cmds
+        names = ", ".join("$%s" % root.name for root in roots)
+        cmds.warning("MSL: %d path%s of this scene start%s with a folder %s stands for - MSL > Scene > Paths "
+                     "to Variables, or the session's menu in MSL Tools, swaps them (nothing was changed)"
+                     % (count, "s" if count != 1 else "", "" if count != 1 else "s", names))
+        if not cmds.about(batch=True):
+            cmds.inViewMessage(
+                assistMessage="<hl>Paths</hl>: %d could be %s - MSL &gt; Scene &gt; Paths to Variables" % (count, names),
+                position="topCenter", fade=True, fadeStayTime=6000)
     except Exception:
         pass
 

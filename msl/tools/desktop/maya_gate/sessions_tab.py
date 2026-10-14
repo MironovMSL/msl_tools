@@ -391,6 +391,8 @@ class SessionsTab(_ConsoleMixin, _ControlMixin, qt.QtWidgets.QWidget):
                 row = _SessionRow(session)
                 row.set_session(session, process_memory(session.pid))
                 row.menu_requested.connect(self._on_row_menu)
+                row.scene_label.paths_handler = (lambda session_id=session.session_id:
+                                                 self._on_scene_paths(session_id))
                 row.selected.connect(self._select_session)
                 row.scene_label.reveal_failed.connect(self._on_reveal_failed)
                 self._rows[session_id] = row

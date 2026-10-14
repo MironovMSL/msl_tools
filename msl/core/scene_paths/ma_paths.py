@@ -84,6 +84,7 @@ class PathUse:
     note: str = ""            # why a path under a root is LEFT (a binary scene's runner says it)
     relink: str = ""          # a missing file found again (finder.py): the WHOLE path becomes this
     found: list = field(default_factory=list)   # the files of that name the finder found, best first
+    options: list = field(default_factory=list)  # every (root, root_end) that could stand for it, deepest first
 
     @property
     def new_path(self) -> str:
@@ -294,15 +295,15 @@ def scan(path, roots: list[Root], environment: dict | None = None, check_files: 
         use = PathUse(line=line, kind=ATTRIBUTE, node="", attribute="",
                       path=_shown(data[start:end], codeset), start=start, end=end)
         _describe(use, data, start, nodes, node_starts)
-        for root, pattern in patterns:
-            found = pattern.match(data, start, end + 1)
-            if found:   # (the root's part reads as long as root.value: one "/" per separator)
-                use.root = root
-                if use.kind == SCRIPT:
-                    use.state = LEFT
-                else:
-                    use.state, use.root_end = CHANGE, found.end()
-                break
+        matches = [(root, found.end()) for root, pattern in patterns
+                   for found in [pattern.match(data, start, end + 1)] if found]
+        if matches:   # (the root's part reads as long as root.value: one "/" per separator)
+            use.root = matches[0][0]
+            if use.kind == SCRIPT:
+                use.state = LEFT
+            else:
+                use.state, use.root_end = CHANGE, matches[0][1]
+                use.options = matches   # the deepest first; the user may pick another (choose())
         else:
             if data[start] == 0x24:   # "$"
                 use.state = VARIABLE
@@ -351,6 +352,18 @@ def _describe(use: PathUse, data: bytes, start: int, nodes: list, node_starts: l
 
 
 # --- writing -----------------------------------------------------------------------------------------
+
+def choose(use: PathUse, name: str | None) -> None:
+    """Writes `use` through the root called `name` (one of its options); "" = leave it as it is;
+    None = its deepest root, as found. Safe to call again with another choice."""
+    if not use.options:
+        return
+    if name == "":
+        use.state, use.note = LEFT, "left as it is — your choice"
+        return
+    root, root_end = next(((root, end) for root, end in use.options if root.name == name), use.options[0])
+    use.root, use.root_end, use.state, use.note = root, root_end, CHANGE, ""
+
 
 def rewrite(data: bytes, uses: list[PathUse], codeset: str) -> bytes:
     """`data` with the root's folder at the start of each CHANGE use swapped for its $NAME, and each

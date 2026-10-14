@@ -71,6 +71,9 @@ QUIT = "quit_maya"                # {"save": bool, "discard": bool} -> {"quittin
 QUIT_UNSAVED = "the scene has unsaved changes now - nothing was closed"
 # The one request that runs code. Maya refuses it unless it was started with the console
 # allowed (MSL_GATE_CONSOLE=1 - Maya Gate sets it in every environment).
+SCENE_PATHS = "scene_paths"       # {} -> {"roots": [[name, folder]], "changes": [{"key", "kind", "where", "path",
+                                  # "new"}], "left": n, "through": n} - the open scene's paths a variable could stand for
+SCENE_PATHS_APPLY = "scene_paths_apply"   # {"keys": [...]} -> {"changed": n, "skipped": [plugs], "gone": [keys]}
 RUN_PYTHON = "run_python"         # {"code": str} -> {"output": str, "result": str, "traceback": str}
 
 # Levels of a log entry.

@@ -199,6 +199,7 @@ class HubLink(QtCore.QObject):
             modified=self._sent_scene[1],
             autosave=self._sent_scene[2],
             autosave_folder=self._sent_scene[3],
+            paths=self._paths_count(),
             startup_seconds=_startup_seconds(),
             msl_version=_msl_version))
 
@@ -431,6 +432,56 @@ class HubLink(QtCore.QObject):
         # "traceback", not "error": a reply's own "error" field means the REQUEST failed.
         return {"output": output.getvalue()[:limit], "result": result[:limit], "traceback": error[:limit]}
 
+    @staticmethod
+    def _paths_count() -> int:
+        """How many paths of the open scene one of this Maya's variables could stand for (0 = none, or this
+        Maya has no such variable) - shown in the hub's session menu."""
+        try:
+            from msl_tools.msl.tools.maya import scene_paths_tool
+            return int(scene_paths_tool.count_changes()[0])
+        except Exception:
+            return 0
+
+    def _handle_scene_paths(self, _data: dict) -> dict:
+        """The open scene's paths under a folder one of this Maya's variables names (scene_paths_tool.py) -
+        the hub shows them and asks its user before scene_paths_apply."""
+        import maya.cmds as cmds
+        from msl_tools.msl.tools.maya import scene_paths_tool
+        roots = scene_paths_tool.roots_here()
+        uses = scene_paths_tool.collect(cmds, roots) if roots else []
+        changes = [{"key": use["plug"] or use["node"], "kind": use["kind"],
+                    "where": scene_paths_tool._where(use), "path": use["path"], "new": use["new"],
+                    "options": use.get("options") or []}
+                   for use in uses if use["state"] == "change"]
+        return {"roots": [[root.name, root.value] for root in roots], "changes": changes[:500],
+                "left": sum(1 for use in uses if use["state"] == "left"),
+                "through": sum(1 for use in uses if use["state"] == "variable"),
+                "referenced": scene_paths_tool.referenced_files(cmds, uses)}
+
+    def _handle_scene_paths_apply(self, data: dict) -> dict:
+        """Swaps the paths the hub's user ticked, each through the variable picked for it ({"writes": {key:
+        new path}}; the older {"keys": [...]} = the deepest), found again NOW - one no longer there (the
+        scene changed meanwhile) is named, not guessed; a new path that isn't one of the path's own options
+        is refused. The scene isn't saved."""
+        import maya.cmds as cmds
+        from msl_tools.msl.tools.maya import scene_paths_tool
+        from msl_tools.msl.tools.maya.scene_paths_runner import Runner
+        writes = data.get("writes")
+        if not isinstance(writes, dict):
+            writes = None
+        keys = [str(key) for key in (writes or data.get("keys") or []) if key]
+        roots = scene_paths_tool.roots_here()
+        uses = [use for use in (scene_paths_tool.collect(cmds, roots) if roots else []) if use["state"] == "change"]
+        found = {use["plug"] or use["node"]: use for use in uses}
+        refused = Runner.pick([found[key] for key in keys if key in found],
+                              {str(key): str(value) for key, value in writes.items()} if writes else None)
+        changes = [found[key] for key in keys if key in found and found[key]["state"] == "change"]
+        changed, skipped = scene_paths_tool.apply(cmds, changes)
+        print("MSL Paths to variables: %d path%s now through a variable (from MSL Tools)."
+              % (changed, "s" if changed != 1 else ""))
+        self._on_scene_changed()   # the new count (and the "modified" mark) to the hub now
+        return {"changed": changed, "skipped": skipped + refused, "gone": [key for key in keys if key not in found]}
+
     _HANDLERS = {
         protocol.PING: _handle_ping,
         protocol.LAUNCH_REPORT: _handle_launch_report,
@@ -440,6 +491,8 @@ class HubLink(QtCore.QObject):
         protocol.SET_LOG_LEVEL: _handle_set_log_level,
         protocol.QUIT: _handle_quit,
         protocol.RUN_PYTHON: _handle_run_python,
+        protocol.SCENE_PATHS: _handle_scene_paths,
+        protocol.SCENE_PATHS_APPLY: _handle_scene_paths_apply,
     }
 
     # --- the scene ---------------------------------------------------------------------
@@ -496,8 +549,9 @@ class HubLink(QtCore.QObject):
         state = self._scene_state()
         if state != self._sent_scene:
             self._sent_scene = state
+            # counted only when something changed (not on every poll): it walks the scene's file nodes
             self._send(protocol.event(protocol.SCENE, scene=state[0], modified=state[1],
-                                      autosave=state[2], autosave_folder=state[3]))
+                                      autosave=state[2], autosave_folder=state[3], paths=self._paths_count()))
 
 
 class _Tee(object):

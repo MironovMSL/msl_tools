@@ -507,6 +507,8 @@ class MayaGatePage(qt.QtWidgets.QWidget):
             if rate["check"]:
                 environment_vars[self.SCENE_CHECK_VARIABLE] = "1"
         environment_vars.update(scene_settings.to_environment(rate))   # range, units, up axis, playback, keys
+        if rate["paths_check"]:   # scene_defaults.py: "N paths could be $WG_ANIM" on opening a scene
+            environment_vars[variables.SCENE_PATHS_CHECK] = "1"
 
         if environment == self._environment and not preview:
             self._user_setup_tab.save()  # launch with what's on screen, not the last autosave

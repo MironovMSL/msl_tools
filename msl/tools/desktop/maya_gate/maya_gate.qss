@@ -348,3 +348,33 @@ QPushButton#gateProblems {
 QPushButton#gateProblems:hover {
     color: var(--text-primary);
 }
+
+/* "Paths to variables" for a running Maya: a row per path (ScenePathsDialog). */
+ScenePathsDialog QTreeWidget#scenePathsChoices {
+    background-color: var(--field);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-primary);
+    outline: 0;
+}
+ScenePathsDialog QTreeWidget#scenePathsChoices::item { padding: 2px 0; min-height: 22px; }
+ScenePathsDialog QTreeWidget#scenePathsChoices::item:hover { background-color: alpha(var(--text-primary), 5%); }
+ScenePathsDialog QTreeWidget#scenePathsChoices::item:selected {
+    background-color: alpha(var(--accent), 14%);
+    color: var(--text-primary);
+}
+ScenePathsDialog QTreeWidget#scenePathsChoices QHeaderView { background-color: transparent; border: none; }
+ScenePathsDialog QTreeWidget#scenePathsChoices QHeaderView::section {
+    background-color: transparent;
+    color: var(--text-secondary);
+    border: none;
+    border-bottom: 1px solid alpha(var(--border), 70%);
+    padding: 3px 6px;
+    font-size: 11px;
+}
+ScenePathsDialog QFrame#scenePathsReferenced {
+    background-color: alpha(var(--warning), 8%);
+    border: 1px solid alpha(var(--warning), 35%);
+    border-radius: 6px;
+}
+ScenePathsDialog QLabel#scenePathsReferencedTitle { color: var(--text-primary); font-weight: 600; }

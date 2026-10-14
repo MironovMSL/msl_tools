@@ -29,6 +29,7 @@ StylesheetBuilder.register_template(Path(__file__).with_name("scene_paths.qss"))
 PATH_ROLE = qt.QtCore.Qt.ItemDataRole.UserRole          # a scene row: its file
 TONE_ROLE = qt.QtCore.Qt.ItemDataRole.UserRole + 1      # how a row is colored: change / missing / quiet / ""
 KEY_ROLE = qt.QtCore.Qt.ItemDataRole.UserRole + 2       # a missing path's row: finder.key_of(its path)
+CHOICE_ROLE = qt.QtCore.Qt.ItemDataRole.UserRole + 3    # a path a variable can stand for: finder.key_of(its path)
 STATE_TEXT = {ma_paths.CHANGE: "", ma_paths.VARIABLE: "already a variable", ma_paths.OUTSIDE: "under no variable",
               ma_paths.LEFT: "inside a script — left as it is"}
 
@@ -100,6 +101,7 @@ class ScenePathsPage(qt.QtWidgets.QWidget):
         self._mb_reading: set[str] = set()     # binary scenes a mayapy is reading now
         self._found: dict[str, list] = {}      # a missing path (finder.key_of) -> files of its name, best first
         self._picked: dict[str, str] = {}      # the user's pick for one ("" = don't relink it)
+        self._root_choice: dict[str, str] = {}  # a path (finder.key_of) -> the variable picked for it ("" = leave it)
         self._searching = False
         self._find_after: set[str] = set()   # scenes whose missing files are looked for once they are read
         self._coverage: dict = {}            # variable -> coverage.Coverage (where it is set)
@@ -488,6 +490,7 @@ class ScenePathsPage(qt.QtWidgets.QWidget):
                 item.setText(2, result.error)
                 item.setData(0, TONE_ROLE, "missing")
             else:
+                self._choose(result)
                 self._relink(result, roots)
                 count, found = len(result.changes), len(result.relinks)
                 lost = len(result.missing) - found
@@ -510,7 +513,7 @@ class ScenePathsPage(qt.QtWidgets.QWidget):
                 item.setData(0, TONE_ROLE, "change" if count or found else "quiet")
                 lost_ids = {id(use) for use in result.missing}
                 for use in result.uses:
-                    if everything or use.state == ma_paths.CHANGE or id(use) in lost_ids:
+                    if everything or use.state == ma_paths.CHANGE or id(use) in lost_ids or use.options:
                         item.addChild(self._use_item(use, id(use) in lost_ids))
             self._tree.addTopLevelItem(item)
             item.setExpanded(str(scene) in opened)
@@ -569,6 +572,10 @@ class ScenePathsPage(qt.QtWidgets.QWidget):
                 note = f"missing · {len(use.found)} found — right click to pick"
         child = qt.QtWidgets.QTreeWidgetItem([use.path, use.new_path or note, what])
         child.setData(0, KEY_ROLE, finder.key_of(use.path) if missing else "")
+        child.setData(0, CHOICE_ROLE, finder.key_of(use.path) if use.options and not use.relink else "")
+        if len(use.options) > 1 and not use.relink:
+            what += f"  ·  {len(use.options)} variables fit — right click to pick"
+            child.setText(2, what)
         tip = f"{use.path}\n→ {use.new_path}" if use.new_path else use.path
         if missing:
             tip += "\n\nThis file isn’t there."
@@ -625,6 +632,9 @@ class ScenePathsPage(qt.QtWidgets.QWidget):
             key = item.data(0, KEY_ROLE) or ""
             if key and self._found.get(key):
                 self._add_pick_items(menu, key)
+            choice_key = item.data(0, CHOICE_ROLE) or ""
+            if choice_key:
+                self._add_variable_items(menu, choice_key)
             text = item.text(0)
             menu.addAction("Copy the path").triggered.connect(
                 lambda: qt.QtWidgets.QApplication.clipboard().setText(text))
@@ -714,6 +724,51 @@ class ScenePathsPage(qt.QtWidgets.QWidget):
                  "the file in its version’s folder; a variable Maya Gate sets wins over it). Another machine or "
                  "a render farm needs it as well — that can’t be checked from here.")
         TextDialog.show_for(self, "Where the variables are set", text)
+
+
+    # --- the variable of each path -----------------------------------------------------------------------
+
+    def _choose(self, result) -> None:
+        """Gives each path of `result` the variable picked for it (the deepest when none is; "" = leave it).
+        Idempotent: every use keeps its options, so a pick can change again."""
+        for use in result.uses:
+            if use.options:
+                ma_paths.choose(use, self._root_choice.get(finder.key_of(use.path)))
+
+    def _variable_options(self, key: str) -> list:
+        """The (root, new path) ways of the listed path `key` (finder.key_of), from the first use found."""
+        for result in self._scans.values():
+            if result.error:
+                continue
+            for use in result.uses:
+                if use.options and finder.key_of(use.path) == key:
+                    return [(root, root.token + use.path[len(root.value):]) for root, _end in use.options]
+        return []
+
+    def _add_variable_items(self, menu, key: str) -> None:
+        """The path's variables as items of the row's menu (the same path in every listed scene follows)."""
+        options = self._variable_options(key)
+        if not options:
+            return
+        current = self._root_choice.get(key)
+        if current is None:
+            current = options[0][0].name
+        title = menu.addAction("WRITE IT THROUGH")
+        title.setEnabled(False)
+        for index, (root, new) in enumerate(options):
+            action = menu.addAction(f"${root.name}  →  {new}" + ("   (the most exact)" if index == 0 and len(options) > 1 else ""))
+            action.setCheckable(True)
+            action.setChecked(root.name == current)
+            action.triggered.connect(lambda _checked=False, name=root.name: self._choose_variable(key, name))
+        leave = menu.addAction("Leave this path as it is")
+        leave.setCheckable(True)
+        leave.setChecked(current == "")
+        leave.triggered.connect(lambda: self._choose_variable(key, ""))
+        menu.addSeparator()
+
+    def _choose_variable(self, key: str, name: str) -> None:
+        self._root_choice[key] = name
+        self._show()
 
     # --- finding missing files --------------------------------------------------------------------------
 

@@ -35,6 +35,8 @@ class _SceneLabel(qt.QtWidgets.QLabel):
         self.setSizePolicy(qt.QtWidgets.QSizePolicy.Policy.Ignored, qt.QtWidgets.QSizePolicy.Policy.Preferred)
         self.setMouseTracking(True)
         self._path = ""
+        self.paths_handler = None   # a live session's "Paths to variables…" (set by the tab)
+        self.paths_count = 0
         self._pressed = False
         self._press_position = qt.QtCore.QPoint()
 
@@ -120,6 +122,10 @@ class _SceneLabel(qt.QtWidgets.QLabel):
         menu.addAction("Show in folder").triggered.connect(self.reveal)
         menu.addAction("Copy path").triggered.connect(
             lambda: qt.QtGui.QGuiApplication.clipboard().setText(self._path))
+        if self.paths_handler is not None:
+            menu.addSeparator()
+            count = f" ({self.paths_count})" if self.paths_count else ""
+            menu.addAction(f"Paths to variables…{count}").triggered.connect(lambda: self.paths_handler())
         self._menu = menu  # for tests; the menu deletes itself on close
         menu.popup(event.globalPos())
 
@@ -241,6 +247,7 @@ class _SessionRow(qt.QtWidgets.QWidget):
             self.dot.setProperty("state", state)  # maya_gate.qss: QLabel#sessionDot[state]
             repolish(self.dot)
         self.scene_label.set_scene(session.scene, session.modified)
+        self.scene_label.paths_count = session.paths
         self.time_label.setText(session.connected_for())
         lines = [f"Maya {session.full_version or session.version}  ·  process {session.pid}"
                  + (f"  ·  memory {_size(memory)}" if memory else ""),

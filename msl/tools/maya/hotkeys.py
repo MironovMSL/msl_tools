@@ -39,6 +39,8 @@ COMMANDS = {
                        "from msl_tools.msl.tools.maya.rename import quick; quick()"),
     "MSLRenameRepeat": ("Rename again: the last rename on what is selected now (opens the window if it is closed)",
                         "from msl_tools.msl.tools.maya.rename import repeat_last; repeat_last()"),
+    "MSLPathsToVariables": ("Paths to variables: the open scene's absolute paths become $WG_ANIM/... (asks first)",
+                            "from msl_tools.msl.tools.maya.scene_paths_tool import paths_to_variables; paths_to_variables()"),
 }
 
 

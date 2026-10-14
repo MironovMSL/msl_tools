@@ -298,11 +298,13 @@ class MayaLinkServer(qt.QtCore.QObject):
             peer.bye_reason = str(data.get("reason") or protocol.BYE_QUIT)
         elif kind == protocol.EVENT and name == protocol.SCENE:
             session = peer.session
+            paths = data.get("paths", session.paths)
             state = (str(data.get("scene") or ""), bool(data.get("modified")),
                      bool(data.get("autosave", session.autosave)),  # absent from a Maya with older code
-                     str(data.get("autosave_folder", session.autosave_folder) or ""))
-            if state != (session.scene, session.modified, session.autosave, session.autosave_folder):
-                session.scene, session.modified, session.autosave, session.autosave_folder = state
+                     str(data.get("autosave_folder", session.autosave_folder) or ""),
+                     paths if isinstance(paths, int) and paths >= 0 else 0)
+            if state != (session.scene, session.modified, session.autosave, session.autosave_folder, session.paths):
+                session.scene, session.modified, session.autosave, session.autosave_folder, session.paths = state
                 self.sessions_changed.emit()
         elif kind == protocol.EVENT and name == protocol.OPEN_IN_MEDIA:
             paths = data.get("paths")

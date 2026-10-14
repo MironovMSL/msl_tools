@@ -62,7 +62,7 @@ msl_tools/                 (repo root)
                 scene_paths/      ScenePathsPage = the Paths tab: absolute paths swapped for Maya Gate's variables (see "Paths tool")
                 installer/        InstallerView — the setup window (not a hub tool, not in the registry)
                 stub_a/, stub_b/  placeholder tools used to test hub navigation
-            maya/               Maya-side tools (the MSL menu, hub_link, launch_report, batch_runner)
+            maya/               Maya-side tools (the MSL menu, hub_link, launch_report, batch_runner, scene_paths_tool)
                 playblast/        Playblast: a dockable panel inside Maya 2025+ (see "Playblast tool")
                 rename/           Rename: quick naming of Maya objects, a window inside Maya 2025+ (see "Rename tool")
                 controls/         Controls: rig controls — shape library, create, offsets, shape tools; Maya 2025+ (see "Controls tool")
@@ -3773,6 +3773,92 @@ mayapy (step 2, the same day — see the last bullet).
   without the command-line svn, no read-only scenes) — not needed (the user, 2026-10-14).
   Checked: tests; offscreen from an isolated copy on a scene copy: the job's link -> Paths, the search ran
   by itself (4 found again), Replace wrote 5 paths, Undo put the scene back byte for byte, the .bak gone.
+- IN THE OPEN SCENE (2026-10-14, the user kept the fix as a console snippet): MSL > "Paths to Variables"
+  (hotkey MSLPathsToVariables; menu icon `paths` = tools/paths) -> `tools/maya/scene_paths_tool.py`
+  (Maya 2023+, 3.9-valid, no Qt): the roots are THIS Maya's — the names its launch set
+  (MSL_GATE_VARIABLES) whose values name one folder, minus Maya's own (MAYA_*, PYTHON*, XBMLANG*, MTOA*,
+  ARNOLD*, REDSHIFT*, QT_*); a Maya not started from Maya Gate has none and says so. The paths come from
+  the SAME code the Paths tab reads .mb with (`scene_paths_runner.Runner` now takes a task dict too:
+  `.references` / `.attributes`), so the rule for referenced nodes is the same. A cmds.confirmDialog
+  lists what changes (8 named, the rest counted), the paths left in referenced files, and that the scene
+  isn't saved. `apply()`: references FIRST, then the attributes in ONE undo chunk — MEASURED (mayapy
+  2024): reloading a reference (file -loadReference) EMPTIES Maya's undo queue, so done after the
+  attributes it took their undo with it; the dialog says a reference reload isn't undone and clears
+  what Ctrl+Z could undo before. Locked plugs are left and named.
+  The check on opening: the Scene tab's "When a scene opens, say so if its paths could use a variable"
+  (`paths_check`, on by default — it only speaks; independent of the frame rate) ->
+  MSL_GATE_SCENE_PATHS_CHECK -> scene_defaults `_after_open` counts (`count_changes`) and warns "MSL: N
+  paths of this scene start with a folder $WG_ANIM stands for - MSL > Paths to Variables swaps them" +
+  an inViewMessage, deferred to the next idle moment like the rate check.
+  Checked in mayapy 2024 from an isolated copy: a shot with a reference, a reference edit and its own
+  texture — the warning on opening (3 paths), all three swapped, the reference still loaded, one Ctrl+Z
+  put both attributes back; tests (roots_here). And in a WINDOWED Maya 2024 started from the user's hub
+  (Dev, a scratch COPY of Rig_Labrador.ma; the running hub predated the change, so the check's variable
+  was set inside Maya and scene_defaults.start() run again): the menu entry and the hotkey command there,
+  the warning on reopening reached the hub's log, the dialog (pictured; Cancel by a timer changed
+  nothing), Replace by a timer swapped file2's texture, one Ctrl+Z put it back; then File > New, closed.
+  WHERE IT LIVES (2026-10-14, the user: a script among the tools felt out of place): the MSL menu's entry
+  moved into a "Scene" submenu (MSL > Scene > Paths to Variables; menu icons `scene`, `paths`), and the
+  main road is the hub: the session row's ⋯ / right-click menu and the scene name's right click have
+  "Paths to variables… (N)". N comes with the session: hub_link counts (`_paths_count` =
+  scene_paths_tool.count_changes) in the hello and in every scene event — only when the scene's state
+  changed, never on each 2 s poll — and `MayaSession.paths` keeps it (server: a non-count reads as 0).
+  Two FIXED requests (protocol.SCENE_PATHS -> roots, changes [{key, kind, where, path, new}], left,
+  through; SCENE_PATHS_APPLY {"keys"} -> changed, skipped, gone): the hub shows the changes in a
+  ConfirmDialog (warning when a reference reloads: not undone, clears Ctrl+Z's history; the paths left
+  in referenced files counted; "not saved"), then Maya swaps exactly the keys the user saw, found AGAIN
+  at that moment (one gone meanwhile is named, never guessed), and sends a scene event with the new
+  count. No code travels: these work without the console or the assistant switch. A Maya started before
+  this answers "unknown request" until "Reload code". The warning on opening names both roads.
+  Checked: link test (the count in hello / scene events); the two handlers in mayapy 2024 on a shot with
+  a reference + an edit + a texture (3 listed, 3 swapped, an unknown key named "gone", the scene event
+  sent, count 0 after); the row menu, the scene label's entry, the question and the keys sent, offscreen
+  against a fake Maya on a private port (isolated copy). NOT seen: the whole road with a real Maya and
+  the real hub (the user's hub predates it).
+  PICKING THE VARIABLE (same day, the user: several variables, a different one per path): a path under
+  several roots can be written through any of them. Maya side: the runner's uses carry `options`
+  ([root name, new path], deepest first; `roots_of`), `Runner.pick(uses, writes)` applies {key: new
+  path} — a key not in it is left, a new path that isn't one of the use's options is REFUSED (named in
+  "skipped"); the runner's apply honours a scene's "writes", hub_link's SCENE_PATHS returns the options
+  and SCENE_PATHS_APPLY takes {"writes": {...}} (the older {"keys"} = deepest). Hub, session menu:
+  `maya_gate/scene_paths_dialog.py` ScenePathsDialog replaces the ConfirmDialog — a row per path
+  (tick = swap; a BaseComboBox of its variables where there is a choice, else the name; "Becomes" /
+  "stays as it is"), "All ticked: [the most exact for each | $X]" at the bottom, "Replace N"; styles
+  in maya_gate.qss. Paths tab: `PathUse.options` = [(root, root_end)] deepest first (.ma: each root's own
+  byte end; .mb: 0 — Maya writes it), `ma_paths.choose(use, name | "" | None)` (idempotent; "" = LEFT
+  "left as it is — your choice"); the page keeps `_root_choice` {finder.key_of(path): name} for the
+  session (the same path in every listed scene follows) and re-applies it in `_show` (`_choose`, before
+  `_relink`); a row with options lists them in its right-click menu ("WRITE IT THROUGH", the most exact
+  marked, "Leave this path as it is") and says "N variables fit — right click to pick"; rows with options
+  stay listed when left. mb_paths.apply_binary sends "writes" = each change's chosen new path. The MSL >
+  Scene menu entry inside Maya keeps the plain dialog with the deepest (cmds dialogs can't hold a table).
+  Checked: tests (a .ma written through the picked root, one left, back to the deepest; the runner's pick
+  refusing a path that isn't an option); mayapy 2024 (the options listed, a wider root picked, an
+  unpicked path untouched, "$TESTROOT/../../evil.png" refused); offscreen: the dialog against a fake Maya
+  (a pick, an untick, "Replace 2", the writes sent; pictured) and the Paths tab's menu with a second,
+  nested variable (pick, leave, write).
+  REFERENCED FILES (same day; the user: "it missed this texture" — NY27_Celeb_body_01_AM.tga of a rig):
+  a path a REFERENCE holds (no edit of it in the scene) is never swapped from the scene — but the dialog
+  now says where they live: SCENE_PATHS also returns "referenced" [{"file", "count"}]
+  (`scene_paths_tool.referenced_files`: every use the runner flagged `inside`, under a root or not,
+  grouped by `referenceQuery -filename`), and ScenePathsDialog shows them in a block (warning tone) with
+  "Fix them in those files…" -> `SessionsTab._fix_in_paths`: `window.open_tool("scenes")`, its Paths tab,
+  `paths.add(files, find=True)` — the rig is read and its missing files looked for at once. The dialog
+  also opens when the scene itself has nothing to swap but its references do (no table, "Close").
+  WHY IT MATTERED: what Maya SHOWS for a referenced texture can be where IT found the file — the user's
+  Buscemi_Rig.ma holds "D:/AnimBase/NYs/NY27/rigs/Buscemi/NY27_Celeb_body_01_AM.tga" 13 times (another
+  machine's drive) and Maya, finding the file next to the rig, shows E:/branches/... in memory; the rig
+  file itself stays broken. The Paths tab reads the FILE: on a copy of that rig Find missing found 64
+  paths again ($WG_ANIM/NYs/NY27/rigs/Buscemi/...), 7 files exist nowhere.
+  TWO TRAPS met: (1) a modal dialog run inside the link's reply callback (a socket slot) — the reply now
+  opens it on the next turn (`QTimer.singleShot(0, self, ...)`); (2) a closed ScenePathsDialog left
+  behind as a hidden child, when it had NO rows, aborted the process a moment later (offscreen,
+  reproducible; Cancel / Fix / a bare FramelessDialog didn't; the exact Qt path wasn't found) — `ask()`
+  now `deleteLater()`s it once answered. Layout: the empty dialog adds no table, buttons stay at the
+  right (a stretch, not the count label's), its height is fitted to its width (`heightForWidth`).
+  Checked: mayapy 2024 (a rig holding a texture under the root and one at D:/…, no edit: both counted
+  for rig.ma); offscreen: the dialog with only the referenced block, the button opening Scenes › Paths
+  on a COPY of Buscemi_Rig.ma, 64 found again incl. that texture -> $WG_ANIM/...; pictures of both modes.
 
 ## Maya module
 

@@ -22,6 +22,7 @@ SCENE_UP = "MSL_GATE_SCENE_UP"                # "y" / "z": Maya's up axis
 SCENE_SPEED = "MSL_GATE_SCENE_SPEED"          # "every" / "realtime" / "half" / "double": playback speed
 SCENE_TANGENTS = "MSL_GATE_SCENE_TANGENTS"    # "auto" / "linear" / "stepped" ...: tangents of new keys
 SCENE_AUTO_KEY = "MSL_GATE_SCENE_AUTO_KEY"    # "on" / "off"
+SCENE_PATHS_CHECK = "MSL_GATE_SCENE_PATHS_CHECK"   # "1": say so when an opened scene's paths could use a variable
 
 LINK_PORT = "MSL_GATE_LINK_PORT"              # the hub's link server
 LINK_TOKEN = "MSL_GATE_LINK_TOKEN"            # its secret: never printed, never sent (core/link/protocol.py)
@@ -35,5 +36,5 @@ LAUNCH_FILE = "MSL_GATE_LAUNCH_FILE"          # this launch's record; the loader
 STARTUP_SECONDS = "MSL_GATE_STARTUP_SECONDS"  # set inside Maya once: how long the start took
 
 ALL = (ENVIRONMENT, VARIABLES, CONSOLE, KEEP_ENGLISH, SCENE_FPS, SCENE_CHECK, SCENE_RANGE, SCENE_UNITS, SCENE_UP,
-       SCENE_SPEED, SCENE_TANGENTS, SCENE_AUTO_KEY, LINK_PORT, LINK_TOKEN, BOOST_SKIP, BOOST_REPORT, BOOST_ENVIRONMENT,
+       SCENE_SPEED, SCENE_TANGENTS, SCENE_AUTO_KEY, SCENE_PATHS_CHECK, LINK_PORT, LINK_TOKEN, BOOST_SKIP, BOOST_REPORT, BOOST_ENVIRONMENT,
        LAUNCH_TIME, LAUNCH_FILE, STARTUP_SECONDS)

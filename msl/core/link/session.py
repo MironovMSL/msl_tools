@@ -39,6 +39,7 @@ class MayaSession:
     modified: bool = False
     autosave: bool = False
     autosave_folder: str = ""
+    paths: int = 0              # paths of its scene one of its variables could stand for (scene_paths_tool.py)
     startup_seconds: float = 0.0
     busy_since: float = 0.0
     boosted: bool = False
@@ -75,6 +76,7 @@ class MayaSession:
                    modified=bool(data.get("modified")),
                    autosave=bool(data.get("autosave")),
                    autosave_folder=str(data.get("autosave_folder") or ""),
+                   paths=_count(data.get("paths")),
                    startup_seconds=_number(data.get("startup_seconds")),
                    boosted=bool(data.get("boosted")),
                    skipped=[str(name) for name in data.get("skipped") or [] if name],
@@ -87,3 +89,11 @@ def _number(value) -> float:
         return max(float(value or 0.0), 0.0)
     except (TypeError, ValueError):
         return 0.0
+
+
+def _count(value) -> int:
+    """A count a message carries (anything else, or missing: 0)."""
+    try:
+        return max(int(value or 0), 0)
+    except (TypeError, ValueError):
+        return 0

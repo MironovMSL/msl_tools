@@ -30,6 +30,9 @@ class MslMenuDefinition:
                 MenuAction("Controls", cls._tool("controls"), icon=cls._icon("controls"), tooltip="Rig controls: a library of shapes, a control on every selected joint or object with its offsets and side color - driving it by constraints or the matrix if you like -, shape tools, colors. Maya 2025 and newer."),
                 MenuAction("Rename", cls._tool("rename"), icon=cls._icon("rename"), tooltip="Quick naming of the selected objects: a name with numbers, sides and kinds, prefix / suffix, find & replace, a library of words — see before / after first. Maya 2025 and newer."),
                 MenuDivider(),
+                SubMenu("Scene", icon=cls._icon("scene"), items=(
+                    MenuAction("Paths to Variables", f"{cls._TOOLS_PACKAGE}.scene_paths_tool.paths_to_variables", icon=cls._icon("paths"), tooltip="The open scene's absolute paths swapped for this environment's variables (E:/branches/Animation/... -> $WG_ANIM/...): textures, references, caches. Shows what changes and asks first; the scene isn't saved."),
+                )),
                 SubMenu("Dev", icon=cls._icon("dev"), items=(
                     MenuAction("Print Hello", cls._dev_action("print_hello"), icon=cls._icon("print_hello"), tooltip="Prints a test message."),
                     MenuAction("Print Environment", cls._dev_action("print_environment"), icon=cls._icon("print_environment"), tooltip="Prints Maya version, state and package location."),

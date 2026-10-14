@@ -11,7 +11,9 @@ The task file (written by core/scene_paths/mb_paths.py):
     {"mode": "list" | "apply", "roots": [["WG_ANIM", "E:/branches/Animation"], ...],   deepest first
                                          ("list" is given none: the hub sorts the paths by its roots)
      "scenes": [{"path": ..., "size": 123, "mtime_ns": 456,          size / mtime: apply refuses a changed file
-                 "relink": {"file2.fileTextureName" | "rigRN": <a found file's new path>}}, ...],
+                 "relink": {"file2.fileTextureName" | "rigRN": <a found file's new path>},
+                 "writes": {<key>: <its new path>}}, ...],   which paths to swap and through which variable
+                                                          (each must be one of the path's options; absent = all, deepest)
      "result": <a JSON file written at the end>, "progress": <a JSON-lines file, one line per scene>}
 
 What is looked at, in each scene:
@@ -43,9 +45,13 @@ def text(value):
 
 
 class Runner(object):
-    def __init__(self, task_path):
-        with open(task_path, "r") as handle:
-            self.task = json.load(handle)
+    def __init__(self, task):
+        """`task`: the task file's path - or the task itself, a dict (scene_paths_tool.py: the open scene)."""
+        if isinstance(task, dict):
+            self.task = task
+        else:
+            with open(task, "r") as handle:
+                self.task = json.load(handle)
         self.roots = [(str(name), str(value).replace("\\", "/").rstrip("/")) for name, value in self.task["roots"]]
         self.apply = self.task.get("mode") == "apply"
         self.results = []
@@ -63,14 +69,38 @@ class Runner(object):
                 pass
 
     def root_of(self, path):
-        """(root name, root value) whose folder starts `path`, or None."""
-        shown = path.replace("\\", "/")
-        lowered = shown.lower()
-        for name, value in self.roots:
-            folder = value.lower()
-            if lowered == folder or lowered.startswith(folder + "/"):
-                return name, value
-        return None
+        """(root name, root value) whose folder starts `path` - the deepest - or None."""
+        found = self.roots_of(path)
+        return found[0] if found else None
+
+    def roots_of(self, path):
+        """Every (root name, root value) whose folder starts `path`, deepest first (self.roots is in that
+        order): a path under E:/a/b can be written through a variable of E:/a/b or one of E:/a."""
+        lowered = path.replace("\\", "/").lower()
+        return [(name, value) for name, value in self.roots
+                if lowered == value.lower() or lowered.startswith(value.lower() + "/")]
+
+    @staticmethod
+    def pick(uses, writes):
+        """Applies the user's choices to the uses about to be swapped: `writes` {key: new path} names the
+        ones to swap and how (a new path that isn't one of the use's options is refused - the use stays);
+        None = every use as found (its deepest root). Returns the keys refused."""
+        if writes is None:
+            return []
+        refused = []
+        for use in uses:
+            if use["state"] != "change":
+                continue
+            key = use["plug"] or use["node"]
+            new = writes.get(key)
+            if new is None:
+                use["state"], use["note"] = "left", "left as it is"
+            elif new in [option[1] for option in use.get("options") or []]:
+                use["new"] = new
+            else:
+                use["state"], use["note"] = "left", "not one of its variables"
+                refused.append(key)
+        return refused
 
     def new_path(self, path, root):
         shown = path.replace("\\", "/")
@@ -109,6 +139,7 @@ class Runner(object):
         uses = result["uses"]
         references = self.references(cmds, uses)
         self.attributes(cmds, uses, references)
+        result["refused"] = self.pick(uses, scene.get("writes"))
         relink = scene.get("relink") or {}
         for use in uses:   # missing files the hub found again: the whole path becomes the found one
             new = relink.get(use["plug"] or use["node"])
@@ -187,9 +218,12 @@ class Runner(object):
                 self.add(uses, use_kind, node, attribute, value, plug=plug, left=state_note)
 
     def add(self, uses, kind, node, attribute, path, plug="", left=""):
-        root = self.root_of(path)
+        roots = self.roots_of(path)
+        root = roots[0] if roots else None
         use = {"kind": kind, "node": text(node), "attribute": text(attribute), "path": path, "plug": plug,
-               "new": "", "root": "", "state": "outside", "note": left, "inside": bool(left)}
+               "new": "", "root": "", "state": "outside", "note": left, "inside": bool(left),
+               # every way to write it: [root name, new path], deepest first - the user may pick another
+               "options": [] if left else [[name, self.new_path(path, (name, value))] for name, value in roots]}
         if path.startswith("$"):
             use["state"] = "variable"
         elif root is not None:

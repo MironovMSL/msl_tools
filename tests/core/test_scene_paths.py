@@ -361,5 +361,58 @@ class UndoingAReplace(unittest.TestCase):
         self.assertEqual(checks.missing_files({}), [])
 
 
+class InsideMaya(unittest.TestCase):
+    """tools/maya/scene_paths_tool.py without Maya: which of this Maya's variables can stand for a folder."""
+
+    def test_the_launchs_own_folder_variables_not_mayas(self):
+        from msl_tools.msl.tools.maya import scene_paths_tool
+        environment = {"MSL_GATE_VARIABLES": os.pathsep.join(["WG_ANIM", "MAYA_APP_DIR", "LIST", "GONE", "PYTHONPATH"]),
+                       "WG_ANIM": "E:/branches/Animation", "MAYA_APP_DIR": "H:/prefs", "LIST": "E:/a;E:/b",
+                       "PYTHONPATH": "E:/py", "OTHER": "E:/not/set/by/the/launch"}
+        self.assertEqual([(root.name, root.value) for root in scene_paths_tool.roots_here(environment)],
+                         [("WG_ANIM", "E:/branches/Animation")])
+        self.assertEqual(scene_paths_tool.roots_here({"WG_ANIM": "E:/x"}), [])   # not started from Maya Gate
+
+
+class PickingTheVariable(unittest.TestCase):
+    """A path under two roots: written through the one picked, or left — in a .ma and by Maya's runner."""
+
+    def setUp(self):
+        self.folder = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.folder, True)
+        self.scene = self.folder / "shot.ma"
+        self.scene.write_bytes(SCENE.encode("cp1252"))
+
+    def test_a_ma_path_through_the_variable_picked(self):
+        result = ma_paths.scan(self.scene, ROOTS, environment={}, check_files=False)
+        dog = next(use for use in result.uses if use.line == 13)
+        self.assertEqual([root.name for root, _end in dog.options], ["WG_DOG", "WG_ANIM"])
+        ma_paths.choose(dog, "WG_ANIM")
+        self.assertEqual(dog.new_path, "$WG_ANIM/chars/dog/d.<UDIM>.png")
+        texture = next(use for use in result.uses if use.line == 7)
+        ma_paths.choose(texture, "")                                   # leave this one
+        self.assertNotIn(texture, result.changes)
+        self.assertEqual(ma_paths.apply(result, backup=False).changed, 4)
+        text = self.scene.read_bytes().decode("cp1252")
+        self.assertIn('"$WG_ANIM/chars/dog/d.<UDIM>.png"', text)
+        self.assertIn(r'"e:\\Branches\\animation\\tex\\a.png"', text)   # left as it was
+        ma_paths.choose(dog, None)                                     # back to the deepest
+        self.assertEqual(dog.new_path, "$WG_DOG/d.<UDIM>.png")
+
+    def test_the_runner_takes_only_a_choice_that_fits(self):
+        from msl_tools.msl.tools.maya.scene_paths_runner import Runner
+        runner = Runner({"mode": "list", "scenes": [], "roots": [[root.name, root.value] for root in ROOTS]})
+        uses = []
+        runner.add(uses, "texture", "a", "fileTextureName", "E:/branches/Animation/chars/dog/x.png", plug="a.ftn")
+        runner.add(uses, "texture", "b", "fileTextureName", "E:/branches/Animation/y.png", plug="b.ftn")
+        runner.add(uses, "texture", "c", "fileTextureName", "E:/branches/Animation/z.png", plug="c.ftn")
+        self.assertEqual([option[0] for option in uses[0]["options"]], ["WG_DOG", "WG_ANIM"])
+        refused = Runner.pick(uses, {"a.ftn": "$WG_ANIM/chars/dog/x.png", "b.ftn": "$WG_DOG/../y.png"})
+        self.assertEqual(refused, ["b.ftn"])
+        self.assertEqual([(use["state"], use["new"]) for use in uses],
+                         [("change", "$WG_ANIM/chars/dog/x.png"), ("left", "$WG_ANIM/y.png"), ("left", "$WG_ANIM/z.png")])
+        self.assertEqual(Runner.pick(uses, None), [])                  # an older hub: everything as found
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -9,6 +9,7 @@ from msl_tools.msl.core.link import protocol
 from msl_tools.msl.core.link.session import MayaSession
 from msl_tools.msl.core.environment.processes import is_process_running, terminate_process
 from msl_tools.msl.ui.widgets.windows.confirm_dialog import ConfirmDialog
+from msl_tools.msl.tools.desktop.maya_gate.scene_paths_dialog import ScenePathsDialog
 from msl_tools.msl.ui.icon_manager import tinted_menu_icon
 from msl_tools.msl.ui.theme.qss import make_rounded_popup, repolish
 from msl_tools.msl.ui.ui_resources import UiResources
@@ -139,6 +140,11 @@ class _ControlMixin:
         add("Reload code", ("code", "actions"), "Re-read msl_tools from disk in this Maya and rebuild the MSL menu"
             + chr(10) + "(open windows keep their old code until reopened)", lambda: self._on_reload(session_id),
             enabled=reachable)
+        count = f" ({session.paths})" if session.paths else ""
+        add(f"Paths to variables…{count}", ("folder_into", "actions"),
+            "The scene’s absolute paths swapped for this Maya’s variables (E:/branches/Animation/… → "
+            "$WG_ANIM/…) — shows what changes first; the scene isn’t saved", lambda: self._on_scene_paths(session_id),
+            enabled=reachable)
         if session.skipped:
             add("Load plug-ins…", ("plugin", "plugins"), "Load plug-ins that boost start left out — in this "
                 "running Maya, no restart", lambda: self._on_plugins(session_id), enabled=reachable)
@@ -267,6 +273,70 @@ class _ControlMixin:
                 self._say(f"Maya {session.version}: {reply.get('error') or 'the request failed'}", "error")
 
         self._server.request(session_id, name, on_reply=finished, timeout_ms=timeout_ms, **data)
+
+    def _on_scene_paths(self, session_id: int) -> None:
+        """Paths to variables: asks the Maya what could change, shows it, and on "Replace" has it swap
+        exactly those (tools/maya/scene_paths_tool.py does it inside Maya)."""
+        # The window opens on the NEXT turn of the event loop, not inside the reply: a modal dialog run inside
+        # the socket's slot - and the Scenes tab's workers it may start - aborted the hub (seen offscreen).
+        self._ask(session_id, protocol.SCENE_PATHS,
+                  lambda session, data: qt.QtCore.QTimer.singleShot(0, self, lambda: self._show_scene_paths(session, data)),
+                  self.REPORT_TIMEOUT_MS)
+
+    def _show_scene_paths(self, session: MayaSession, data: dict) -> None:
+        name = self._names.get(session.pid, f"Maya {session.version}")
+        roots = [(str(root[0]), str(root[1])) for root in data.get("roots") or [] if len(root) == 2]
+        changes = [change for change in data.get("changes") or [] if isinstance(change, dict)]
+        left, through = int(data.get("left") or 0), int(data.get("through") or 0)
+        referenced = [entry for entry in data.get("referenced") or [] if isinstance(entry, dict) and entry.get("file")]
+        if not roots:
+            self._say(f"{name}: its environment has no variable that names one folder — add one in Variables "
+                      f"(e.g. WG_ANIM = E:/branches/Animation).", "error")
+            return
+        if not changes and not referenced:
+            text = f"{name}: nothing to change in {session.scene_name}"
+            if through:
+                text += f" — {through} path{'s are' if through != 1 else ' is'} already through a variable"
+            self._say(text + ".", "success")
+            return
+        notes = ["Variables: " + ", ".join(f"${root} = {folder}" for root, folder in roots) + "."]
+        if left and not referenced:   # (a Maya with older code: no list of the files)
+            notes.append(f"{left} path{'s' if left != 1 else ''} under {'them' if len(roots) > 1 else 'it'} live in "
+                         f"referenced files and stay — fix those files.")
+        references = sum(1 for change in changes if change.get("kind") == "reference")
+        if references:
+            notes.append(f"{references} reference{'s are' if references != 1 else ' is'} reloaded under the new "
+                         f"name — Ctrl+Z in Maya doesn’t undo that, and reloading clears what Ctrl+Z could undo before.")
+        if changes:
+            notes.append("The scene isn’t saved — save it in Maya when it looks right.")
+        # A row per path: ticked = swapped, its variable picked where several can stand for it.
+        writes, fix = ScenePathsDialog.ask(self, name, session.scene_name, changes, notes, referenced)
+        if fix:
+            self._fix_in_paths(fix)
+            return
+        if not writes:
+            return
+
+        def done(session: MayaSession, reply: dict) -> None:
+            changed, gone, skipped = int(reply.get("changed") or 0), reply.get("gone") or [], reply.get("skipped") or []
+            text = (f"{name}: {changed} path{'s' if changed != 1 else ''} now through a variable — not saved yet.")
+            if gone or skipped:
+                text += f" {len(gone) + len(skipped)} left: " + ", ".join([*gone, *skipped][:4])
+            self._say(text, "error" if gone or skipped else "success")
+
+        self._ask(session.session_id, protocol.SCENE_PATHS_APPLY, done, self.REPORT_TIMEOUT_MS, writes=writes)
+
+    def _fix_in_paths(self, files: list) -> None:
+        """The referenced files into Scenes › Paths, which looks for their missing files once they are read."""
+        window = self.window()
+        open_tool = getattr(window, "open_tool", None)
+        page = open_tool("scenes") if callable(open_tool) else None
+        paths = getattr(page, "paths", None)
+        if paths is None:
+            self._say("Scenes isn’t in this hub — open the files in its Paths tab yourself.", "error")
+            return
+        page.show_tab(page.PATHS)
+        paths.add(files, find=True)
 
     def _on_report(self, session_id: int) -> None:
         self._ask(session_id, protocol.LAUNCH_REPORT,

@@ -139,13 +139,14 @@ def scan_from_raw(path, raw: dict, roots: list[Root], environment: dict, cache: 
             use.state, use.variable = ma_paths.VARIABLE, shown[1:].split("/", 1)[0]
         else:
             lowered = shown.lower()
-            for root in roots:
-                folder = root.value.lower()
-                if lowered == folder or lowered.startswith(folder + "/"):
-                    use.root = root
-                    use.state = ma_paths.LEFT if item.get("inside") else ma_paths.CHANGE
-                    use.note = str(item.get("note") or "")
-                    break
+            under = [root for root in roots
+                     if lowered == root.value.lower() or lowered.startswith(root.value.lower() + "/")]
+            if under:
+                use.root = under[0]
+                use.state = ma_paths.LEFT if item.get("inside") else ma_paths.CHANGE
+                use.note = str(item.get("note") or "")
+                if use.state == ma_paths.CHANGE:
+                    use.options = [(root, 0) for root in under]   # Maya writes it: no byte offset
         use.exists = ma_paths._exists(ma_paths._resolved(use, lookup), cache)
         result.uses.append(use)
     return result
@@ -190,7 +191,9 @@ def apply_binary(scans: list[SceneScan], roots: list[Root], installed: dict, env
     for year, group in sorted(groups.items()):
         task = {"mode": "apply", "roots": [[root.name, root.value] for root in roots],
                 "scenes": [{"path": str(result.path), "size": result.size, "mtime_ns": result.mtime_ns,
-                            "relink": {use.key: use.relink for use in result.relinks}}
+                            "relink": {use.key: use.relink for use in result.relinks},
+                            # exactly what to swap and through which variable (the runner checks each)
+                            "writes": {use.key: use.new_path for use in result.changes}}
                            for result, _copy in group]}
         try:
             answer = _run(installed[year], task, environment)

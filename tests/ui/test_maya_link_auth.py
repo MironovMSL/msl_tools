@@ -172,6 +172,25 @@ class OpenInMedia(HubSide):
         self.assert_dropped()
 
 
+class ScenePathsCount(OpenInMedia):
+    """The count of paths a variable could stand for: in the hello, kept up by the scene events."""
+
+    def test_the_count_arrives_and_follows_the_scene(self):
+        self.hello(paths=3, scene="E:/shots/a.ma")
+        welcome = self.welcome()
+        self.maya.send(protocol.event(protocol.PROOF, proof=protocol.maya_proof(TOKEN, self.nonce, welcome["nonce"])))
+        self.assertTrue(self.pump(lambda: len(self.server.sessions()) == 1))
+        self.assertEqual(self.server.sessions()[0].paths, 3)
+        changed = []
+        self.server.sessions_changed.connect(lambda: changed.append(True))
+        self.maya.send(protocol.event(protocol.SCENE, scene="E:/shots/a.ma", modified=True, paths=0))
+        self.assertTrue(self.pump(lambda: self.server.sessions()[0].paths == 0))
+        self.assertTrue(changed)
+        self.maya.send(protocol.event(protocol.SCENE, scene="E:/shots/b.ma", modified=False, paths="x"))
+        self.assertTrue(self.pump(lambda: self.server.sessions()[0].scene == "E:/shots/b.ma"))
+        self.assertEqual(self.server.sessions()[0].paths, 0)          # not a count: 0, not an error
+
+
 class _FakeHub:
     """What sits on the hub's port: a QTcpServer that answers the way it is told."""
 
