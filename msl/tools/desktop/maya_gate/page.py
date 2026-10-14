@@ -4,7 +4,7 @@ import threading
 
 import msl_tools.msl.ui.qt_bindings as qt
 from msl_tools.msl.core.resources import Resources
-from msl_tools.msl.core.link import variables
+from msl_tools.msl.core.link import scene_settings, variables
 from msl_tools.msl.core.fs.maya_paths import MayaPaths
 from msl_tools.msl.ui.process_launcher.process_launcher import ProcessLauncher
 from msl_tools.msl.core.theme import ThemeRegistry
@@ -24,6 +24,7 @@ from msl_tools.msl.tools.desktop.maya_gate.user_setup_tab import UserSetupTab
 from msl_tools.msl.tools.desktop.maya_gate import launch_check
 from msl_tools.msl.tools.desktop.maya_gate.boost import BoostStore, LaunchLog
 from msl_tools.msl.tools.desktop.maya_gate.boost_tab import BoostTab
+from msl_tools.msl.tools.desktop.maya_gate.scene_tab import SceneTab
 from msl_tools.msl.tools.desktop.maya_gate.session_history import SessionHistory
 from msl_tools.msl.tools.desktop.maya_gate.snippets import SnippetStore
 from msl_tools.msl.tools.desktop.maya_gate.sessions_tab import SessionsTab
@@ -100,6 +101,9 @@ class MayaGatePage(qt.QtWidgets.QWidget):
     # {"<env>": true | false | "only"}: English keyboard while that environment's Maya is active (on
     # unless switched off); "only" = no other layout inside Maya (an older hub reads it as true)
     KEYBOARD_KEY = "keyboard"
+    SCENE_KEY = "scene"   # {"<env>": {"fps": "30" or "", "check": bool}} - see SceneTab
+    SCENE_FPS_VARIABLE = variables.SCENE_FPS
+    SCENE_CHECK_VARIABLE = variables.SCENE_CHECK
     KEEP_ENGLISH_VARIABLE = variables.KEEP_ENGLISH
     # Tells the launched Maya which environment it is (read by the MSL menu's "Print Launch Report").
     ENVIRONMENT_VARIABLE = variables.ENVIRONMENT
@@ -113,11 +117,12 @@ class MayaGatePage(qt.QtWidgets.QWidget):
     # Color of the icons in a version's right-click menu (maya_gate.qss) - see tinted_menu_icon().
     menuIconColor = color_property("_menu_icon_color", None)
     CONSOLE_VARIABLE = variables.CONSOLE
-    TAB_KEYS = ("variables", "user_setup", "boost", "sessions")  # tab order; stored by key, not index
+    TAB_KEYS = ("variables", "user_setup", "boost", "scene", "sessions")  # tab order; stored by key, not index
     SESSIONS_TAB_TITLE = "Sessions"
     DEFAULTS = {MAYA_KEY: {env: {} for env in ENVIRONMENTS},
                 CUSTOM_KEY: {env: {} for env in ENVIRONMENTS},
                 BOOST_KEY: {env: {"enabled": False, "skip": []} for env in ENVIRONMENTS},
+                SCENE_KEY: {env: {"fps": "", "check": True} for env in ENVIRONMENTS},
                 UI_SECTION: {"year": "", "environment": DEFAULT_ENVIRONMENT, "tab": TAB_KEYS[0],
                              "collapsed": {"maya": False, "custom": False}}}
 
@@ -193,6 +198,8 @@ class MayaGatePage(qt.QtWidgets.QWidget):
                                    running_years_for=lambda: {session.version
                                                               for session in MayaLinkServer.instance().sessions()})
         self._tabs.addTab(self._indented(self._boost_tab), "Boost start")
+        self._scene_tab = SceneTab(self._config[self.SCENE_KEY], self._environment)
+        self._tabs.addTab(self._indented(self._scene_tab), "Scene")
         self._link = MayaLinkServer.instance()  # the hub's one server; run_hub starts it listening
         self._sessions_tab = SessionsTab(self._link, self._session_history,
                                          launch=self._launch_scene, settings=self._ui,
@@ -343,6 +350,7 @@ class MayaGatePage(qt.QtWidgets.QWidget):
         self._custom_group.set_section(environment)
         self._user_setup_tab.set_environment(environment)
         self._boost_tab.set_environment(environment)
+        self._scene_tab.set_environment(environment)
         self._toolbar.set_english(self._english_mode(environment))
         self._check_environment()
 
@@ -493,6 +501,12 @@ class MayaGatePage(qt.QtWidgets.QWidget):
         english = self._english_mode(environment)
         if english != MayaGateToolbar.ENGLISH_OFF:
             environment_vars[self.KEEP_ENGLISH_VARIABLE] = "only" if english == MayaGateToolbar.ENGLISH_ONLY else "1"
+        rate = self._scene_tab.settings_for(environment)   # SceneTab; tools/maya/scene_defaults.py reads them
+        if rate["fps"]:
+            environment_vars[self.SCENE_FPS_VARIABLE] = rate["fps"]
+            if rate["check"]:
+                environment_vars[self.SCENE_CHECK_VARIABLE] = "1"
+        environment_vars.update(scene_settings.to_environment(rate))   # range, units, up axis, playback, keys
 
         if environment == self._environment and not preview:
             self._user_setup_tab.save()  # launch with what's on screen, not the last autosave

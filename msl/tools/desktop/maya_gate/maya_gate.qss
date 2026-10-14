@@ -40,6 +40,12 @@ UserSetupTab QLabel#userSetupTitle {
     font-weight: 600;
 }
 UserSetupTab QLabel#userSetupSection,
+/* Scene tab: what a Maya of the environment does with scenes (SceneTab). */
+SceneTab QLabel#sceneTitle { color: var(--text-primary); font-weight: 600; }
+SceneTab QLabel#sceneCaption { color: var(--text-secondary); }
+SceneTab QLabel#sceneHint { color: var(--text-secondary); }
+SceneTab QLabel#sceneNote { color: var(--accent); }
+SceneTab QLineEdit#sceneRange[state="error"] { border: 1px solid var(--error); }
 UserSetupTab QLabel#userSetupStatus {
     color: var(--text-secondary);
 }

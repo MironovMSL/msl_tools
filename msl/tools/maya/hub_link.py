@@ -552,6 +552,11 @@ def start() -> bool:
         keyboard_keeper.start()
     except Exception:
         pass
+    try:  # the environment's frame rate for new scenes, and the check on opening one (scene_defaults.py)
+        from msl_tools.msl.tools.maya import scene_defaults
+        scene_defaults.start()
+    except Exception:
+        pass
     port, token = os.environ.get(PORT_VARIABLE, ""), os.environ.get(TOKEN_VARIABLE, "")
     application = QtWidgets.QApplication.instance()
     if not port.isdigit() or not token or application is None:
