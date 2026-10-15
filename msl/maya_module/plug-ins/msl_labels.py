@@ -14,6 +14,9 @@ Each element of the `line` array is one line:
                      field's name, an angle / a length / a time the scene's units, a switch
                      on / off, a vector "(x, y, z)", a string as it is
     line[n].label    the text before the value; empty = the connected attribute's name
+    line[n].attribute    what the line is MEANT to show, as text ("hero:arm_ctrl.ikFk"): kept by
+                         the tool so a line whose attribute is not in the scene (yet) keeps it;
+                         the draw never reads it — the connection is what is shown
     line[n].color    the line's color
     line[n].opacity  0 = invisible .. 1 = solid
     line[n].show     off = the line is skipped (it keeps its connection)
@@ -234,6 +237,7 @@ class LabelsNode(omui.MPxLocatorNode):
     line = None
     value = None
     label = None
+    attribute = None
     color = None
     opacity = None
     show = None
@@ -319,6 +323,7 @@ class LabelsNode(omui.MPxLocatorNode):
         generic.keyable = False
         LabelsNode.value = value
         LabelsNode.label = string("label", "mlla", add=False)
+        LabelsNode.attribute = string("attribute", "mlat", add=False)
         LabelsNode.color = color("color", "mlco", (1.0, 1.0, 1.0), add=False)
         LabelsNode.opacity = number("opacity", "mlop", om.MFnNumericData.kFloat, 1.0, 0.0, 1.0, add=False)
         LabelsNode.show = number("show", "mlsh", om.MFnNumericData.kBoolean, True, add=False)
@@ -327,8 +332,8 @@ class LabelsNode(omui.MPxLocatorNode):
         LabelsNode.opacity_keys = number_list("opacityKeys", "mlok")
         LabelsNode.blend = choice("blend", "mlbl", ("smooth", "steps"), add=False)
         LabelsNode.line = compound.create("line", "mlln")
-        for child in (LabelsNode.value, LabelsNode.label, LabelsNode.color, LabelsNode.opacity,
-                      LabelsNode.show, LabelsNode.decimals, LabelsNode.color_keys,
+        for child in (LabelsNode.value, LabelsNode.attribute, LabelsNode.label, LabelsNode.color,
+                      LabelsNode.opacity, LabelsNode.show, LabelsNode.decimals, LabelsNode.color_keys,
                       LabelsNode.opacity_keys, LabelsNode.blend):
             compound.addChild(child)
         compound.array = True

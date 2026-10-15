@@ -66,6 +66,7 @@ msl_tools/                 (repo root)
                 playblast/        Playblast: a dockable panel inside Maya 2025+ (see "Playblast tool")
                 rename/           Rename: quick naming of Maya objects, a window inside Maya 2025+ (see "Rename tool")
                 controls/         Controls: rig controls — shape library, create, offsets, shape tools; Maya 2025+ (see "Controls tool")
+                labels/           Labels: attribute values live in the viewport (the mslLabels plug-in); Maya 2025+ (see "Labels tool")
 ```
 
 ## Hard conventions (violate these and it won't match the rest of the codebase)
@@ -3519,7 +3520,7 @@ axis (`flip`). ZERO THE SELECTED (`actions/zero_out`, in the Zero row): the mode
   can be tried by a click to see what it does, and given a key there (instead of a mere list in the
   settings menu).
 
-## Labels tool (inside Maya; steps 1-3 of 6 built)
+## Labels tool (inside Maya; steps 1-4 of 6 built)
 
 Attribute values shown live in the viewport — a column of "label  value" lines + a header, fixed
 on the screen (HUD) or standing at a node in the scene (3D). Planned 2026-10-15 with the user, the
@@ -3586,6 +3587,37 @@ No code of anyone else's (see CLAUDE.local.md).
   keyed in degrees, an enum by index, a vector untouched, the keys kept through save / open) and a
   playblast of frames 1 / 5 / 10 in a windowed Maya 2026 (throwaway prefs): IK/FK blue -> teal ->
   green, stretch white until 1.2 then red, a line fading in from invisible.
+- THE CORE (step 4, 2026-10-15), `msl/tools/maya/labels/`:
+  `layout.py` (no Qt, no Maya): dataclasses `Layout` (name, namespace it was last built for,
+  columns) / `Column` (one node: mode hud / 3d, corner, x / y, `anchor` = the 3D object, font, size,
+  spacing, header + color / scale / opacity, scale_mode manual / auto, scale, reference_height,
+  distance_scale, camera, lines) / `Line` (attribute "node.attr" WITHOUT the rig's namespace, label,
+  color, opacity, show, decimals, color_keys [(value, rgb)], opacity_keys [(value, opacity)], blend).
+  Enums are words ("hud", "top_left", "auto", "steps"); the node's index = their place in MODES /
+  CORNERS / SCALE_MODES / BLENDS. `with_namespace(path, ns)` puts ns in front of EVERY name of a
+  path ("|grp|ctrl.tx" -> "|ns:grp|ns:ctrl.tx"), `without_namespace(path, ns)` takes exactly that one
+  off (another namespace stays; None = any). `mirror_line` / `mirror_column(column, rename,
+  flip_corner)` take Rename's `rules.mirror` (lf_ <-> rt_, the HUD corner to the other side).
+  `problems()` (two columns of one name, a 3D column with no anchor, one that shows nothing, lines
+  with no attribute). JSON: `to_dict` / `from_dict` ({"format": "msl_labels", "version": 1, ...};
+  forgiving: a missing or wrong-kind value = its default, unknown keys ignored, keys sorted,
+  values held to their ranges), `save` (write_json_atomic) / `load` (ValueError for a file that is
+  no layout of ours; such a file is never moved aside - it isn't ours).
+  `scene.py` (maya.cmds): `build(layout, namespace=None)` = ONE undo step: a world group
+  "<ns>_<name>_labels" tagged `mslLabelsLayout` / `mslLabelsNamespace`, a transform per column
+  (`mslLabelsColumn`) with its mslLabels shape; a 3D column FOLLOWS its anchor through
+  anchor.worldMatrix[0] -> column.offsetParentMatrix (stays in the group); building again replaces
+  the group of the same layout + namespace (found by its tags, not its name); an attribute or anchor
+  not in the scene is no error - the line is made unconnected and named in `BuildResult.missing`.
+  `capture(group)` -> the Layout as the nodes hold it NOW (hand edits included), namespace taken off.
+  `find`, `rigs`, `namespaces`, `remove` (one undo step). `ensure_plugin()` loads msl_labels by name.
+  Plug-in change for it: `line[n].attribute` (string "mlat") = what the line is MEANT to show, set by
+  build - without it a line whose attribute wasn't in the scene lost it when read back (the
+  mayapy check found that); the draw never reads it.
+  Tests: tests/maya/test_labels.py (12: namespaces both ways, mirroring, checks, JSON round trip,
+  forgiving reading, files). mayapy 2026 (19 checks: two rigs in namespaces hero / villain, built,
+  connected, keys, 3D anchor following, read back equal, hand edits read, rebuilt in place, a
+  second namespace = a second group, one undo / redo, remove, save / open).
 
 ## Scenes tool
 
