@@ -6,6 +6,7 @@ work on what is selected / under the pointer and say what they did in the viewpo
     reset_attributes.py   values back to their defaults: picked keys, picked channels, or the
                           selected objects (a transform's t / r / s, another node's keyable ones)
     camera_views.py       the viewport camera to an orthographic view of the side it faces, and back
+    viewport.py           what a viewport shows: a kind on / off, geometry only (Shift: every viewport)
     rig.py                locators / joints on the selection (the Controls tool's own functions)
 
 SCRIPTS is the one list of them: tools/maya/hotkeys.py makes each a runtime command of the Hotkey
@@ -42,6 +43,18 @@ SCRIPTS = (
            f"{_HERE}.camera_views.toggle_ortho", "Camera"),
     Script("MSLCameraBack", "Camera Back", "The viewport camera back: to the perspective it had before Ortho View, "
            "else Maya's home view", f"{_HERE}.camera_views.camera_back", "Camera"),
+    # what the viewport shows (Shift: every viewport)
+    Script("MSLToggleCurves", "Curves On / Off", "NURBS curves shown / hidden in the viewport under the pointer "
+           "(Shift: every viewport)", f"{_HERE}.viewport.toggle_curves", "Viewport"),
+    Script("MSLTogglePolygons", "Polygons On / Off", "Polygons shown / hidden in the viewport under the pointer "
+           "(Shift: every viewport)", f"{_HERE}.viewport.toggle_polygons", "Viewport"),
+    Script("MSLToggleJoints", "Joints On / Off", "Joints shown / hidden in the viewport under the pointer "
+           "(Shift: every viewport)", f"{_HERE}.viewport.toggle_joints", "Viewport"),
+    Script("MSLToggleLocators", "Locators On / Off", "Locators shown / hidden in the viewport under the pointer "
+           "(Shift: every viewport)", f"{_HERE}.viewport.toggle_locators", "Viewport"),
+    Script("MSLGeometryOnly", "Geometry Only", "Everything but the geometry hidden in the viewport under the "
+           "pointer; again = back to exactly what it showed (Shift: every viewport)",
+           f"{_HERE}.viewport.geometry_only", "Viewport"),
     # attributes
     Script("MSLResetAttributes", "Reset Attributes", "Values back to their defaults: the keys picked in the Graph "
            "Editor, else the channels picked in the Channel Box, else the selected objects' move / rotate / scale "
@@ -75,4 +88,4 @@ SCRIPTS = (
     Script("MSLLabelsToggle", "Labels On / Off", "Show or hide every set of MSL Labels in the scene",
            f"{_TOOLS}.labels.toggle", "Show"),
 )
-GROUPS = ("Camera", "Attributes", "Rig", "Controls", "Show")
+GROUPS = ("Camera", "Viewport", "Attributes", "Rig", "Controls", "Show")

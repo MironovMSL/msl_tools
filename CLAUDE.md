@@ -3732,6 +3732,17 @@ and `front` refused; 23 commands registered in their categories; every call impo
 windowed Maya 2026 (MSL menu > Scripts built; Ortho View / Camera Back / Reset / Locators run
 through their runtime commands as a hotkey would; the ortho picture). NOT seen: a real Channel Box
 pick (a script can't make one) and a real key press.
+- `viewport.py` (2026-10-15, after the user's own MSLtoggle Joints; `MSLToggleCurves`,
+  `MSLTogglePolygons`, `MSLToggleJoints`, `MSLToggleLocators`, `MSLGeometryOnly`; image planes left
+  out - the user doesn't use them): `toggle(flag)` = one modelEditor kind shown <-> hidden in the
+  viewport UNDER THE POINTER (else the focused one); SHIFT held (`cmds.getModifiers() & 1`) = every
+  model panel, all set as the one under the pointer goes. `geometry_only()` hides every object kind
+  but polygons / NURBS / subdiv surfaces and, pressed again, puts back exactly what each viewport
+  showed (`_before`, per panel, for the session) - grid, manipulators, selection highlighting and
+  plug-in shapes (shot mask, Labels) are left alone. The kinds are Playblast's VISIBILITY_GROUPS.
+  View settings: no undo step. Checked in windowed Maya 2026 through the runtime commands (one
+  panel, the others untouched, back; geometry only and back to a state of the user's own; Shift
+  faked: every viewport alike, geometry only everywhere and back).
 The user's old copies in Documents/maya/2024/scripts and their old runtime commands (viewSnap,
 resetCamera, attributeResetter on Alt+F, Ctrl+Alt+F, Alt+W) were left for the user to remove /
 re-key.
@@ -3742,6 +3753,9 @@ re-key.
 Batch and Paths both work on many scenes with Maya closed, so one tool) — `ScenesPage`: a heading and a
 BaseTabWidget with the two pages built `embedded=True` (no heading of their own, no outer margins):
 **Render** = BatchPage, **Paths** = ScenePathsPage. EACH TAB KEEPS ITS OWN LIST, deliberately: Render
+PLANNED by the user (2026-10-15), not built: a HOTKEYS window of our own over SCRIPTS + the tools'
+commands - each listed, tried by a click to see what it does, and given a key there (the same
+idea was noted for Controls).
 reads every scene added in Maya (~10 s each) — a shared list would turn a folder of 300 scenes dropped for
 their paths into 300 Mayas. They hand scenes over instead: a render job's menu "Check its paths (Paths
 tab)" (`BatchPage.paths_requested`, .ma only) and a Paths row's "Render it (Render tab)"
