@@ -327,6 +327,14 @@ RangeStrip {
     qproperty-baseColor:   alpha(var(--text-primary), 8%);
 }
 
+/* --- GradientRamp: a color ramp to edit (its colors are the user's; frame, handles, marker here) */
+GradientRamp {
+    qproperty-borderColor: alpha(var(--border), 90%);
+    qproperty-handleColor: var(--text-secondary);
+    qproperty-pickedColor: var(--accent);
+    qproperty-markerColor: var(--text-primary);
+}
+
 /* --- BarStrip: a handful of measurements as thin bars ------------------------------- */
 
 BarStrip {

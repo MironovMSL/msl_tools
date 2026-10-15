@@ -93,28 +93,45 @@ def namespaces() -> list[str]:
 
 # --- building -----------------------------------------------------------------------------------
 
-def build(layout: lay.Layout, namespace: str | None = None) -> BuildResult:
+def build(layout: lay.Layout, namespace: str | None = None, undo: bool = True) -> BuildResult:
     """Builds `layout` into the scene for `namespace` (None = the layout's own) as one undo step,
-    replacing what was built before for the same layout and namespace."""
+    replacing what was built before for the same layout and namespace. `undo=False`: outside
+    the undo queue — the window's live update after every edit (a hundred small edits must not
+    fill Ctrl+Z; the undo queue itself is left as it was)."""
     ensure_plugin()
     namespace = (layout.namespace if namespace is None else namespace).strip(":")
+    if not undo:
+        was = cmds.undoInfo(query=True, stateWithoutFlush=True)
+        cmds.undoInfo(stateWithoutFlush=False)
+        try:
+            return _build(layout, namespace)
+        finally:
+            cmds.undoInfo(stateWithoutFlush=was)
     cmds.undoInfo(openChunk=True, chunkName=UNDO_NAME)
     try:
-        old = find(layout.name, namespace)
-        if old:
-            cmds.delete(old)
-        prefix = (_safe(namespace.replace(":", "_")) + "_") if namespace else ""
-        name = _safe(layout.name)
-        name = name if name.lower().endswith("labels") else name + "_labels"
-        group = cmds.group(empty=True, world=True, name=prefix + name)
-        _tag(group, TAG, layout.name)
-        _tag(group, NAMESPACE_TAG, namespace)
-        result = BuildResult(group=cmds.ls(group, long=True)[0])
-        for column in layout.columns:
-            _build_column(result, column, namespace)
-        return result
+        return _build(layout, namespace)
     finally:
         cmds.undoInfo(closeChunk=True)
+
+
+def _build(layout: lay.Layout, namespace: str) -> BuildResult:
+    old = find(layout.name, namespace)
+    selection = cmds.ls(selection=True, long=True) or []
+    if old:
+        cmds.delete(old)
+    prefix = (_safe(namespace.replace(":", "_")) + "_") if namespace else ""
+    name = _safe(layout.name)
+    name = name if name.lower().endswith("labels") else name + "_labels"
+    group = cmds.group(empty=True, world=True, name=prefix + name)
+    _tag(group, TAG, layout.name)
+    _tag(group, NAMESPACE_TAG, namespace)
+    result = BuildResult(group=cmds.ls(group, long=True)[0])
+    for column in layout.columns:
+        _build_column(result, column, namespace)
+    # cmds.group selects the new group: put back what the user had selected (what still exists)
+    kept = [node for node in selection if cmds.objExists(node)]
+    cmds.select(kept, replace=True) if kept else cmds.select(clear=True)
+    return result
 
 
 def _build_column(result: BuildResult, column: lay.Column, namespace: str) -> None:
@@ -241,6 +258,97 @@ def _capture_line(element: str, namespace: str) -> lay.Line:
                     decimals=_get(f"{element}.decimals"), color_keys=_keys(f"{element}.colorKeys", 4),
                     opacity_keys=_keys(f"{element}.opacityKeys", 2),
                     blend=lay.BLENDS[_get(f"{element}.blend")])
+
+
+# --- what the window asks -----------------------------------------------------------------------
+
+def selected_channels() -> list[str]:
+    """"node.attribute" of every channel picked in the Channel Box, for each selected object —
+    the order Maya lists them in (the objects in the order picked)."""
+    objects = cmds.ls(orderedSelection=True, objectsOnly=True) or []
+    names = []
+    for box_flag in ("selectedMainAttributes", "selectedShapeAttributes", "selectedHistoryAttributes",
+                     "selectedOutputAttributes"):
+        names += cmds.channelBox("mainChannelBox", query=True, **{box_flag: True}) or []
+    found = []
+    for node in objects:
+        for name in names:
+            if cmds.attributeQuery(name, node=node, exists=True):
+                long_name = cmds.attributeQuery(name, node=node, longName=True)
+                found.append(f"{node}.{long_name}")
+    return list(dict.fromkeys(found))
+
+
+def selected_object() -> str:
+    """The first selected object's name ("" = nothing selected)."""
+    objects = cmds.ls(orderedSelection=True, objectsOnly=True) or []
+    return objects[0] if objects else ""
+
+
+def value_text(path: str, decimals: int = -1) -> str:
+    """What a line shows for `path` now, roughly as the node draws it ("-" = no such attribute)."""
+    try:
+        if not path or not cmds.objExists(path):
+            return "-"
+        value = cmds.getAttr(path, asString=True) if _is_enum(path) else cmds.getAttr(path)
+    except (RuntimeError, ValueError):
+        return "-"
+    return _text(value, decimals)
+
+
+def value_number(path: str) -> float | None:
+    """`path`'s value as one number (an enum's index, a switch 0 / 1); None = none / not a number."""
+    try:
+        if not path or not cmds.objExists(path):
+            return None
+        value = cmds.getAttr(path)
+    except (RuntimeError, ValueError):
+        return None
+    if isinstance(value, bool):
+        return float(value)
+    return float(value) if isinstance(value, (int, float)) else None
+
+
+def value_range(path: str) -> tuple[float, float] | None:
+    """The attribute's own minimum and maximum, when it has both (a 0..1 switch, an enum: 0..last)."""
+    try:
+        node, attribute = path.split(".", 1)
+        if _is_enum(path):
+            fields = cmds.attributeQuery(attribute, node=node, listEnum=True)[0].split(":")
+            return 0.0, float(max(1, len(fields) - 1))
+        if cmds.attributeQuery(attribute, node=node, minExists=True) and \
+                cmds.attributeQuery(attribute, node=node, maxExists=True):
+            low = cmds.attributeQuery(attribute, node=node, minimum=True)[0]
+            high = cmds.attributeQuery(attribute, node=node, maximum=True)[0]
+            if high > low:
+                return float(low), float(high)
+    except (RuntimeError, ValueError, IndexError, TypeError):
+        pass
+    return None
+
+
+def _is_enum(path: str) -> bool:
+    try:
+        return cmds.getAttr(path, type=True) == "enum"
+    except (RuntimeError, ValueError):
+        return False
+
+
+def _text(value, decimals: int) -> str:
+    if isinstance(value, bool):
+        return "on" if value else "off"
+    if isinstance(value, (list, tuple)):
+        parts = value[0] if len(value) == 1 and isinstance(value[0], (list, tuple)) else value
+        return "(" + ", ".join(_text(part, decimals) for part in parts) + ")"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        if decimals >= 0:
+            text = "%.*f" % (decimals, value)
+            return text[1:] if text.startswith("-") and float(text) == 0.0 else text
+        text = ("%.2f" % value).rstrip("0").rstrip(".")
+        return "0" if text in ("-0", "") else text
+    return str(value)
 
 
 def remove(group: str) -> None:

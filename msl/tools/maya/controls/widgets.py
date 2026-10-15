@@ -42,7 +42,9 @@ class DragNumberField(qt.QtWidgets.QLineEdit):
             self.value_changed.emit(value)
 
     def _show(self) -> None:
-        text = f"{self._value:.{self._decimals}f}".rstrip("0").rstrip(".")
+        text = f"{self._value:.{self._decimals}f}"
+        if "." in text:   # trailing zeros of the FRACTION only: with 0 decimals "40" stayed "4"
+            text = text.rstrip("0").rstrip(".")
         if self.text() != text:
             self.setText(text)
 

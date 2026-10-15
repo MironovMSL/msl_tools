@@ -66,7 +66,7 @@ msl_tools/                 (repo root)
                 playblast/        Playblast: a dockable panel inside Maya 2025+ (see "Playblast tool")
                 rename/           Rename: quick naming of Maya objects, a window inside Maya 2025+ (see "Rename tool")
                 controls/         Controls: rig controls — shape library, create, offsets, shape tools; Maya 2025+ (see "Controls tool")
-                labels/           Labels: attribute values live in the viewport (the mslLabels plug-in); Maya 2025+ (see "Labels tool")
+                labels/           Labels: attribute values live in the viewport (the mslLabels plug-in), a window inside Maya 2025+ (see "Labels tool")
 ```
 
 ## Hard conventions (violate these and it won't match the rest of the codebase)
@@ -230,7 +230,7 @@ msl_tools/                 (repo root)
     named by what the icon IS, not the gesture (`drag_handle`, not
     `dragAndDrop`). Categories: `window/` (chrome: close/maximize/...),
     `actions/` (row/toolbar actions: `drag_handle`, `copy`, `delete`,
-    `browse`, `folder_add`, `file_video`, `bookmark`, `bookmark_add`, `save`, `file_add`, `chevron_right`, `eye`, `folder_into`, `compress`, `scissors`, `repeat`, `text_frame`, `volume`, `gif`, `image_stack`, `clapper`, `crop`, `merge`, `split_view`, `film`, `timeline`, `folder_watch`, `pause`, `bell` (the Media actions and its queue), `clear`, `arrow_right`, `chevron_down`, `add`, `check`, `select_all`, `more`, `report`, `code`, `restart`, `power`, `play`, `edit`, `scene`, `stop`, `lock`, `search`, `rename`, and the Rename tool's quick buttons: `case_upper`, `case_capital`, `case_lower`, `case_snake` (a snake), `case_camel` (a camel's humps), `cut_prefix`, `cut_suffix`, `cut_number`, `cut_digits`, `cut_first`, `cut_last`, `namespace_out`, `magic_fix`, `sweep`, `mirror_sides`, `shape_name`, `warning`, `error`, `keyboard` (Maya Gate's EN), and the Rename strip's `names_same`, `name_bad`, `skin_joints`, `side_other`, `lock_find`, `convention_check`, `names_unique`, `name_related`, `convention_fix`, `unlock`, `sets`, `star`, `sliders`, `book`, `replace`, `skin_mesh` (the grey cube under `skin_joints`), `branch`, and the Controls tool's `controls`, `grow`, `shrink`, `outliner`, `color_pick`, `line_width`, `mirror_shape`, `mirror_update`, `zero_out`, `zero_matrix`, `matrix_out`, `on_top`, `cvs`, `paste`, `drive_constraint`, `drive_matrix`, `drive_off`, `locator`, `joint_chain`, `center`, `move`, `minus`, `smooth_curve`, `expand`, `collapse`, `undo`, `redo`, `snap_grid`, `chevron_left`, `chevron_up`, `layout`, `joint_node`, `joint_shape`, `joints_separate`, `shape_off`, `eye_off`, `same_shape`, `channels`, `attributes`, `keyframe`, `range`, `viewport`, `shade_lighter`, `shade_darker`, `brush` (the COLOR card and its header button; `color_pick` stays the pipette of "take the color") (`joint_chain` = a ball and a tapering bone to a smaller ball, like Maya's own joint icon); add new action icons here),
+    `browse`, `folder_add`, `file_video`, `bookmark`, `bookmark_add`, `save`, `file_add`, `chevron_right`, `eye`, `folder_into`, `compress`, `scissors`, `repeat`, `text_frame`, `volume`, `gif`, `image_stack`, `clapper`, `crop`, `merge`, `split_view`, `film`, `timeline`, `folder_watch`, `pause`, `bell` (the Media actions and its queue), `clear`, `arrow_right`, `chevron_down`, `add`, `check`, `select_all`, `more`, `report`, `code`, `restart`, `power`, `play`, `edit`, `scene`, `stop`, `lock`, `search`, `rename`, and the Rename tool's quick buttons: `case_upper`, `case_capital`, `case_lower`, `case_snake` (a snake), `case_camel` (a camel's humps), `cut_prefix`, `cut_suffix`, `cut_number`, `cut_digits`, `cut_first`, `cut_last`, `namespace_out`, `magic_fix`, `sweep`, `mirror_sides`, `shape_name`, `warning`, `error`, `keyboard` (Maya Gate's EN), and the Rename strip's `names_same`, `name_bad`, `skin_joints`, `side_other`, `lock_find`, `convention_check`, `names_unique`, `name_related`, `convention_fix`, `unlock`, `sets`, `star`, `sliders`, `book`, `replace`, `skin_mesh` (the grey cube under `skin_joints`), `branch`, and the Controls tool's `controls`, `grow`, `shrink`, `outliner`, `color_pick`, `line_width`, `mirror_shape`, `mirror_update`, `zero_out`, `zero_matrix`, `matrix_out`, `on_top`, `cvs`, `paste`, `drive_constraint`, `drive_matrix`, `drive_off`, `locator`, `joint_chain`, `center`, `move`, `minus`, `smooth_curve`, `expand`, `collapse`, `undo`, `redo`, `snap_grid`, `chevron_left`, `chevron_up`, `layout`, `joint_node`, `joint_shape`, `joints_separate`, `shape_off`, `eye_off`, `same_shape`, `channels`, `attributes`, `keyframe`, `range`, `viewport`, `shade_lighter`, `shade_darker`, `brush` (the COLOR card and its header button; `color_pick` stays the pipette of "take the color") (`joint_chain` = a ball and a tapering bone to a smaller ball, like Maya's own joint icon), and the Labels tool's `labels` (a tag with two lines of text); add new action icons here),
     `apps/` (third-party application logos: `maya`; later houdini, blender...
     — named after the app, not the tool that uses it, so several tools can
     share one), `tools/` (sidebar icons of our OWN hub tools, one-color like
@@ -1271,6 +1271,7 @@ atoms/icons/tinted_icon.py                TintedIcon (passive one-color icon tin
 atoms/buttons/glyph_button.py             GlyphButton (custom-painted small icon button; QPushButton's QSS padding leaves no room for a glyph at ~20px)
 atoms/comboboxes/base_combo_box.py        BaseComboBox (was QCustomComboBox)
 atoms/charts/ring_gauge.py                RingGauge (how far something is as a ring filling clockwise, a value in the middle, a caption under it; animated; qproperty trackColor / fillColor / textColor / captionColor; #ringDone = the success tone)
+atoms/gradients/gradient_ramp.py         GradientRamp (a color ramp to edit: click the bar = a stop, drag a handle, Delete, double click = its color; set_marker(position) = where a value lies now, set_steps(); stops_changed(list) / picked(int); its colors are the user's data, frame / handles / marker = qproperty borderColor / handleColor / pickedColor / markerColor)
 atoms/charts/bar_strip.py                 BarStrip (a handful of measurements as thin bars in two tones, each with a tooltip; scaled from zero; qproperty accentColor / mutedColor)
 atoms/layouts/flow_layout.py              FlowLayout (items left to right, wrapping like words; height-for-width; hidden widgets take no room)
 atoms/editors/token_line_edit.py          TokenLineEdit (a line edit whose text may hold {tokens}: a right click lists them and the picked one goes in WHERE THE CLICK WAS; Cut / Copy / Paste stay in that menu; default= adds "Back to <that text>"; insert_token() for a button beside it; token_inserted(str), focused())
@@ -3520,7 +3521,7 @@ axis (`flip`). ZERO THE SELECTED (`actions/zero_out`, in the Zero row): the mode
   can be tried by a click to see what it does, and given a key there (instead of a mere list in the
   settings menu).
 
-## Labels tool (inside Maya; steps 1-4 of 6 built)
+## Labels tool (inside Maya; steps 1-5 of 6 built)
 
 Attribute values shown live in the viewport — a column of "label  value" lines + a header, fixed
 on the screen (HUD) or standing at a node in the scene (3D). Planned 2026-10-15 with the user, the
@@ -3618,6 +3619,49 @@ No code of anyone else's (see CLAUDE.local.md).
   forgiving reading, files). mayapy 2026 (19 checks: two rigs in namespaces hero / villain, built,
   connected, keys, 3D anchor following, read back equal, hand edits read, rebuilt in place, a
   second namespace = a second group, one undo / redo, remove, save / open).
+- THE WINDOW (step 5, 2026-10-15; MSL menu > Labels, hotkeys MSLLabels / MSLLabelsToggle -
+  `labels.toggle()` shows / hides every built set, one undo step; menu icon `labels` = a new
+  actions/labels.svg, a tag): `window.py` LabelsWindow (FramelessDialog 440 wide, a child of
+  Maya's main window, Controls' pattern: status in the header, the height follows the content,
+  place kept in configsMayaMng "labels" `window`) + `panel.py` LabelsPanel, cards as in the agreed
+  mock-up: VIEWPORT (`sketch.py` ViewportSketch - the picture 16:9 at most MOST 190 px high, HUD
+  columns where they stand, dragged with the mouse: the column keeps its corner, the drag changes
+  x / y; letters drawn at least READABLE 8 px - true to scale a 14 px label is 3 px there, places
+  ARE to scale; on Maya's viewport grey in BOTH themes: palette tokens --viewport-ground / -text /
+  -quiet in light.css; 3D columns only named along the bottom; heading: 3D / HUD), COLUMNS (chips +
+  "+ column"; mirror (Rename's rules, HUD corner flipped) / duplicate / remove; header + color,
+  size, gap, font, `sketch.CornerPicker` 2 x 2 cells + X / Y, or for 3D the object + "selected" +
+  distance), LINES (a QTreeWidget: shown tick, label, attribute - double click types, namespace
+  taken off -, "Now" = the value read every VALUES_MS 300 while on screen (`scene.value_text`);
+  from the Channel Box (`scene.selected_channels`), add, up / down, remove), LINE (Static color +
+  opacity / Gradient: `GradientRamp` over a range - a new GENERIC atom ui/widgets/atoms/gradients/
+  gradient_ramp.py: click the bar = a stop, drag, Delete, double click = its color, `set_marker`
+  = where the value is now, `set_steps`; colors in qproperty borderColor / handleColor /
+  pickedColor / markerColor, widgets.qss -, the range from the attribute's own min / max
+  (`scene.value_range`; an enum 0..last) when a gradient is made, smooth / steps, opacity from - to
+  across the range, digits), then Namespace (the scene's) + Size Manual / Auto (for every column)
+  and "Build in scene" / "Update in scene". LIVE: once built, every edit rebuilds the set
+  LIVE_MS 250 later OUTSIDE the undo queue (`scene.build(undo=False)`: stateWithoutFlush off and
+  back) - the button is the undoable build. `build` puts the user's selection back (cmds.group had
+  selected the new group). The header's bookmark: saved layouts (configsMayaMng "labels"
+  `layouts`), read back from the scene, remove from the scene, write / read a file, new layout.
+  Config reads go through `JsonConfig.data` (plain dicts: a ConfigNode is no dict, and
+  layout.from_dict wants dicts).
+  Fixed on the way: `controls/widgets.py` DragNumberField with 0 decimals showed 40 as "4" (it
+  stripped the zeros of WHOLE numbers too). Inside Maya a QTreeWidget's QHeaderView takes Maya's
+  dark palette unless labels.qss gives it a ground. `cmds.ls(selection=True,
+  orderedSelection=True)` is an error ("Only one of -sl/-hl/-lv"): orderedSelection alone.
+  A script can't pick channels in the Channel Box (`channelBox -e -select` leaves
+  selectedMainAttributes None) - "From the Channel Box" was NOT seen working with a real pick.
+  TRAP met again: MAYA_PLUG_IN_PATH under %TEMP%'s 8.3 short name (S_MIRO~1) = the plug-in "can't be
+  loaded"; give Maya the long path (`cygpath -w -l`).
+  Checked: offscreen from an isolated copy (16 checks: chips, lines, rows per mode, gradient made /
+  rescaled / opacity, a column dragged in the sketch and kept, mirror, the 3D row, the layouts menu,
+  min width 391); windowed Maya 2026 from an isolated copy and throwaway prefs (window opened by the
+  launcher, lines added, gradient range from the attribute, built for namespace "hero", values
+  read, playblast showing the labels, a header edit reaching the node live without an undo step,
+  the selection kept, closed, no draw error). NOT done by a real hand: clicks, drags, the ramp,
+  the menus, the file dialogs.
 
 ## Scenes tool
 

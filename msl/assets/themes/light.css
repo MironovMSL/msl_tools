@@ -33,6 +33,9 @@
     --field:             #ffffff;
     --field-top:         #f1f3f6;   /* shade at a field's top edge: looks set in */
     --editor-background: #f8f9fb;
+    --viewport-ground:   #5a5a5a;   /* Maya's viewport grey, in BOTH themes: labels are colored for it */
+    --viewport-text:     #e8e8e8;   /* text drawn on it, and quiet text */
+    --viewport-quiet:    #b4b4b4;
 
     /* push buttons: top-lit gradients (base.qss); primary = the accent one */
     --button-top:          #ffffff;

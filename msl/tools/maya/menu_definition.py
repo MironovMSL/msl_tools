@@ -28,6 +28,7 @@ class MslMenuDefinition:
             items=(
                 MenuAction("Playblast", cls._tool("playblast"), icon=cls._icon("playblast"), tooltip="What the viewport shows as a video or frames: camera, size, frame range, name. Maya 2025 and newer."),
                 MenuAction("Controls", cls._tool("controls"), icon=cls._icon("controls"), tooltip="Rig controls: a library of shapes, a control on every selected joint or object with its offsets and side color - driving it by constraints or the matrix if you like -, shape tools, colors. Maya 2025 and newer."),
+                MenuAction("Labels", cls._tool("labels"), icon=cls._icon("labels"), tooltip="Attribute values shown live in the viewport - on the screen or next to an object, colored by the value; one layout fits every copy of a rig. Maya 2025 and newer."),
                 MenuAction("Rename", cls._tool("rename"), icon=cls._icon("rename"), tooltip="Quick naming of the selected objects: a name with numbers, sides and kinds, prefix / suffix, find & replace, a library of words — see before / after first. Maya 2025 and newer."),
                 MenuDivider(),
                 SubMenu("Scene", icon=cls._icon("scene"), items=(

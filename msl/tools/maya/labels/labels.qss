@@ -1,0 +1,113 @@
+/*
+ * Labels tool styles (template) — registered with StylesheetBuilder.register_template() by
+ * panel.py and appended after ui/theme/base.qss + widgets.qss. Same var()/alpha() syntax.
+ */
+
+TintedIcon#labelsTitleIcon {
+    qproperty-iconColor: var(--accent);
+}
+LabelsPanel StableScrollArea#labelsScroll {
+    background-color: transparent;
+    border: none;
+}
+LabelsPanel {
+    qproperty-menuIconColor: var(--text-primary);
+}
+LabelsPanel QLabel#labelsCaption {
+    color: var(--text-secondary);
+    font-size: 11px;
+}
+
+/* The sketch of the picture: Maya's viewport grey in both themes (the labels' colors are the user's,
+   chosen for that grey); its own captions in the light greys made for it. */
+LabelsPanel ViewportSketch {
+    qproperty-frameColor: alpha(var(--border), 90%);
+    qproperty-groundColor: var(--viewport-ground);
+    qproperty-textColor: var(--viewport-text);
+    qproperty-quietColor: var(--viewport-quiet);
+    qproperty-pickedColor: var(--accent);
+}
+
+LabelsPanel CornerPicker {
+    qproperty-cellColor: alpha(var(--text-secondary), 80%);
+    qproperty-hoverColor: var(--accent);
+    qproperty-pickedColor: var(--accent);
+}
+
+/* Small tool buttons in the cards' headings. */
+LabelsPanel QuickButton#labelsTool {
+    qproperty-iconColor: var(--text-secondary);
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 5px;
+    padding: 0px;
+    min-width: 22px;
+    max-width: 22px;
+}
+LabelsPanel QuickButton#labelsTool:hover {
+    qproperty-iconColor: var(--text-primary);
+    background: alpha(var(--text-primary), 8%);
+}
+LabelsPanel QuickButton#labelsTool[tone="teal"] { qproperty-iconColor: var(--teal); }
+
+LabelsPanel ToggleIconButton#labelsToggle {
+    qproperty-iconColor: var(--text-secondary);
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 5px;
+    padding: 0px;
+    min-width: 24px;
+}
+LabelsPanel ToggleIconButton#labelsToggle:hover {
+    border: 1px solid alpha(var(--accent), 60%);
+}
+LabelsPanel ToggleIconButton#labelsToggle[on="true"] {
+    qproperty-iconColor: var(--accent);
+    background: alpha(var(--accent), 20%);
+    border: 1px solid alpha(var(--accent), 70%);
+}
+
+/* The lines: a list on a field, the picked one in the accent. */
+LabelsPanel QTreeWidget#labelsLines {
+    background-color: var(--field);
+    border: 1px solid alpha(var(--border), 80%);
+    border-radius: 6px;
+    color: var(--text-primary);
+}
+LabelsPanel QTreeWidget#labelsLines::item {
+    height: 22px;
+}
+LabelsPanel QTreeWidget#labelsLines::item:selected {
+    background: alpha(var(--accent), 22%);
+    color: var(--text-primary);
+}
+/* inside Maya the header takes Maya's own (dark) palette unless it is given a ground of ours */
+LabelsPanel QTreeWidget#labelsLines QHeaderView {
+    background: var(--field);
+    border: none;
+    border-top-left-radius: 6px;
+    border-top-right-radius: 6px;
+}
+LabelsPanel QTreeWidget#labelsLines QHeaderView::section {
+    background: var(--field);
+    color: var(--text-secondary);
+    border: none;
+    border-bottom: 1px solid alpha(var(--border), 80%);
+    padding: 2px 4px;
+    font-size: 11px;
+}
+
+LabelsWindow QuickButton#labelsHeaderButton {
+    qproperty-iconColor: var(--text-secondary);
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 5px;
+    padding: 0px;
+    min-width: 24px;
+}
+LabelsWindow QuickButton#labelsHeaderButton:hover {
+    qproperty-iconColor: var(--text-primary);
+    background: alpha(var(--text-primary), 8%);
+}
+LabelsWindow QLabel#headerSubtitle[state="done"] { color: var(--success); }
+LabelsWindow QLabel#headerSubtitle[state="error"] { color: var(--error); }

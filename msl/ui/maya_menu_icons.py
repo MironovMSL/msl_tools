@@ -24,6 +24,7 @@ MENU_ICONS = {
     "playblast": ("actions", "clapper"),     # the Playblast window's own icon
     "rename": ("actions", "rename"),         # the Rename window's own icon
     "controls": ("actions", "controls"),     # the Controls window's own icon
+    "labels": ("actions", "labels"),         # the Labels window's own icon
     "paths": ("tools", "paths"),             # the Scenes > Paths tab's icon
     "scene": ("actions", "scene"),           # the Scene submenu (actions on the open scene)
     "dev": ("actions", "code"),
