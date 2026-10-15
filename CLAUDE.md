@@ -50,7 +50,7 @@ msl_tools/                 (repo root)
                               ui_resources.py (UiResources singleton), theme/,
                               process_launcher/ (ProcessLauncher — QProcess-based, so ui/, not core/),
                               widgets/ (atoms/, compositions/, windows/, app/)
-        maya_module/          the Maya MODULE of msl_tools: mslTools.mod + plug-ins/ (msl_shot_mask.py),
+        maya_module/          the Maya MODULE of msl_tools: mslTools.mod + plug-ins/ (msl_shot_mask.py, msl_labels.py),
                               scripts/ (what Maya looks up by name), later icons/ - not a Python package:
                               Maya reads it through MAYA_MODULE_PATH (see "Maya module")
         tools/                DCC-specific instruments
@@ -3518,6 +3518,74 @@ axis (`flip`). ZERO THE SELECTED (`actions/zero_out`, in the Zero row): the mode
   NOT BUILT, the user's plan for later: a HOTKEYS window of its own - the tool's commands listed, each
   can be tried by a click to see what it does, and given a key there (instead of a mere list in the
   settings menu).
+
+## Labels tool (inside Maya; steps 1-3 of 6 built)
+
+Attribute values shown live in the viewport — a column of "label  value" lines + a header, fixed
+on the screen (HUD) or standing at a node in the scene (3D). Planned 2026-10-15 with the user, the
+window's mock-up agreed (cards: VIEWPORT sketch where columns are dragged, COLUMNS as chips, LINES
+with live values, LINE with static / gradient color, namespace + Manual / Auto size + "Update in
+scene"). Steps: 1 the node (built) · 2 size across screens / playblasts · 3 gradients of color and
+opacity by value · 4 Qt-free core (layout -> columns -> lines, JSON, build in the scene with a
+namespace, read back from the scene) · 5 the window · 6 menu, hotkeys, Playblast.
+No code of anyone else's (see CLAUDE.local.md).
+- `maya_module/plug-ins/msl_labels.py` — node `mslLabels` (MPxLocatorNode + MPxDrawOverride,
+  id 0x0007F7A2, self-contained, API 2.0, short names "ml…"). `line[n]` compound array: `value`
+  (an MFnGenericAttribute — API 2.0 has `addNumericType` / `addDataType`, no `add…DataAccept` and
+  no unit type: angles / lengths connect anyway), `label` ("" = the connected attribute's name),
+  `color`, `opacity`, `show`, `decimals` (-1 = at most two). The value is read from the SOURCE
+  plug (`plug_text`: enum names, angle / length / time in the scene's units, on / off, vectors,
+  strings), so units and enum names survive. Labels are padded to the longest one (Consolas =
+  a column of values). `displayMode` HUD (`corner` + `screenX` / `screenY` px) / 3D (the node's
+  world position projected through kViewProjMtx, + the same px offset; nothing behind the camera);
+  `fontName`, `fontSize`, `lineSpacing`, `headerText` ("" = none) / `headerScale` / `headerColor` /
+  `headerOpacity`, `scaleMode` manual (`scale`) / auto (view height / `referenceHeight`), `camera`
+  ("" = all). Draw override always dirty (values change without the node knowing). A failed draw
+  -> MSL_LABELS_ERROR. TRAP, measured in Maya 2026: text2d draws a NON-ASCII character as a run of
+  garbage (half the character table, the degree sign did it) — `_drawable()` turns every such
+  character into "?"; so no "°" after angles, and Cyrillic labels read "????".
+  Unlike the shot mask the node is SCENE DATA (part of a rig): it is saved, so a scene using it gets
+  `requires "msl_labels.py"`.
+  Checked: mayapy 2026 (23 checks: loaded by name through MAYA_PLUG_IN_PATH, eight attribute kinds
+  connected and read, kept through save / open, unload) and windowed Maya 2026 from the hub (HUD top
+  left / top right / bottom right, auto size, 3D at a cube, a keyed value following the time, a
+  hidden, a faint and an unconnected line). With a right corner each line is right-aligned whole
+  (no font metrics in MUIDrawManager): the values line up at the edge, the labels don't.
+- SIZE (step 2, 2026-10-15), all MEASURED in windowed Maya 2026 (throwaway MAYA_APP_DIRs, offscreen
+  and onscreen playblasts, letters found in the PNGs): (1) a playblast hands the draw ITS size as
+  the viewport's (960 x 540 ... 3840 x 2160, on- and offscreen alike), and `renderingDestination`
+  is the same (kViewport) — a draw can't tell a playblast from the viewport; (2) Maya MULTIPLIES
+  every font size given to MUIDrawManager by its interface scale (`mayaDpiSetting
+  realScaleValue`), in playblasts too: at 150 % the same 1920 x 1080 playblast had letters 1.46x
+  as big — so the same scene gave different playblasts on different machines, and lines overlapped
+  (the spacing didn't grow with them); (3) text2d's point is the bottom of the text's box: capitals
+  are 0.65 of the size, the descent 0.23 (`BASELINE_PART` 0.88 puts the capitals' top on screenY).
+  Rule now: the node works in real pixels and gives MUIDrawManager `_points()` = pixels / UI_SCALE
+  (read once by `initializePlugin`, 1 in mayapy). Manual = pixels x Maya's interface scale (like
+  Maya's menus, for working); Auto = viewport height / referenceHeight (a part of the picture, for
+  playblasts). screenX / screenY follow the same rule, without `scale`. Measured result: Manual 13 px
+  capitals at every playblast size at 100 %, 19 at 150 %; Auto 13 / 26 px at 1080 / 2160, and at 2160
+  pixel-for-pixel the same at 100 % and 150 % (at 1080 one pixel less at 150 %: the size is whole
+  points). Below ~8 px (Auto at 540) the letters degrade — readable labels need a bigger fontSize.
+  `distanceScale` (3D, perspective only): > 0 = the camera distance at which the text is fontSize,
+  nearer bigger, farther smaller, at most DISTANCE_LIMIT 4x either way — measured: 13 / 6 / 26 /
+  51 px at distance 10 / 20 / 5 / 1 with distanceScale 10.
+  The scale mode stays Manual by default; the window (step 5) should offer Auto for playblasts.
+- GRADIENTS (step 3, 2026-10-15): per line `colorKeys` [value, r, g, b, ...] and `opacityKeys`
+  [value, opacity, ...] (doubleArray children of `line`) + `blend` smooth / steps (steps = the key
+  at or below the value holds: "red from 1.2 on"). Keys are in the VALUE's own units — what the
+  line shows: degrees, the scene's length unit, an enum's INDEX, a switch 0 / 1 (`plug_number`) —
+  in any order (`parse_keys` sorts, drops an unfinished last key); outside them the first / last
+  holds (`sample`). Any key = the line's color / opacity come from them; a vector or a string keeps
+  `color` / `opacity`; color keys alone keep the line's own opacity and the other way round. No
+  separate "range": the values ARE the positions (the window's ramp shows its own range).
+  `_keyed_color` reads the children by their attribute objects (`element.child(LabelsNode.x)`).
+  Test trap: a copy of the plug-in imported by path in mayapy never ran initialize() — its
+  LabelsNode attributes are None; the check fills them from the real node (`MFnDependencyNode.
+  attribute(name)`). Checked: mayapy 2026 (38 checks: sorting, blending, steps, opacity, an angle
+  keyed in degrees, an enum by index, a vector untouched, the keys kept through save / open) and a
+  playblast of frames 1 / 5 / 10 in a windowed Maya 2026 (throwaway prefs): IK/FK blue -> teal ->
+  green, stretch white until 1.2 then red, a line fading in from invisible.
 
 ## Scenes tool
 
