@@ -3732,16 +3732,6 @@ and Labels toggles moved here from hotkeys.COMMANDS (same command names).
   locked / driven (shot cameras) and Maya's own top / front / side are left alone with the reason.
   Outside the undo queue (state put back as it WAS - the old decorator always switched it ON), the
   modified mark kept.
-- `rig.py` (`MSLLocatorsOnSelection`, `MSLLocatorInMiddle`, `MSLJointsOnSelection`): the Controls
-  tool's `locators_on_selection` / `joints_on_selection`, said in the viewport.
-Checked: mayapy 2026 from an isolated copy (30 checks: reset of transforms / default_ / locked /
-driven / one undo / transforms_only / channels / a history node / a shape / a picked key / a keyed
-channel; ortho of a zxy camera tilted -80 looking down: top, up a world axis, same target, width,
-backed off, no undo step, not modified; back with the pan carried; Camera Back exact; a shot camera
-and `front` refused; 23 commands registered in their categories; every call importable) and
-windowed Maya 2026 (MSL menu > Scripts built; Ortho View / Camera Back / Reset / Locators run
-through their runtime commands as a hotkey would; the ortho picture). NOT seen: a real Channel Box
-pick (a script can't make one) and a real key press.
 - `viewport.py` (2026-10-15, after the user's own MSLtoggle Joints; `MSLToggleCurves`,
   `MSLTogglePolygons`, `MSLToggleJoints`, `MSLToggleLocators`, `MSLGeometryOnly`; image planes left
   out - the user doesn't use them): `toggle(flag)` = one modelEditor kind shown <-> hidden in the
@@ -3753,6 +3743,19 @@ pick (a script can't make one) and a real key press.
   View settings: no undo step. Checked in windowed Maya 2026 through the runtime commands (one
   panel, the others untouched, back; geometry only and back to a state of the user's own; Shift
   faked: every viewport alike, geometry only everywhere and back).
+- `rig.py` (`MSLLocatorsOnSelection`, `MSLLocatorInMiddle`, `MSLJointsOnSelection`): the Controls
+  tool's `locators_on_selection` / `joints_on_selection`, said in the viewport.
+Checked: mayapy 2026 from an isolated copy (30 checks: reset of transforms / default_ / locked /
+driven / one undo / transforms_only / channels / a history node / a shape / a picked key / a keyed
+channel; ortho of a zxy camera tilted -80 looking down: top, up a world axis, same target, width,
+backed off, no undo step, not modified; back with the pan carried; Camera Back exact; a shot camera
+and `front` refused; 23 commands registered in their categories; every call importable) and
+windowed Maya 2026 (MSL menu > Scripts built; Ortho View / Camera Back / Reset / Locators run
+through their runtime commands as a hotkey would; the ortho picture). NOT seen: a real Channel Box
+pick (a script can't make one) and a real key press.
+PLANNED by the user (2026-10-15), not built: a HOTKEYS window of our own over SCRIPTS + the tools'
+commands - each listed, tried by a click to see what it does, and given a key there (the same
+idea was noted for Controls).
 The user's old copies in Documents/maya/2024/scripts and their old runtime commands (viewSnap,
 resetCamera, attributeResetter on Alt+F, Ctrl+Alt+F, Alt+W) were left for the user to remove /
 re-key.
@@ -3763,9 +3766,6 @@ re-key.
 Batch and Paths both work on many scenes with Maya closed, so one tool) — `ScenesPage`: a heading and a
 BaseTabWidget with the two pages built `embedded=True` (no heading of their own, no outer margins):
 **Render** = BatchPage, **Paths** = ScenePathsPage. EACH TAB KEEPS ITS OWN LIST, deliberately: Render
-PLANNED by the user (2026-10-15), not built: a HOTKEYS window of our own over SCRIPTS + the tools'
-commands - each listed, tried by a click to see what it does, and given a key there (the same
-idea was noted for Controls).
 reads every scene added in Maya (~10 s each) — a shared list would turn a folder of 300 scenes dropped for
 their paths into 300 Mayas. They hand scenes over instead: a render job's menu "Check its paths (Paths
 tab)" (`BatchPage.paths_requested`, .ma only) and a Paths row's "Render it (Render tab)"
