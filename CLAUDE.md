@@ -3521,7 +3521,7 @@ axis (`flip`). ZERO THE SELECTED (`actions/zero_out`, in the Zero row): the mode
   can be tried by a click to see what it does, and given a key there (instead of a mere list in the
   settings menu).
 
-## Labels tool (inside Maya; steps 1-5 of 6 built)
+## Labels tool (inside Maya; all 6 planned steps built)
 
 Attribute values shown live in the viewport — a column of "label  value" lines + a header, fixed
 on the screen (HUD) or standing at a node in the scene (3D). Planned 2026-10-15 with the user, the
@@ -3662,6 +3662,27 @@ No code of anyone else's (see CLAUDE.local.md).
   read, playblast showing the labels, a header edit reaching the node live without an undo step,
   the selection kept, closed, no draw error). NOT done by a real hand: clicks, drags, the ramp,
   the menus, the file dialogs.
+- PLAYBLAST (step 6, 2026-10-15): the PICTURE card's heading has a "Labels" toggle (icon
+  `labels`, settings `labels`, on by default - an older settings file without it reads as on; in
+  PRESET_KEYS: Review on, Client OFF - a client sees the picture, not the rig's numbers).
+  `capture.CaptureSettings.labels` False = every SHOWN mslLabels shape (not locked, not driven;
+  `capture._shown_labels`, nothing when the plug-in isn't loaded) gets visibility off for the
+  capture and back after, outside the undo queue, the modified mark kept. Measured: Playblast's
+  "Geometry" preset (plug-in shapes off) does NOT hide the labels.
+  CLEAR OF THE SHOT MASK (plug-in attribute `clearOfMask`, on): the first cut put a 40 px HUD
+  label UNDER the mask's 81 px bar of a 1080 picture (and half under it at 540). While our
+  mslShotMask is shown in that view (found by type among plug-in locators each draw; perspective
+  cameras and its `camera` filter, as the mask itself), a HUD column's corner is the corner of the
+  mask's frame INSIDE its bars (`msl_labels._mask_room`: the mask's aspect / overscan / barScale /
+  letterbox / topBar / bottomBar - the same arithmetic as msl_shot_mask.py, MASK_BAR_PART = its
+  BAR_PART; change both). The layout doesn't carry the switch (always on when built).
+  Checked in windowed Maya 2026 from an isolated copy: labels in a playblast, hidden by the toggle
+  and back after, scene not modified, the Geometry preset keeps them, with the mask at 960 x 540 and
+  1920 x 1080 the labels stand 40 px under the top bar, without the mask back in the viewport's
+  corner; mayapy checks (19 + 38) and the unit tests pass. The toggle itself was not clicked in the
+  Playblast window.
+  Open, for the user to decide: a 14 px Manual label in a 1080 playblast is small - Auto suits
+  playblasts better (the window offers it; nothing switches it by itself).
 
 ## Scenes tool
 

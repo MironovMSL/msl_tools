@@ -61,7 +61,7 @@ class PlayblastPanel(_ShareMixin, _MaskMixin, _PresetsMixin, _RunMixin, qt.QtWid
                 "format": FORMAT_MP4, "quality": "High", "sound": True, "overwrite": False, "open": True,
                 "copy": False, "light": False, "smooth": False, "background": "Viewport",
                 "background_color": DEFAULT_BACKGROUND_COLOR,
-                "codec": "H.264", "gpu": False, "occlusion": False, "cameras": [],
+                "codec": "H.264", "gpu": False, "occlusion": False, "labels": True, "cameras": [],
                 "folded": {"picture": False, "result": False},
                 "ornaments": False, "show": SHOW_VIEWPORT, "show_custom": list(capture.VISIBILITY_PRESETS["Geometry"]),
                 "mask": {"shown": False, "texts": dict(mask.DEFAULT_TEXTS), "text": "Medium", "bars": "Solid",
@@ -144,6 +144,10 @@ class PlayblastPanel(_ShareMixin, _MaskMixin, _PresetsMixin, _RunMixin, qt.QtWid
         self._occlusion = _Toggle("Occlusion", "shade",
                                   "Ambient occlusion switched on for the playblast — soft contact shadows\n"
                                   "(the viewport gets its own back).")
+        self._labels = _Toggle("Labels", "labels",
+                               "The MSL Labels in the playblast — attribute values drawn in the viewport
+"
+                               "(MSL > Labels). Off: hidden for the playblast, the viewport keeps them.")
         self._start, self._end = self._number_field(6, signed=True), self._number_field(6, signed=True)
         self._background = SegmentedControl(list(BACKGROUNDS), "Viewport")
         self._background.setToolTip("The background of the playblast.\nViewport: as the viewport shows it "
@@ -297,7 +301,7 @@ class PlayblastPanel(_ShareMixin, _MaskMixin, _PresetsMixin, _RunMixin, qt.QtWid
         header.addStretch(1)
         header.addWidget(self._ffmpeg_note)
 
-        picture = self._picture_card = self._card("PICTURE", "film", extras=[self._smooth, self._occlusion], rows=[
+        picture = self._picture_card = self._card("PICTURE", "film", extras=[self._smooth, self._occlusion, self._labels], rows=[
             (("camera", "Camera"), [self._camera, self._cameras_button]),
             (("eye", "What it shows"), [self._visible, self._visible_edit]),
             (("frame_fit", "Size"), [self._size, self._width, self._times, self._height]),
@@ -408,7 +412,7 @@ class PlayblastPanel(_ShareMixin, _MaskMixin, _PresetsMixin, _RunMixin, qt.QtWid
         self._still.clicked.connect(self._on_preview_frame)
         self._quality.currentTextChanged.connect(self._on_changed)
         for box in (self._sound, self._ornaments, self._overwrite, self._open, self._copy, self._light,
-                    self._smooth, self._occlusion):
+                    self._smooth, self._occlusion, self._labels):
             box.toggled.connect(self._on_changed)
         self._folder.token_inserted.connect(self._on_changed)
         self._name.token_inserted.connect(self._on_changed)
@@ -483,6 +487,7 @@ class PlayblastPanel(_ShareMixin, _MaskMixin, _PresetsMixin, _RunMixin, qt.QtWid
                          (self._smooth, "smooth"),
                          (self._occlusion, "occlusion")):
             box.set_checked_immediate(bool(get(key)))
+        self._labels.set_checked_immediate(get("labels") is not False)   # on unless switched off
         saved = self._settings.get("mask") or {}
         self._apply_mask_look(saved)
         self._mask_note.setText(str(saved.get("note", "")))
@@ -512,7 +517,8 @@ class PlayblastPanel(_ShareMixin, _MaskMixin, _PresetsMixin, _RunMixin, qt.QtWid
                   "light": self._light.isChecked(), "background": self._background.current(),
                   "background_color": self._background_color.hex(), "codec": self._codec.currentText(),
                   "gpu": self._gpu.isChecked(),
-                  "smooth": self._smooth.isChecked(), "occlusion": self._occlusion.isChecked()}
+                  "smooth": self._smooth.isChecked(), "occlusion": self._occlusion.isChecked(),
+                  "labels": self._labels.isChecked()}
         if self._size.currentText() == SIZE_CUSTOM:
             values["width"], values["height"] = self._frame_size()
         if self._range.currentText() == RANGE_CUSTOM:

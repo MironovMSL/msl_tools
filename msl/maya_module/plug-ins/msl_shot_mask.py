@@ -63,7 +63,8 @@ DRAW_CLASSIFICATION = "drawdb/geometry/mslShotMask"
 DRAW_REGISTRANT = "mslShotMaskPlugin"
 
 SLOTS = ("topLeft", "topCenter", "topRight", "bottomLeft", "bottomCenter", "bottomRight")
-BAR_PART = 0.075    # a bar's height as a part of the frame's height, at barScale 1
+BAR_PART = 0.075    # a bar's height as a part of the frame's height, at barScale 1 (msl_labels.py
+                    # reads the same to keep labels clear of the bars: change both)
 TEXT_PART = 0.030   # the text's height as a part of the frame's height, at textScale 1
 PADDING_PART = 0.012  # room between the frame's side and the text
 LOGO_PART = 0.72      # the logo's height as a part of a bar's height

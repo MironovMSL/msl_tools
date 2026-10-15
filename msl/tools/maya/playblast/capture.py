@@ -78,6 +78,8 @@ class CaptureSettings:
             viewport: it is put back afterwards.)
         overscan: Room around the frame (the camera's overscan, e.g. 1.1 = 10 %) for the capture;
             1.0 = none. The shot mask then marks the frame's edge inside the picture.
+        labels: The MSL Labels (attribute values the mslLabels nodes draw) in the picture; False =
+            hidden for the capture (their nodes' visibility, put back after).
     """
 
     folder: Path
@@ -94,6 +96,7 @@ class CaptureSettings:
     occlusion: bool = False
     background: tuple | None = None
     overscan: float = 1.0
+    labels: bool = True
 
 
 @dataclass
@@ -289,9 +292,13 @@ class CaptureSession:
             camera_shape = _camera_shape(settings.camera or self._previous_camera)
             if camera_shape:
                 self._overscan = (camera_shape, cmds.getAttr(camera_shape + ".overscan"))
+        # the MSL Labels to hide for the capture: their shapes that are shown now and can be changed
+        self._labels = [] if settings.labels else _shown_labels()
         self._open = True
         try:
             with _NoUndo():
+                for shape in self._labels:
+                    cmds.setAttr(shape + ".visibility", False)
                 if self._background is not None:
                     cmds.displayPref(displayGradient=False)
                     cmds.displayRGBColor("background", *settings.background)
@@ -372,6 +379,8 @@ class CaptureSession:
         if self._overscan is not None:
             shape, value = self._overscan
             steps.append(lambda: cmds.setAttr(shape + ".overscan", value))
+        for shape in self._labels:
+            steps.append(lambda shape=shape: cmds.setAttr(shape + ".visibility", True))
         with _NoUndo():
             for step in steps:
                 try:
@@ -383,6 +392,30 @@ class CaptureSession:
                     cmds.file(modified=False)  # looking through another camera marks the scene as changed
                 except Exception:
                     pass
+
+
+LABELS_NODE = "mslLabels"  # the node type of the Labels tool (maya_module/plug-ins/msl_labels.py)
+
+
+def _shown_labels() -> list:
+    """The mslLabels shapes that are shown now and whose visibility can be switched (not locked,
+    not driven); [] when the Labels plug-in isn't loaded."""
+    try:
+        if not cmds.pluginInfo("msl_labels", query=True, loaded=True):
+            return []
+        shapes = cmds.ls(type=LABELS_NODE, long=True) or []
+    except RuntimeError:
+        return []
+    shown = []
+    for shape in shapes:
+        plug = shape + ".visibility"
+        try:
+            if (cmds.getAttr(plug) and not cmds.getAttr(plug, lock=True)
+                    and not cmds.listConnections(plug, source=True, destination=False)):
+                shown.append(shape)
+        except (RuntimeError, ValueError):
+            continue
+    return shown
 
 
 def _camera_shape(camera: str) -> str:

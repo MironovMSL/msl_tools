@@ -118,7 +118,8 @@ class _RunMixin:
             folder=frames_folder, name=frames_name, start=start, end=end, width=width, height=height,
             camera=camera or capture.ACTIVE_VIEW, ornaments=self._ornaments.isChecked(),
             background=self._background_rgb(),
-            visibility=self._shown_kinds(), smooth=self._smooth.isChecked(), occlusion=self._occlusion.isChecked())
+            visibility=self._shown_kinds(), smooth=self._smooth.isChecked(), occlusion=self._occlusion.isChecked(),
+            labels=self._labels.isChecked())
         # everything the end of this playblast needs, as the controls say NOW: by the time its video is
         # made the user may have changed them, or started the next one
         self._run = {"settings": settings, "target": target, "video": video, "latest": latest,
@@ -270,7 +271,7 @@ class _RunMixin:
             folder=folder, name="preview", start=frame, end=frame, width=width, height=height,
             camera=camera or capture.ACTIVE_VIEW, ornaments=self._ornaments.isChecked(),
             visibility=self._shown_kinds(), smooth=self._smooth.isChecked(), occlusion=self._occlusion.isChecked(),
-            background=self._background_rgb())
+            background=self._background_rgb(), labels=self._labels.isChecked())
         try:
             session = capture.CaptureSession(settings)
             try:

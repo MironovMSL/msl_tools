@@ -46,14 +46,16 @@ MASK_LOOK_DEFAULTS = {"text": "Medium", "bars": "Solid", "text_color": "#ffffff"
 # A preset of the WHOLE playblast keeps these settings (not the camera, not custom frames: those
 # belong to the scene) and, under "mask", the mask's look and whether it is shown.
 PRESET_KEYS = ("size", "width", "height", "range", "show", "format", "quality", "sound", "ornaments", "smooth",
-               "occlusion", "overwrite", "open", "copy", "folder", "name", "background", "background_color", "codec")
+               "occlusion", "overwrite", "open", "copy", "folder", "name", "background", "background_color", "codec",
+               "labels")
 # The ones that come with the tool (name -> what a click sets; a key left out stays as it is).
 PRESETS = {
     "Review": {"size": "HD 1080", "range": "Playback", "show": "As in the viewport", "format": "MP4",
-               "quality": "High", "smooth": False, "occlusion": False,
+               "quality": "High", "smooth": False, "occlusion": False, "labels": True,
                "mask": dict(MASK_PRESETS["Review"], shown=True)},
     "Client": {"size": "HD 1080", "range": "Playback", "show": "Geometry", "format": "MP4", "quality": "Best",
-               "smooth": True, "occlusion": True, "mask": dict(MASK_PRESETS["Client"], shown=True)},
+               "smooth": True, "occlusion": True, "labels": False,   # a client sees the picture, not the rig's numbers
+               "mask": dict(MASK_PRESETS["Client"], shown=True)},
     "Quick": {"size": "HD 540", "range": "Playback", "show": "As in the viewport", "format": "MP4",
               "quality": "Small", "smooth": False, "occlusion": False, "mask": {"shown": False}},
 }

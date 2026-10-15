@@ -51,6 +51,10 @@ In 3D, `distanceScale` > 0 makes the text smaller with the camera's distance (pe
 
 `camera` = the name of the only camera that shows the labels; "" = every camera.
 
+`clearOfMask` (on): while our shot mask (msl_shot_mask.py) is shown in that view, a HUD column's
+corner is the corner of the mask's frame INSIDE its bars — labels never stand under a bar, and
+in the viewport they stand inside the frame a playblast will take.
+
 Text is drawn as ASCII: any other character shows as "?" (text2d garbles it).
 
 A failed draw keeps its traceback in the environment variable MSL_LABELS_ERROR (Maya
@@ -215,6 +219,58 @@ def _read_ui_scale():
         UI_SCALE[0] = 1.0
 
 
+MASK_NODE = "mslShotMask"
+# what the shot mask's frame and bars are, as msl_shot_mask.py draws them (keep the two the same)
+MASK_BAR_PART = 0.075
+
+
+def _mask_room(camera_path, view_width, view_height):
+    """(left, bottom, width, height) of the room between a shown shot mask's bars in this view,
+    in viewport pixels; None = no shot mask is drawn here."""
+    nodes = om.MItDependencyNodes(om.MFn.kPluginLocatorNode)
+    mask = None
+    while not nodes.isDone():
+        node = nodes.thisNode()
+        if om.MFnDependencyNode(node).typeName == MASK_NODE:
+            mask = node
+            break
+        nodes.next()
+    if mask is None:
+        return None
+    try:
+        path = om.MDagPath.getAPathTo(mask)
+        if not path.isVisible() or om.MFnCamera(camera_path).isOrtho():   # the mask draws in perspective only
+            return None
+        fn = om.MFnDependencyNode(mask)
+
+        def value(name):
+            return fn.findPlug(name, False)
+
+        wanted = value("camera").asString()
+        camera_name = om.MFnDagNode(camera_path.transform()).name()
+        if wanted and wanted.split("|")[-1] != camera_name:
+            return None
+        camera = om.MFnCamera(camera_path)
+        aspect = value("aspect").asFloat()
+        width, height = float(view_width), float(view_height)
+        if aspect > 0.0 and view_height > 0:
+            width = min(float(view_width), view_height * aspect)
+            height = width / aspect
+            overscan = camera.overscan if camera.overscan > 0.0 else 1.0
+            width, height = width / overscan, height / overscan
+        bar = height * MASK_BAR_PART * value("barScale").asFloat()
+        letterbox = value("letterbox").asFloat()
+        if letterbox > 0.0 and width / letterbox < height:
+            bar = (height - width / letterbox) / 2.0
+        top_bar = bar if value("topBar").asBool() else 0.0
+        bottom_bar = bar if value("bottomBar").asBool() else 0.0
+        left = (view_width - width) / 2.0
+        bottom = (view_height - height) / 2.0 + bottom_bar
+        return left, bottom, width, height - top_bar - bottom_bar
+    except Exception:   # a mask of another version (an attribute missing): the viewport's room
+        return None
+
+
 def _drawable(text):
     """`text` as text2d can draw it: a non-ASCII character becomes "?" — given as it is,
     Maya 2026 draws a run of garbage (half the character table) after it."""
@@ -261,6 +317,7 @@ class LabelsNode(omui.MPxLocatorNode):
     reference_height = None
     distance_scale = None
     camera = None
+    clear_of_mask = None
 
     @staticmethod
     def creator():
@@ -358,6 +415,8 @@ class LabelsNode(omui.MPxLocatorNode):
         # smaller (at most DISTANCE_LIMIT either way); 0 = as big wherever it stands
         LabelsNode.distance_scale = number("distanceScale", "mlds", om.MFnNumericData.kFloat, 0.0, 0.0)
         LabelsNode.camera = string("camera", "mlcam")  # "" = every camera
+        # HUD: under a shown MSL shot mask the corners are its frame's, inside its bars
+        LabelsNode.clear_of_mask = number("clearOfMask", "mlcm", om.MFnNumericData.kBoolean, True)
 
     def excludeAsLocator(self):
         return False  # stays visible when Show > Locators is off: it is no rigging locator
@@ -479,11 +538,18 @@ class LabelsDrawOverride(omr.MPxDrawOverride):
         if not three_d:
             corner = plug(LabelsNode.corner).asShort()
             data.right = corner in (TOP_RIGHT, BOTTOM_RIGHT)
-            x = view_width - offset_x if data.right else offset_x
+            # the room the column stands in: the viewport — or, under our shot mask, its frame
+            # between its bars (else a label at 40 px stood under a 1080 picture's 81 px bar)
+            left, bottom, width, height = 0.0, 0.0, float(view_width), float(view_height)
+            if plug(LabelsNode.clear_of_mask).asBool():
+                room = _mask_room(camera_path, view_width, view_height)
+                if room is not None:
+                    left, bottom, width, height = room
+            x = left + width - offset_x if data.right else left + offset_x
             if corner in (TOP_LEFT, TOP_RIGHT):
-                top = view_height - offset_y
-            else:  # the column's BOTTOM is offset_y up from the viewport's bottom
-                top = offset_y + LabelsDrawOverride._height(data)
+                top = bottom + height - offset_y
+            else:  # the column's BOTTOM is offset_y up from the room's bottom
+                top = bottom + offset_y + LabelsDrawOverride._height(data)
             data.origin = (x, top)
             return data
 
