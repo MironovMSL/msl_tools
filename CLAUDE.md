@@ -365,7 +365,21 @@ NEVER runs inside Maya; it's a pure standalone desktop app. Future
   for the hub, via `QtApplicationContext`. It passes the `brand/hub` icon to HubWindow
   (header + OS window icon: FramelessWindowMixin sets both) and gives the
   process its own Windows AppUserModelID, so the taskbar shows that icon,
-  not python.exe's. It also owns the hub's own
+  not python.exe's. The taskbar button was now and then BLANK (Windows' default
+  application icon) while the window itself had the hub's icon (2026-10-15, the user saw it; not
+  reproduced: a busy main thread and a window flashing first both still got the right icon). What
+  a blank button IS was measured: a window without a big icon -> the taskbar falls back to its
+  window CLASS's icon, and Qt's class (`Qt683QWindowIcon`) carries the default one. So now:
+  `QApplication.setWindowIcon(hub)` (every window of the hub has it), and `_brand_taskbar_button`
+  (right after show and again 3 s later) -> `core/environment/taskbar.set_window_icons(hwnd,
+  hub.ico)` gives the window AND its class the big / small icons at the window's DPI and sends
+  WM_SETICON (measured: a blank button turns into the hub's when that comes 1.5 s later), and
+  `set_window_identity()` sets the window's System.AppUserModel ID / RelaunchCommand /
+  RelaunchIconResource / RelaunchDisplayNameResource (SHGetPropertyStoreForWindow), so a button
+  PINNED to the taskbar starts the hub (`pythonw -c "os.chdir(<folder holding msl_tools>);
+  runpy.run_module('msl_tools.msl.run_hub', ...)"` - checked from C:\Windows) instead of a bare
+  pythonw. hub.ico now holds 9 sizes (16..256; it had 256 only) - `python -m
+  msl_tools.msl.ui.brand_icons hub`. It also owns the hub's own
   config (`configsDesktopHubMng` "hub": `current_tool`, `window`): HubWindow
   stays storage-agnostic — `current_tool_id=` in, `tool_changed(str)` out.
   Window placement: first start = default; on close (`finished`) it stores

@@ -46,12 +46,46 @@ HUB_CONFIG_DEFAULTS = {"current_tool": "", "window": {}}
 UPDATE_CHECK_INTERVAL_MS = 30 * 60 * 1000  # a hub left open for days still learns about a new release
 
 
+APP_ID = "msl_tools.hub"   # the hub's taskbar group (AppUserModelID)
+
+
 def _use_own_taskbar_icon() -> None:
     """Windows groups a script's window under python.exe — and shows the
     Python icon — unless the process has its own AppUserModelID."""
     if sys.platform == "win32":
         import ctypes
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("msl_tools.hub")
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_ID)
+
+
+def _brand_taskbar_button(window: HubWindow) -> None:
+    """The hub's taskbar button always shows the hub: its icons are given to the window AND its
+    window class (the taskbar falls back to the class's when the window doesn't answer in time -
+    a blank button now and then), and the window says what it is (a button pinned to the taskbar
+    starts the hub, not a bare pythonw). Done once the window exists and again when the start's
+    work is over (WM_SETICON makes the taskbar redraw a button it drew blank)."""
+    if sys.platform != "win32":
+        return
+    from msl_tools.msl.core.environment import taskbar
+    from msl_tools.msl.core.fs.manager import FileSystemManager
+    icon = FileSystemManager.icons / "brand" / "hub.ico"
+    if not icon.is_file():
+        return
+    # what a pinned button runs: the hub as the desktop shortcut starts it (-m from the folder
+    # that holds msl_tools - a pinned button has no working folder of its own)
+    code = (f"import os, runpy; os.chdir({str(FileSystemManager.PARENT_DIR)!r}); "
+            f"runpy.run_module({FileSystemManager.PACKAGE_ROOT + '.run_hub'!r}, run_name='__main__', alter_sys=True)")
+    command = f'"{sys.executable}" -c "{code}"'
+
+    def brand() -> None:
+        try:
+            window_id = int(window.winId())
+        except RuntimeError:   # closed meanwhile
+            return
+        taskbar.set_window_icons(window_id, str(icon))
+        taskbar.set_window_identity(window_id, APP_ID, "MSL Tools", str(icon), command)
+
+    brand()
+    qt.QtCore.QTimer.singleShot(3000, window, brand)
 
 
 class _UpdateNotifier(qt.QtCore.QObject):
@@ -272,6 +306,8 @@ def main() -> None:
         # The hub's own state (which tool is open) lives in configs/desktop/hub/.
         hub_config = Resources().configsDesktopHubMng.get_config("hub", defaults=HUB_CONFIG_DEFAULTS)
         icon = UiResources().iconManager.get_icon("hub", sub_folder="brand")
+        if icon is not None:   # every window of the hub carries it, also one that shows before the main one
+            qt.QtWidgets.QApplication.instance().setWindowIcon(icon)
         current_tool = str(hub_config["current_tool"] or "")
         if current_tool in SCENES_REPLACED:   # Batch / Paths are tabs of Scenes now
             current_tool = "scenes"
@@ -341,6 +377,7 @@ def main() -> None:
 
         window.finished.connect(remember_geometry)  # QDialog: emitted on every close
         window.show()
+        _brand_taskbar_button(window)
         _watch_for_update(window)
         # The hub <-> Maya link: listen from the start, so a Maya that outlived the
         # previous hub (it retries every few seconds) finds this one.
