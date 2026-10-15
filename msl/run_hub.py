@@ -153,6 +153,8 @@ def _assistant_menu(button: AssistantButton, assistant: AssistantServer, toggle)
                     lambda allowed, environment=environment: assistant.set_environment_allowed(environment, allowed))
         popup.add_caption("BEFORE IT SAVES, OPENS OR CLOSES A SCENE, OR DELETES FILES")
         popup.add_switch("Ask me first", assistant.confirms()).toggled.connect(assistant.set_confirms)
+        popup.add_switch("Open / new scenes without asking (until restart)",
+                         assistant.scenes_free()).toggled.connect(assistant.set_scenes_free)
     popup.addSeparator()
     if listening:
         who = "%d connected now" % clients if clients else "nobody connected now"

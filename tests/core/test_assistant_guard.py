@@ -33,6 +33,12 @@ class Risks(unittest.TestCase):
         self.assertIn("writes a scene file", self.says("cmds.file('C:/c.ma', exportSelected=True, type='mayaAscii')"))
         self.assertIn("saves the scene", self.says("pm.saveFile()"))
 
+    def test_opening_a_scene_may_go_without_the_question(self):
+        reasons = guard.risks("cmds.file(new=True, force=True)\ncmds.file('C:/b.ma', open=True, force=True)\n"
+                              "cmds.file(save=True)")
+        self.assertEqual(guard.without_scene_switch(reasons), ["saves the scene"])   # saving is still asked
+        self.assertEqual(guard.without_scene_switch(guard.risks("cmds.file(new=True, f=True)")), [])
+
     def test_closing_deleting_and_other_programs(self):
         self.assertEqual(self.says("cmds.quit(force=True)"), "closes Maya")
         self.assertEqual(self.says("import os\nos.remove(path)"), "deletes a file")

@@ -93,6 +93,7 @@ class AssistantServer(qt.QtCore.QObject):
         self._denied: set[int] = set()
         self._confirms = True      # ask the user before code that saves, opens, closes or deletes
         self._confirmer = None     # set_confirmer(): puts that question
+        self._scenes_free = False  # open / new scenes without asking - until the hub restarts (never stored)
         self._journal = None       # set_journal(): the file record of what an assistant did
         self._launch = None        # set_launcher(): starts a Maya
         self._environments: list = []
@@ -130,6 +131,16 @@ class AssistantServer(qt.QtCore.QObject):
     def set_confirms(self, on: bool) -> None:
         self._confirms = bool(on)
         self._settings()["confirm"] = self._confirms
+        self.access_changed.emit()
+
+    def scenes_free(self) -> bool:
+        """Does code that only opens another scene / starts a new one run without the question?"""
+        return self._scenes_free
+
+    def set_scenes_free(self, on: bool) -> None:
+        """For developing: open / new scenes without asking. Kept in memory only - the next start of
+        the hub asks again; saving, closing Maya and deleting files are still asked about."""
+        self._scenes_free = bool(on)
         self.access_changed.emit()
 
     def off_environments(self) -> set:
@@ -558,6 +569,8 @@ class AssistantServer(qt.QtCore.QObject):
 
         self._running.add(pid)   # from here on that Maya is taken: also while the user is asked
         reasons = guard.risks(code) if self._confirms and self._confirmer is not None else []
+        if reasons and self._scenes_free:
+            reasons = guard.without_scene_switch(reasons)
         if not reasons:
             return start()
 

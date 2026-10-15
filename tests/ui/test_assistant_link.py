@@ -277,6 +277,25 @@ class Channel(unittest.TestCase):
         self.assertEqual(journal.count("  ran Python  |  Maya 2025 \u00b7 Dev \u00b7 pid 4242 \u00b7 C:/shots/a.ma"), 3)
         self.assertIn("cmds.ls()\n--- outcome\n# Result: None", journal)
 
+    def test_opening_scenes_may_go_without_the_question(self):
+        maya = self.join_maya()
+        self.server._code_allowed = True
+        asked, seen = [], []
+        self.server.set_confirmer(lambda session, code, reasons, answer: (asked.append(reasons), answer(True)))
+        client = self.client()
+        answering = self.answering(maya, seen, output="", result="None", traceback="")
+        new_scene = "cmds.file(new=True, force=True)"
+        self.ask(lambda: client.request(assistant.RUN_PYTHON, again=False, pid=4242, code=new_scene), answering)
+        self.assertEqual(len(asked), 1)                            # asked, as always
+        self.server.set_scenes_free(True)                          # "open / new scenes without asking"
+        self.assertTrue(self.server.scenes_free())
+        self.ask(lambda: client.request(assistant.RUN_PYTHON, again=False, pid=4242, code=new_scene), answering)
+        self.assertEqual(len(asked), 1)                            # went without the question
+        self.ask(lambda: client.request(assistant.RUN_PYTHON, again=False, pid=4242,
+                                        code=new_scene + "\ncmds.file(save=True)"), answering)
+        self.assertEqual(asked[-1], ["saves the scene"])           # saving still is asked about
+        self.assertEqual(len(seen), 3)
+
     def test_it_may_only_look_where_the_user_said_so(self):
         maya = self.join_maya()
         self.server._code_allowed = True

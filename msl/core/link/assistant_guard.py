@@ -50,6 +50,16 @@ _MEL = re.compile(r"\bfile\b[^;]*\s-(s|save|new|newFile|o|open|rn|rename|ea|es|e
 _MEL_SAYS = "runs MEL that saves, opens or closes"
 
 
+# What only swaps the open scene for another (nothing written to disk): while developing, the user
+# may let an assistant do it without a question (the hub's "Open / new scenes without asking").
+SCENE_SWITCH = ("starts a new scene (the open one goes)", "opens another scene (the open one goes)")
+
+
+def without_scene_switch(reasons: list[str]) -> list[str]:
+    """`reasons` with the ones that only open / start a scene taken out."""
+    return [reason for reason in reasons if reason not in SCENE_SWITCH]
+
+
 def _name(node) -> str:
     """`a.b.c` of a call's function ("" for anything else)."""
     parts = []

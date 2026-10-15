@@ -1102,6 +1102,16 @@ What changed vs. the original (all deliberate, not oversights):
   the question, the user answered Allow after 31 s, the file was gone; the journal held all three
   entries. NOT seen live: a Refuse, the two-minute timeout, the environment and per-Maya switches
   (they need the user's clicks).
+  OPEN / NEW SCENES WITHOUT ASKING (2026-10-15, the user's ask: while developing, every new or
+  reopened scene in a test Maya needed their click): a switch under "Ask me first" in the robot's
+  menu, "Open / new scenes without asking (until restart)" -> `AssistantServer.set_scenes_free()`.
+  IN MEMORY ONLY (never in the config): the next start of the hub asks again. It takes out of the
+  question exactly `assistant_guard.SCENE_SWITCH` ("starts a new scene", "opens another scene" -
+  `without_scene_switch()`); saving, renaming, exporting, closing Maya, deleting files, references,
+  MEL that can't be read are still asked about, and the journal still records every run. Tests:
+  test_assistant_guard (the filter), test_assistant_link (a new scene goes without the question,
+  new + save is asked about "saves the scene"). Rendered offscreen; the running hub needs a restart
+  to have it.
   CONNECTING AN ASSISTANT TO AN INSTALLED COPY (2026-10-14, before releasing 0.6.0 - the user's
   call): an install copies `msl/` only, so it has no `.mcp.json`. The robot's menu has "Connect a
   coding assistant…" -> `tools/desktop/assistant/connect_dialog.py` `ConnectAssistantDialog` (not
