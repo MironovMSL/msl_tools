@@ -17,11 +17,13 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 from msl_tools.msl.core.batch.commands import clean_environment, scene_maya_version
 from msl_tools.msl.core.scene_paths import ma_paths
 from msl_tools.msl.core.scene_paths.ma_paths import ApplyResult, PathUse, SceneScan
+from msl_tools.msl.core.scene_paths.progress import Progress
 from msl_tools.msl.core.scene_paths.roots import Root, normalized
 
 RUNNER = Path(__file__).resolve().parents[2] / "tools" / "maya" / "scene_paths_runner.py"
@@ -59,8 +61,30 @@ def environment_for(variables: dict, base: dict | None = None) -> dict:
     return environment
 
 
-def _run(maya_folder: Path, task: dict, environment: dict) -> dict:
-    """Runs the runner on `task` in a mayapy of `maya_folder`; returns its result {"scenes": [...]}."""
+POLL_SECONDS = 0.3
+
+
+class Stopped(ma_paths.ScenePathsError):
+    """The user stopped the run: the mayapy was ended; the scenes it hadn't finished stay as they were.
+    `done` = the runner's results for the scenes it HAD finished (it writes them after each one)."""
+
+    def __init__(self, message: str, done: list | None = None):
+        super().__init__(message)
+        self.done = done or []
+
+
+def _partial(result_file: Path) -> list:
+    try:
+        return list(json.loads(result_file.read_text(encoding="utf-8")).get("scenes") or [])
+    except (OSError, ValueError, AttributeError):
+        return []
+
+
+def _run(maya_folder: Path, task: dict, environment: dict, progress: Progress | None = None) -> dict:
+    """Runs the runner on `task` in a mayapy of `maya_folder`; returns its result {"scenes": [...]}.
+    Watched every POLL_SECONDS: each scene the runner finishes (its progress file's "scene_done") counts in
+    `progress`; `progress.stopped` ends the mayapy (raises Stopped) — between saves a scene is never cut
+    in half by it except while Maya writes one (Maya's own save then decides)."""
     work = Path(tempfile.mkdtemp(prefix="msl_scene_paths_"))
     try:
         task = dict(task, result=str(work / "result.json"), progress=str(work / "progress.jsonl"))
@@ -68,24 +92,47 @@ def _run(maya_folder: Path, task: dict, environment: dict) -> dict:
         task_file.write_text(json.dumps(task), encoding="utf-8")
         flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
         timeout = START_SECONDS + SECONDS_PER_SCENE * len(task["scenes"])
+        log = open(work / "output.txt", "w", encoding="utf-8", errors="replace")   # not a pipe: nobody reads it live
         try:
-            done = subprocess.run([str(Path(maya_folder) / "bin" / "mayapy.exe"), str(RUNNER), str(task_file)],
-                                  stdin=subprocess.DEVNULL, capture_output=True, text=True, encoding="utf-8",
-                                  errors="replace", timeout=timeout, env=environment, creationflags=flags)
-        except subprocess.TimeoutExpired as error:
-            raise ma_paths.ScenePathsError(f"Maya didn’t finish in {timeout // 60} min") from error
+            process = subprocess.Popen([str(Path(maya_folder) / "bin" / "mayapy.exe"), str(RUNNER), str(task_file)],
+                                       stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
+                                       env=environment, creationflags=flags)
         except OSError as error:
+            log.close()
             raise ma_paths.ScenePathsError(f"mayapy couldn’t be started: {error.strerror or error}") from error
+        started, base = time.monotonic(), progress.done if progress is not None else 0
+        progress_file = Path(task["progress"])
+        try:
+            while process.poll() is None:
+                if progress is not None:
+                    try:
+                        finished = progress_file.read_text(encoding="utf-8", errors="replace").count('"scene_done"')
+                    except OSError:
+                        finished = 0
+                    progress.done = base + finished
+                    if progress.stopped:
+                        process.kill()
+                        process.wait(10)
+                        raise Stopped("stopped", _partial(Path(task["result"])))
+                if time.monotonic() - started > timeout:
+                    process.kill()
+                    process.wait(10)
+                    raise ma_paths.ScenePathsError(f"Maya didn’t finish in {timeout // 60} min")
+                time.sleep(POLL_SECONDS)
+        finally:
+            log.close()
+        if progress is not None:
+            progress.done = base + len(task["scenes"])
         result_file = Path(task["result"])
         if not result_file.is_file():
-            tail = (done.stderr or done.stdout or "").strip().splitlines()[-6:]
+            tail = (work / "output.txt").read_text(encoding="utf-8", errors="replace").strip().splitlines()[-6:]
             raise ma_paths.ScenePathsError("Maya stopped before it was done" + (": " + " / ".join(tail) if tail else ""))
         return json.loads(result_file.read_text(encoding="utf-8"))
     finally:
         shutil.rmtree(work, ignore_errors=True)
 
 
-def read_raw(scenes, installed: dict, environment: dict) -> dict[str, dict]:
+def read_raw(scenes, installed: dict, environment: dict, progress: Progress | None = None) -> dict[str, dict]:
     """What mayapy finds in the binary scenes, before any root is applied: {str(path): {"maya",
     "size", "mtime_ns" (the file as Maya read it), "data" (the runner's answer for it)}}. Kept by the
     caller: a change of roots only sorts these again (scan_from_raw) — no Maya."""
@@ -110,7 +157,13 @@ def read_raw(scenes, installed: dict, environment: dict) -> dict[str, dict]:
                 stats[str(scene)] = (0, 0)
         task = {"mode": "list", "roots": [], "scenes": [{"path": str(scene)} for scene in group]}
         try:
-            answer = _run(installed[year], task, environment)
+            if progress is not None and progress.stopped:
+                raise Stopped("stopped")
+            answer = _run(installed[year], task, environment, progress)
+        except Stopped as stop:
+            finished = {str(Path(item.get("path", ""))) for item in stop.done}
+            answer = {"scenes": stop.done + [{"path": str(scene), "error": Progress.STOPPED}
+                                             for scene in group if str(scene) not in finished]}
         except ma_paths.ScenePathsError as error:
             answer = {"scenes": [{"path": str(scene), "error": str(error)} for scene in group]}
         found = {str(Path(item.get("path", ""))): item for item in answer.get("scenes") or []}
@@ -161,7 +214,7 @@ def scan_binary(scenes, roots: list[Root], installed: dict, environment: dict,
 
 
 def apply_binary(scans: list[SceneScan], roots: list[Root], installed: dict, environment: dict,
-                 backup: bool = True) -> list[tuple[Path, ApplyResult | None, str]]:
+                 backup: bool = True, progress: Progress | None = None) -> list[tuple[Path, ApplyResult | None, str]]:
     """Swaps and saves the binary scenes in mayapy, each in the Maya it was saved with: a list of
     (path, ApplyResult or None, why not). The old file is copied aside first (backup)."""
     outcome: list = []
@@ -196,7 +249,16 @@ def apply_binary(scans: list[SceneScan], roots: list[Root], installed: dict, env
                             "writes": {use.key: use.new_path for use in result.changes}}
                            for result, _copy in group]}
         try:
-            answer = _run(installed[year], task, environment)
+            if progress is not None and progress.stopped:
+                raise Stopped("stopped")
+            answer = _run(installed[year], task, environment, progress)
+        except Stopped as stop:
+            answer = {"scenes": stop.done}   # the scenes Maya finished (saved) before the stop count as done
+            finished = {str(Path(item.get("path", ""))) for item in stop.done}
+            outcome += [(result.path, None, f"{result.path.name}: stopped before Maya wrote it (or while it did — "
+                                            f"its .bak is beside it)") for result, _copy in group
+                        if str(result.path) not in finished]
+            group = [(result, copy) for result, copy in group if str(result.path) in finished]
         except ma_paths.ScenePathsError as error:
             outcome += [(result.path, None, f"{result.path.name}: {error}") for result, _copy in group]
             continue

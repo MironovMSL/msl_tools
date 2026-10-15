@@ -124,9 +124,20 @@ class Runner(object):
                 result["error"] = "Maya: {0}".format(error)
                 result["traceback"] = traceback.format_exc()
             self.results.append(result)
+            self.write_results()   # after EVERY scene: a run the hub stops keeps what is done
             self.say("scene_done", path=scene["path"], error=result["error"], uses=len(result["uses"]))
-        with open(self.task["result"], "w") as handle:
+        self.write_results()
+
+    def write_results(self):
+        """The results so far, replacing the file in one step (a stop never leaves half a file)."""
+        path = self.task.get("result")
+        if not path:
+            return
+        with open(path + ".tmp", "w") as handle:
             json.dump({"scenes": self.results}, handle)
+        if os.path.exists(path):
+            os.remove(path)
+        os.rename(path + ".tmp", path)
 
     def scene(self, cmds, scene, result):
         path = scene["path"]

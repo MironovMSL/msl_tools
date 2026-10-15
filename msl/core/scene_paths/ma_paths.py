@@ -425,3 +425,18 @@ def apply(result: SceneScan, backup: bool = True) -> ApplyResult:
     except OSError as error:
         raise ScenePathsError(f"{path.name}: couldn’t be written ({error.strerror or error})") from error
     return ApplyResult(path, len(changes), copy)
+
+
+def summary(result: SceneScan) -> dict:
+    """What a scene file holds, for a line about it: {"missing": files it names that aren't there, "starts":
+    [(the first two parts of their paths, how many)] the most first, "change": paths a root could stand for,
+    "error": why it couldn't be read}."""
+    if result.error:
+        return {"missing": 0, "starts": [], "change": 0, "error": result.error}
+    starts: dict = {}   # lower case -> [the first spelling met, how many] (Windows: E:/branches = e:/Branches)
+    for use in result.missing:
+        parts = use.path.replace("\\", "/").split("/")
+        start = "/".join(parts[:2]) if len(parts) > 2 else use.path
+        starts.setdefault(start.lower(), [start, 0])[1] += 1
+    return {"missing": len(result.missing), "change": len(result.changes), "error": "",
+            "starts": sorted(((start, count) for start, count in starts.values()), key=lambda item: -item[1])}

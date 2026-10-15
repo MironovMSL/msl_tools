@@ -8,7 +8,8 @@ import unittest
 from pathlib import Path
 
 from msl_tools.msl.core.batch import checks
-from msl_tools.msl.core.scene_paths import coverage, finder, ma_paths, mb_paths, undo
+from msl_tools.msl.core.scene_paths import backups, coverage, finder, ma_paths, mb_paths, undo
+from msl_tools.msl.core.scene_paths.progress import Progress
 from msl_tools.msl.core.scene_paths.roots import Root, normalized, roots_from, why_not
 
 SCENE = (
@@ -412,6 +413,43 @@ class PickingTheVariable(unittest.TestCase):
         self.assertEqual([(use["state"], use["new"]) for use in uses],
                          [("change", "$WG_ANIM/chars/dog/x.png"), ("left", "$WG_ANIM/y.png"), ("left", "$WG_ANIM/z.png")])
         self.assertEqual(Runner.pick(uses, None), [])                  # an older hub: everything as found
+
+
+class BackupsProgressAndWhatAFileHolds(unittest.TestCase):
+    """backups.py (only our own .bak), progress.py, ma_paths.summary."""
+
+    def setUp(self):
+        self.folder = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.folder, True)
+        self.scene = self.folder / "shot.ma"
+        self.scene.write_bytes(SCENE.encode("cp1252"))
+
+    def test_only_the_copies_this_tab_made_are_listed(self):
+        ours = [self.folder / "shot.ma.20261014-153012.bak", self.folder / "shot.ma.20261014-153012-2.bak"]
+        for file in ours + [self.folder / "shot.ma.bak", self.folder / "other.ma.20261014-153012.bak",
+                            self.folder / "shot.ma.old.bak"]:
+            file.write_bytes(b"x" * 1024)
+        self.assertEqual(backups.backups_of(self.scene), sorted(ours))
+        self.assertEqual(backups.size_text(ours), "2.0 KB")
+        done = ma_paths.apply(ma_paths.scan(self.scene, ROOTS, environment={}, check_files=False))
+        self.assertIn(done.backup, backups.backups_of(self.scene))   # what apply() writes is found
+
+    def test_progress_says_how_far(self):
+        progress = Progress(3, "Reading")
+        progress.done = 1
+        self.assertEqual(progress.text(), "Reading 1 of 3 scenes…")
+        progress.stopped = True
+        self.assertIn("Stopping", progress.text())
+
+    def test_what_a_file_holds(self):
+        held = ma_paths.summary(ma_paths.scan(self.scene, ROOTS, environment={}))
+        self.assertEqual(held["error"], "")
+        self.assertEqual(held["change"], 5)
+        self.assertTrue(held["missing"] >= 1)
+        starts = [start.lower() for start, _count in held["starts"]]
+        self.assertEqual(starts.count("e:/branches"), 1)       # one folder, whatever the case
+        self.assertNotIn("c:/users", starts)                    # a reference's history isn't a missing file
+        self.assertTrue(ma_paths.summary(ma_paths.scan(self.folder / "gone.ma", ROOTS))["error"])
 
 
 if __name__ == "__main__":

@@ -150,9 +150,19 @@ class ScenePathsDialog(FramelessDialog):
         layout.addWidget(title)
         for entry in self._referenced[:8]:
             name = str(entry["file"]).replace("\\", "/").rsplit("/", 1)[-1]
-            line = qt.QtWidgets.QLabel(f"    {name}   ·   {entry.get('count')}")
+            text = f"    {name}   ·   {entry.get('count')}"
+            holds = entry.get("holds") or {}
+            if holds.get("error"):
+                text += f"   —   the file: {holds['error']}"
+            elif holds.get("missing"):
+                starts = ", ".join(f"{start}/… {count}" for start, count in holds.get("starts", [])[:3])
+                text += f"   —   the file names {holds['missing']} missing file{'s' if holds['missing'] != 1 else ''} ({starts})"
+            elif holds:
+                text += "   —   every file it names is there"
+            line = qt.QtWidgets.QLabel(text)
             line.setObjectName("confirmDetails")
-            line.setToolTip(str(entry["file"]))
+            line.setToolTip(str(entry["file"]) + ("\n\nRead from the file itself: what Maya shows can be where it "
+                                                  "found a file." if holds else ""))
             layout.addWidget(line)
         if len(self._referenced) > 8:
             more = qt.QtWidgets.QLabel(f"    … and {len(self._referenced) - 8} more files")

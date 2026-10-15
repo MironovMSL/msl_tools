@@ -4100,6 +4100,31 @@ mayapy (step 2, the same day — see the last bullet).
   Checked: mayapy 2024 (a rig holding a texture under the root and one at D:/…, no edit: both counted
   for rig.ma); offscreen: the dialog with only the referenced block, the button opening Scenes › Paths
   on a COPY of Buscemi_Rig.ma, 64 found again incl. that texture -> $WG_ANIM/...; pictures of both modes.
+- THREE MORE (2026-10-14, the user's 6-8 of a list):
+  CLEAR BACKUPS: `core/scene_paths/backups.py` `backups_of(scene)` lists ONLY "<scene>.<YYYYmmdd-HHMMSS>[-n].bak"
+  beside it (another .bak is not ours), found with every read (`_backups`); "Clear backups (N · X MB)" in
+  the FILES heading moves them to the RECYCLE BIN (`core/environment/shell.py move_to_recycle_bin`:
+  SHFileOperationW + FOF_ALLOWUNDO, its own shell32 handle; returns what is still there) — never deleted
+  outright — and keeps the copies the last replace can be undone from.
+  PROGRESS + STOP: `core/scene_paths/progress.py` Progress {total, done, what, stopped}, shared by the
+  worker and the page; a 300 ms ticker shows "Reading 120 of 500 scenes…" (and "Reading in Maya: 3 of 12…"
+  for the binary read) with a "Stop" link; the .ma read / write check `stopped` between scenes (each one
+  stays whole; unread ones get error Progress.STOPPED, "Read again" reads them). Binary scenes: mb_paths
+  `_run` is a Popen watched every POLL_SECONDS — the runner's "scene_done" lines count, `stopped` kills
+  the mayapy (Stopped) — and the runner now writes its result file after EVERY scene (atomically), so a
+  stop keeps the scenes Maya finished (read: listed; apply: counted as written). Measured with mayapy
+  2024: two copies of Rig_Husky.mb, Stop after the first -> the first read, the second "not read —
+  stopped", the mayapy gone.
+  WHAT A REFERENCED FILE HOLDS: before the session dialog opens, the referenced .ma files are read as text
+  on a worker (`sessions_control._read_referenced` -> `ma_paths.summary`: missing files it names, grouped
+  by the first two path parts case-insensitively, paths a root could stand for) and each line of the
+  block says it: "Buscemi_Rig.ma · 55 — the file names 140 missing files (C:/Work/… 71, D:/AnimBase/… 57,
+  D:/Projects_archive/… 7)" — what Maya shows can be where IT found a file. A .mb is listed with its count
+  only. Checked: tests (only our .bak listed, apply's copy found, the progress text, the summary incl. one
+  group per folder whatever the case and no reference history as missing); offscreen (isolated copy):
+  Stop on 400 synthetic scenes (314 unread, the hint), Clear backups (two old copies to the Recycle Bin,
+  the last replace's and a foreign .bak kept, the link gone), the session dialog's block on a COPY of
+  Buscemi_Rig.ma.
 
 ## Maya module
 

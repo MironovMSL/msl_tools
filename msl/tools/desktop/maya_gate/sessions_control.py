@@ -10,6 +10,9 @@ from msl_tools.msl.core.link.session import MayaSession
 from msl_tools.msl.core.environment.processes import is_process_running, terminate_process
 from msl_tools.msl.ui.widgets.windows.confirm_dialog import ConfirmDialog
 from msl_tools.msl.tools.desktop.maya_gate.scene_paths_dialog import ScenePathsDialog
+from msl_tools.msl.core.scene_paths import ma_paths
+from msl_tools.msl.core.scene_paths.roots import Root
+from msl_tools.msl.ui.workers.result_worker import run_in_background
 from msl_tools.msl.ui.icon_manager import tinted_menu_icon
 from msl_tools.msl.ui.theme.qss import make_rounded_popup, repolish
 from msl_tools.msl.ui.ui_resources import UiResources
@@ -309,6 +312,19 @@ class _ControlMixin:
                          f"name — Ctrl+Z in Maya doesn’t undo that, and reloading clears what Ctrl+Z could undo before.")
         if changes:
             notes.append("The scene isn’t saved — save it in Maya when it looks right.")
+        # The referenced .ma files are read here first (on a worker): the dialog says what each one HOLDS -
+        # Maya may show where it found a file (a rig written with D:/AnimBase/... shows E:/...).
+        if any(str(entry["file"]).lower().endswith(".ma") for entry in referenced):
+            self._say(f"Reading what {len(referenced)} referenced file{'s' if len(referenced) != 1 else ''} hold…")
+            workers = self.__dict__.setdefault("_paths_workers", [])
+            run_in_background(lambda: _read_referenced(referenced, roots),
+                              lambda read: self._open_scene_paths(session, name, changes, notes, read),
+                              lambda _error: self._open_scene_paths(session, name, changes, notes, referenced),
+                              keep=workers, parent=self)
+            return
+        self._open_scene_paths(session, name, changes, notes, referenced)
+
+    def _open_scene_paths(self, session: MayaSession, name: str, changes: list, notes: list, referenced: list) -> None:
         # A row per path: ticked = swapped, its variable picked where several can stand for it.
         writes, fix = ScenePathsDialog.ask(self, name, session.scene_name, changes, notes, referenced)
         if fix:
@@ -396,3 +412,16 @@ class _ControlMixin:
 
         self._say("Loading " + ", ".join(names) + "\u2026")
         self._ask(session_id, protocol.LOAD_PLUGINS, done, self.PLUGINS_TIMEOUT_MS, names=list(names))
+
+
+def _read_referenced(referenced: list, roots: list) -> list:
+    """The referenced files with what each .ma HOLDS (ma_paths.summary) — read as text, never changed."""
+    root_objects = [Root(str(name), str(value)) for name, value in roots]
+    read = []
+    for entry in referenced:
+        entry = dict(entry)
+        file = str(entry.get("file") or "")
+        if file.lower().endswith(".ma"):
+            entry["holds"] = ma_paths.summary(ma_paths.scan(file, root_objects, environment={}))
+        read.append(entry)
+    return read

@@ -7,7 +7,9 @@ import msl_tools.msl.ui.qt_bindings as qt
 from msl_tools.msl.core.batch import environments
 from msl_tools.msl.core.resources import Resources
 from msl_tools.msl.core.fs.maya_paths import MayaPaths
-from msl_tools.msl.core.scene_paths import coverage, finder, ma_paths, mb_paths, undo
+from msl_tools.msl.core.environment.shell import move_to_recycle_bin
+from msl_tools.msl.core.scene_paths import backups, coverage, finder, ma_paths, mb_paths, undo
+from msl_tools.msl.core.scene_paths.progress import Progress
 from msl_tools.msl.core.scene_paths.roots import roots_from, why_not
 from msl_tools.msl.core.theme import ThemeRegistry
 from msl_tools.msl.tools.desktop.maya_gate.maya_variables import KNOWN_VARIABLES
@@ -103,6 +105,9 @@ class ScenePathsPage(qt.QtWidgets.QWidget):
         self._picked: dict[str, str] = {}      # the user's pick for one ("" = don't relink it)
         self._root_choice: dict[str, str] = {}  # a path (finder.key_of) -> the variable picked for it ("" = leave it)
         self._searching = False
+        self._progress: Progress | None = None      # the run at hand (reading / writing) - shown, stoppable
+        self._mb_progress: Progress | None = None   # the binary scenes a mayapy reads
+        self._backups: dict[str, list] = {}         # scene -> its .bak copies (backups.backups_of), found with each read
         self._find_after: set[str] = set()   # scenes whose missing files are looked for once they are read
         self._coverage: dict = {}            # variable -> coverage.Coverage (where it is set)
         self._coverage_names: list = []
@@ -171,13 +176,16 @@ class ScenePathsPage(qt.QtWidgets.QWidget):
         self._add_files = self._link("+ Scenes")
         self._add_folder = self._link("+ Folder")
         self._clear = self._link("Clear")
+        self._clean = self._link("Clear backups")
+        self._clean.setToolTip("Moves the .bak copies this tab left beside the listed scenes to the Recycle Bin —\n"
+                               "the copies the last replace can be undone from stay")
         self._undo = self._link("Undo last replace")
         self._undo.setToolTip("Puts the scenes of the last replace back from their .bak copies —\n"
                               "a scene saved again since is left as it is")
         self._find = self._link("Find missing ▾")
         self._find.setToolTip("Missing files looked for by their name — in the ticked variables’ folders\n"
                               "and in folders you add; a found file is written through the variable")
-        for widget in (self._show_all, self._undo, self._find, self._add_files, self._add_folder, self._clear):
+        for widget in (self._show_all, self._clean, self._undo, self._find, self._add_files, self._add_folder, self._clear):
             scenes_heading.addWidget(widget)
         self._tree = qt.QtWidgets.QTreeWidget()
         self._tree.setObjectName("pathsTree")
@@ -225,6 +233,10 @@ class ScenePathsPage(qt.QtWidgets.QWidget):
         bottom_layout.setContentsMargins(12, 7, 10, 7)
         bottom_layout.setSpacing(10)
         bottom_layout.addWidget(self._summary, 1)
+        self._stop = self._link("Stop")
+        self._stop.setToolTip("Stops after the scene at hand — every scene stays whole")
+        self._stop.hide()
+        bottom_layout.addWidget(self._stop)
         bottom_layout.addWidget(self._backup)
         bottom_layout.addWidget(self._reread)
         bottom_layout.addWidget(self._apply)
@@ -257,6 +269,11 @@ class ScenePathsPage(qt.QtWidgets.QWidget):
         self._clear.clicked.connect(self._on_clear)
         self._find.clicked.connect(self._on_find_menu)
         self._undo.clicked.connect(self._on_undo)
+        self._clean.clicked.connect(self._on_clean)
+        self._stop.clicked.connect(self._on_stop)
+        self._ticker = qt.QtCore.QTimer(self)
+        self._ticker.setInterval(300)
+        self._ticker.timeout.connect(self._tick)
         self._coverage_details.clicked.connect(self._on_coverage_details)
         self._show_all.toggled.connect(self._on_show_all)
         self._backup.toggled.connect(lambda checked: self._settings.__setitem__("backup", bool(checked)))
@@ -371,24 +388,36 @@ class ScenePathsPage(qt.QtWidgets.QWidget):
         self._summary.setText(f"Reading {len(scenes)} scene{'s' if len(scenes) != 1 else ''}…")
         self._set_busy(True)
 
-        def read() -> dict:
+        progress = self._progress = Progress(len(scenes), "Reading")
+        self._start_ticking()
+
+        def read() -> tuple:
             cache: dict = {}
-            found = {}
+            found, copies = {}, {}
             for scene in scenes:
-                if scene.suffix.lower() == ma_paths.BINARY_SUFFIX:
+                copies[str(scene)] = backups.backups_of(scene)
+                if progress.stopped:
+                    found[str(scene)] = ma_paths.SceneScan(scene, error=Progress.STOPPED)
+                elif scene.suffix.lower() == ma_paths.BINARY_SUFFIX:
                     if str(scene) in raw:
                         found[str(scene)] = mb_paths.scan_from_raw(scene, raw[str(scene)], roots, environment, cache)
                 else:
                     found[str(scene)] = ma_paths.scan(scene, roots, environment=environment, exists_cache=cache)
-            return found
+                progress.done += 1
+            return found, copies
 
         run_in_background(read, lambda result: self._on_read(token, result),
                           lambda error: self._on_failed(token, error), keep=self._workers, parent=self)
 
-    def _on_read(self, token: int, result: dict) -> None:
+    def _on_read(self, token: int, result: tuple) -> None:
         if token != self._reading:
             return
+        result, self._backups = result
+        stopped = self._progress is not None and self._progress.stopped
+        self._progress = None
         self._scans = result
+        if stopped:
+            self._say("Stopped — the scenes not read yet say so; “Read again” reads them.")
         self._set_busy(False)
         self._show()
         self._read_binary()
@@ -418,8 +447,11 @@ class ScenePathsPage(qt.QtWidgets.QWidget):
         environment = mb_paths.environment_for(self._variables())
         self._show()
 
+        progress = self._mb_progress = Progress(len(need), "Reading in Maya:")
+        self._start_ticking()
+
         def read() -> dict:
-            return mb_paths.read_raw(need, MayaPaths.get_available_installs(), environment)
+            return mb_paths.read_raw(need, MayaPaths.get_available_installs(), environment, progress)
 
         def failed(error) -> None:
             self._on_binary_read({str(scene): {"maya": "", "data": {"error": f"reading failed: {error}"}}
@@ -428,8 +460,10 @@ class ScenePathsPage(qt.QtWidgets.QWidget):
         run_in_background(read, self._on_binary_read, failed, keep=self._workers, parent=self)
 
     def _on_binary_read(self, raw: dict) -> None:
+        self._mb_progress = None
         self._mb_reading.difference_update(raw)
-        self._mb_raw.update(raw)
+        stopped = {path for path, found in raw.items() if (found.get("data") or {}).get("error") == Progress.STOPPED}
+        self._mb_raw.update({path: found for path, found in raw.items() if path not in stopped})   # a stopped one is read again later
         roots, environment, cache = self.roots(), self._variables(), {}
         wanted = {str(scene) for scene in self._scenes}
         for path, found in raw.items():
@@ -440,6 +474,7 @@ class ScenePathsPage(qt.QtWidgets.QWidget):
 
     def _on_failed(self, token: int, error) -> None:
         if token == self._reading:
+            self._progress = None
             self._set_busy(False)
             self._say(f"Reading failed: {error}", "error")
             self._show()
@@ -469,6 +504,12 @@ class ScenePathsPage(qt.QtWidgets.QWidget):
         self._undo.setVisible(bool(last))
         self._undo.setText(f"Undo last replace ({len(last)})" if last else "Undo last replace")
         self._undo.setEnabled(not self._busy)
+        protected = {str(entry.get("backup")) for entry in last}
+        clearable = [path for paths in self._backups.values() for path in paths if str(path) not in protected]
+        self._clean.setVisible(bool(clearable))
+        self._clean.setText(f"Clear backups ({len(clearable)} · {backups.size_text(clearable)})" if clearable
+                            else "Clear backups")
+        self._clean.setEnabled(not self._busy)
         opened = {self._tree.topLevelItem(index).data(0, PATH_ROLE)
                   for index in range(self._tree.topLevelItemCount()) if self._tree.topLevelItem(index).isExpanded()}
         self._tree.clear()
@@ -877,6 +918,61 @@ class ScenePathsPage(qt.QtWidgets.QWidget):
         self._show()
 
 
+
+    # --- how far a run is; stopping it; the .bak copies ------------------------------------------------
+
+    def _start_ticking(self) -> None:
+        self._stop.show()
+        self._tick()
+        self._ticker.start()
+
+    def _tick(self) -> None:
+        """The run at hand on the bottom line ("Reading 120 of 500 scenes…"); hides Stop when none is."""
+        runs = [run for run in (self._progress, self._mb_progress) if run is not None]
+        if not runs:
+            self._ticker.stop()
+            self._stop.hide()
+            return
+        self._summary.setText("   ·   ".join(run.text() for run in runs))
+        self._stop.setEnabled(not all(run.stopped for run in runs))
+
+    def _on_stop(self) -> None:
+        for run in (self._progress, self._mb_progress):
+            if run is not None:
+                run.stopped = True
+        self._tick()
+
+    def _on_clean(self) -> None:
+        last = self._last_run()
+        protected = {str(entry.get("backup")) for entry in last}
+        clearable = [path for paths in self._backups.values() for path in paths if str(path) not in protected]
+        if not clearable:
+            return
+        scenes = sum(1 for paths in self._backups.values() if any(str(path) not in protected for path in paths))
+        details = "\n".join(str(path) for path in clearable[:12]) + (f"\n… and {len(clearable) - 12} more"
+                                                                     if len(clearable) > 12 else "")
+        message = (f"Move {len(clearable)} .bak cop{'ies' if len(clearable) != 1 else 'y'} ({backups.size_text(clearable)}) "
+                   f"of {scenes} scene{'s' if scenes != 1 else ''} to the Recycle Bin? They can be put back from there.")
+        if protected:
+            message += f" The {len(protected)} the last replace can be undone from stay."
+        choice = ConfirmDialog.ask(self, "Clear backups", message, details,
+                                   (("clear", "Move to the Recycle Bin"), ("cancel", "Cancel")), kind="question")
+        if choice != "clear":
+            return
+        self._set_busy(True)
+        run_in_background(lambda: (len(clearable), move_to_recycle_bin(clearable)), self._on_cleaned,
+                          self._on_write_failed, keep=self._workers, parent=self)
+
+    def _on_cleaned(self, answer: tuple) -> None:
+        total, left = answer
+        self._set_busy(False)
+        moved = total - len(left)
+        text = f"{moved} .bak cop{'ies' if moved != 1 else 'y'} moved to the Recycle Bin."
+        if left:
+            text += f"  {len(left)} couldn’t be moved (in use?)."
+        self._say(text, "error" if left else "done")
+        self._read()
+
     # --- undoing the last replace -----------------------------------------------------------------------
 
     def _last_run(self) -> list:
@@ -983,19 +1079,26 @@ class ScenePathsPage(qt.QtWidgets.QWidget):
         roots_now = self.roots()
         environment = mb_paths.environment_for(self._variables())
 
+        progress = self._progress = Progress(len(scans), "Writing")
+        self._start_ticking()
+
         def write() -> list:
             outcome = []
             for result in scans:
                 if result.binary:
                     continue
+                if progress.stopped:
+                    outcome.append((result.path, None, f"{result.path.name}: stopped — not written"))
+                    continue
                 try:
                     outcome.append((result.path, ma_paths.apply(result, backup=backup), ""))
                 except ma_paths.ScenePathsError as error:
                     outcome.append((result.path, None, str(error)))
+                progress.done += 1
             binary_scans = [result for result in scans if result.binary]
             if binary_scans:   # each in the Maya it was saved with (mb_paths.maya_to_write)
                 outcome += mb_paths.apply_binary(binary_scans, roots_now, MayaPaths.get_available_installs(),
-                                                 environment, backup=backup)
+                                                 environment, backup=backup, progress=progress)
             # each written scene as the write left it, with its copy: what "Undo last replace" needs
             entries = [undo.entry_for(path, done.backup) for path, done, _error in outcome
                        if done is not None and done.changed and done.backup]
@@ -1005,6 +1108,7 @@ class ScenePathsPage(qt.QtWidgets.QWidget):
                           keep=self._workers, parent=self)
 
     def _on_written(self, outcome: list, entries: list, held: list) -> None:
+        self._progress = None
         self._set_busy(False)
         if entries:   # this replace becomes the one to undo (kept across restarts of the hub)
             self._settings["last_run"] = {"time": time.time(), "entries": entries}
@@ -1025,6 +1129,7 @@ class ScenePathsPage(qt.QtWidgets.QWidget):
         self._read()
 
     def _on_write_failed(self, error) -> None:
+        self._progress = None
         self._set_busy(False)
         self._say(f"Writing failed: {error}", "error")
         self._read()

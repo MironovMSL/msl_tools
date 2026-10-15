@@ -36,3 +36,33 @@ def select_in_file_manager(path: str | Path) -> bool:
             shell.ILFree(item)
     except Exception:  # noqa: BLE001 - showing a file must never break what asked for it
         return False
+
+
+def move_to_recycle_bin(paths) -> list[str]:
+    """Moves files to the Recycle Bin (they can be put back from there) — never deletes them outright.
+    Windows only. Returns the paths that are still there afterwards (refused, in use; all of them where
+    it can't be done)."""
+    paths = [str(Path(path)) for path in paths if Path(path).exists()]
+    if not paths:
+        return []
+    if sys.platform != "win32":
+        return paths
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class _Operation(ctypes.Structure):   # SHFILEOPSTRUCTW
+            _fields_ = [("hwnd", wintypes.HWND), ("wFunc", wintypes.UINT), ("pFrom", wintypes.LPCWSTR),
+                        ("pTo", wintypes.LPCWSTR), ("fFlags", ctypes.c_ushort), ("fAnyOperationsAborted", wintypes.BOOL),
+                        ("hNameMappings", ctypes.c_void_p), ("lpszProgressTitle", wintypes.LPCWSTR)]
+
+        shell = ctypes.WinDLL("shell32")   # own handle (see select_in_file_manager)
+        shell.SHFileOperationW.argtypes = [ctypes.POINTER(_Operation)]
+        shell.SHFileOperationW.restype = ctypes.c_int
+        delete, allow_undo, no_confirmation, silent, no_error_ui = 3, 0x40, 0x10, 0x4, 0x400
+        operation = _Operation(None, delete, "\0".join(paths) + "\0\0", None,
+                               allow_undo | no_confirmation | silent | no_error_ui, False, None, None)
+        shell.SHFileOperationW(ctypes.byref(operation))
+    except Exception:
+        pass
+    return [path for path in paths if Path(path).exists()]
