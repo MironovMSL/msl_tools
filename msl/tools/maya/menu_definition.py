@@ -31,6 +31,7 @@ class MslMenuDefinition:
                 MenuAction("Labels", cls._tool("labels"), icon=cls._icon("labels"), tooltip="Attribute values shown live in the viewport - on the screen or next to an object, colored by the value; one layout fits every copy of a rig. Maya 2025 and newer."),
                 MenuAction("Rename", cls._tool("rename"), icon=cls._icon("rename"), tooltip="Quick naming of the selected objects: a name with numbers, sides and kinds, prefix / suffix, find & replace, a library of words — see before / after first. Maya 2025 and newer."),
                 MenuDivider(),
+                SubMenu("Scripts", icon=cls._icon("scripts"), items=cls._scripts()),
                 SubMenu("Scene", icon=cls._icon("scene"), items=(
                     MenuAction("Paths to Variables", f"{cls._TOOLS_PACKAGE}.scene_paths_tool.paths_to_variables", icon=cls._icon("paths"), tooltip="The open scene's absolute paths swapped for this environment's variables (E:/branches/Animation/... -> $WG_ANIM/...): textures, references, caches. Shows what changes and asks first; the scene isn't saved."),
                 )),
@@ -44,6 +45,20 @@ class MslMenuDefinition:
                 )),
             ),
         )
+
+    @classmethod
+    def _scripts(cls) -> tuple:
+        """The MSL Scripts (tools/maya/scripts SCRIPTS) by group, a divider between groups."""
+        from msl_tools.msl.tools.maya.scripts import GROUPS, SCRIPTS
+        items = []
+        for group in GROUPS:
+            entries = [MenuAction(script.label, script.call, tooltip=script.annotation + "  (a key: Hotkey Editor > "
+                                  f"Custom Scripts > MSL Scripts > {script.command})")
+                       for script in SCRIPTS if script.group == group]
+            if entries and items:
+                items.append(MenuDivider())
+            items += entries
+        return tuple(items)
 
     @classmethod
     def _tool(cls, tool_name: str) -> str:

@@ -67,6 +67,7 @@ msl_tools/                 (repo root)
                 rename/           Rename: quick naming of Maya objects, a window inside Maya 2025+ (see "Rename tool")
                 controls/         Controls: rig controls — shape library, create, offsets, shape tools; Maya 2025+ (see "Controls tool")
                 labels/           Labels: attribute values live in the viewport (the mslLabels plug-in), a window inside Maya 2025+ (see "Labels tool")
+                scripts/          MSL Scripts: one key = one thing done, no window - the hotkey actions (see "MSL Scripts")
 ```
 
 ## Hard conventions (violate these and it won't match the rest of the codebase)
@@ -3683,6 +3684,57 @@ No code of anyone else's (see CLAUDE.local.md).
   Playblast window.
   Open, for the user to decide: a 14 px Manual label in a 1080 playblast is small - Auto suits
   playblasts better (the window offers it; nothing switches it by itself).
+
+## MSL Scripts (inside Maya)
+
+`msl/tools/maya/scripts/` (2026-10-15, the user's ask: their own scripts - and new ones - with a
+hotkey to give, apart from the TOOLS; a tool's own small actions may join them). `SCRIPTS` in
+`scripts/__init__.py` is the one list (`Script(command, label, annotation, call, group)`, groups
+Camera / Attributes / Rig / Controls / Show); `hotkeys.all_commands()` makes each a runtime command
+in Custom Scripts > **MSL Scripts** (the windows stay in > MSL Tools; `register()` moves a command
+that changed category, its key kept), and the MSL menu has a "Scripts" submenu (menu icon `scripts`
+= actions/keyboard) listing them by group. NO KEY is given to any command: the user assigns keys in
+the Hotkey Editor (their call). A new script = a function + one Script line;
+`tests/maya/test_scripts.py` checks names, groups, that every `call` is defined (by reading the
+source: no Maya) and that no command is in both lists. The Controls quick actions, the shot mask
+and Labels toggles moved here from hotkeys.COMMANDS (same command names).
+- `reset_attributes.py` (`MSLResetAttributes`; was the user's MSL_attributeResetter.py in
+  Documents/maya/2024/scripts): picked keys of a Graph Editor that is ON SCREEN (keys stay picked
+  after it closes - a reset meant for the object must not reach them), else channels picked in the
+  Channel Box (every section: object, shape, inputs, outputs, on the objects it lists), else the
+  selected nodes - a transform: move / rotate / scale (`run(transforms_only=False)`: its other
+  keyable ones too; `keyable_only=False`: + non-keyable Channel Box ones), a shape or another node
+  selected by itself: its keyable attributes. `default_<name>` on the node beats Maya's default.
+  Left and counted: locked, driven by something other than keys (a keyed channel IS reset), keys of
+  a curve driving through pairBlend / blendWeighted. ONE undo step; inViewMessage + Script Editor
+  line "Reset: 7 attributes back to default on 1 object(s) · 1 locked, 1 driven - left". MEASURED
+  (Maya 2026): attributeQuery listDefault, getAttr / setAttr and key values all use the UI unit -
+  a 30 degree default reads 30; nothing is converted. The old script had no undo chunk (one Ctrl+Z
+  per attribute), a hard-coded graphEditor1GraphEd, `default_` only on whole objects, silent
+  `except: pass`.
+- `camera_views.py` (`MSLOrthoView`, `MSLCameraBack`; was MSL_viewSnap.py): the camera of the
+  viewport UNDER THE POINTER (else the focused one) -> ortho of the side it faces: turned by two
+  DIRECTIONS (forward = the nearest world axis, up = the nearest axis across it; the old per-Euler
+  rounding to 90 broke for tilts near 90 and non-xyz rotate orders), the same point looked at, as
+  wide as it was far, moved back to at least BACK_OFF 1000 so nothing in front is cut off; again =
+  back to the perspective it had (remembered per camera UUID for the session), carried by the pan
+  done in ortho. Camera Back = that perspective exactly, else `viewSet -home`. Cameras keyed /
+  locked / driven (shot cameras) and Maya's own top / front / side are left alone with the reason.
+  Outside the undo queue (state put back as it WAS - the old decorator always switched it ON), the
+  modified mark kept.
+- `rig.py` (`MSLLocatorsOnSelection`, `MSLLocatorInMiddle`, `MSLJointsOnSelection`): the Controls
+  tool's `locators_on_selection` / `joints_on_selection`, said in the viewport.
+Checked: mayapy 2026 from an isolated copy (30 checks: reset of transforms / default_ / locked /
+driven / one undo / transforms_only / channels / a history node / a shape / a picked key / a keyed
+channel; ortho of a zxy camera tilted -80 looking down: top, up a world axis, same target, width,
+backed off, no undo step, not modified; back with the pan carried; Camera Back exact; a shot camera
+and `front` refused; 23 commands registered in their categories; every call importable) and
+windowed Maya 2026 (MSL menu > Scripts built; Ortho View / Camera Back / Reset / Locators run
+through their runtime commands as a hotkey would; the ortho picture). NOT seen: a real Channel Box
+pick (a script can't make one) and a real key press.
+The user's old copies in Documents/maya/2024/scripts and their old runtime commands (viewSnap,
+resetCamera, attributeResetter on Alt+F, Ctrl+Alt+F, Alt+W) were left for the user to remove /
+re-key.
 
 ## Scenes tool
 
