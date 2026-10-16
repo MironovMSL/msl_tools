@@ -195,6 +195,10 @@ class BatchRunner(qt.QtCore.QObject):
     def current(self) -> BatchJob | None:
         return self._render_job
 
+    def video_job(self) -> BatchJob | None:
+        """The job whose frames are being made into a video right now (its Maya is closed)."""
+        return self._video_job
+
     def find(self, job_id: str) -> BatchJob | None:
         return next((job for job in self.jobs if job.id == job_id), None)
 

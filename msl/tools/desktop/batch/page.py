@@ -7,6 +7,7 @@ from msl_tools.msl.core.batch.checks import choose_renderer
 from msl_tools.msl.core.batch.job import CANCELLED, CHECKING, DONE, FAILED, RENDERER_TITLES, RUNNING, BatchJob, BatchStore
 from msl_tools.msl.core.batch import environments
 from msl_tools.msl.core.batch.frames import FramesError
+from msl_tools.msl.core.batch.stages import stage_of, steps_of
 from msl_tools.msl.core.environment import system_actions
 from msl_tools.msl.core.resources import Resources
 from msl_tools.msl.tools.desktop.batch.job_row import DRAG_MIME, JobRow
@@ -21,6 +22,7 @@ from msl_tools.msl.ui.ui_resources import UiResources
 from msl_tools.msl.ui.widgets.atoms.charts.ring_gauge import RingGauge
 from msl_tools.msl.ui.widgets.atoms.icons.tinted_icon import TintedIcon
 from msl_tools.msl.ui.widgets.atoms.labels.elided_label import ElidedLabel
+from msl_tools.msl.ui.widgets.atoms.progress.step_track import StepTrack
 from msl_tools.msl.ui.widgets.atoms.surfaces import StableScrollArea
 from msl_tools.msl.ui.widgets.compositions.drop_area import DropArea
 
@@ -165,6 +167,9 @@ class BatchPage(qt.QtWidgets.QWidget):
         self._now = qt.QtWidgets.QLabel()
         self._now.setObjectName("batchNow")
         self._now.setWordWrap(True)
+        self._track = StepTrack()   # Read -> Open -> Render (-> Video) of the job on this card
+        self._track.hide()
+        self._track_job = ""        # the job the track shows: the one at work, else the last one that was
         self._engine = qt.QtWidgets.QLabel()
         self._engine.setObjectName("batchSubtitle")
         self._watchdog = qt.QtWidgets.QLabel()
@@ -180,6 +185,9 @@ class BatchPage(qt.QtWidgets.QWidget):
         texts = qt.QtWidgets.QVBoxLayout()
         texts.setSpacing(3)
         texts.addWidget(self._now)
+        texts.addSpacing(2)
+        texts.addWidget(self._track)
+        texts.addSpacing(2)
         texts.addWidget(self._engine)
         texts.addWidget(self._watchdog)
         texts.addWidget(self._scene)
@@ -671,6 +679,23 @@ class BatchPage(qt.QtWidgets.QWidget):
 
     # --- the summary ---------------------------------------------------------------------------------
 
+    def _show_track(self, job: "BatchJob | None", video: "BatchJob | None") -> None:
+        """The steps of the job at work (or whose video is being made); with none at work, those
+        of the last one that was - how it ended - while it is still in the queue."""
+        shown = job or video
+        if shown is not None:
+            self._track_job = shown.id
+        else:
+            shown = next((each for each in self.jobs if each.id == self._track_job), None)
+        if shown is None:
+            if self._track.isVisibleTo(self):
+                self._track.hide()
+            return
+        self._track.set_steps(steps_of(shown))
+        self._track.set_stage(*stage_of(shown, making_video=video is shown))
+        if not self._track.isVisibleTo(self):
+            self._track.show()
+
     def _refresh_summary(self) -> None:
         runner = self.runner
         totals = runner.totals()
@@ -691,6 +716,7 @@ class BatchPage(qt.QtWidgets.QWidget):
             parts.append("paused")
         self._time_running.setText("  ·  ".join(parts))
         job = runner.current()
+        self._show_track(job, runner.video_job())
         if job is not None:
             renderer = RENDERER_TITLES.get(choose_renderer(job), "")
             frame = job.message if job.message.startswith(("rendering", "frame")) else job.message
@@ -711,6 +737,9 @@ class BatchPage(qt.QtWidgets.QWidget):
                 self._now.setText(f"All {len(enabled)} scene{'s' if len(enabled) != 1 else ''} rendered")
             else:
                 self._now.setText(f"{ready} scene{'s' if ready != 1 else ''} ready to render")
+            video = runner.video_job()
+            if video is not None:
+                self._now.setText(f"{video.name}  ·  making the video")
             self._engine.setText("waiting for scenes to be read…" if running else "")
             self._watchdog.setText("")
             self._scene.setText("")

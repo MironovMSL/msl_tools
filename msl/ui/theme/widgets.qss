@@ -373,6 +373,17 @@ Spinner {
     qproperty-trackColor: alpha(var(--text-primary), 10%);
 }
 
+/* --- StepTrack: the stages of one piece of work (Scenes > Render's current job) ---- */
+
+StepTrack {
+    qproperty-activeColor:    var(--accent);
+    qproperty-markColor:      var(--on-accent);
+    qproperty-quietColor:     var(--text-secondary);
+    qproperty-errorColor:     var(--error);
+    qproperty-textColor:      var(--text-primary);
+    qproperty-quietTextColor: var(--text-secondary);
+}
+
 /* --- Toast: a short message at the bottom right of a window (ToastStack) --------------- */
 
 Toast {
