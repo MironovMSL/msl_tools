@@ -7,7 +7,7 @@ from msl_tools.msl.core.theme import ThemeRegistry
 from msl_tools.msl.ui.theme import StylesheetBuilder
 from msl_tools.msl.ui.theme.qss import color_property, make_rounded_popup
 from msl_tools.msl.ui.ui_resources import UiResources
-from msl_tools.msl.ui.widgets.atoms.tooltips import ArrowTooltip
+from msl_tools.msl.ui.widgets.compositions.toast_stack import show_toast
 from msl_tools.msl.ui.widgets.compositions import BulkActionBar, DraggableList, EnvVarRow, ValueSpec
 from msl_tools.msl.ui.widgets.windows.confirm_dialog import ConfirmDialog
 
@@ -562,7 +562,7 @@ class CollapsibleVariableGroup(qt.QtWidgets.QWidget):
         copied, skipped = self.copy_items_to(names, target, replace_existing=replace)
         self.clear_selection()
         message = f"Copied {len(copied)} to {target}" + (f", skipped {len(skipped)}" if skipped else "")
-        ArrowTooltip.shared(self).show_message(message)
+        show_toast(self, message + ".", "Variables", tone="warning" if skipped else "success")
 
     def _on_value_changed(self, var_name: str, value: str) -> None:
         self._config[self._section][var_name] = value

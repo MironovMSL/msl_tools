@@ -12,6 +12,7 @@ from msl_tools.msl.tools.desktop.media.job_queue import DONE, FAILED
 from msl_tools.msl.ui.desktop_notice import DesktopNotice
 from msl_tools.msl.ui.process_launcher.process_launcher import ProcessLauncher
 from msl_tools.msl.ui.ui_resources import UiResources
+from msl_tools.msl.ui.widgets.compositions.toast_stack import show_toast
 from msl_tools.msl.ui.widgets.windows.confirm_dialog import ConfirmDialog
 from msl_tools.msl.ui.widgets.windows.text_dialog import TextDialog
 
@@ -240,6 +241,20 @@ class _JobsMixin:
         window = self.window()
         if not (done or failed) or not self._notifies() or (self.isVisible() and window.isActiveWindow()):
             return
+        text = self._batch_text(done, failed)
+        if window.isActiveWindow():   # the hub is in front, another tool open: say it there
+            show_toast(window, text, "Media", tone="warning" if failed else "success",
+                       action="Open Media", on_action=self._on_notice_clicked)
+            return
+        if self._notice is None:
+            self._notice = DesktopNotice(UiResources().iconManager.get_icon("hub", sub_folder="brand"), self)
+            self._notice.clicked.connect(self._on_notice_clicked)
+        self._notice.show("MSL Tools · Media", text)
+        qt.QtWidgets.QApplication.alert(window)  # the taskbar button asks for attention too
+
+    @staticmethod
+    def _batch_text(done: list, failed: list) -> str:
+        """What a finished batch made, in one line."""
         if len(done) == 1 and not failed:
             text = f"{done[0].job.output.name} is ready."
         elif len(failed) == 1 and not done:
@@ -247,11 +262,7 @@ class _JobsMixin:
         else:
             text = f"{len(done)} result{'s are' if len(done) != 1 else ' is'} ready" + \
                    (f", {len(failed)} failed." if failed else ".")
-        if self._notice is None:
-            self._notice = DesktopNotice(UiResources().iconManager.get_icon("hub", sub_folder="brand"), self)
-            self._notice.clicked.connect(self._on_notice_clicked)
-        self._notice.show("MSL Tools · Media", text)
-        qt.QtWidgets.QApplication.alert(window)  # the taskbar button asks for attention too
+        return text
 
     def _on_notice_clicked(self) -> None:
         """The notice was clicked: this page, in front."""

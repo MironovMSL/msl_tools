@@ -18,6 +18,7 @@ from msl_tools.msl.ui.widgets.atoms.editors import LogView
 from msl_tools.msl.ui.widgets.atoms.layouts import FlowLayout
 from msl_tools.msl.ui.widgets.atoms.segmented.segmented_control import SegmentedControl
 from msl_tools.msl.ui.widgets.atoms.surfaces import StableScrollArea
+from msl_tools.msl.ui.widgets.compositions.toast_stack import show_toast
 from msl_tools.msl.tools.desktop.maya_gate.session_rows import _EndedRow, _HistoryRow, _SessionRow
 from msl_tools.msl.tools.desktop.maya_gate.sessions_console_widgets import _ConsoleInput, _NameField
 from msl_tools.msl.tools.desktop.maya_gate.sessions_console import _ConsoleMixin
@@ -628,6 +629,12 @@ class SessionsTab(_ConsoleMixin, _ControlMixin, qt.QtWidgets.QWidget):
                       + (" Its newest autosave can be opened from its line." if record.autosave else ""), "error")
             if not self.isVisible() and not record.forced:
                 self._server.set_unread_errors(self._server.unread_errors() + 1)
+            if not record.forced:   # wherever the user is in the hub: a Maya was lost
+                show_toast(self, f"Maya {session.version} · {session.environment} ended unexpectedly"
+                           + (" with unsaved changes" if session.modified else "") + " — its log was saved."
+                           + (" An autosave is there." if record.autosave else ""),
+                           "Maya Gate", tone="error", action="Show",
+                           on_action=lambda pid=session.pid: self._show_ended(pid))
         if self._history is not None:
             self._history.add(record)
         self.refresh()
@@ -705,6 +712,17 @@ class SessionsTab(_ConsoleMixin, _ControlMixin, qt.QtWidgets.QWidget):
         self._say(f"That scene isn’t there any more: {path}", "error")
 
     REOPEN_WAIT_S = 300   # how long a "Reopen" waits for its Maya to show up
+
+    def _show_ended(self, pid: int) -> None:
+        """A toast's "Show": Maya Gate, its Sessions tab, that Maya's log."""
+        window = self.window()
+        open_tool = getattr(window, "open_tool", None)   # the hub; a tab shown on its own has none
+        page = open_tool("maya_gate") if callable(open_tool) else None
+        show = getattr(page, "show_sessions", None)
+        if callable(show):
+            show()
+        if pid in self._ended:
+            self._select_pid(pid)
 
     def _select_pid(self, pid: int) -> None:
         """Shows the log of the Maya with process id `pid` (an ended one)."""

@@ -22,6 +22,7 @@ from msl_tools.msl.ui.widgets.atoms.comboboxes.base_combo_box import BaseComboBo
 from msl_tools.msl.ui.widgets.atoms.icons.tinted_icon import TintedIcon
 from msl_tools.msl.ui.widgets.compositions.chip_bar import ChipBar
 from msl_tools.msl.ui.widgets.compositions.drop_area import DropArea
+from msl_tools.msl.ui.widgets.compositions.toast_stack import show_toast
 from msl_tools.msl.ui.widgets.windows.confirm_dialog import ConfirmDialog
 from msl_tools.msl.ui.widgets.windows.text_dialog import TextDialog
 from msl_tools.msl.ui.workers.result_worker import run_in_background
@@ -1013,6 +1014,7 @@ class ScenePathsPage(qt.QtWidgets.QWidget):
         if failed:
             text += "  " + "; ".join(failed[:4]) + ("…" if len(failed) > 4 else "")
         self._say(text, "error" if failed else "done")
+        show_toast(self, text, "Paths", tone="warning" if failed else "success")
         for entry in back:   # a binary scene is read again by Maya
             self._mb_raw.pop(str(entry.get("scene")), None)
         self._read()
@@ -1123,6 +1125,9 @@ class ScenePathsPage(qt.QtWidgets.QWidget):
         if failed:
             text += "  Not written: " + "; ".join(failed[:4]) + ("…" if len(failed) > 4 else "")
         self._say(text, "error" if failed else "done")
+        if written:   # where the user looks: the result, and the way back
+            show_toast(self, text, "Paths", tone="warning" if (failed or held) else "success",
+                       action="Undo" if entries else "", on_action=self._on_undo if entries else None)
         for path, _done, _error in outcome:   # a binary scene Maya saved (or tried to) is read again by Maya
             if str(path).lower().endswith(ma_paths.BINARY_SUFFIX):
                 self._mb_raw.pop(str(path), None)

@@ -366,6 +366,45 @@ ArrowTooltip {
     qproperty-shadowColor:     alpha(#000000, 45%);
 }
 
+/* --- Toast: a short message at the bottom right of a window (ToastStack) --------------- */
+
+Toast {
+    qproperty-backgroundColor: var(--surface-raised);
+    qproperty-borderColor:     var(--border);
+    qproperty-toneColor:       var(--accent);
+    qproperty-shadowColor:     alpha(#000000, 45%);
+}
+Toast[tone="success"] { qproperty-toneColor: var(--success); }
+Toast[tone="warning"] { qproperty-toneColor: var(--warning); }
+Toast[tone="error"]   { qproperty-toneColor: var(--error); }
+Toast TintedIcon#toastIcon                 { qproperty-iconColor: var(--accent); }
+Toast[tone="success"] TintedIcon#toastIcon { qproperty-iconColor: var(--success); }
+Toast[tone="warning"] TintedIcon#toastIcon { qproperty-iconColor: var(--warning); }
+Toast[tone="error"] TintedIcon#toastIcon   { qproperty-iconColor: var(--error); }
+QLabel#toastTitle {
+    color: var(--text-primary);
+    font-weight: 600;
+}
+QLabel#toastText {
+    color: var(--text-secondary);
+}
+QPushButton#toastAction {
+    color: var(--accent);
+    background: transparent;
+    border: 1px solid alpha(var(--accent), 45%);
+    border-radius: 5px;
+    padding: 2px 10px;
+    min-height: 0px;
+    font-weight: 600;
+}
+QPushButton#toastAction:hover {
+    background: alpha(var(--accent), 12%);
+    border-color: var(--accent);
+}
+QPushButton#toastAction:pressed {
+    background: alpha(var(--accent), 22%);
+}
+
 /* --- LogView: log entries colored by level ------------------------------------------- */
 
 LogView {
