@@ -9,7 +9,7 @@ from msl_tools.msl.core.version.release_notes import ReleaseNote, split_blocks
 from msl_tools.msl.core.version.version import Version
 from msl_tools.msl.ui.process_launcher.process_launcher import ProcessLauncher
 from msl_tools.msl.ui.theme.qss import repolish
-from msl_tools.msl.ui.widgets.atoms.progress import BaseProgressBar, ProgressState
+from msl_tools.msl.ui.widgets.atoms.progress import BaseProgressBar, ProgressState, Spinner
 from msl_tools.msl.ui.widgets.atoms.surfaces import StableScrollArea
 from msl_tools.msl.ui.widgets.windows.confirm_dialog import ConfirmDialog
 from msl_tools.msl.ui.widgets.windows.frameless_dialog import FramelessDialog
@@ -229,9 +229,14 @@ class WhatsNewDialog(FramelessDialog):
         self._retry_button = qt.QtWidgets.QPushButton("Retry")
         self._retry_button.clicked.connect(self._load)
 
+        self._spinner = Spinner(22)   # while the list is on its way
+        self._spinner.hide()
+
         self._status_page = qt.QtWidgets.QWidget()
         status_layout = qt.QtWidgets.QVBoxLayout(self._status_page)
         status_layout.addStretch()
+        status_layout.addWidget(self._spinner, 0, qt.QtCore.Qt.AlignmentFlag.AlignHCenter)
+        status_layout.addSpacing(6)
         status_layout.addWidget(self._status_label)
         status_layout.addSpacing(8)
         status_layout.addWidget(self._retry_button, 0, qt.QtCore.Qt.AlignmentFlag.AlignHCenter)
@@ -342,8 +347,11 @@ class WhatsNewDialog(FramelessDialog):
             self.set_releases(releases)
 
     def _show_status(self, text: str, retry: bool) -> None:
+        """A line instead of the list: a failure (with Retry), or - without Retry - the
+        wait for it (the spinner turns above the line)."""
         self._status_label.setText(text)
         self._retry_button.setVisible(retry)
+        self._spinner.setVisible(not retry)
         self._pages.setCurrentWidget(self._status_page)
 
     # --- content ------------------------------------------------------------------

@@ -22,6 +22,7 @@ from msl_tools.msl.ui.widgets.atoms.comboboxes.base_combo_box import BaseComboBo
 from msl_tools.msl.ui.widgets.atoms.icons.tinted_icon import TintedIcon
 from msl_tools.msl.ui.widgets.compositions.chip_bar import ChipBar
 from msl_tools.msl.ui.widgets.compositions.drop_area import DropArea
+from msl_tools.msl.ui.widgets.atoms.progress.spinner import Spinner
 from msl_tools.msl.ui.widgets.compositions.toast_stack import show_toast
 from msl_tools.msl.ui.widgets.windows.confirm_dialog import ConfirmDialog
 from msl_tools.msl.ui.widgets.windows.text_dialog import TextDialog
@@ -233,6 +234,9 @@ class ScenePathsPage(qt.QtWidgets.QWidget):
         bottom_layout = qt.QtWidgets.QHBoxLayout(bottom)
         bottom_layout.setContentsMargins(12, 7, 10, 7)
         bottom_layout.setSpacing(10)
+        self._spinner = Spinner(14)   # while scenes are read / written / looked through
+        self._spinner.hide()
+        bottom_layout.addWidget(self._spinner)
         bottom_layout.addWidget(self._summary, 1)
         self._stop = self._link("Stop")
         self._stop.setToolTip("Stops after the scene at hand — every scene stays whole")
@@ -930,6 +934,7 @@ class ScenePathsPage(qt.QtWidgets.QWidget):
     def _tick(self) -> None:
         """The run at hand on the bottom line ("Reading 120 of 500 scenes…"); hides Stop when none is."""
         runs = [run for run in (self._progress, self._mb_progress) if run is not None]
+        self._sync_spinner()
         if not runs:
             self._ticker.stop()
             self._stop.hide()
@@ -1139,8 +1144,15 @@ class ScenePathsPage(qt.QtWidgets.QWidget):
         self._say(f"Writing failed: {error}", "error")
         self._read()
 
+    def _sync_spinner(self) -> None:
+        """The spinner turns while anything is at work: a read (also Maya's), a write, an undo."""
+        working = self._busy or self._progress is not None or self._mb_progress is not None
+        if working != self._spinner.isVisibleTo(self):
+            self._spinner.setVisible(working)
+
     def _set_busy(self, busy: bool) -> None:
         self._busy = busy
+        self._sync_spinner()
         for widget in (self._apply, self._reread, self._environment, self._roots, self._clear):
             widget.setEnabled(not busy)
         if not busy:

@@ -4,6 +4,7 @@ from msl_tools.msl.core.theme import ThemeRegistry
 from msl_tools.msl.ui.theme.qss import color_property, repolish
 from msl_tools.msl.ui.widgets.atoms.buttons.icon_push_button import IconPushButton
 from msl_tools.msl.ui.widgets.atoms.icons.tinted_icon import TintedIcon
+from msl_tools.msl.ui.widgets.atoms.progress.spinner import Spinner
 
 
 class DropArea(qt.QtWidgets.QWidget):
@@ -50,6 +51,8 @@ class DropArea(qt.QtWidgets.QWidget):
         self._buttons: list[IconPushButton] = []
 
         self._icon = TintedIcon(icon, self.ICON_SIZE)
+        self._spinner = Spinner(self.ICON_SIZE)   # in the icon's place while something is read
+        self._spinner.hide()
         self._title = qt.QtWidgets.QLabel(title)
         self._title.setObjectName("dropAreaTitle")
         self._note = qt.QtWidgets.QLabel(note)
@@ -70,6 +73,7 @@ class DropArea(qt.QtWidgets.QWidget):
         head.setSpacing(10)
         head.addStretch(1)
         head.addWidget(self._icon)
+        head.addWidget(self._spinner)
         head.addWidget(self._title)
         head.addStretch(1)
         layout = qt.QtWidgets.QVBoxLayout(self)
@@ -107,12 +111,17 @@ class DropArea(qt.QtWidgets.QWidget):
         self._note.setText(note)
         self._note.setVisible(bool(note))
         self._pill.setVisible(bool(self._buttons))
+        self._spinner.hide()
+        self._icon.show()
 
     def set_busy(self, text: str) -> None:
-        """Something is being read: only `text` is shown."""
+        """Something is being read: only `text` is shown, a spinner in the icon's place
+        (set_texts() brings the rest back)."""
         self._title.setText(text)
         self._note.hide()
         self._pill.hide()
+        self._icon.hide()
+        self._spinner.show()
 
     def title(self) -> str:
         return self._title.text()

@@ -366,6 +366,13 @@ ArrowTooltip {
     qproperty-shadowColor:     alpha(#000000, 45%);
 }
 
+/* --- Spinner: working on it, no number (What's new, a drop area reading, Paths) ---- */
+
+Spinner {
+    qproperty-arcColor:   var(--accent);
+    qproperty-trackColor: alpha(var(--text-primary), 10%);
+}
+
 /* --- Toast: a short message at the bottom right of a window (ToastStack) --------------- */
 
 Toast {
