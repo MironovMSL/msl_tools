@@ -13,6 +13,8 @@ class BarStrip(qt.QtWidgets.QWidget):
 
         strip.set_bars([(52.0, False, "52.0 s without boost"), (28.0, True, "28.0 s with boost")])
 
+    Each bar's text is the widget's toolTip() while the pointer is over it.
+
     Bars are scaled from zero to the largest value, so heights compare
     honestly. The widget is as wide as its bars; no axes, no numbers — the
     numbers belong to the text next to it.
@@ -58,23 +60,16 @@ class BarStrip(qt.QtWidgets.QWidget):
         hovered = self._bar_at(event.position().x())
         if hovered != self._hovered:
             self._hovered = hovered
+            # The tooltip is the bar under the pointer: whoever shows tooltips reads toolTip().
+            self.setToolTip(self._bars[hovered][2] if hovered >= 0 else "")
             self.update()
         super().mouseMoveEvent(event)
 
     def leaveEvent(self, event) -> None:
         self._hovered = -1
+        self.setToolTip("")
         self.update()
         super().leaveEvent(event)
-
-    def event(self, event) -> bool:
-        if event.type() == qt.QtCore.QEvent.Type.ToolTip:
-            index = self._bar_at(event.pos().x())
-            if index >= 0:
-                qt.QtWidgets.QToolTip.showText(event.globalPos(), self._bars[index][2], self)
-            else:
-                qt.QtWidgets.QToolTip.hideText()
-            return True
-        return super().event(event)
 
     def paintEvent(self, event) -> None:
         if not self._bars:

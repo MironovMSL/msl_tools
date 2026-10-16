@@ -34,6 +34,7 @@ from msl_tools.msl.tools.desktop.scenes import REPLACED_TOOL_IDS as SCENES_REPLA
 from msl_tools.msl.ui.process_launcher.process_launcher import ProcessLauncher
 from msl_tools.msl.ui.maya_link import AssistantServer, MayaLinkServer
 from msl_tools.msl.ui.widgets.atoms.header.assistant_button import AssistantButton
+from msl_tools.msl.ui.widgets.atoms.tooltips import attach_tooltip, install_tooltip_router
 from msl_tools.msl.ui.widgets.compositions.option_menu import OptionMenu
 from msl_tools.msl.ui.widgets.windows.confirm_dialog import ConfirmDialog
 from msl_tools.msl.ui.widgets.windows.hub import HubWindow
@@ -231,17 +232,19 @@ def _add_assistant_button(window: HubWindow, assistant: AssistantServer) -> None
         listening, code, clients = assistant.is_listening(), assistant.code_allowed(), assistant.clients()
         button.set_state(listening, code, clients, bool(assistant.running()))
         if listening:
-            state = "Assistant access: ON · port %d · %s" % (
-                assistant.port(), "%d connected" % clients if clients else "nobody connected")
+            state = "Assistant access: on"
+            where = "Port %d · %s." % (assistant.port(), "%d connected" % clients if clients else "nobody connected")
         elif assistant.is_enabled():
-            state = "Assistant access: switched on, but no port could be taken"
+            state, where = "Assistant access: no port", "Switched on, but no port could be taken."
         else:
-            state = "Assistant access: off"
-        button.setToolTip(
-            state + "\nLets a coding assistant on this computer (the msl-maya MCP server) see which Mayas "
-                    "are connected and read their logs"
-            + (" — and RUN PYTHON in them (shown in each Maya’s log)." if code else ".")
-            + "\nThis computer only, with a key of its own.\nClick: on / off  ·  right click: what it may do")
+            state, where = "Assistant access: off", ""
+        attach_tooltip(button, state, "\n".join(line for line in (
+            where,
+            "Lets a coding assistant on this computer (the msl-maya MCP server) see which Mayas are "
+            "connected and read their logs"
+            + (" — and RUN PYTHON in them (shown in each Maya’s log)." if code else "."),
+            "This computer only, with a key of its own.",
+            "Click: on / off  ·  right click: what it may do") if line))
 
     def toggle() -> None:
         assistant.set_enabled(not assistant.is_listening())
@@ -308,6 +311,8 @@ def main() -> None:
         icon = UiResources().iconManager.get_icon("hub", sub_folder="brand")
         if icon is not None:   # every window of the hub carries it, also one that shows before the main one
             qt.QtWidgets.QApplication.instance().setWindowIcon(icon)
+        # Every tooltip of the hub (setToolTip, rows, tabs, menu items) as our bubble with a tail.
+        install_tooltip_router(qt.QtWidgets.QApplication.instance())
         current_tool = str(hub_config["current_tool"] or "")
         if current_tool in SCENES_REPLACED:   # Batch / Paths are tabs of Scenes now
             current_tool = "scenes"

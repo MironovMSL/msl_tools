@@ -15,4 +15,6 @@ TOOL_DESCRIPTOR = ToolDescriptor(
     widget_factory=_page,
     icon="media",
     icon_sub_folder="tools",
+    description="Video and image sequences without knowing ffmpeg: make a video, "
+                "shrink, trim, stamp, GIF, frames and more.",
 )

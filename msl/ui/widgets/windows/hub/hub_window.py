@@ -11,6 +11,7 @@ from msl_tools.msl.ui.ui_resources import UiResources
 from msl_tools.msl.ui.widgets.atoms.buttons.icon_tile_button import IconTileButton
 from msl_tools.msl.ui.widgets.atoms.header.update_button import UpdateButton
 from msl_tools.msl.ui.widgets.atoms.surfaces import BasePanel
+from msl_tools.msl.ui.widgets.atoms.tooltips import attach_tooltip
 from msl_tools.msl.ui.theme import StylesheetBuilder
 from msl_tools.msl.ui.theme.qss import color_property, repolish
 from msl_tools.msl.ui.widgets.windows.frameless_dialog import FramelessDialog
@@ -173,6 +174,9 @@ class HubWindow(FramelessDialog):
         self._nav_buttons: Dict[str, qt.QtWidgets.QPushButton] = {}
         self._footer: qt.QtWidgets.QPushButton | None = None
         self._update_button: UpdateButton | None = None
+        self._badge_tips: Dict[str, str] = {}   # tool id -> what its badge means (tile tooltip)
+        self._footer_title = footer_tooltip or ""
+        self._footer_notice = ""
         self._current_tool_id: str | None = None
         self._nav_group = qt.QtWidgets.QButtonGroup(self)
         self._nav_group.setExclusive(True)
@@ -180,6 +184,9 @@ class HubWindow(FramelessDialog):
         self._build_body(footer_text, footer_tooltip)
         for descriptor in tools:
             self._add_tool_button(descriptor)
+
+        if self._theme_toggle is not None:
+            attach_tooltip(self._theme_toggle, provider=self._theme_tip)
 
         # FramelessDialog.__init__ applied the theme before the card existed.
         self._apply_theme(self._ui_resources.themeManager.current_theme)
@@ -203,7 +210,7 @@ class HubWindow(FramelessDialog):
         if footer_text:
             footer = qt.QtWidgets.QPushButton(footer_text)
             footer.setObjectName("hubFooter")  # widgets.qss: a quiet text button
-            footer.setToolTip(footer_tooltip)
+            attach_tooltip(footer, provider=self._footer_tip, side="right")
             footer.setCursor(qt.QtCore.Qt.CursorShape.PointingHandCursor)
             footer.setFocusPolicy(qt.QtCore.Qt.FocusPolicy.NoFocus)
             footer.clicked.connect(self.footer_clicked)
@@ -237,7 +244,9 @@ class HubWindow(FramelessDialog):
             self.header.trailing_layout.insertWidget(max(self.header.trailing_layout.count() - 1, 0),
                                                      self._update_button)
         if self._update_button is not None:
-            self._update_button.setToolTip(tooltip)
+            attach_tooltip(self._update_button, "Update available",
+                           f"Version {version} is out — click to see what’s new and update."
+                           if version else "")
             self._update_button.setVisible(bool(version))
         self.set_footer_notice(tooltip)
 
@@ -264,6 +273,7 @@ class HubWindow(FramelessDialog):
         if button is None:
             return
         button.set_badge(text, tone)
+        self._badge_tips[tool_id] = tooltip if text else ""
         button.setToolTip(button.text() + ("\n" + tooltip if tooltip else ""))
 
     def tool_button(self, tool_id: str) -> "qt.QtWidgets.QAbstractButton | None":
@@ -289,9 +299,25 @@ class HubWindow(FramelessDialog):
         if self._footer is None:
             return
         self._footer.setProperty("notice", bool(tooltip))
-        if tooltip:
-            self._footer.setToolTip(tooltip)
+        self._footer_notice = tooltip
         repolish(self._footer)
+
+    # --- tooltips (ArrowTooltip: asked each time one shows) ---------------------------
+
+    def _tile_tip(self, descriptor: ToolDescriptor) -> tuple[str, str, str]:
+        """A sidebar tile: the tool's name, what it is for, and what its badge says now."""
+        lines = [descriptor.description, self._badge_tips.get(descriptor.id, "")]
+        return descriptor.title, "\n".join(line for line in lines if line), ""
+
+    def _footer_tip(self) -> tuple[str, str, str]:
+        title = self._footer_title or "What’s new"
+        if self._footer_notice:
+            return title, self._footer_notice.replace(" — ", "\n"), ""
+        return title, "What changed in each version of MSL Tools.", ""
+
+    def _theme_tip(self) -> tuple[str, str, str]:
+        dark = self._ui_resources.themeManager.current_theme.name == "dark"
+        return "Theme", "Switch to the %s theme." % ("light" if dark else "dark"), ""
 
     def _apply_theme(self, theme: Theme) -> None:
         super()._apply_theme(theme)
@@ -310,6 +336,7 @@ class HubWindow(FramelessDialog):
         button.setObjectName("hubNavButton")
         button.setCheckable(True)
         button.setCursor(qt.QtCore.Qt.CursorShape.PointingHandCursor)
+        attach_tooltip(button, provider=lambda: self._tile_tip(descriptor), side="right")
         button.clicked.connect(lambda: self._show_tool(descriptor))
         self._nav_group.addButton(button)
         self._nav_buttons[descriptor.id] = button

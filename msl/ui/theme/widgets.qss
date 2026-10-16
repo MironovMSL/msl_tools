@@ -353,6 +353,19 @@ RingGauge#ringDone {
     qproperty-fillColor:    var(--success);
 }
 
+/* --- ArrowTooltip: a bubble with a tail pointing at its widget (title, keys, text) ---- */
+
+ArrowTooltip {
+    qproperty-backgroundColor: var(--surface-raised);
+    qproperty-borderColor:     var(--border);
+    qproperty-titleColor:      var(--text-primary);
+    qproperty-textColor:       var(--text-secondary);
+    qproperty-keyColor:        var(--field);
+    qproperty-keyBorderColor:  var(--border);
+    qproperty-keyTextColor:    var(--text-secondary);
+    qproperty-shadowColor:     alpha(#000000, 45%);
+}
+
 /* --- LogView: log entries colored by level ------------------------------------------- */
 
 LogView {

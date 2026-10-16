@@ -29,6 +29,8 @@ class ToolDescriptor:
             one-color SVG: the hub tints it from QSS. None = text only.
         icon_sub_folder: Folder under assets/icons/ holding `icon`
             (e.g. "apps" for application logos).
+        description: One or two plain sentences on what the tool is for —
+            shown under its name in the sidebar tile's tooltip.
     """
 
     id: str
@@ -36,3 +38,4 @@ class ToolDescriptor:
     widget_factory: Callable[[], "qt.QtWidgets.QWidget"]
     icon: str | None = None
     icon_sub_folder: str | None = None
+    description: str = ""

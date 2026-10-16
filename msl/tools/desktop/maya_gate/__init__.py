@@ -10,4 +10,6 @@ TOOL_DESCRIPTOR = ToolDescriptor(
     widget_factory=lambda: MayaGatePage(),
     icon="maya",
     icon_sub_folder="apps",
+    description="Starts Maya with each environment's variables, userSetup and plug-ins, "
+                "and shows the Mayas running now with their logs.",
 )

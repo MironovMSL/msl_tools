@@ -19,4 +19,6 @@ TOOL_DESCRIPTOR = ToolDescriptor(
     widget_factory=_page,
     icon="scenes",
     icon_sub_folder="tools",
+    description="Many Maya scenes at once, with Maya closed: render them one after another, "
+                "or swap absolute paths for variables.",
 )
