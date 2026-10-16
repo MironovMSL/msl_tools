@@ -4,6 +4,7 @@ from msl_tools.msl.core.resources import Resources
 from msl_tools.msl.tools.maya.rename.panel import RenamePanel  # registers rename.qss before the window styles itself
 from msl_tools.msl.ui.ui_resources import UiResources
 from msl_tools.msl.ui.widgets.atoms.icons.tinted_icon import TintedIcon
+from msl_tools.msl.ui.widgets.atoms.tooltips import install_tooltip_router
 from msl_tools.msl.ui.widgets.windows.frameless_dialog import FramelessDialog
 from msl_tools.msl.ui.windows.maya_window_query import MayaWindowQuery
 
@@ -55,6 +56,8 @@ class RenameWindow(FramelessDialog):
         self._body = body
         self.panel.fit_changed.connect(lambda on: self._fit_timer.start() if on else None)
         self.finished.connect(self._remember_geometry)
+        # every tooltip of this window (and its menus, lists, dialogs) as our bubble - not Maya's
+        install_tooltip_router(self)
 
     def _show_status(self, text: str, state: str = "") -> None:
         from msl_tools.msl.ui.theme.qss import repolish

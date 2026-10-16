@@ -145,8 +145,7 @@ class PlayblastPanel(_ShareMixin, _MaskMixin, _PresetsMixin, _RunMixin, qt.QtWid
                                   "Ambient occlusion switched on for the playblast — soft contact shadows\n"
                                   "(the viewport gets its own back).")
         self._labels = _Toggle("Labels", "labels",
-                               "The MSL Labels in the playblast — attribute values drawn in the viewport
-"
+                               "The MSL Labels in the playblast — attribute values drawn in the viewport\n"
                                "(MSL > Labels). Off: hidden for the playblast, the viewport keeps them.")
         self._start, self._end = self._number_field(6, signed=True), self._number_field(6, signed=True)
         self._background = SegmentedControl(list(BACKGROUNDS), "Viewport")

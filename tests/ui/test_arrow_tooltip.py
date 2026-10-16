@@ -7,7 +7,7 @@ try:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     import msl_tools.msl.ui.qt_bindings as qt
     from msl_tools.msl.ui.widgets.atoms.tooltips import ArrowTooltip, attach_tooltip, detach_tooltip
-    from msl_tools.msl.ui.widgets.atoms.tooltips import install_tooltip_router
+    from msl_tools.msl.ui.widgets.atoms.tooltips import WindowTooltipRouter, install_tooltip_router
     from msl_tools.msl.ui.widgets.atoms.tooltips.arrow_tooltip import key_caps, place
     from msl_tools.msl.ui.widgets.atoms.tooltips.tooltip_router import split_text
 except ImportError:  # no PySide6 in this Python
@@ -254,6 +254,93 @@ class RouterTest(unittest.TestCase):
         while time.monotonic() < end:
             self.app.processEvents()
             time.sleep(0.01)
+
+
+@unittest.skipIf(qt is None, "PySide6 is not installed")
+class WindowRouterTest(unittest.TestCase):
+    """The per-window form (our windows inside Maya): the window and what lives under it get
+    our bubble, a window of someone else's (Maya's) keeps the plain tooltip."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.app = qt.QtWidgets.QApplication.instance() or qt.QtWidgets.QApplication([])
+        # another test class may have left the application-wide router: none may be on here
+        for child in cls.app.children():
+            if type(child).__name__ == "TooltipRouter":
+                cls.app.removeEventFilter(child)
+
+    def setUp(self):
+        self.ours = qt.QtWidgets.QWidget()
+        self.layout = qt.QtWidgets.QVBoxLayout(self.ours)
+        self.router = install_tooltip_router(self.ours)
+        self.theirs = qt.QtWidgets.QWidget()
+        qt.QtWidgets.QVBoxLayout(self.theirs)
+
+    def tearDown(self):
+        for window in (self.ours, self.theirs):
+            window.close()
+            window.deleteLater()
+        self.app.processEvents()
+
+    def _help(self, widget, pos=qt.QtCore.QPoint(3, 3) if qt else None) -> bool:
+        event = qt.QtGui.QHelpEvent(qt.QtCore.QEvent.Type.ToolTip, pos, widget.mapToGlobal(pos))
+        return qt.QtWidgets.QApplication.sendEvent(widget, event)
+
+    def _show(self):
+        self.ours.show()
+        self.theirs.show()
+        self.app.processEvents()
+
+    def test_once_per_window_and_a_window_router(self):
+        self.assertIs(install_tooltip_router(self.ours), self.router)
+        self.assertIsInstance(self.router, WindowTooltipRouter)
+        self.assertNotIn(self.router, [child for child in self.app.children()])
+
+    def test_a_widget_added_later_is_ours_and_a_foreign_window_is_not(self):
+        holder = qt.QtWidgets.QFrame()          # built apart, with a child, then put in
+        button = qt.QtWidgets.QPushButton("x", holder)
+        button.setToolTip("Make unique (Ctrl+U)")
+        self.layout.addWidget(holder)
+        foreign = qt.QtWidgets.QPushButton("y")
+        foreign.setToolTip("Maya's own")
+        self.theirs.layout().addWidget(foreign)
+        self._show()
+        self.assertTrue(self._help(button))
+        tip = self.ours.findChild(ArrowTooltip, ArrowTooltip.OBJECT_NAME)
+        self.assertEqual((tip._title, tip._caps), ("Make unique", ["Ctrl", "U"]))
+        self._help(foreign)
+        self.assertIsNone(self.theirs.findChild(ArrowTooltip, ArrowTooltip.OBJECT_NAME))
+
+    def test_a_menu_of_the_window_and_a_row_of_its_list(self):
+        view = qt.QtWidgets.QListWidget()
+        item = qt.QtWidgets.QListWidgetItem("row")
+        item.setToolTip("Row tip")
+        view.addItem(item)
+        self.layout.addWidget(view)
+        menu = qt.QtWidgets.QMenu(view)          # made with a parent: in the window's tree
+        menu.setToolTipsVisible(True)
+        action = menu.addAction("Lock")
+        action.setToolTip("Lock it\nNothing can rename it then.")
+        self._show()
+        self.assertTrue(self._help(view.viewport(), view.visualItemRect(item).center()))
+        self.assertEqual(self.ours.findChild(ArrowTooltip, ArrowTooltip.OBJECT_NAME)._title, "Row tip")
+        menu.popup(qt.QtCore.QPoint(10, 10))
+        self.app.processEvents()
+        self.assertTrue(self._help(menu, menu.actionGeometry(action).center()))
+        tip = menu.findChild(ArrowTooltip, ArrowTooltip.OBJECT_NAME)
+        self.assertEqual((tip._title, tip._text), ("Lock it", "Nothing can rename it then."))
+        menu.close()
+
+    def test_a_hooked_widget_and_an_empty_one(self):
+        hooked = qt.QtWidgets.QPushButton("h")
+        attach_tooltip(hooked, "Own title", "own text")
+        plain = qt.QtWidgets.QPushButton("p")
+        self.layout.addWidget(hooked)
+        self.layout.addWidget(plain)
+        self._show()
+        self._help(hooked)
+        self.assertEqual(self.ours.findChild(ArrowTooltip, ArrowTooltip.OBJECT_NAME)._title, "Own title")
+        self.assertFalse(self.router.show(plain, qt.QtCore.QPoint(1, 1)))
 
 
 if __name__ == "__main__":

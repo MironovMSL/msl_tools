@@ -4,6 +4,7 @@ from msl_tools.msl.core.resources import Resources
 from msl_tools.msl.tools.maya.playblast.panel import PlayblastPanel  # registers playblast.qss before the window styles itself
 from msl_tools.msl.ui.ui_resources import UiResources
 from msl_tools.msl.ui.widgets.atoms.icons.tinted_icon import TintedIcon
+from msl_tools.msl.ui.widgets.atoms.tooltips import install_tooltip_router
 from msl_tools.msl.ui.widgets.windows.frameless_dialog import FramelessDialog
 from msl_tools.msl.ui.windows.maya_window_query import MayaWindowQuery
 
@@ -37,6 +38,8 @@ class PlayblastWindow(FramelessDialog):
         self.header.leading_layout.insertWidget(0, icon)
         self.header.add_leading_widget(self.panel.detach_title())  # right after the title
         self.finished.connect(self._remember_geometry)
+        # every tooltip of this window (and its menus, lists, dialogs) as our bubble - not Maya's
+        install_tooltip_router(self)
 
     @classmethod
     def find(cls) -> "PlayblastWindow | None":

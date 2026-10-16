@@ -2,6 +2,7 @@
 """Every tooltip of an application as an ArrowTooltip, without touching the widgets.
 
     install_tooltip_router(app)     # run_hub: the hub owns its QApplication
+    install_tooltip_router(window)  # a window of ours inside Maya: that window only
 
 One event filter on the QApplication takes the ToolTip events Qt sends after the hover delay
 and shows the bubble with the text the widget already carries — `setToolTip()` stays the way
@@ -11,8 +12,13 @@ tooltip passes the event on to its parent), rows / cells of item views (ToolTipR
 is split by `split_text()`: a short first line is the bold title, the rest the description, and
 a key in brackets at the end of the first line ("Run (Ctrl+Enter)") becomes key caps.
 
-Widgets hooked with attach_tooltip() keep their own content (the router steps aside). Never
-installed inside Maya: Maya's QApplication is Maya's, and its own tooltips must stay native.
+Widgets hooked with attach_tooltip() keep their own content (the router steps aside).
+
+Inside Maya the QApplication is Maya's: a filter on it would see (and slow) every event of
+Maya and turn Maya's own tooltips into ours. There the router is given a WINDOW
+(`WindowTooltipRouter`): it filters that window and each widget under it - in the QObject
+tree, so its menus, combo lists and completer popups (made with a parent) are covered, while
+Maya's widgets never reach it. Widgets added later are taken as they come (ChildAdded).
 """
 import re
 from typing import Optional
@@ -187,10 +193,47 @@ class TooltipRouter(qt.QtCore.QObject):
         return False
 
 
-def install_tooltip_router(app: qt.QtWidgets.QApplication) -> TooltipRouter:
-    """Routes every tooltip of `app` through ArrowTooltip (once; returns the router)."""
-    router = app.findChild(TooltipRouter)
-    if router is None:
-        router = TooltipRouter(app)
-        app.installEventFilter(router)
-    return router
+class WindowTooltipRouter(TooltipRouter):
+    """The router of ONE window and what lives under it (see the module's docstring): an event
+    filter on every widget of the window's QObject tree, never on the QApplication."""
+
+    OBJECT_NAME = "windowTooltipRouter"
+
+    def __init__(self, window: qt.QtWidgets.QWidget):
+        super().__init__(window)
+        self.setObjectName(self.OBJECT_NAME)
+        self.watch(window)
+
+    def watch(self, widget: qt.QtWidgets.QWidget) -> None:
+        """Filters `widget` and every widget under it (again is harmless: Qt keeps one)."""
+        for each in [widget] + widget.findChildren(qt.QtWidgets.QWidget):
+            if not isinstance(each, ArrowTooltip):
+                each.installEventFilter(self)
+
+    def eventFilter(self, watched, event) -> bool:
+        if event.type() == qt.QtCore.QEvent.Type.ChildAdded:
+            try:
+                child = event.child()
+                if child is not None and child.isWidgetType() and not isinstance(child, ArrowTooltip):
+                    self.watch(child)
+            except RuntimeError:  # gone already
+                pass
+            return False
+        return super().eventFilter(watched, event)
+
+
+def install_tooltip_router(target) -> TooltipRouter:
+    """Routes the tooltips of `target` through ArrowTooltip (once; returns the router).
+
+    A QApplication (the hub's own): every tooltip of the application. A widget (a window of
+    ours inside Maya): that window and what lives under it only - never pass Maya's
+    QApplication there."""
+    direct = qt.QtCore.Qt.FindChildOption.FindDirectChildrenOnly
+    if isinstance(target, qt.QtWidgets.QApplication):
+        router = next((child for child in target.children() if type(child) is TooltipRouter), None)
+        if router is None:
+            router = TooltipRouter(target)
+            target.installEventFilter(router)
+        return router
+    router = target.findChild(WindowTooltipRouter, WindowTooltipRouter.OBJECT_NAME, direct)
+    return router if router is not None else WindowTooltipRouter(target)
