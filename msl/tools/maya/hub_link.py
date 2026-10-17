@@ -482,6 +482,26 @@ class HubLink(QtCore.QObject):
         self._on_scene_changed()   # the new count (and the "modified" mark) to the hub now
         return {"changed": changed, "skipped": skipped + refused, "gone": [key for key in keys if key not in found]}
 
+    def _handle_hotkeys_state(self, _data: dict) -> dict:
+        from msl_tools.msl.tools.maya import hotkey_set
+        return hotkey_set.state()
+
+    def _handle_hotkeys_apply(self, data: dict) -> dict:
+        """The Hotkeys tab's keys for this Maya now: the set MSL rebuilt (keys are data - text and our commands'
+        names, checked against the catalog)."""
+        from msl_tools.msl.tools.maya import hotkey_set
+        keys = data.get("keys") if isinstance(data.get("keys"), dict) else {}
+        release = [str(name) for name in data.get("release") or [] if isinstance(name, str)]
+        report = hotkey_set.apply(keys, release)
+        print("MSL hotkeys: %d key(s) from MSL Tools in the set %s (made from %s)."
+              % (report["applied"], report["current"], report["base"]))
+        return report
+
+    def _handle_run_command(self, data: dict) -> dict:
+        """One of OUR commands by name (the Hotkeys tab's "try"): hotkey_set.run refuses any other name."""
+        from msl_tools.msl.tools.maya import hotkey_set
+        return {"ran": hotkey_set.run(str(data.get("command") or ""))}
+
     _HANDLERS = {
         protocol.PING: _handle_ping,
         protocol.LAUNCH_REPORT: _handle_launch_report,
@@ -493,6 +513,9 @@ class HubLink(QtCore.QObject):
         protocol.RUN_PYTHON: _handle_run_python,
         protocol.SCENE_PATHS: _handle_scene_paths,
         protocol.SCENE_PATHS_APPLY: _handle_scene_paths_apply,
+        protocol.HOTKEYS_STATE: _handle_hotkeys_state,
+        protocol.HOTKEYS_APPLY: _handle_hotkeys_apply,
+        protocol.RUN_COMMAND: _handle_run_command,
     }
 
     # --- the scene ---------------------------------------------------------------------
@@ -609,6 +632,11 @@ def start() -> bool:
     try:  # the environment's frame rate for new scenes, and the check on opening one (scene_defaults.py)
         from msl_tools.msl.tools.maya import scene_defaults
         scene_defaults.start()
+    except Exception:
+        pass
+    try:  # the Hotkeys tab's keys as the hotkey set MSL, built from the user's own set (hotkey_set.py)
+        from msl_tools.msl.tools.maya import hotkey_set
+        hotkey_set.start()
     except Exception:
         pass
     port, token = os.environ.get(PORT_VARIABLE, ""), os.environ.get(TOKEN_VARIABLE, "")

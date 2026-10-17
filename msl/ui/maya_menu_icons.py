@@ -21,6 +21,7 @@ from msl_tools.msl.core.fs.manager import FileSystemManager
 
 # menu icon name -> (sub folder, SVG name) under assets/icons; names used in tools/maya/menu_definition.py
 MENU_ICONS = {
+    "animation": ("actions", "animation"),   # the Animation window's own icon
     "playblast": ("actions", "clapper"),     # the Playblast window's own icon
     "rename": ("actions", "rename"),         # the Rename window's own icon
     "controls": ("actions", "controls"),     # the Controls window's own icon

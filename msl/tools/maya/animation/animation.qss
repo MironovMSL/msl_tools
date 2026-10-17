@@ -1,0 +1,76 @@
+/*
+ * Animation tool styles (template) — registered with StylesheetBuilder.register_template() by
+ * panel.py and appended after ui/theme/base.qss + widgets.qss. Same var()/alpha() syntax.
+ * The sliders themselves (BlendSlider, tone pose = yellow / curve = green) are in widgets.qss.
+ */
+
+TintedIcon#animationTitleIcon {
+    qproperty-iconColor: var(--accent);
+}
+AnimationPanel {
+    qproperty-menuIconColor: var(--text-primary);
+}
+
+/* The button naming a slider's mode: quiet text, a colored edge on the side of its slider. */
+AnimationPanel QPushButton#animationMode {
+    text-align: left;
+    padding-left: 6px;
+    font-weight: 600;
+}
+AnimationPanel QPushButton#animationMode[tone="pose"] {
+    border-left: 3px solid var(--yellow);
+}
+AnimationPanel QPushButton#animationMode[tone="curve"] {
+    border-left: 3px solid var(--success);
+}
+/* the held keys switch the mode for the next press: the button says so in its slider's color */
+AnimationPanel QPushButton#animationMode[tone="pose"][held="true"] {
+    color: var(--yellow);
+    border-color: alpha(var(--yellow), 70%);
+}
+AnimationPanel QPushButton#animationMode[tone="curve"][held="true"] {
+    color: var(--success);
+    border-color: alpha(var(--success), 70%);
+}
+
+/* the mode's two letters in the mode menu (OptionMenu is a popup: no AnimationPanel above it) */
+QLabel#animationModeChip {
+    min-width: 26px;
+    max-width: 26px;
+    min-height: 18px;
+    border-radius: 5px;
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--text-primary);
+    background: var(--segment-pill);
+}
+QLabel#animationModeChip[tone="pose"] { border: 1px solid var(--yellow); }
+QLabel#animationModeChip[tone="curve"] { border: 1px solid var(--success); }
+AnimationPanel QLabel#animationCaption,
+AnimationPanel QLabel#animationTargets {
+    color: var(--text-secondary);
+    font-size: 11px;
+}
+AnimationPanel QPushButton#animationQuiet {
+    padding: 0px 8px;
+}
+
+ToggleIconButton#animationToggle {
+    qproperty-iconColor: var(--text-secondary);
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 5px;
+    padding: 0px;
+    min-width: 24px;
+}
+ToggleIconButton#animationToggle:hover {
+    border: 1px solid alpha(var(--accent), 60%);
+}
+ToggleIconButton#animationToggle[on="true"] {
+    qproperty-iconColor: var(--accent);
+    background: alpha(var(--accent), 20%);
+    border: 1px solid alpha(var(--accent), 70%);
+}
+
+AnimationWindow QLabel#headerSubtitle[state="done"] { color: var(--success); }
+AnimationWindow QLabel#headerSubtitle[state="error"] { color: var(--error); }

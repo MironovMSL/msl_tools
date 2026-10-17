@@ -63,6 +63,7 @@ msl_tools/                 (repo root)
                 installer/        InstallerView — the setup window (not a hub tool, not in the registry)
                 stub_a/, stub_b/  placeholder tools used to test hub navigation
             maya/               Maya-side tools (the MSL menu, hub_link, launch_report, batch_runner, scene_paths_tool)
+                animation/        Animation: the animator's sliders (pose / curve) inside Maya 2025+ (see "Animation tool")
                 playblast/        Playblast: a dockable panel inside Maya 2025+ (see "Playblast tool")
                 rename/           Rename: quick naming of Maya objects, a window inside Maya 2025+ (see "Rename tool")
                 controls/         Controls: rig controls — shape library, create, offsets, shape tools; Maya 2025+ (see "Controls tool")
@@ -231,7 +232,7 @@ msl_tools/                 (repo root)
     named by what the icon IS, not the gesture (`drag_handle`, not
     `dragAndDrop`). Categories: `window/` (chrome: close/maximize/...),
     `actions/` (row/toolbar actions: `drag_handle`, `copy`, `delete`,
-    `browse`, `folder_add`, `file_video`, `bookmark`, `bookmark_add`, `save`, `file_add`, `chevron_right`, `eye`, `folder_into`, `compress`, `scissors`, `repeat`, `text_frame`, `volume`, `gif`, `image_stack`, `clapper`, `crop`, `merge`, `split_view`, `film`, `timeline`, `folder_watch`, `pause`, `bell` (the Media actions and its queue), `clear`, `arrow_right`, `chevron_down`, `add`, `check`, `select_all`, `more`, `report`, `code`, `restart`, `power`, `play`, `edit`, `scene`, `stop`, `lock`, `search`, `rename`, and the Rename tool's quick buttons: `case_upper`, `case_capital`, `case_lower`, `case_snake` (a snake), `case_camel` (a camel's humps), `cut_prefix`, `cut_suffix`, `cut_number`, `cut_digits`, `cut_first`, `cut_last`, `namespace_out`, `magic_fix`, `sweep`, `mirror_sides`, `shape_name`, `warning`, `error`, `keyboard` (Maya Gate's EN), and the Rename strip's `names_same`, `name_bad`, `skin_joints`, `side_other`, `lock_find`, `convention_check`, `names_unique`, `name_related`, `convention_fix`, `unlock`, `sets`, `star`, `sliders`, `book`, `replace`, `skin_mesh` (the grey cube under `skin_joints`), `branch`, and the Controls tool's `controls`, `grow`, `shrink`, `outliner`, `color_pick`, `line_width`, `mirror_shape`, `mirror_update`, `zero_out`, `zero_matrix`, `matrix_out`, `on_top`, `cvs`, `paste`, `drive_constraint`, `drive_matrix`, `drive_off`, `locator`, `joint_chain`, `center`, `move`, `minus`, `smooth_curve`, `expand`, `collapse`, `undo`, `redo`, `snap_grid`, `chevron_left`, `chevron_up`, `layout`, `joint_node`, `joint_shape`, `joints_separate`, `shape_off`, `eye_off`, `same_shape`, `channels`, `attributes`, `keyframe`, `range`, `viewport`, `shade_lighter`, `shade_darker`, `brush` (the COLOR card and its header button; `color_pick` stays the pipette of "take the color") (`joint_chain` = a ball and a tapering bone to a smaller ball, like Maya's own joint icon), and the Labels tool's `labels` (a tag with two lines of text); add new action icons here),
+    `browse`, `folder_add`, `file_video`, `bookmark`, `bookmark_add`, `save`, `file_add`, `chevron_right`, `eye`, `folder_into`, `compress`, `scissors`, `repeat`, `text_frame`, `volume`, `gif`, `image_stack`, `clapper`, `crop`, `merge`, `split_view`, `film`, `timeline`, `folder_watch`, `pause`, `bell` (the Media actions and its queue), `clear`, `arrow_right`, `chevron_down`, `add`, `check`, `select_all`, `more`, `report`, `code`, `restart`, `power`, `play`, `edit`, `scene`, `stop`, `lock`, `search`, `rename`, and the Rename tool's quick buttons: `case_upper`, `case_capital`, `case_lower`, `case_snake` (a snake), `case_camel` (a camel's humps), `cut_prefix`, `cut_suffix`, `cut_number`, `cut_digits`, `cut_first`, `cut_last`, `namespace_out`, `magic_fix`, `sweep`, `mirror_sides`, `shape_name`, `warning`, `error`, `keyboard` (Maya Gate's EN), and the Rename strip's `names_same`, `name_bad`, `skin_joints`, `side_other`, `lock_find`, `convention_check`, `names_unique`, `name_related`, `convention_fix`, `unlock`, `sets`, `star`, `sliders`, `book`, `replace`, `skin_mesh` (the grey cube under `skin_joints`), `branch`, and the Controls tool's `controls`, `grow`, `shrink`, `outliner`, `color_pick`, `line_width`, `mirror_shape`, `mirror_update`, `zero_out`, `zero_matrix`, `matrix_out`, `on_top`, `cvs`, `paste`, `drive_constraint`, `drive_matrix`, `drive_off`, `locator`, `joint_chain`, `center`, `move`, `minus`, `smooth_curve`, `expand`, `collapse`, `undo`, `redo`, `snap_grid`, `chevron_left`, `chevron_up`, `layout`, `joint_node`, `joint_shape`, `joints_separate`, `shape_off`, `eye_off`, `same_shape`, `channels`, `attributes`, `keyframe`, `range`, `viewport`, `shade_lighter`, `shade_darker`, `brush` (the COLOR card and its header button; `color_pick` stays the pipette of "take the color") (`joint_chain` = a ball and a tapering bone to a smaller ball, like Maya's own joint icon), and the Labels tool's `labels` (a tag with two lines of text), and the Animation tool's `animation` (a curve with a key on its top); add new action icons here),
     `apps/` (third-party application logos: `maya`; later houdini, blender...
     — named after the app, not the tool that uses it, so several tools can
     share one), `tools/` (sidebar icons of our OWN hub tools, one-color like
@@ -341,6 +342,8 @@ NEVER runs inside Maya; it's a pure standalone desktop app. Future
   on the open tool via the dynamic property `current="true"` (qproperty-*
   is only applied from rules without pseudo-states, so not `:checked`).
   The first tool opens on start.
+  Esc never closes the hub (`HubWindow.keyPressEvent`, 2026-10-16): QDialog's default Esc = reject
+  closed the whole app when a field with its own Esc (the Hotkeys tab's key capture) had just let go of it.
   `BaseNavButton` isn't used: it's built for the header's icon-only row.
   Window size: the START size is `width=900, height=600` in
   HubWindow.__init__ (then run_hub restores the saved placement). The
@@ -1181,6 +1184,89 @@ What changed vs. the original (all deliberate, not oversights):
   whose PARAMETER `scene` is the scene's path - every launch then got `-file <a dict>` (QProcess
   passed it as "") and Maya opened with "Unrecognized file type" (the user saw it). Now `rate`;
   `tests/core/test_maya_gate_launch.py` fails if `scene` is ever assigned in `_prepare_launch`.
+- HOTKEYS tab (2026-10-16, the user's ask after animBot's Hotkeys window; their decisions: per environment
+  with copy to another, only OUR commands, our own hotkey set "MSL" that keeps the user's set working):
+  `hotkeys_tab.py` HotkeysTab + `hotkeys_store.py` HotkeyStore (Qt-free) + config branch
+  `"hotkeys": {"<env>": {"MSLRename": "Ctrl+Alt+R"}}` (not environment-named: `_migrate_legacy_config` leaves it).
+  THE COMMANDS: `tools/maya/hotkey_catalog.py` (no Maya, no Qt - the hub imports it): `Command(name, label,
+  annotation, python, group, icon, category)`, TOOL_COMMANDS (the tools' windows, moved here from
+  hotkeys.COMMANDS, which is now derived from it) + tools/maya/scripts SCRIPTS (+ SCRIPT_ICONS); `GROUPS` =
+  the tab's filter chips. A new command = a line there (or a Script) and it shows in the tab.
+  KEY TEXT: `core/link/hotkey_keys.py` (3.9-valid): "Ctrl+Alt+Shift+<key>" (letters upper case, digits,
+  F1..F12, Up / PageUp / Enter / Space / Tab / Backspace..., ` - = [ ] \ ; ' , . /); `normalize` takes any
+  order / spelling, `to_maya` -> {keyShortcut, ctl, alt, sht} with MAYA'S OWN names (Page_Up, Return - Maya
+  silently accepts wrong ones), `from_maya`, `clashes`, `copied` (a key another command has is taken from it, or
+  skipped), the launch variable `MSL_GATE_HOTKEYS` (JSON; ALWAYS passed, `{}` too - its presence means "manage
+  the set MSL"), export / import data {"format": "msl_hotkeys", "keys"}.
+  INSIDE MAYA: `tools/maya/hotkey_set.py` (no Qt, never raises out of start()), called by hub_link.start():
+  the BASE set = the current one unless it is "MSL" (remembered in optionVar mslHotkeyBaseSet for a Maya
+  that crashed on MSL), base made current, MSL deleted and made again `-source <base>`, our keys put on top
+  (nameCommand `<command>NameCommand` -> the runtime command; a clash with the base is printed); no keys =
+  the base current, MSL removed. A quitApplication job makes the base current again, so Maya saves the
+  USER'S set as the one to start with - a Maya started any other way is on it. Keys changed in Maya's Hotkey
+  Editor while on MSL are lost at the next start (they belong in the base set - the tab's hint says it).
+  Link requests (FIXED, keys are data): HOTKEYS_STATE -> {base, current, sets, ours, bindings: {key text:
+  {command, label, from: "maya" | "set"}}} - the BASE set's Global bindings (every key x the 8 modifier
+  combinations, `cmds.hotkey(q=True, name=True, ctl, alt, sht)`, Maya_Default scanned too to tell Maya's own
+  from the set's), HOTKEYS_APPLY {keys} -> the same rebuild in a running Maya, RUN_COMMAND {"command"} (not
+  "name": that is MayaLinkServer.request's own parameter - the first cut raised TypeError) runs ONE of our
+  commands by name, anything else refused.
+  THE TAB: "Keys in <env>", a hint, search (commands and keys), the groups as chips, copy to another
+  environment (all / the picked rows - a click picks, Ctrl / Shift more; keys taken in the target: "Take them
+  over" / "Keep theirs"), import (add / replace), export, clear (danger; all or the picked) - each with a toast
+  and Undo. A row: icon (in its group's palette hue - `hotkeys_tab.GROUP_TONES`, the user's ask: Playblast orange,
+  Rename blue, Controls / Rig violet, Labels / Show yellow, Scene teal, Camera pink, Viewport green, Attributes red), name (annotation + the Maya name in the tooltip), a mark (red: two of ours on one key;
+  amber: the key does something else in Maya - "In your hotkey set “My_Hotkey_Set” this key is: …", or Maya's
+  own), the `KeyCaptureField`, ▶ = try it in the newest running Maya of the environment. Giving a key another
+  command has moves it (toast + Undo). The bottom line counts keys and clashes and says when they were checked
+  against Maya; while Mayas of the environment run, the button compares the tab's keys with what EACH of them
+  has (`_live`: HOTKEYS_STATE's "ours", or the keys a successful apply sent): "Apply to N running Mayas" (the
+  ones behind, or not answered yet) or a disabled "✓ Up to date in N running Mayas" (the user: after an apply
+  it still said "Apply"). What Maya uses each key for is
+  asked of the newest running Maya of the environment once per session and KEPT (`HotkeyStore.seen` ->
+  configs/desktop/maya_gate/hotkeys/seen_<env>.json), so clashes show with no Maya running.
+  SECOND ROUND (2026-10-17, the user's picks of an idea list): (1) a taken key WARNS while typed - the field's
+  `check` (`HotkeysTab._check_key`: the base set's / Maya's own key as last seen, another of ours here - "it would
+  move", a key without Ctrl / Alt) holds it back in the warning color ("again / ↵") with the note in the hub's
+  ArrowTooltip at the field; pressed again or Enter = taken, another key = checked anew, Esc = given up; the held-back state is a 1.6 px orange frame + a warm tint, shown at once (the user first saw only the bubble: Windows still reports a released Alt in modifiers(), so the field kept showing a lone "Alt" cap - keyReleaseEvent now drops the released modifier); (2) FREE
+  KEYS: right click on a field -> `free_menu` (`hotkey_keys.free_keys(label, taken)`: the label's word initials,
+  then its letters, then A..Z and digits, one suggestion per key in the first free of Ctrl+Alt / Alt+Shift /
+  Ctrl+Shift / Ctrl+Alt+Shift) + "No key"; (3) the group chips count their keys ("Controls · 2",
+  `ChipBar.set_text` - new, changes a chip in place); (4) a STATUS BAR on top (`QFrame#hotkeysStatus`, the bottom
+  line is gone): "N keys" · "⚠ N cover a key of Maya or your set" · "● N changes not in Maya 2027 yet" / "✓ Maya
+  2027 in sync" + the Apply button; (5) a row a running Maya (that answered) has otherwise is marked - an accent bar on its left
+  edge + a tint (`QFrame#hotkeyRow[changed]`, the user's ask: a dot was easy to miss) - and `QLabel#hotkeyPending`
+  before the field says what that Maya has: the old key struck through, "new →", or "hold on / off →". Offscreen, 35 checks with real key / mouse events (a toast covering a field
+  takes QTest's window-routed clicks: focus such a field directly in a test).
+  THIRD ROUND (2026-10-17, the user's picks after a mock-up): (1) KEYBOARD MAP (`hotkeys_keyboard.py` KeyboardMap,
+  painted; the keyboard button in the tab's tool row shows it, remembered in `_ui.hotkeys_keyboard`): the letter /
+  digit block for the modifiers picked above it (Ctrl / Alt / Shift chips) - OURS outlined in its group's tone, TAKEN
+  (Maya's own or the user's set - the user asked for these three kinds only) grey, FREE dashed; hover = what the
+  key does, a click on a free key gives it to the ONE picked row (a taken one asks), a click on ours picks its row;
+  picking a row switches the map to its key's modifiers and rings the key. SYNCED WITH THE KEYBOARD like Maya's Hotkey Editor (the user's ask): while the map is on screen a 60 ms poll of `QGuiApplication.queryKeyboardModifiers()` (the keyboard's state, focus or not) shows the map - and its chips - for the Ctrl / Alt / Shift held now; let go = back to the chips' own choice (`_map_choice`); a key field that starts listening picks its row; a combination the field holds back is ringed (`_map_pending`). (2) HOLD (release keys): `Command.toggle`
+  (`hotkey_catalog.TOGGLES`: the viewport toggles, Geometry Only, Ortho View, shot mask, Labels) rows get a "hold"
+  button = Maya runs the command again when the key is let go (`cmds.hotkey(..., releaseName=NC)`); stored as
+  `hotkeys._release.<env>` (not an environment name), launched as `MSL_GATE_HOTKEYS_RELEASE` (names with a key),
+  HOTKEYS_APPLY {"release"}, HOTKEYS_STATE "release"; the tab compares (key, hold) with each running Maya;
+  export / import / copy carry it. MEASURED: press + release run it twice ("PP"), a held key's auto-repeat does NOT
+  run it again, Alt let go first still fires; real Alt+3 held = joints hidden, let go = back (through hotkey_set).
+  (3) KEYBOARD LAYOUT, measured: with a RUSSIAN layout Ctrl+Alt+<letter> reaches Maya as a Cyrillic letter and NO
+  hotkey runs (digits work) - the status bar warns "EN is off: letter keys don't work in a Russian layout" while the
+  toolbar's EN is off for the environment and a letter key is set (`HotkeysTab(english_for=)`, `refresh()` on
+  english_changed). Offscreen 18 more checks (map, hold, EN); both themes rendered.
+  MEASURED (windowed Maya 2026, throwaway MAYA_APP_DIR; notes in the session's notes folder): mayapy has NO
+  hotkey sets (hotkeySet raises, hotkeyCheck returns None); `-source` copies the base's keys (the saved
+  userHotkeys_MSL.mel is a flattened copy `-source "Maya_Default"` + every difference); quit(force=True) still
+  saves the sets and currentHotkeySet, other sets' files untouched; deleting the CURRENT set falls back to
+  Maya_Default; `sht` works on any key ("k"+sht = "K"); a nameCommand made again doesn't duplicate; 208
+  queries take ~5 ms. VERIFIED end to end from an isolated hub (offscreen, its own configs) launching Maya
+  2026 Dev with throwaway prefs: the state read (Alt+Z = the base set's "animBotTest", marked), Maya started
+  on MSL with the keys, Apply swapped them (the base's Alt+Z came back), ▶ ran a command, a REAL key press
+  (keybd_event Ctrl+Alt+U) made a locator, Maya's Hotkey Editor showed set MSL, quit -> currentHotkeySet
+  "Base". The tab driven offscreen with QTest (19 checks: capture, Esc, Backspace, Shift+F5, Alt+Tab, a moved
+  key + toast, search, chips, picking, copy, export / import / clear, a fake Maya's state / apply / try, the
+  launch variable). NOT seen: the tab in the user's real hub (it needs a restart), through the msl-maya MCP
+  (it reaches the running hub, which predates this), a Maya 2023 / 2024 (PySide2 - hotkey_set uses no Qt).
 - Before a launch (2026-10-04): `launch_check.py` (Qt-free)
   `check(variables, script, boost_enabled, boost_blocked)` -> one line
   per thing worth a look: a folder / file a variable names that isn't
@@ -1272,6 +1358,8 @@ maya_gate/
     boost.py               BoostStore (Maya's auto-load list, the boosted launch + its loader, reports, backups, Qt-free)
     boost_tab.py           BoostTab (per-environment plug-in list: checked = loaded at startup)
     scene_tab.py           SceneTab (per-environment frame rate of new scenes + the check on opening one)
+    hotkeys_tab.py         HotkeysTab (keys for our Maya commands per environment, applied as Maya's hotkey set MSL)
+    hotkeys_store.py       HotkeyStore (the keys in the config, copy / files, what Maya was seen using; Qt-free)
     sessions_tab.py        SessionsTab (the Mayas connected to the hub right now; the finished ones while none is)
     session_rows.py        its rows: _SessionRow, _EndedRow, _HistoryRow, _SceneLabel (+ size / duration helpers)
     sessions_console.py    _ConsoleMixin: the console + snippets  (methods of SessionsTab, moved as they were)
@@ -1299,9 +1387,11 @@ atoms/charts/ring_gauge.py                RingGauge (how far something is as a r
 atoms/gradients/gradient_ramp.py         GradientRamp (a color ramp to edit: click the bar = a stop, drag a handle, Delete, double click = its color; set_marker(position) = where a value lies now, set_steps(); stops_changed(list) / picked(int); its colors are the user's data, frame / handles / marker = qproperty borderColor / handleColor / pickedColor / markerColor)
 atoms/progress/spinner.py                 Spinner ("working on it" without a number, 2026-10-16: an arc turning clockwise round a faint ring, its length breathing 30..260 degrees so it never looks stuck; turns ONLY while visible (a timer started in showEvent, stopped in hideEvent); qproperty arcColor / trackColor. In: What's new while the list loads (above "Loading…"), DropArea.set_busy() in the icon's place (Media's "Reading clip.mp4…"), Paths' bottom line while reading / writing / undoing (`_sync_spinner`). tests/ui/test_spinner.py)
 atoms/progress/step_track.py              StepTrack (the stages of one piece of work in a row, 2026-10-16: circles joined by a line - done = filled with a tick, the current one running (a breathing halo) / error (filled red, "!") / waiting, to come = a quiet ring with its number; the filled line GLIDES to the current step; labels under; `set_steps(labels)`, `set_stage(index, state)` (index = len = all done); only shows what it is told; qproperty activeColor / markColor / quietColor / errorColor / textColor / quietTextColor. In Scenes > Render's CURRENT RENDER card: Read -> Open -> Render (-> Video) of the job at work, else how the last one ended (`core/batch/stages.py` steps_of / stage_of, Qt-free; BatchRunner.video_job()). TRAP met: PySide6's QPen takes no `cap=` keyword - the TypeError inside paintEvent left the painter active and SEGFAULTED the process; a test now paints every state. tests/ui/test_step_track.py, tests/core/test_batch_stages.py)
+atoms/sliders/blend_slider.py             BlendSlider (a slider that is PULLED: a knob in the middle dragged left / right, sprung back when let go; sends a weight -limit..limit, how it grows along the track is the owner's (to_weight / to_position, default square); marks = STEPS (each side's marks at even distances up to where weight 1 lies, smallest nearest the middle - the user found tween fractions placed on the scale uneven), AT REST the track is a THIN strip (THIN 8 px, full width, its marks there to click) under a full-size knob; pressed it GROWS to its full height (animated) and the number is written in it, the marks but the end squares FADE OUT from the press on (with the track's growth) and back when it is thin again, thin again once the knob is back in the middle (the user's ask: room; a first cut shortened the track's WIDTH instead - not what was meant); hovered = the mark grows, NO number (the pointer crosses marks on its way to the knob and numbers flickered); a click on a mark ONLY sends its weight - the knob stays, the track stays thin, no number (the user: the click already did it); a HELD mark looks pressed itself (bigger, in the fill) and the knob is not lit; set_marks() with the same marks keeps the hover (the panel re-shows its mode on every press - it had wiped it); the track opens when the KNOB is pressed or a drag starts; a press on the KNOB emits dragged(its weight) at once - a Tweener's 50 % is applied on the press, not only on the release (the user expected it; the reference does it); the knob is SMALL (26 px) and always shows the mode's letters - the NUMBER (dragging, clicked mark) is written inside the track at the end AWAY from the knob, like the reference; drag_started(modifiers) / dragged / drag_finished / cancelled (Esc) / menu_requested; qproperty colors, `[tone=pose|curve]` = yellow / green fill in widgets.qss)
 atoms/charts/bar_strip.py                 BarStrip (a handful of measurements as thin bars in two tones, each with a tooltip; scaled from zero; qproperty accentColor / mutedColor)
 atoms/tooltips/arrow_tooltip.py           ArrowTooltip (a tooltip of our own: a rounded bubble with a tail pointing at its widget, a bold title, the key as caps — "Ctrl+Shift+U" -> three caps —, a wrapped description; `attach_tooltip(widget, title, description, key, provider=)` takes the widget's ToolTip event so the plain tooltip never shows (`provider()` -> (title, description, key) | None is asked each time: live state); ONE per window, its child, so the window's QSS colors it (qproperty backgroundColor / borderColor / titleColor / textColor / keyColor / keyBorderColor / keyTextColor / shadowColor); `side=` "below" (flips above at the screen's end) or "right" (beside it, flips left - a column of tiles); a second hooked widget within WARM_MS shows at once; `show_at(global rect)` for list rows; tests/ui/test_arrow_tooltip.py. In the hub (2026-10-16): the sidebar tiles (side right: the tool's name, `ToolDescriptor.description`, what its badge says now), the version, the update button, the theme toggle, the assistant's robot (run_hub). `tooltip_router.py` TooltipRouter = EVERY tooltip of the hub as this bubble: run_hub calls `install_tooltip_router(app)` (one QApplication event filter; NEVER inside Maya - its QApplication is Maya's: a Python filter there would see every event of Maya and turn Maya's own tooltips into ours): plain widgets (`toolTip()`; Qt's rule kept - none = the parent's), item-view rows (ToolTipRole), tabs (`setTabToolTip`), menu items (`setToolTipsVisible` + `QAction.setToolTip`); `split_text()` makes the text title / description / key: a short first line that does not end like a sentence (. ; ,) is the bold title, the rest the description, "(Ctrl+Enter)" at the end of the first line the key caps. So in the hub a tooltip is still just `setToolTip()` - write a short first line as its name when it has one. A tooltip that follows the pointer keeps its text in `toolTip()` (BarStrip does); a short note at the pointer = `ArrowTooltip.shared(w).show_message(text)` (goes away by itself). INSIDE MAYA (2026-10-16): `install_tooltip_router(window)` = `WindowTooltipRouter` - the same router, as an event filter on the window and every widget of its QObject tree (a widget added later is taken from ChildAdded, a subtree put in later is walked), so its menus, combo lists, child dialogs and completer popups made WITH a parent are ours and Maya's widgets never reach it; the QApplication gets nothing. Installed at the end of __init__ by RenameWindow, ControlsWindow, PlayblastWindow, LabelsWindow (not the parentless QuickRename popup, not the docked Playblast form). Seen in windowed Maya 2026 from an isolated copy: a real hover over Rename's strip, and a ToolTip event in each of the four windows showed the themed bubble; a Maya button (Script Editor's MEL / Python toggle) showed the native QToolTip, no bubble in Maya's window. A grab of the screen (QScreen.grabWindow) does not show the bubble: it is a translucent (layered) window - picture it with `tip.grab()`.
 atoms/layouts/flow_layout.py              FlowLayout (items left to right, wrapping like words; height-for-width; hidden widgets take no room)
+atoms/editors/key_capture_field.py        KeyCaptureField (ONE keyboard shortcut shown as key caps: click, press the combination - held modifiers show at once -, Esc gives up, Backspace / Delete or the × at its right end (shown under the pointer while it holds one) clear; takes Tab and the window's shortcuts while listening; keys by the PHYSICAL key (a Cyrillic layout or Shift change nothing); accept(text) refuses one with a flash; check(text) -> note holds one back until pressed again / Enter (warned(text, note), warn_ended); key_changed(str); TabFocus, NOT StrongFocus: Qt gives a click-focus widget its focus BEFORE mousePressEvent, so the × and "second click gives up" never worked with a real mouse (a test that sends the press straight to the widget doesn't see it - click through the window); qproperty colors in widgets.qss)
 atoms/editors/token_line_edit.py          TokenLineEdit (a line edit whose text may hold {tokens}: a right click lists them and the picked one goes in WHERE THE CLICK WAS; Cut / Copy / Paste stay in that menu; default= adds "Back to <that text>"; insert_token() for a button beside it; token_inserted(str), focused())
 atoms/editors/log_view.py                 LogView (read-only log: time-stamped entries colored by level — error / warning / info / trace — from qproperty colors; follows the tail; its QSS `color` exists only to color the placeholder — a QPlainTextEdit without one draws it near-black)
 atoms/editors/code_editor.py              CodeEditor (line numbers + gutter divider, Python highlighting from --syntax-* tokens, Tab/auto-indent)
@@ -3546,7 +3636,7 @@ axis (`flip`). ZERO THE SELECTED (`actions/zero_out`, in the Zero row): the mode
   field starts with while it holds another; reported through `token_inserted`, which the panel saves on).
   Checked offscreen from an isolated copy (10 checks: the blocks keep their places to the pixel, grey,
   the mark still clicks, back as it was; a token put in is saved, the default put back).
-  NOT BUILT, the user's plan for later: a HOTKEYS window of its own - the tool's commands listed, each
+  (BUILT 2026-10-16 as Maya Gate's Hotkeys tab.) The user's plan for later was: a HOTKEYS window of its own - the tool's commands listed, each
   can be tried by a click to see what it does, and given a key there (instead of a mere list in the
   settings menu).
 
@@ -3713,6 +3803,80 @@ No code of anyone else's (see CLAUDE.local.md).
   Open, for the user to decide: a 14 px Manual label in a 1080 playblast is small - Auto suits
   playblasts better (the window offers it; nothing switches it by itself).
 
+## Animation tool (inside Maya; phases 0 + 1 built)
+
+`msl/tools/maya/animation/` (MSL menu > Animation - first entry; hotkeys MSLAnimation + MSLAnimTweenHalf,
+MSLAnimNeighborsLeft / Right, MSLAnimPull / Push = `animation.nudge(mode, weight)`, group "Animation" in Maya
+Gate's Hotkeys tab). The user's big animator toolkit, started 2026-10-17 after animBot / Animo (ideas only -
+see CLAUDE.local.md). Maya 2025+ (the user's call), our own frameless window for now (MayaDock decided later).
+The phased plan: 0 core + 1 sliders (BUILT) · 2 keys & timing (nudge, inbetweens, share / copy key times, bake
+on N, smart snap, remove redundant, crop / reverse, color keys) · 3 tangents (native on a range, best guess /
+polished / flow / bounce / cycle match, blend to a tangent) · 4 pose & mirror (default pose snapshot by name,
+opposite, mirror pose / keys - mirror axes MEASURED from the T-pose, copy / paste animation insert / replace
+across Mayas) · 5 space (align, world xform on a range, temp pivot, attribute space switch keeping the pose,
+locators / aim / world / temp IK + bake) · 6 viewport (our own motion trail plug-in, visibility modes, suspend,
+tumble around selection) · 7 timeline (bookmarks, waveform) · 8 selection sets · 9 Anim Recovery through the
+hub (it already sees an unclean end) + fast anim layer merge · 10 Master Spline, temp controls.
+- WHAT THE REFERENCE DOES, measured 2026-10-17 (animBot 2.0.7 in windowed Maya 2025, real mouse): two sliders
+  over the timeline - YELLOW = the pose (Tweener; Blend to Buffer / Default / Ease / Frame / Neighbors /
+  Infinity / Undo, World Space variants), GREEN = the curve (Connect to Neighbors, Ease In|Out, Gap Stitcher,
+  Noise|Wave, Pull|Push, Simplify|Bake, Smooth|Rough, Time Offsetter (+Stagger), Scale From Average / Default /
+  Frame / Neighbor Left / Right); MODIFIERS held at the press switch the mode for one drag (yellow: Shift =
+  Neighbors, Alt+Shift = Default, Ctrl = Frame, Ctrl+Alt = Infinity...; green: Alt = Pull|Push, Shift =
+  Smooth|Rough, Ctrl+Shift = Ease, Ctrl+Alt = Time Offset...); a right click lists the modes. Tweener: a press
+  jumps to 50 %, clicks on its marks give 0, 1/8, 1/6, 1/4, 1/3, 1/2, 2/3, 3/4, 5/6, 7/8, 1; the weight grows
+  about with the SQUARE of the distance (full at ~85-95 px). Blend to Neighbors: value + (neighbor - value) * w.
+  Pull -100 % = exactly the straight line between the keys around. On a frame without a key it ADDS one (only on
+  animated channels); one undo step. Its sliders read the REAL cursor - synthetic Qt events do nothing.
+- `curves.py` (no Qt, no Maya): `Mode` (key, title, 2-letter short, family POSE / CURVE, tip, left / right,
+  marks, modifier) x 18 in `MODES`; `Block` = a run of consecutive keys of one curve + before / after (and
+  the key past each), default, frame value, undo values, evaluate(time) of the ORIGINAL curve, order / count
+  (stagger), seed (noise); `apply(mode, block, weight)` -> new values; weight 0 = no change except the Tweener
+  (a POSITION: 0 = half way). Left = the first word of the name (Pull | Push, Smooth | Rough, Ease In | Out).
+  Ease: MEASURED on the reference (a key half way between 0 and 10, its marks clicked): 25 / 50 / 75 / 100 % ->
+  3.66 / 1.96 / 0.22 / 0.01 (in) and 6.34 / 8.04 / 9.78 / 9.99 (out) - a POWER that grows with the weight
+  (`ease_power`: 1 + 9 * w ** 2.5, u ** 10 at 100 %: the key hugs its neighbor; ours 4.11 / 1.66 / 0.24 / 0.01);
+  the reference sets the ease outright, ours blends it in over the first EASE_BLEND 25 % so a small pull never
+  jumps (the user saw ours stop well short of the neighbor at 100 % with a fixed u ** 3).
+  The rest BLEND from the current values by the weight (0 = untouched). `weight_at` / `position_of` = the square feel; `weight_text`; `split_runs`, `block_from_keys`.
+- `scene.py` (maya.cmds + API 2.0): `find_targets()` - keys selected in a Graph Editor ON SCREEN, else the
+  selected objects' keys in the timeline's highlighted range (end exclusive), else on the current frame (a key
+  added where a channel has none); 2 and 3 are narrowed to the curves the Graph Editor on screen SHOWS
+  (`animCurveEditor <panel>GraphEd -q -curvesShown`: a channel picked in its list = that curve alone - the user
+  saw every curve move), else to the Channel Box's picked channels; (a channel picked by selectionConnection
+  from a script is undone by Maya at the next idle - test it with a Qt click on the outliner widget, rows 20 px); time curves only (TA / TL / TU / TT), the
+  curve's node / attribute found through anim layer blend nodes / pairBlend. `Drag(mode, frame)`: added keys
+  with the undo queue off; `update(w)` = MFnAnimCurve.setValue (API units: x MAngle / MDistance ui->internal;
+  never in the undo queue) + refresh; `commit(w)` puts it all back, then does it again in ONE chunk
+  ("MSL Animation") with cmds.keyframe, Euler filter on rotations over the changed range +-1; remembers the
+  values before (Blend to Undo); `cancel()`; `apply_once` (hotkeys, clicks); `describe()` (the window's line).
+  The time offset reads the original curve from samples taken at the press (0.1 frame).
+  TRAP, met (the user saw the curve shoot past its neighbor): `setKeyframe -insert` gives the new key FIXED
+  tangents as steep as the curve there (-51 deg on the ball); moving its value then overshoots. Added keys get
+  Maya's default tangents (`keyTangent -g -q`, auto) - measured: the reference does exactly that (auto, angle 0
+  on a key equal to its neighbor). `_add_key`.
+  TRAP, met (the user: "the second change takes a random curve"): `cmds.filterCurve` (the Euler pass) leaves
+  ONLY the filtered curves' keys selected, so the next drag acted on the rotation curve alone - `_euler` puts
+  the key selection back after it.
+- Window: `window.py` AnimationWindow (FramelessDialog 400 wide, AS TALL AS ITS CONTENT - `_fit_height` on the
+  panel's LayoutRequest, 30 ms later; 145 px with two sliders -, Esc doesn't close - it puts a drag back; compact
+  margins, the mode button MODE_WIDTH 116 with the name elided),
+  `panel.py` AnimationPanel: two rows (mode button with a colored edge + BlendSlider; a hint line under each
+  was tried and taken out again for room), the mode menu an OptionMenu
+  (the 2-letter chip, title + "hold <modifier>", the left / right line, the tip as the row's tooltip),
+  and while the pointer is over a slider the HELD keys are read every KEYS_MS 50
+  (`queryKeyboardModifiers`: the slider has no focus) and the row already shows the mode a press would use -
+  the button in the slider's color (`[held="true"]`), the knob's letters (the user's ask), "Frame to blend / scale
+  to" shown only for the frame modes, the line saying what the sliders act on (read every 500 ms while shown),
+  header toggles Overshoot (ends = 200 %) and Euler filter. Config configsMayaMng "animation" (`settings`: pose,
+  curve, overshoot, euler, frame; `window`).
+- Checked: tests/maya/test_animation.py (22); windowed Maya 2025 with animBot loaded, the window driven by Qt
+  events: live tween + one undo on two curves (rotation in degrees), Shift = Neighbors, a click on the 1/3
+  mark, Esc puts back, Pull, Alt+Shift = Scale From Default, Graph Editor keys + Time Offset +10 fr. A Maya 2025
+  CRASHED once (ACCESS_VIOLATION in a maya command called from a Qt slot) in a session where animBot's own
+  sliders had been poked by setValue / sendEvent before; the same steps in a fresh Maya ran clean twice - not
+  reproduced. NOT tried: a real hand on the sliders, the timeline range, anim layers, a big rig's speed.
+
 ## MSL Scripts (inside Maya)
 
 `msl/tools/maya/scripts/` (2026-10-15, the user's ask: their own scripts - and new ones - with a
@@ -3771,7 +3935,8 @@ and `front` refused; 23 commands registered in their categories; every call impo
 windowed Maya 2026 (MSL menu > Scripts built; Ortho View / Camera Back / Reset / Locators run
 through their runtime commands as a hotkey would; the ortho picture). NOT seen: a real Channel Box
 pick (a script can't make one) and a real key press.
-PLANNED by the user (2026-10-15), not built: a HOTKEYS window of our own over SCRIPTS + the tools'
+BUILT 2026-10-16 as Maya Gate's Hotkeys tab (see there) - keys for every Maya of an environment, not a window inside
+Maya. Was PLANNED by the user (2026-10-15): a HOTKEYS window of our own over SCRIPTS + the tools'
 commands - each listed, tried by a click to see what it does, and given a key there (the same
 idea was noted for Controls).
 The user's old copies in Documents/maya/2024/scripts and their old runtime commands (viewSnap,

@@ -4,7 +4,7 @@ import threading
 
 import msl_tools.msl.ui.qt_bindings as qt
 from msl_tools.msl.core.resources import Resources
-from msl_tools.msl.core.link import scene_settings, variables
+from msl_tools.msl.core.link import hotkey_keys, scene_settings, variables
 from msl_tools.msl.core.fs.maya_paths import MayaPaths
 from msl_tools.msl.ui.process_launcher.process_launcher import ProcessLauncher
 from msl_tools.msl.core.theme import ThemeRegistry
@@ -25,6 +25,9 @@ from msl_tools.msl.tools.desktop.maya_gate import launch_check
 from msl_tools.msl.tools.desktop.maya_gate.boost import BoostStore, LaunchLog
 from msl_tools.msl.tools.desktop.maya_gate.boost_tab import BoostTab
 from msl_tools.msl.tools.desktop.maya_gate.scene_tab import SceneTab
+from msl_tools.msl.tools.desktop.maya_gate.hotkeys_store import HotkeyStore
+from msl_tools.msl.tools.desktop.maya_gate.hotkeys_tab import HotkeysTab
+from msl_tools.msl.tools.maya import hotkey_catalog
 from msl_tools.msl.tools.desktop.maya_gate.session_history import SessionHistory
 from msl_tools.msl.tools.desktop.maya_gate.snippets import SnippetStore
 from msl_tools.msl.tools.desktop.maya_gate.sessions_tab import SessionsTab
@@ -102,6 +105,7 @@ class MayaGatePage(qt.QtWidgets.QWidget):
     # unless switched off); "only" = no other layout inside Maya (an older hub reads it as true)
     KEYBOARD_KEY = "keyboard"
     SCENE_KEY = "scene"   # {"<env>": {"fps": "30" or "", "check": bool}} - see SceneTab
+    HOTKEYS_KEY = "hotkeys"   # {"<env>": {"MSLRename": "Ctrl+Alt+R"}} - see HotkeysTab / HotkeyStore
     SCENE_FPS_VARIABLE = variables.SCENE_FPS
     SCENE_CHECK_VARIABLE = variables.SCENE_CHECK
     KEEP_ENGLISH_VARIABLE = variables.KEEP_ENGLISH
@@ -117,12 +121,13 @@ class MayaGatePage(qt.QtWidgets.QWidget):
     # Color of the icons in a version's right-click menu (maya_gate.qss) - see tinted_menu_icon().
     menuIconColor = color_property("_menu_icon_color", None)
     CONSOLE_VARIABLE = variables.CONSOLE
-    TAB_KEYS = ("variables", "user_setup", "boost", "scene", "sessions")  # tab order; stored by key, not index
+    TAB_KEYS = ("variables", "user_setup", "boost", "scene", "hotkeys", "sessions")  # tab order; stored by key, not index
     SESSIONS_TAB_TITLE = "Sessions"
     DEFAULTS = {MAYA_KEY: {env: {} for env in ENVIRONMENTS},
                 CUSTOM_KEY: {env: {} for env in ENVIRONMENTS},
                 BOOST_KEY: {env: {"enabled": False, "skip": []} for env in ENVIRONMENTS},
                 SCENE_KEY: {env: {"fps": "", "check": True} for env in ENVIRONMENTS},
+                HOTKEYS_KEY: {env: {} for env in ENVIRONMENTS},
                 UI_SECTION: {"year": "", "environment": DEFAULT_ENVIRONMENT, "tab": TAB_KEYS[0],
                              "collapsed": {"maya": False, "custom": False}}}
 
@@ -145,6 +150,8 @@ class MayaGatePage(qt.QtWidgets.QWidget):
         self._boost_store = BoostStore(configs.base_dir / self.TOOL_NAME)
         self._session_history = SessionHistory(configs.base_dir / self.TOOL_NAME)
         self._snippet_store = SnippetStore(configs.base_dir / self.TOOL_NAME)
+        self._hotkey_store = HotkeyStore(self._config[self.HOTKEYS_KEY], configs.base_dir / self.TOOL_NAME,
+                                         hotkey_catalog.names())
         saved_environment = self._ui.get("environment")
         self._environment = (saved_environment if saved_environment in self.ENVIRONMENTS
                              else self.DEFAULT_ENVIRONMENT)
@@ -201,6 +208,11 @@ class MayaGatePage(qt.QtWidgets.QWidget):
         self._scene_tab = SceneTab(self._config[self.SCENE_KEY], self._environment)
         self._tabs.addTab(self._indented(self._scene_tab), "Scene")
         self._link = MayaLinkServer.instance()  # the hub's one server; run_hub starts it listening
+        self._hotkeys_tab = HotkeysTab(
+            self._hotkey_store, self._environment, self.ENVIRONMENTS, self._link,
+            english_for=lambda environment: self._english_mode(environment) != MayaGateToolbar.ENGLISH_OFF,
+            settings=self._ui)
+        self._tabs.addTab(self._indented(self._hotkeys_tab), "Hotkeys")
         self._sessions_tab = SessionsTab(self._link, self._session_history,
                                          launch=self._launch_scene, settings=self._ui,
                                          snippets=self._snippet_store,
@@ -269,6 +281,7 @@ class MayaGatePage(qt.QtWidgets.QWidget):
         self._toolbar.year_changed.connect(lambda year: self._save_ui("year", year))
         self._toolbar.environment_changed.connect(self._on_environment_changed)
         self._toolbar.english_changed.connect(self._on_english_changed)
+        self._toolbar.english_changed.connect(lambda _mode: self._hotkeys_tab.refresh())   # letter keys need EN
         self._tabs.currentChanged.connect(lambda index: self._save_ui("tab", self.TAB_KEYS[index]))
         self._version_row.clicked.connect(self._launch)
         self._problems_found.connect(self._on_problems_found)
@@ -351,6 +364,7 @@ class MayaGatePage(qt.QtWidgets.QWidget):
         self._user_setup_tab.set_environment(environment)
         self._boost_tab.set_environment(environment)
         self._scene_tab.set_environment(environment)
+        self._hotkeys_tab.set_environment(environment)
         self._toolbar.set_english(self._english_mode(environment))
         self._check_environment()
 
@@ -509,6 +523,10 @@ class MayaGatePage(qt.QtWidgets.QWidget):
         environment_vars.update(scene_settings.to_environment(rate))   # range, units, up axis, playback, keys
         if rate["paths_check"]:   # scene_defaults.py: "N paths could be $WG_ANIM" on opening a scene
             environment_vars[variables.SCENE_PATHS_CHECK] = "1"
+
+        # the Hotkeys tab's keys: ALWAYS passed (an empty set too - Maya then leaves its set "MSL"; hotkey_set.py)
+        environment_vars.update(hotkey_keys.to_environment(self._hotkey_store.keys(environment),
+                                                           self._hotkey_store.release(environment)))
 
         if environment == self._environment and not preview:
             self._user_setup_tab.save()  # launch with what's on screen, not the last autosave

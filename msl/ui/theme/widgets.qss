@@ -121,6 +121,19 @@ OptionMenu TintedIcon#menuOptionCheck {
 
 /* --- GlyphButton ------------------------------------------------------------ */
 
+/* A field holding one keyboard shortcut, shown as key caps (KeyCaptureField). */
+KeyCaptureField {
+    qproperty-backgroundColor:  var(--field);
+    qproperty-borderColor:      var(--border);
+    qproperty-hoverBorderColor: alpha(var(--accent), 55%);
+    qproperty-focusColor:       var(--accent);
+    qproperty-capColor:         var(--surface-raised);
+    qproperty-capBorderColor:   alpha(var(--text-secondary), 45%);
+    qproperty-capTextColor:     var(--text-primary);
+    qproperty-placeholderColor: alpha(var(--text-secondary), 75%);
+    qproperty-errorColor:       var(--error);
+    qproperty-warnColor:        var(--warning);
+}
 GlyphButton {
     qproperty-glyphColor:            var(--text-secondary);
     qproperty-activeGlyphColor:      var(--text-primary);
@@ -334,6 +347,20 @@ GradientRamp {
     qproperty-pickedColor: var(--accent);
     qproperty-markerColor: var(--text-primary);
 }
+
+/* --- BlendSlider: a knob pulled left / right that springs back (the Animation tool's sliders) */
+BlendSlider {
+    qproperty-trackTopColor: var(--segment-track-top);
+    qproperty-trackColor:    var(--segment-track);
+    qproperty-markColor:     alpha(var(--text-secondary), 80%);
+    qproperty-fillColor:     var(--accent);
+    qproperty-knobTopColor:  var(--segment-pill-top);
+    qproperty-knobColor:     var(--segment-pill);
+    qproperty-knobTextColor: var(--text-primary);
+    qproperty-borderColor:   alpha(var(--border), 90%);
+}
+BlendSlider[tone="pose"]  { qproperty-fillColor: var(--yellow); }
+BlendSlider[tone="curve"] { qproperty-fillColor: var(--success); }
 
 /* --- BarStrip: a handful of measurements as thin bars ------------------------------- */
 

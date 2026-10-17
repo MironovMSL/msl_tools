@@ -378,3 +378,79 @@ ScenePathsDialog QFrame#scenePathsReferenced {
     border-radius: 6px;
 }
 ScenePathsDialog QLabel#scenePathsReferencedTitle { color: var(--text-primary); font-weight: 600; }
+
+/* Hotkeys tab: keys for our Maya commands (HotkeysTab). */
+HotkeysTab { qproperty-menuIconColor: var(--text-secondary); }
+HotkeysTab QLabel#hotkeysTitle { color: var(--text-primary); font-weight: 600; }
+HotkeysTab QLabel#hotkeysHint { color: var(--text-secondary); }
+HotkeysTab QLabel#hotkeysNote { color: var(--text-secondary); }
+HotkeysTab QLabel#hotkeysGroup {
+    color: var(--text-secondary);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 1px;
+    padding: 8px 0 2px 6px;
+}
+HotkeysTab QFrame#hotkeyRow { border-radius: 5px; background: transparent; }
+HotkeysTab QFrame#hotkeyRow:hover { background-color: alpha(var(--text-primary), 5%); }
+HotkeysTab QFrame#hotkeyRow[changed="true"] {
+    border-left: 3px solid var(--accent);
+    border-top-left-radius: 0;
+    border-bottom-left-radius: 0;
+    background-color: alpha(var(--accent), 7%);
+}
+HotkeysTab QFrame#hotkeyRow[picked="true"] { background-color: alpha(var(--accent), 16%); }
+HotkeysTab QLabel#hotkeyName { color: var(--text-primary); }
+HotkeysTab TintedIcon#hotkeyIcon { qproperty-iconColor: var(--accent); }
+HotkeysTab TintedIcon#hotkeyIcon[tone="orange"] { qproperty-iconColor: var(--orange); }
+HotkeysTab TintedIcon#hotkeyIcon[tone="violet"] { qproperty-iconColor: var(--violet); }
+HotkeysTab TintedIcon#hotkeyIcon[tone="yellow"] { qproperty-iconColor: var(--yellow); }
+HotkeysTab TintedIcon#hotkeyIcon[tone="teal"] { qproperty-iconColor: var(--teal); }
+HotkeysTab TintedIcon#hotkeyIcon[tone="pink"] { qproperty-iconColor: var(--pink); }
+HotkeysTab TintedIcon#hotkeyIcon[tone="success"] { qproperty-iconColor: var(--success); }
+HotkeysTab TintedIcon#hotkeyIcon[tone="error"] { qproperty-iconColor: var(--error); }
+HotkeysTab TintedIcon#hotkeyMark[tone="warning"] { qproperty-iconColor: var(--warning); }
+HotkeysTab TintedIcon#hotkeyMark[tone="error"] { qproperty-iconColor: var(--error); }
+HotkeysTab QFrame#hotkeysStatus {
+    background-color: var(--surface-raised);
+    border: 1px solid alpha(var(--text-secondary), 22%);
+    border-radius: 6px;
+}
+HotkeysTab QLabel#hotkeysStatusPart { color: var(--text-primary); }
+HotkeysTab QLabel#hotkeysStatusPart[state="warning"] { color: var(--warning); }
+HotkeysTab QLabel#hotkeysStatusPart[state="behind"] { color: var(--accent); }
+HotkeysTab QLabel#hotkeysStatusPart[state="ok"] { color: var(--success); }
+HotkeysTab QLabel#hotkeysStatusPart[state="quiet"] { color: var(--text-secondary); }
+HotkeysTab QLabel#hotkeyPending { color: var(--text-secondary); font-size: 11px; }
+HotkeysTab GlyphButton#hotkeysTool[on="true"] {
+    qproperty-glyphColor: var(--accent);
+    qproperty-highlightColor: alpha(var(--accent), 16%);
+}
+HotkeysTab QFrame#hotkeysKeyboard {
+    background-color: var(--surface-raised);
+    border: 1px solid alpha(var(--text-secondary), 22%);
+    border-radius: 6px;
+}
+HotkeysTab QLabel#hotkeysMapInfo { color: var(--text-primary); }
+HotkeysTab QPushButton#hotkeyRelease { padding: 0; font-size: 11px; }
+HotkeysTab QPushButton#hotkeyRelease:checked {
+    color: var(--on-accent);
+    background: linear-gradient(to bottom, var(--primary-top), var(--primary-bottom));
+    border: 1px solid var(--accent);
+}
+KeyboardMap {
+    qproperty-keyBorderColor: alpha(var(--text-secondary), 40%);
+    qproperty-freeColor:      alpha(var(--text-secondary), 55%);
+    qproperty-takenColor:     alpha(var(--text-secondary), 22%);
+    qproperty-textColor:      var(--text-primary);
+    qproperty-quietColor:     alpha(var(--text-secondary), 80%);
+    qproperty-highlightColor: var(--accent);
+    qproperty-accentColor:    var(--accent);
+    qproperty-orangeColor:    var(--orange);
+    qproperty-violetColor:    var(--violet);
+    qproperty-yellowColor:    var(--yellow);
+    qproperty-tealColor:      var(--teal);
+    qproperty-pinkColor:      var(--pink);
+    qproperty-successColor:   var(--success);
+    qproperty-errorColor:     var(--error);
+}

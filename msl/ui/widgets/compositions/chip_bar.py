@@ -147,6 +147,12 @@ class ChipBar(qt.QtWidgets.QWidget):
             self._sync_checked()
         self._layout.invalidate()
 
+    def set_text(self, key: str, text: str) -> None:
+        """A chip's text changed in place ("Controls · 3"): nothing rebuilt, the current / checked ones stay."""
+        chip = self._chips.get(key)
+        if chip is not None and chip.text() != text:
+            chip.setText(text)
+
     def keys(self) -> list[str]:
         return list(self._chips)
 

@@ -256,6 +256,14 @@ class HubWindow(FramelessDialog):
         status indicators. The hub doesn't know what they show."""
         self.header.trailing_layout.insertWidget(0, widget)
 
+    def keyPressEvent(self, event) -> None:
+        """Esc never closes the hub: QDialog's default (Esc = reject) closed the whole app whenever a field
+        that gives Esc a meaning of its own (a key capture, a name typed in place) had just let go of it."""
+        if event.key() == qt.QtCore.Qt.Key.Key_Escape:
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
     def open_tool(self, tool_id: str) -> qt.QtWidgets.QWidget | None:
         """Opens tool `tool_id` (as a click on its sidebar tile would) and
         returns its page, or None if there is no such tool."""

@@ -36,9 +36,10 @@ class Registry(unittest.TestCase):
         self.assertEqual(script.python(), "from msl_tools.msl.tools.maya.scripts.rig import joints; joints()")
 
     def test_no_command_is_in_both_categories(self):
-        source = (PACKAGE_ROOT / "msl" / "tools" / "maya" / "hotkeys.py").read_text(encoding="utf-8")
+        from msl_tools.msl.tools.maya import hotkey_catalog
+        tools = {command.name for command in hotkey_catalog.TOOL_COMMANDS}
         for script in scripts.SCRIPTS:
-            self.assertNotIn(f'"{script.command}":', source, script.command)
+            self.assertNotIn(script.command, tools, script.command)
 
 
 if __name__ == "__main__":

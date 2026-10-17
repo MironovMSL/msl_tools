@@ -74,6 +74,10 @@ QUIT_UNSAVED = "the scene has unsaved changes now - nothing was closed"
 SCENE_PATHS = "scene_paths"       # {} -> {"roots": [[name, folder]], "changes": [{"key", "kind", "where", "path",
                                   # "new"}], "left": n, "through": n} - the open scene's paths a variable could stand for
 SCENE_PATHS_APPLY = "scene_paths_apply"   # {"keys": [...]} -> {"changed": n, "skipped": [plugs], "gone": [keys]}
+# Maya Gate's Hotkeys tab (tools/maya/hotkey_set.py): keys are data, a command is one of OURS by name.
+HOTKEYS_STATE = "hotkeys_state"   # {} -> {"base", "current", "sets", "ours": {command: key}, "bindings": {key: {...}}}
+HOTKEYS_APPLY = "hotkeys_apply"   # {"keys": {command: "Ctrl+Alt+R"}, "release": [command]} -> {"base", "current", "applied", "clashes", "skipped"}
+RUN_COMMAND = "run_command"       # {"command": "MSLRename"} -> {"ran": name}; only a command of hotkey_catalog
 RUN_PYTHON = "run_python"         # {"code": str} -> {"output": str, "result": str, "traceback": str}
 
 # Levels of a log entry.
