@@ -3829,15 +3829,16 @@ hub (it already sees an unclean end) + fast anim layer merge · 10 Master Spline
   Pull -100 % = exactly the straight line between the keys around. On a frame without a key it ADDS one (only on
   animated channels); one undo step. Its sliders read the REAL cursor - synthetic Qt events do nothing.
 - `curves.py` (no Qt, no Maya): `Mode` (key, title, 2-letter short, family POSE / CURVE, tip, left / right,
-  marks, modifier) x 18 in `MODES`; `Block` = a run of consecutive keys of one curve + before / after (and
+  marks, modifier) x 19 in `MODES`; `Block` = a run of consecutive keys of one curve + before / after (and
   the key past each), default, frame value, undo values, evaluate(time) of the ORIGINAL curve, order / count
   (stagger), seed (noise); `apply(mode, block, weight)` -> new values; weight 0 = no change except the Tweener
   (a POSITION: 0 = half way). Left = the first word of the name (Pull | Push, Smooth | Rough, Ease In | Out).
-  Ease: MEASURED on the reference (a key half way between 0 and 10, its marks clicked): 25 / 50 / 75 / 100 % ->
-  3.66 / 1.96 / 0.22 / 0.01 (in) and 6.34 / 8.04 / 9.78 / 9.99 (out) - a POWER that grows with the weight
-  (`ease_power`: 1 + 9 * w ** 2.5, u ** 10 at 100 %: the key hugs its neighbor; ours 4.11 / 1.66 / 0.24 / 0.01);
-  the reference sets the ease outright, ours blends it in over the first EASE_BLEND 25 % so a small pull never
-  jumps (the user saw ours stop well short of the neighbor at 100 % with a fixed u ** 3).
+  Ease: MEASURED on the reference (a zigzag 7 / 1 / 9 / 2 picked on frames 3-9 between UNPICKED 0 at 1 and 10
+  at 11; its knob and marks clicked): it lays the run out ANEW - the picked keys' own values don't count; the knob
+  alone = a straight line (2 / 4 / 6 / 8), the 4 marks a side = powers 1.45 / 2.35 / 5.5 / 10 (u ** 10 at the
+  end: they hug the neighbor). Ours is exactly that (`EASE_POWERS`, log-interpolated between them, 30 at 200 %;
+  `EASE_MARKS`), checked to 0.02 against the measured values in a test and in the user's Maya. A first cut
+  blended from the current values - the user: "it remembers the curve's shape".
   The rest BLEND from the current values by the weight (0 = untouched). `weight_at` / `position_of` = the square feel; `weight_text`; `split_runs`, `block_from_keys`.
 - `scene.py` (maya.cmds + API 2.0): `find_targets()` - keys selected in a Graph Editor ON SCREEN, else the
   selected objects' keys in the timeline's highlighted range (end exclusive), else on the current frame (a key
@@ -3851,6 +3852,19 @@ hub (it already sees an unclean end) + fast anim layer merge · 10 Master Spline
   ("MSL Animation") with cmds.keyframe, Euler filter on rotations over the changed range +-1; remembers the
   values before (Blend to Undo); `cancel()`; `apply_once` (hotkeys, clicks); `describe()` (the window's line).
   The time offset reads the original curve from samples taken at the press (0.1 frame).
+  BLEND TO FRAME has TWO frames, as on the reference (seen there: grey squares past the slider's ends; hovered,
+  pills with the frame numbers over them; a click on one takes the current frame): left = toward the left frame's
+  pose, right = toward the right one's (`Block.frame_value` / `frame_value_right`, `Drag(mode, frame,
+  frame_right)`). Ours: BlendSlider SLOTS (`set_slots(left, right)`, generic) - grey squares past the track's
+  ends, hovered = the number in place, click = the current frame, wheel = +-1 (Shift 10), right click = a field;
+  Scale From Frame uses the left slot only. The separate "Frame to blend / scale to" row is gone (the user's ask);
+  settings frame_left / frame_right (an older "frame" = the left one). No lines to the timeline (the user: not
+  needed).
+  BLEND TO BUFFER (the user's ask, after the reference; Ctrl+Alt+Shift): toward Maya's own buffer curve (Graph
+  Editor > Curves > Buffer Curve Snapshot - the dark line). Maya has NO query for its values: `buffer_values()`
+  swaps it in (`bufferCurve -swap`), evaluates at the keys' times (`keyframe -q -eval`), swaps back - undo queue
+  off, the modified mark put back; measured: the swaps leave the undo queue and the snapshot as they were. No
+  snapshot on any target = the header says where to take one.
   TRAP, met (the user saw the curve shoot past its neighbor): `setKeyframe -insert` gives the new key FIXED
   tangents as steep as the curve there (-51 deg on the ball); moving its value then overshoots. Added keys get
   Maya's default tangents (`keyTangent -g -q`, auto) - measured: the reference does exactly that (auto, angle 0
@@ -3862,7 +3876,8 @@ hub (it already sees an unclean end) + fast anim layer merge · 10 Master Spline
   panel's LayoutRequest, 30 ms later; 145 px with two sliders -, Esc doesn't close - it puts a drag back; compact
   margins, the mode button MODE_WIDTH 116 with the name elided),
   `panel.py` AnimationPanel: two rows (mode button with a colored edge + BlendSlider; a hint line under each
-  was tried and taken out again for room), the mode menu an OptionMenu
+  was tried and taken out again for room; the frames of the frame modes live in the slider's slots), the mode
+  menu an OptionMenu
   (the 2-letter chip, title + "hold <modifier>", the left / right line, the tip as the row's tooltip),
   and while the pointer is over a slider the HELD keys are read every KEYS_MS 50
   (`queryKeyboardModifiers`: the slider has no focus) and the row already shows the mode a press would use -

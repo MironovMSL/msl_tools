@@ -44,12 +44,21 @@ class PoseTest(unittest.TestCase):
 
     def test_frame_without_a_value_changes_nothing(self):
         self.assertEqual(cv.apply("frame", block(), 1.0), [2.0])
-        self.assertAlmostEqual(cv.apply("frame", block(frame_value=8.0), 0.5)[0], 5.0)
+        two = block(frame_value=8.0, frame_value_right=12.0)                # the left and the right frame
+        self.assertAlmostEqual(cv.apply("frame", two, -0.5)[0], 5.0)        # half way to the left one's 8
+        self.assertAlmostEqual(cv.apply("frame", two, 0.5)[0], 7.0)         # half way to the right one's 12
 
     def test_infinity_follows_the_line_of_the_two_keys(self):
         b = block(values=[0.0], times=[12.0], before=(11.0, 10.0), before2=(10.0, 8.0), after=None)
         self.assertAlmostEqual(cv.apply("infinity", b, -1.0)[0], 12.0)
         self.assertEqual(cv.apply("infinity", b, 1.0), [0.0])     # nothing after: nothing changes
+
+    def test_buffer_toward_and_away_and_none_without_one(self):
+        b = block(values=[7.0, 5.0], times=[5.0, 9.0], buffer_values=[4.0, 2.0])
+        self.assertEqual(cv.apply("buffer", b, 1.0), [4.0, 2.0])
+        self.assertEqual(cv.apply("buffer", b, 0.5), [5.5, 3.5])
+        self.assertEqual(cv.apply("buffer", b, -1.0), [10.0, 8.0])
+        self.assertEqual(cv.apply("buffer", block(values=[7.0]), 1.0), [7.0])
 
     def test_undo_goes_back_by_part(self):
         b = block(values=[4.0, 6.0], undo_values=[0.0, 2.0])
@@ -80,18 +89,17 @@ class CurveTest(unittest.TestCase):
         rough = cv.apply("smooth_rough", b, 1.0)
         self.assertEqual(rough, [-2.0, 12.0, -2.0])
 
-    def test_ease_grows_like_the_reference(self):
-        b = block(values=[5.0], times=[6.0])                          # half way between 0 and 10
-        self.assertAlmostEqual(cv.apply("ease", b, -1.0)[0], 10 * 0.5 ** 10, places=4)   # 0.0098, as measured
-        self.assertAlmostEqual(cv.apply("ease", b, 1.0)[0], 10 - 10 * 0.5 ** 10, places=4)
-        quarter, half, three = (cv.apply("ease", b, w)[0] for w in (0.25, 0.5, 0.75))
-        self.assertTrue(5.0 < quarter < half < three < 10.0)
-        self.assertAlmostEqual(half, 8.04, delta=0.5)                  # measured ~8.04 (its marks' weights are a guess)
-        self.assertAlmostEqual(three, 9.78, delta=0.3)                 # measured ~9.78
-
-    def test_a_small_ease_blends_in(self):
-        b = block(values=[2.0], times=[6.0])                           # not on the ease's line
-        self.assertAlmostEqual(cv.apply("ease", b, 0.01)[0], 2.0, delta=0.2)
+    def test_ease_is_the_reference_measured(self):
+        # keys 3 / 5 / 7 / 9 (a zigzag) between unpicked 0 at 1 and 10 at 11, as clicked on the reference
+        b = block(values=[7.0, 1.0, 9.0, 2.0], times=[3.0, 5.0, 7.0, 9.0])
+        measured = {0.0: (2.0, 4.0, 6.0, 8.0),             # the knob: straight, whatever the keys held
+                    -1.0: (0.0, 0.001, 0.06, 1.074), -0.75: (0.001, 0.065, 0.602, 2.931),
+                    -0.5: (0.228, 1.161, 3.011, 5.919), -0.25: (0.969, 2.648, 4.768, 7.236),
+                    0.25: (2.764, 5.232, 7.352, 9.031), 0.5: (4.081, 6.989, 8.839, 9.772),
+                    0.75: (7.069, 9.398, 9.935, 9.999), 1.0: (8.926, 9.94, 9.999, 10.0)}
+        for weight, wanted in measured.items():
+            for got, value in zip(cv.apply("ease", b, weight), wanted):
+                self.assertAlmostEqual(got, value, delta=0.02, msg=f"weight {weight}")
 
     def test_time_offset_reads_the_curve_earlier(self):
         b = block(values=[6.0], times=[6.0], evaluate=lambda time: time)
@@ -115,7 +123,7 @@ class CurveTest(unittest.TestCase):
 
     def test_zero_weight_changes_nothing(self):
         for mode in cv.MODES:
-            if mode.key != "tween":
+            if mode.key not in ("tween", "ease"):        # these two are places, not changes
                 self.assertEqual(cv.apply(mode, block(evaluate=lambda t: 2.0), 0.0), [2.0], mode.key)
 
 

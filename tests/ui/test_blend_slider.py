@@ -100,6 +100,22 @@ class BlendSliderTest(unittest.TestCase):
         self.assertEqual(self.sent[-1], ("cancel",))
         self.assertFalse(slider.is_dragging())
 
+    def test_slots_take_clicks_and_the_wheel_and_never_drag(self):
+        slider = self.slider()
+        got = []
+        slider.slot_clicked.connect(lambda side: got.append(("click", side)))
+        slider.set_slots("12", "40")
+        x = slider._slot_rect("right").center().x()
+        self.mouse(slider, qt.QtCore.QEvent.Type.MouseButtonPress, x)
+        self.mouse(slider, qt.QtCore.QEvent.Type.MouseButtonRelease, x)
+        self.assertEqual(got, [("click", "right")])
+        self.assertFalse([e for e in self.sent if e[0] in ("start", "drag", "end")])   # no drag at all
+        self.assertLess(slider._half(), (slider.width() - BlendSlider.KNOB_WIDTH) / 2.0)  # room kept for them
+        slider._hovered_slot = "right"
+        slider.grab()
+        slider.set_slots(None, None)
+        self.assertIsNone(slider._slot_at(x))
+
     def test_it_paints_in_every_state(self):
         slider = self.slider()
         slider.grab()                               # closed

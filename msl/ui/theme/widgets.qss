@@ -358,6 +358,7 @@ BlendSlider {
     qproperty-knobColor:     var(--segment-pill);
     qproperty-knobTextColor: var(--text-primary);
     qproperty-borderColor:   alpha(var(--border), 90%);
+    qproperty-slotColor:     alpha(var(--text-secondary), 85%);
 }
 BlendSlider[tone="pose"]  { qproperty-fillColor: var(--yellow); }
 BlendSlider[tone="curve"] { qproperty-fillColor: var(--success); }

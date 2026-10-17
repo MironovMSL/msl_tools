@@ -330,6 +330,30 @@ class _Chunk:
         return False
 
 
+# --------------------------------------------------------------------------- Maya's buffer curve
+
+def buffer_values(curve: str, times) -> "list | None":
+    """Maya's buffer curve (the Graph Editor's Curves > Buffer Curve Snapshot) read at these times, or
+    None when the curve has none. Maya keeps it out of reach of any query - it is read by SWAPPING it
+    with the curve, evaluating, and swapping back, with the undo queue off and the scene's modified mark
+    put back (measured, Maya 2025: the swaps leave the undo queue and the snapshot as they were)."""
+    try:
+        if not cmds.bufferCurve(curve, query=True, exists=True):
+            return None
+    except RuntimeError:
+        return None
+    modified = cmds.file(query=True, modified=True)
+    values = None
+    with _NoUndo():
+        cmds.bufferCurve(curve, swap=True)
+        try:
+            values = [float(cmds.keyframe(curve, query=True, eval=True, time=(t, t))[0]) for t in times]
+        finally:
+            cmds.bufferCurve(curve, swap=True)
+    cmds.file(modified=modified)
+    return values
+
+
 # --------------------------------------------------------------------------- a drag
 
 class Drag:
@@ -338,9 +362,10 @@ class Drag:
     # the values before the last change, per curve {time: value} - for Blend to Undo
     _last_change: dict = {}
 
-    def __init__(self, mode: str, frame: "float | None" = None):
+    def __init__(self, mode: str, frame: "float | None" = None, frame_right: "float | None" = None):
         self.mode = cv.BY_KEY[mode]
         self.frame = frame
+        self.frame_right = frame_right
         self.targets, self.where = find_targets(add_keys=True)
         self.objects = len(selected_objects())
         self._done = False
@@ -361,16 +386,25 @@ class Drag:
 
     def _make_blocks(self) -> list:
         blocks = []
-        needs_curve = self.mode.key in ("time_offset", "stagger") or self.frame is not None
+        needs_curve = self.mode.key in ("time_offset", "stagger") or self.frame is not None \
+            or self.frame_right is not None
+        self.buffered = 0      # curves that have a buffer curve (Blend to Buffer)
         for number, target in enumerate(self.targets):
             if needs_curve:
                 target.sample()
+            buffered = buffer_values(target.curve, target.times) if self.mode.key == "buffer" else None
+            if buffered is not None:
+                self.buffered += 1
             frame_value = target.evaluate(self.frame) if (self.frame is not None and target._samples) else None
+            frame_right = target.evaluate(self.frame_right) if (self.frame_right is not None and target._samples) \
+                else None
             remembered = self._last_change.get(target.curve, {})
             for run in cv.split_runs(target.indices):
                 undo = [remembered.get(round(target.times[i], 3)) for i in run]
                 block = cv.block_from_keys(
                     target.times, target.values, run, default=target.default, frame_value=frame_value,
+                    frame_value_right=frame_right,
+                    buffer_values=[buffered[i] for i in run] if buffered is not None else None,
                     undo_values=undo if all(v is not None for v in undo) else None,
                     evaluate=target.evaluate if target._samples else None,
                     order=target.order, count=max(1, self.objects), seed=number * 7919 + run[0])

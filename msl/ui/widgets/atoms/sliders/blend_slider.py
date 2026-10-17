@@ -35,6 +35,11 @@ class BlendSlider(qt.QtWidgets.QWidget):
     it is dragged - `format_weight(weight)`, the owner's - is written inside the track at the end
     AWAY from the knob (dragged right: on the left), never under the pointer.
 
+    SLOTS (`set_slots(left, right)`: a short text each, or None) are small grey squares past the
+    ends of the track - a value the owner keeps for that side (a frame to blend to). Hovered, a slot
+    shows its text in place; a click, the wheel and a right click on it are the owner's
+    (slot_clicked / slot_stepped / slot_menu_requested) and never start a drag.
+
     Signals:
         drag_started(str)     the press - the modifiers held then ("ctrl+shift"), for the owner to
                               pick what the drag does before anything moves
@@ -42,10 +47,13 @@ class BlendSlider(qt.QtWidgets.QWidget):
         drag_finished(float)  let go (also after a click: the weight clicked)
         cancelled()           Esc during the drag (the owner puts things back)
         menu_requested(QPoint) a right click, at this global position
+        slot_clicked(str)     a click on the "left" / "right" slot
+        slot_stepped(str, int) the wheel over a slot: +-1 a notch (+-10 with Shift)
+        slot_menu_requested(str, QPoint) a right click on a slot
 
     Colors are Qt properties set by ui/theme/widgets.qss (`BlendSlider[tone=...]` gives the fill):
     trackColor, trackTopColor, markColor, fillColor, knobColor, knobTopColor, knobTextColor,
-    borderColor.
+    borderColor, slotColor.
     """
 
     drag_started = qt.QtCore.Signal(str)
@@ -53,6 +61,9 @@ class BlendSlider(qt.QtWidgets.QWidget):
     drag_finished = qt.QtCore.Signal(float)
     cancelled = qt.QtCore.Signal()
     menu_requested = qt.QtCore.Signal(qt.QtCore.QPoint)
+    slot_clicked = qt.QtCore.Signal(str)
+    slot_stepped = qt.QtCore.Signal(str, int)
+    slot_menu_requested = qt.QtCore.Signal(str, qt.QtCore.QPoint)
 
     trackColor = color_property("_track")
     trackTopColor = color_property("_track_top")
@@ -62,6 +73,7 @@ class BlendSlider(qt.QtWidgets.QWidget):
     knobTopColor = color_property("_knob_top")
     knobTextColor = color_property("_knob_text")
     borderColor = color_property("_border")
+    slotColor = color_property("_slot")
 
     HEIGHT = 24
     KNOB_WIDTH = 26
@@ -71,6 +83,8 @@ class BlendSlider(qt.QtWidgets.QWidget):
     OPEN_MS = 140           # the track opening / closing
     CLOSE_DELAY_MS = 120    # after the knob is back in the middle, the track closes this much later
     THIN = 8                # the track's height at rest
+    SLOT_ROOM = 16          # pixels at each end given to a slot (when the slider has any)
+    SLOT_SIZE = 8
 
     def __init__(self, parent=None, to_weight=None, to_position=None):
         super().__init__(parent)
@@ -83,6 +97,10 @@ class BlendSlider(qt.QtWidgets.QWidget):
         self._knob_top = qt.QtGui.QColor(theme.surface)
         self._knob_text = qt.QtGui.QColor(theme.text_primary)
         self._border = qt.QtGui.QColor(theme.border)
+        self._slot = qt.QtGui.QColor(theme.text_secondary)
+        self._slots = {"left": None, "right": None}     # the slots' texts
+        self._hovered_slot = None
+        self._pressed_slot = None
         self._to_weight = to_weight or _square
         self._to_position = to_position or _square_root
         self._limit = 1.0
@@ -129,6 +147,18 @@ class BlendSlider(qt.QtWidgets.QWidget):
         self._pressed_mark = None
         self.update()
 
+    def set_slots(self, left: "str | None" = None, right: "str | None" = None) -> None:
+        """The texts of the slots past the track's ends (None = no slot on that side)."""
+        slots = {"left": left, "right": right}
+        if slots != self._slots:
+            self._slots = slots
+            if self._hovered_slot and slots.get(self._hovered_slot) is None:
+                self._hovered_slot = None
+            self.update()
+
+    def slots(self) -> dict:
+        return dict(self._slots)
+
     def set_limit(self, limit: float) -> None:
         """The weight at either end (2 = overshoot past the targets)."""
         self._limit = max(0.01, float(limit))
@@ -153,8 +183,25 @@ class BlendSlider(qt.QtWidgets.QWidget):
 
     # ------------------------------------------------------------------ geometry
 
+    def _room(self) -> float:
+        """Pixels at each end kept for slots (both ends alike, so the middle stays the middle)."""
+        return float(self.SLOT_ROOM) if any(text is not None for text in self._slots.values()) else 0.0
+
     def _half(self) -> float:
-        return max(1.0, (self.width() - self.KNOB_WIDTH) / 2.0)
+        return max(1.0, (self.width() - self.KNOB_WIDTH) / 2.0 - self._room())
+
+    def _slot_rect(self, side: str) -> qt.QtCore.QRectF:
+        size = float(self.SLOT_SIZE)
+        middle = self.height() / 2.0
+        x = 4.0 if side == "left" else self.width() - 4.0 - size
+        return qt.QtCore.QRectF(x, middle - size / 2.0, size, size)
+
+    def _slot_at(self, x: float) -> "str | None":
+        if self._slots["left"] is not None and x < self._room():
+            return "left"
+        if self._slots["right"] is not None and x > self.width() - self._room():
+            return "right"
+        return None
 
     def _centre(self) -> float:
         return self.width() / 2.0
@@ -181,6 +228,15 @@ class BlendSlider(qt.QtWidgets.QWidget):
     # ------------------------------------------------------------------ the mouse
 
     def mousePressEvent(self, event) -> None:
+        slot = self._slot_at(event.position().x())
+        if slot is not None:
+            if event.button() == qt.QtCore.Qt.MouseButton.RightButton:
+                self.slot_menu_requested.emit(slot, event.globalPosition().toPoint())
+            elif event.button() == qt.QtCore.Qt.MouseButton.LeftButton:
+                self._pressed_slot = slot
+                self.update()
+            event.accept()
+            return
         if event.button() == qt.QtCore.Qt.MouseButton.RightButton:
             self.menu_requested.emit(event.globalPosition().toPoint())
             event.accept()
@@ -211,9 +267,10 @@ class BlendSlider(qt.QtWidgets.QWidget):
     def mouseMoveEvent(self, event) -> None:
         x = event.position().x()
         if self._press is None:
-            hovered = self._mark_at(x)
-            if hovered != self._hovered:
-                self._hovered = hovered
+            slot = self._slot_at(x)
+            hovered = None if slot else self._mark_at(x)
+            if hovered != self._hovered or slot != self._hovered_slot:
+                self._hovered, self._hovered_slot = hovered, slot
                 self.update()
             return super().mouseMoveEvent(event)
         if not self._dragging and abs(x - self._press) < self.CLICK_DISTANCE:
@@ -227,6 +284,12 @@ class BlendSlider(qt.QtWidgets.QWidget):
         self.dragged.emit(self._weight(self._position))
 
     def mouseReleaseEvent(self, event) -> None:
+        if self._pressed_slot is not None and event.button() == qt.QtCore.Qt.MouseButton.LeftButton:
+            slot, self._pressed_slot = self._pressed_slot, None
+            if self._slot_at(event.position().x()) == slot:
+                self.slot_clicked.emit(slot)
+            self.update()
+            return
         if self._press is None or event.button() != qt.QtCore.Qt.MouseButton.LeftButton:
             return super().mouseReleaseEvent(event)
         x = event.position().x()
@@ -247,9 +310,21 @@ class BlendSlider(qt.QtWidgets.QWidget):
             self._spring_back()
         self.drag_finished.emit(weight)
 
+    def wheelEvent(self, event) -> None:
+        slot = self._slot_at(event.position().x())
+        delta = event.angleDelta().y()
+        if slot is None or not delta:
+            return super().wheelEvent(event)
+        notches = int(delta / 120) or (1 if delta > 0 else -1)
+        if event.modifiers() & qt.QtCore.Qt.KeyboardModifier.ShiftModifier:
+            notches *= 10
+        self.slot_stepped.emit(slot, notches)
+        event.accept()
+
     def leaveEvent(self, event) -> None:
-        if self._hovered is not None:
+        if self._hovered is not None or self._hovered_slot is not None:
             self._hovered = None
+            self._hovered_slot = None
             self.update()
         super().leaveEvent(event)
 
@@ -305,7 +380,9 @@ class BlendSlider(qt.QtWidgets.QWidget):
         painter.setRenderHint(qt.QtGui.QPainter.RenderHint.Antialiasing)
         whole = qt.QtCore.QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
         height = self.THIN + (whole.height() - self.THIN) * self._open
-        rect = qt.QtCore.QRectF(whole.left(), whole.center().y() - height / 2.0, whole.width(), height)
+        room = self._room()
+        rect = qt.QtCore.QRectF(whole.left() + room, whole.center().y() - height / 2.0, whole.width() - 2 * room,
+                                height)
         radius = rect.height() / 2.0
         groove = qt.QtGui.QLinearGradient(rect.topLeft(), rect.bottomLeft())
         groove.setColorAt(0.0, self._track_top)
@@ -369,6 +446,8 @@ class BlendSlider(qt.QtWidgets.QWidget):
             painter.setPen(self._fill)
             painter.drawText(plate, qt.QtCore.Qt.AlignmentFlag.AlignCenter, number)
 
+        self._paint_slots(painter)
+
         knob = qt.QtCore.QRectF(knob_x - self.KNOB_WIDTH / 2.0, whole.top() + 2, self.KNOB_WIDTH, whole.height() - 4)
         face = qt.QtGui.QLinearGradient(knob.topLeft(), knob.bottomLeft())
         face.setColorAt(0.0, self._knob_top)
@@ -381,3 +460,25 @@ class BlendSlider(qt.QtWidgets.QWidget):
             painter.setPen(self._fill if lit else self._knob_text)
             painter.drawText(knob, qt.QtCore.Qt.AlignmentFlag.AlignCenter, self._label)
         painter.end()
+
+    def _paint_slots(self, painter) -> None:
+        """The slots: grey squares past the track's ends; the hovered one shows its text instead."""
+        for side, text in self._slots.items():
+            if text is None:
+                continue
+            square = self._slot_rect(side)
+            pressed = self._pressed_slot == side
+            if self._hovered_slot == side or pressed:
+                width = max(square.width(), painter.fontMetrics().horizontalAdvance(text) + 12.0)
+                plate_height = self.height() - 4.0
+                left = square.left() - 2.0 if side == "left" else square.right() + 2.0 - width
+                plate = qt.QtCore.QRectF(left, 2.0, width, plate_height)
+                painter.setPen(qt.QtGui.QPen(self._fill, 1.0))
+                painter.setBrush(self._knob if pressed else self._knob_top)
+                painter.drawRoundedRect(plate, 5, 5)
+                painter.setPen(self._fill)
+                painter.drawText(plate, qt.QtCore.Qt.AlignmentFlag.AlignCenter, text)
+            else:
+                painter.setPen(qt.QtCore.Qt.PenStyle.NoPen)
+                painter.setBrush(self._slot)
+                painter.drawRoundedRect(square, 1.5, 1.5)

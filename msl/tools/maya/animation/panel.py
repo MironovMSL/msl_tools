@@ -4,12 +4,13 @@
     CURVE  the shape of the keys: Pull | Push, Scale From ..., Smooth | Rough, Ease, Time Offset,
            Noise | Wave, Connect to Neighbors
 — each with the mode it is on (a click on the name, or a right click on the slider, picks another;
-held modifiers switch it for one drag: Shift = Blend to Neighbors / Smooth | Rough, ...), the frame
-the "Frame" modes go to, and a line saying what the sliders act on now (Graph Editor keys, the
+held modifiers switch it for one drag: Shift = Blend to Neighbors / Smooth | Rough, ...), the frames
+the "Frame" modes go to (grey squares at the slider's ends: hover = the frame, click = the current
+frame, wheel = +-1, right click = type it), and a line saying what the sliders act on now (Graph Editor keys, the
 timeline's range, the current frame). A drag changes the curves live and ends as ONE undo step;
 Esc during it puts everything back.
 
-Settings: configsMayaMng "animation" (`settings`: pose, curve, overshoot, euler, frame).
+Settings: configsMayaMng "animation" (`settings`: pose, curve, overshoot, euler, frame_left, frame_right).
 """
 from pathlib import Path
 
@@ -19,7 +20,7 @@ from msl_tools.msl.tools.maya.animation import curves as cv
 from msl_tools.msl.tools.maya.controls.widgets import DragNumberField
 from msl_tools.msl.tools.maya.rename.buttons import ToggleIconButton
 from msl_tools.msl.ui.theme import StylesheetBuilder
-from msl_tools.msl.ui.theme.qss import color_property, repolish
+from msl_tools.msl.ui.theme.qss import color_property, make_rounded_popup, repolish
 from msl_tools.msl.ui.ui_resources import UiResources
 from msl_tools.msl.ui.widgets.atoms.sliders import BlendSlider
 from msl_tools.msl.ui.widgets.compositions.option_menu import OptionMenu
@@ -29,6 +30,7 @@ StylesheetBuilder.register_template(Path(__file__).with_name("animation.qss"))
 WATCH_MS = 500           # how often the line "what the sliders act on" is read while on screen
 OVERSHOOT = 2.0          # the weight at a slider's end with overshoot on
 FRAME_MODES = ("frame", "scale_frame")
+FRAME_SIDES = {"frame": ("left", "right"), "scale_frame": ("left",)}   # the slots each frame mode uses
 MODE_WIDTH = 116          # the mode button; a longer name is cut short (the whole one in its tooltip)
 KEYS_MS = 50             # how often the held keys are read while the pointer is over a slider
 
@@ -59,6 +61,7 @@ class _SliderRow(qt.QtWidgets.QWidget):
         self.slider.menu_requested.connect(self._menu)
         self.mode = self.modes[0]
         self._shown = self.mode
+        self.frames = {"left": 1.0, "right": 10.0}   # the panel's; shown in the slots of the frame modes
         # while the pointer is over the slider, the keys held now pick the mode it shows - so it
         # says what a press WOULD do before the click (the keyboard is read: the slider has no focus)
         self._keys = qt.QtCore.QTimer(self)
@@ -116,6 +119,13 @@ class _SliderRow(qt.QtWidgets.QWidget):
                                f"goes straight there. Hold a key while pressing for another mode; right click: "
                                f"every mode. Esc while dragging puts it back.")
         self.slider.format_weight = lambda weight, m=mode: cv.weight_text(m, weight)
+        self.show_frames()
+
+    def show_frames(self) -> None:
+        """The slots at the slider's ends: the frames of the mode shown, if it uses any."""
+        sides = FRAME_SIDES.get(self._shown.key, ())
+        texts = {side: (f"{self.frames[side]:g}" if side in sides else None) for side in ("left", "right")}
+        self.slider.set_slots(texts["left"], texts["right"])
 
     def _menu(self, position) -> None:
         """Every mode of this slider, each with a line saying what its two sides do and the key that
@@ -174,9 +184,6 @@ class AnimationPanel(qt.QtWidgets.QWidget):
     def _limit(self) -> float:
         return OVERSHOOT if self._overshoot.isChecked() else 1.0
 
-    def _frame(self) -> float:
-        return float(self._frame_field.value())
-
     # ------------------------------------------------------------------ building
 
     def _icon(self, name: str):
@@ -187,9 +194,15 @@ class AnimationPanel(qt.QtWidgets.QWidget):
         layout.setContentsMargins(8, 6, 8, 6)
         layout.setSpacing(5)
         self._rows = {}
+        left = float(self._get("frame_left", self._get("frame", 1.0)))
+        self._frames = {"left": left, "right": float(self._get("frame_right", left + 10.0))}
         for family in (cv.POSE, cv.CURVE):
             row = _SliderRow(family)
+            row.frames = self._frames
             row.set_mode(str(self._get(family, row.modes[0].key)))
+            row.slider.slot_clicked.connect(self._take_frame)
+            row.slider.slot_stepped.connect(lambda side, steps: self._set_frame(side, self._frames[side] + steps))
+            row.slider.slot_menu_requested.connect(lambda side, position, r=row: self._frame_menu(r, side, position))
             row.picked.connect(lambda key, r=row: self._pick(r, key))
             row.slider.drag_started.connect(lambda modifiers, r=row: self._start(r, modifiers))
             row.slider.dragged.connect(self._move)
@@ -197,27 +210,6 @@ class AnimationPanel(qt.QtWidgets.QWidget):
             row.slider.cancelled.connect(lambda r=row: self._cancel(r))
             self._rows[family] = row
             layout.addWidget(row)
-
-        frame_row = self._frame_row = qt.QtWidgets.QWidget()
-        frame_layout = qt.QtWidgets.QHBoxLayout(frame_row)
-        frame_layout.setContentsMargins(0, 0, 0, 0)
-        frame_layout.setSpacing(6)
-        caption = qt.QtWidgets.QLabel("Frame to blend / scale to")
-        caption.setObjectName("animationCaption")
-        self._frame_field = DragNumberField(float(self._get("frame", 1.0)), -100000.0, 100000.0, 1.0, width=64,
-                                            decimals=1)
-        self._frame_field.setToolTip("The frame Blend to Frame and Scale From Frame use")
-        self._frame_field.value_changed.connect(lambda value: self._set("frame", float(value)))
-        take = qt.QtWidgets.QPushButton("Current frame")
-        take.setObjectName("animationQuiet")
-        take.setFocusPolicy(qt.QtCore.Qt.FocusPolicy.NoFocus)
-        take.setToolTip("Take the frame the timeline is on now")
-        take.clicked.connect(self._take_frame)
-        frame_layout.addWidget(caption)
-        frame_layout.addWidget(self._frame_field)
-        frame_layout.addWidget(take)
-        frame_layout.addStretch(1)
-        layout.addWidget(frame_row)
 
         self._targets = qt.QtWidgets.QLabel("")
         self._targets.setObjectName("animationTargets")
@@ -241,7 +233,6 @@ class AnimationPanel(qt.QtWidgets.QWidget):
         self._euler.setChecked(bool(self._get("euler", True)))
         self._euler.toggled.connect(lambda on: self._set("euler", bool(on)))
         self._overshoot_changed(self._overshoot.isChecked())
-        self._show_frame_row()
 
     def header_widgets(self) -> list:
         """The window puts these in its header, before the theme toggle."""
@@ -252,23 +243,53 @@ class AnimationPanel(qt.QtWidgets.QWidget):
     def _pick(self, row: _SliderRow, key: str) -> None:
         row.set_mode(key)
         self._set(row.family, key)
-        self._show_frame_row()
-
-    def _show_frame_row(self) -> None:
-        self._frame_row.setVisible(any(row.mode.key in FRAME_MODES for row in self._rows.values()))
 
     def _overshoot_changed(self, on: bool) -> None:
         self._set("overshoot", bool(on))
         for row in self._rows.values():
             row.slider.set_limit(OVERSHOOT if on else 1.0)
 
-    def _take_frame(self) -> None:
+    # ------------------------------------------------------------------ the frames (the slots)
+
+    def _set_frame(self, side: str, frame: float) -> None:
+        self._frames[side] = round(float(frame), 3)
+        self._set(f"frame_{side}", self._frames[side])
+        for row in self._rows.values():
+            row.show_frames()
+        self._say(f"{side.capitalize()} frame: {self._frames[side]:g}", "")
+
+    def _take_frame(self, side: str) -> None:
+        """A click on a slot: the frame the timeline is on now."""
         try:
             from maya import cmds
-            self._frame_field.set_value(float(cmds.currentTime(query=True)))
-            self._set("frame", self._frame())
+            self._set_frame(side, float(cmds.currentTime(query=True)))
         except Exception:
             pass
+
+    def _frame_menu(self, row: _SliderRow, side: str, position) -> None:
+        """A right click on a slot: type the frame, or take the current one."""
+        menu = qt.QtWidgets.QMenu(self)
+        make_rounded_popup(menu)
+        caption = menu.addAction(f"{side.upper()} FRAME")
+        caption.setEnabled(False)
+        field = DragNumberField(self._frames[side], -100000.0, 100000.0, 1.0, width=90, decimals=1)
+        field.value_changed.connect(lambda value: self._set_frame(side, value))
+        holder = qt.QtWidgets.QWidget()
+        holder_layout = qt.QtWidgets.QHBoxLayout(holder)
+        holder_layout.setContentsMargins(10, 2, 10, 2)
+        holder_layout.addWidget(field)
+        action = qt.QtWidgets.QWidgetAction(menu)
+        action.setDefaultWidget(holder)
+        menu.addAction(action)
+        try:
+            from maya import cmds
+            now = float(cmds.currentTime(query=True))
+            menu.addAction(f"Current frame ({now:g})").triggered.connect(lambda: self._set_frame(side, now))
+        except Exception:
+            pass
+        field.returnPressed.connect(menu.close)
+        qt.QtCore.QTimer.singleShot(0, lambda: (field.setFocus(), field.selectAll()))
+        menu.exec(position)
 
     # ------------------------------------------------------------------ a drag
 
@@ -276,10 +297,12 @@ class AnimationPanel(qt.QtWidgets.QWidget):
         mode = cv.mode_for_modifiers(row.family, modifiers) or row.mode
         self._drag_mode = mode
         row.show_mode(mode)
-        frame = self._frame() if mode.key in FRAME_MODES else None
+        sides = FRAME_SIDES.get(mode.key, ())
+        frame = self._frames["left"] if "left" in sides else None
+        frame_right = self._frames["right"] if "right" in sides else None
         try:
             from msl_tools.msl.tools.maya.animation import scene
-            self._drag = scene.Drag(mode.key, frame)
+            self._drag = scene.Drag(mode.key, frame, frame_right)
         except Exception as error:   # outside Maya, or Maya refused
             self._drag = None
             self._say(f"{mode.title}: {error}", "error")
@@ -287,6 +310,10 @@ class AnimationPanel(qt.QtWidgets.QWidget):
         if not self._drag:
             self._drag = None
             self._say("Nothing to act on: select animated objects (or keys in the Graph Editor)", "error")
+        elif mode.key == "buffer" and not self._drag.buffered:
+            self._drag.cancel()
+            self._drag = None
+            self._say("No buffer curve: take one in the Graph Editor - Curves > Buffer Curve Snapshot", "error")
 
     def _move(self, weight: float) -> None:
         if self._drag is not None:

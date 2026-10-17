@@ -32,9 +32,12 @@ TWEEN_FRACTIONS = (0.0, 1 / 8, 1 / 6, 1 / 4, 1 / 3, 1 / 2, 2 / 3, 3 / 4, 5 / 6, 
 BLEND_MARKS = (-1.0, -0.75, -0.5, -0.25, -0.1, 0.0, 0.1, 0.25, 0.5, 0.75, 1.0)
 OFFSET_FRAMES = 10.0     # how far the time offset reaches at a full weight
 NOISE_PART = 0.25        # how big noise / wave get at a full weight, as a part of the run's own range
-EASE_MAX_POWER = 10.0    # the ease's shape at a full weight: u ** 10 - a key half way lands next to its neighbor
-EASE_CURVE = 2.5         # how the power grows with the weight (1 + 9 * weight ** 2.5)
-EASE_BLEND = 0.25        # from this weight on the run IS the ease; below it, it blends in from the keys as they are
+# The ease's power by weight - MEASURED on the reference (keys 3 / 5 / 7 / 9 between unpicked 0 at 1 and 10 at
+# 11, its knob and marks clicked): the knob = a straight line, the marks 1.45, 2.35, 5.5 and 10 (u ** 10 at the
+# end: the keys hug the neighbor they ease into); between them the power runs evenly in log space; past 100 %
+# (overshoot) it goes on to 30.
+EASE_POWERS = ((0.0, 1.0), (0.25, 1.45), (0.5, 2.35), (0.75, 5.5), (1.0, 10.0), (2.0, 30.0))
+EASE_MARKS = (-1.0, -0.75, -0.5, -0.25, 0.25, 0.5, 0.75, 1.0)
 
 
 @dataclass(frozen=True)
@@ -58,14 +61,20 @@ MODES = (
          "after (right).", "toward the key before", "toward the key after", modifier="Shift"),
     Mode("default", "Blend to Default", "BD", POSE, "Toward the rig's default pose (right) or away from it "
          "(left).", "away from the default", "toward the default", modifier="Alt+Shift"),
-    Mode("frame", "Blend to Frame", "BF", POSE, "Toward the pose at the frame picked under the sliders (right) or "
-         "away from it (left).", "away from that frame", "toward that frame", modifier="Ctrl"),
+    Mode("frame", "Blend to Frame", "BF", POSE, "Toward the pose at one of TWO frames - the grey squares at the "
+         "slider's ends (hover: the frame; click: take the current frame; wheel: +-1; right click: type it): left "
+         "toward the left one's pose, right toward the right one's.", "toward the left frame",
+         "toward the right frame", modifier="Ctrl"),
     Mode("infinity", "Blend to Infinity", "BI", POSE, "Toward where the curve would go on in a straight line: "
          "from the two keys before (left) or the two after (right).", "the line from before",
          "the line from after", modifier="Ctrl+Alt"),
     Mode("undo", "Blend to Undo", "BU", POSE, "Toward the values before the last change made with these sliders "
          "(right) - undo only a part of it - or away from them (left).", "away from before",
          "back to before", modifier="Ctrl+Shift"),
+    Mode("buffer", "Blend to Buffer", "BB", POSE, "Toward Maya's buffer curve - the snapshot taken in the Graph "
+         "Editor (Curves > Buffer Curve Snapshot), drawn there as a dark line: try things, then pull back to "
+         "it as far as you like (right) or away from it (left).", "away from the buffer", "toward the buffer",
+         modifier="Ctrl+Alt+Shift"),
     Mode("pull_push", "Pull | Push", "PP", CURVE, "Soften (left: toward the straight line between the keys "
          "around) or exaggerate (right) the run.", "pull to the straight line", "push away from it",
          modifier="Alt"),
@@ -78,15 +87,16 @@ MODES = (
          "good for anticipations and overshoots.", "toward the key before", "away from it"),
     Mode("scale_right", "Scale From Neighbor Right", "SR", CURVE, "Scale the keys about the key after the run.",
          "toward the key after", "away from it"),
-    Mode("scale_frame", "Scale From Frame", "SF", CURVE, "Scale the keys about the value at the frame picked "
-         "under the sliders.", "toward that frame's value", "away from it", modifier="Ctrl"),
+    Mode("scale_frame", "Scale From Frame", "SF", CURVE, "Scale the keys about the value at a frame - the grey "
+         "square at the slider's left end (hover: the frame; click: take the current frame; wheel: +-1).",
+         "toward that frame's value", "away from it", modifier="Ctrl"),
     Mode("smooth_rough", "Smooth | Rough", "SM", CURVE, "Soften the run (left; a few times turns dead keys "
          "into moving holds, cleans noisy mocap) or make it harsher (right).", "smoother", "rougher",
          modifier="Shift"),
-    Mode("ease", "Ease In | Out", "EA", CURVE, "Respace the run between the keys around it in an ease that gets "
-         "stronger along the slider - at 100 % the keys hug the neighbor they ease into: left eases in (slow "
-         "start), right eases out (slow end).", "ease in", "ease out",
-         modifier="Ctrl+Shift"),
+    Mode("ease", "Ease In | Out", "EA", CURVE, "Lay the keys out anew between the unpicked keys around them - "
+         "their own values don't count: the knob alone lines them up straight, further out the ease gets "
+         "stronger, at 100 % they hug the neighbor they ease into. Left eases in (slow start), right eases "
+         "out (slow end).", "ease in", "ease out", EASE_MARKS, modifier="Ctrl+Shift"),
     Mode("time_offset", "Time Offsetter", "TO", CURVE, f"Slide the motion in time without moving the keys "
          f"(a full weight: {OFFSET_FRAMES:g} frames).", "earlier", "later", modifier="Ctrl+Alt"),
     Mode("stagger", "Time Offsetter Stagger", "TS", CURVE, "Like the Time Offsetter, spread over the selected "
@@ -164,8 +174,10 @@ class Block:
     before2: "tuple | None" = None       # the key before `before`
     after2: "tuple | None" = None        # the key after `after`
     default: float = 0.0
-    frame_value: "float | None" = None   # the curve's value at the frame picked in the window
+    frame_value: "float | None" = None   # the curve's value at the (left) frame picked in the window
+    frame_value_right: "float | None" = None   # ...and at the right one (Blend to Frame)
     undo_values: "list | None" = None    # the run's values before the tools' last change
+    buffer_values: "list | None" = None  # Maya's buffer curve at the run's times (Blend to Buffer)
     evaluate: "Callable | None" = None   # time -> the curve's value there (as it was before the drag)
     order: int = 0                       # its object's place in the selection, and how many there are
     count: int = 1
@@ -212,11 +224,14 @@ def _smoothed(block: Block) -> list:
 
 
 def ease_power(weight: float) -> float:
-    """The ease's power for a weight: 1 (a straight line) at 0, EASE_MAX_POWER at 1, more past it.
-    Measured on the reference (a key half way between 0 and 10): 25 % -> 3.66 / 6.34, 50 % -> 1.96 /
-    8.04, 75 % -> 0.22 / 9.78, 100 % -> 0.01 / 9.99 - a power that grows like this, not a fixed one."""
-    weight = min(abs(float(weight)), 2.0)
-    return 1.0 + (EASE_MAX_POWER - 1.0) * weight ** EASE_CURVE
+    """The ease's power for a weight (`EASE_POWERS`, the reference's): 1 = a straight line at 0,
+    10 at 100 %, interpolated in log space between the measured steps."""
+    weight = min(abs(float(weight)), EASE_POWERS[-1][0])
+    for (w0, p0), (w1, p1) in zip(EASE_POWERS, EASE_POWERS[1:]):
+        if weight <= w1:
+            part = (weight - w0) / (w1 - w0)
+            return math.exp(math.log(p0) + (math.log(p1) - math.log(p0)) * part)
+    return EASE_POWERS[-1][1]
 
 
 def _eased(block: Block, weight: float) -> list:
@@ -258,6 +273,10 @@ def apply(mode: "Mode | str", block: Block, weight: float) -> list:
             return values
         fraction = (weight + 1.0) / 2.0
         return [block.before[1] + (block.after[1] - block.before[1]) * fraction for _ in values]
+    if key == "ease":
+        # the run is laid out anew between the UNPICKED keys around it - what it held doesn't count,
+        # as on the reference: the knob alone (0) lines it up straight, the further out the stronger
+        return _eased(block, weight)
     if weight == 0.0:
         return values
     if key == "neighbors":
@@ -267,9 +286,7 @@ def apply(mode: "Mode | str", block: Block, weight: float) -> list:
     if key == "default":
         return [_toward(value, block.default, weight) for value in values]
     if key == "frame":
-        if block.frame_value is None:
-            return values
-        return [_toward(value, block.frame_value, weight) for value in values]
+        return [_toward_sides(value, block.frame_value, block.frame_value_right, weight) for value in values]
     if key == "infinity":
         out = []
         for time, value in zip(block.times, values):
@@ -281,6 +298,10 @@ def apply(mode: "Mode | str", block: Block, weight: float) -> list:
         if not block.undo_values or len(block.undo_values) != len(values):
             return values
         return [_toward(value, before, weight) for value, before in zip(values, block.undo_values)]
+    if key == "buffer":
+        if not block.buffer_values or len(block.buffer_values) != len(values):
+            return values
+        return [_toward(value, buffered, weight) for value, buffered in zip(values, block.buffer_values)]
     if key == "pull_push":
         start, end = block.anchors()
         out = []
@@ -304,12 +325,6 @@ def apply(mode: "Mode | str", block: Block, weight: float) -> list:
         if weight < 0:
             return [value + (target - value) * -weight for value, target in zip(values, smooth)]
         return [value + (value - target) * weight for value, target in zip(values, smooth)]
-    if key == "ease":
-        # the reference sets the ease outright (the keys as they are don't count); here it blends in
-        # over the first EASE_BLEND of the slider, so a small pull never jumps the keys
-        eased = _eased(block, weight)
-        blend = min(1.0, abs(weight) / EASE_BLEND)
-        return [value + (target - value) * blend for value, target in zip(values, eased)]
     if key in ("time_offset", "stagger"):
         if block.evaluate is None:
             return values
