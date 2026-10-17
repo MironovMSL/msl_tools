@@ -180,6 +180,51 @@ class MeasuredTest(unittest.TestCase):
         self.assertTrue(all(abs(n - v) <= 7.0 for n, v in zip(noisy, PROBE["values"])))
         self.assertNotEqual(noisy, PROBE["values"])
 
+    def test_gap_stitcher_matches_the_reference(self):
+        import math
+        values = [round(2 * math.sin(f * 0.8) + (10 if f >= 16 else 0), 4) for f in range(1, 31)]
+        b = cv.block_from_keys([float(f) for f in range(1, 31)], values, list(range(10, 20)))   # frames 11..20
+        measured = {1: (0.035, 0.277, 0.936, 2.219, 4.334), 0.5: (0.095, 0.381, 0.858, 1.525, 2.383),
+                    0.15: (0.094, 0.232, 0.393, 0.572, 0.764), 0.05: (0.044, 0.095, 0.148, 0.203, 0.26)}
+        for weight, left in measured.items():
+            for sign in (-1, 1):                                       # both sides of the slider alike
+                moved = [g - v for g, v in zip(cv.apply("gap", b, sign * weight), b.values)]
+                for got, wanted in zip(moved, left + tuple(-x for x in reversed(left))):
+                    self.assertAlmostEqual(got, wanted, delta=0.002, msg=f"gap at {sign * weight}")
+
+    def test_gap_stitcher_on_a_run_split_unevenly(self):
+        # measured: 13 keys picked (frames 16..28), a drop of 6 between 22 and 23 - 7 keys before it, 6 after
+        base = [-0.4931, -0.6137, -1.0878, -1.4034, -1.1893, -0.9188, -0.2844, -6.258, -5.9985, -5.6892,
+                -5.7937, -6.3896, -6.8165]
+        b = cv.Block(times=[float(f) for f in range(16, 29)], values=base, before=(15.0, 0.636), after=(29.0, -7.5681))
+        measured = {1: (-0.009, -0.07, -0.235, -0.557, -1.089, -1.881, -2.987, 1.881, 1.088, 0.557, 0.235, 0.07, 0.009),
+                    0.5: (-0.03, -0.122, -0.274, -0.488, -0.762, -1.097, -1.493, 1.097, 0.762, 0.488, 0.274, 0.122,
+                          0.03),
+                    0.05: (-0.018, -0.038, -0.059, -0.081, -0.103, -0.126, -0.149, 0.126, 0.103, 0.081, 0.059,
+                           0.038, 0.018)}
+        for weight, wanted in measured.items():
+            moved = [g - v for g, v in zip(cv.apply("gap", b, weight), base)]
+            for got, value in zip(moved, wanted):
+                self.assertAlmostEqual(got, value, delta=0.002, msg=f"gap at {weight}")
+
+    def test_simplify_keeps_what_the_reference_keeps(self):
+        import math
+        times = [float(f) for f in range(1, 32)]
+        values = [round(5 * math.sin(f * 0.3) + 0.3 * math.sin(f * 2.1), 4) for f in range(1, 32)]
+        self.assertEqual([len(cv.simplify_keep(times, values, w)) for w in (-0.05, -0.15, -0.5, -1)],
+                         [30, 29, 22, 12])
+        self.assertEqual([int(times[i]) for i in cv.simplify_keep(times, values, -1)],
+                         [1, 4, 7, 10, 11, 14, 17, 20, 22, 25, 28, 31])
+
+    def test_bake_adds_whole_frames(self):
+        keys = [1.0, 7.0, 13.0, 19.0, 25.0]
+        self.assertEqual(cv.bake_times(keys, 0.5), [3.0, 5.0, 9.0, 11.0, 15.0, 17.0, 21.0, 23.0])
+        self.assertEqual(len(cv.bake_times(keys, 1.0)), 20)
+        self.assertEqual(cv.bake_times(keys, 0.15), [])                 # measured: nothing at the small marks
+        uneven = [1.0, 5.0, 12.0, 20.0, 23.0, 30.0]                     # measured: counted back from each later key
+        self.assertEqual(sorted(cv.bake_times(uneven, 0.5) + uneven),
+                         [1, 3, 5, 6, 8, 10, 12, 14, 16, 18, 20, 21, 23, 24, 26, 28, 30])
+
     def test_the_blend_marks_are_the_references(self):
         self.assertEqual(cv.BLEND_MARKS, (-1.0, -0.5, -0.15, -0.05, 0.05, 0.15, 0.5, 1.0))
 

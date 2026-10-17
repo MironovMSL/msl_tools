@@ -333,7 +333,7 @@ class AnimationPanel(qt.QtWidgets.QWidget):
                 from msl_tools.msl.tools.maya.animation import world as world_space
                 self._drag = world_space.WorldDrag(mode.key, frame, frame_right)
             else:
-                self._drag = scene.Drag(mode.key, frame, frame_right)
+                self._drag = scene.make_drag(mode.key, frame, frame_right)
         except Exception as error:   # outside Maya, or Maya refused
             self._drag = None
             self._say(f"{mode.title}: {error}", "error")

@@ -3829,7 +3829,7 @@ hub (it already sees an unclean end) + fast anim layer merge · 10 Master Spline
   Pull -100 % = exactly the straight line between the keys around. On a frame without a key it ADDS one (only on
   animated channels); one undo step. Its sliders read the REAL cursor - synthetic Qt events do nothing.
 - `curves.py` (no Qt, no Maya): `Mode` (key, title, 2-letter short, family POSE / CURVE, tip, left / right,
-  marks, modifier) x 19 in `MODES`; `Block` = a run of consecutive keys of one curve + before / after (and
+  marks, modifier) x 21 in `MODES`; `Block` = a run of consecutive keys of one curve + before / after (and
   the key past each), default, frame value, undo values, evaluate(time) of the ORIGINAL curve, order / count
   (stagger), seed (noise); `apply(mode, block, weight)` -> new values; weight 0 = no change except the Tweener
   (a POSITION: 0 = half way). Left = the first word of the name (Pull | Push, Smooth | Rough, Ease In | Out).
@@ -3867,8 +3867,22 @@ hub (it already sees an unclean end) + fast anim layer merge · 10 Master Spline
   straight line, rough 3x off the smooth curve, scales 1 + 2w (half way left = flat on the pivot, the left end
   inverts); Scale From Average pivots on the MIDDLE OF THE RANGE (not the mean); Connect moves the whole run as
   one (no fade); Noise / Wave as big as the run's own range, the wave starting down; Blend to Infinity is the
-  other way round (left = the line of the keys AFTER, right = BEFORE). Not built (the reference has them): Gap
-  Stitcher, Simplify | Bake Keys, the Graph Editor's own bar of sliders.
+  other way round (left = the line of the keys AFTER, right = BEFORE). GAP STITCHER (measured on two probes, the
+  second compared key for key in the user's Maya: identical at all 8 marks): the biggest jump between picked keys
+  closes by half from each side, A = w * jump / 2, each key leaning by A * u ** p - u = its place from its end of
+  the run over (n + 1) / 2 -, p = 1 + 2w; both slider sides alike. (A first fit - "the slopes' excess" with a
+  softening factor - matched only the first probe: compare on NEW data before trusting a fit.) SIMPLIFY | BAKE:
+  simplify drops the keys the line between their neighbors misses least, the rest keep their values - the first
+  probe's 30 / 29 / 22 / 12 keys exactly, a second probe identical at 5 / 15 %, one key more at 50 %, 2 of 15 keys
+  other at 100 % (the reference's pick not found: not the line, a spline, Maya's simplify or Douglas-Peucker);
+  bake keys whole frames every round(1 / w) counted BACK from each gap's later key - identical at 50 / 100 % on
+  uneven keys; at 15 % the reference put one key mid of the longest gap, ours none. Simplify | Bake changes the NUMBER of keys: `scene.KeysDrag`
+  (`make_drag` picks it): every move puts back what the last one did (removed keys made again with their exact
+  tangents, `_key_data` / `_remake_key`; added ones cut) and does the new weight - undo off -, the commit as one
+  step; a single key = the whole curve. TRAP, met: keys made again come back UNPICKED - the next drag then worked
+  on the keys that stayed picked (an Esc, then Simplify took 31 keys to 5); the Graph Editor's pick is put back
+  after a cancel and set to the whole run after a commit. Not built: the Graph Editor's own bar of sliders (the
+  user: later).
   WORLD SPACE (`world.py` WorldDrag; the globe toggle beside the pose slider, `settings.world`; Tweener, Blend to
   Neighbors, Blend to Frame): the selected transforms on the current frame put where they were in the WORLD on
   their keys before / after (or the frames picked) - world matrices read at the press, translation / scale

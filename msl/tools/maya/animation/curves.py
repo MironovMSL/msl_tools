@@ -122,6 +122,13 @@ MODES = (
          "earlier, root to tip", "later, root to tip", OFFSET_MARKS),
     Mode("noise_wave", "Noise | Wave", "NW", CURVE, "Add noise (left) or a wave - down, up, down ... - (right) to the "
          "run, as big as the run's own range at the end.", "noise", "wave"),
+    Mode("gap", "Gap Stitcher", "GS", CURVE, "Stitch the biggest jump between two keys of the run: the keys on "
+         "either side lean toward each other, most at the jump and fading to the run's ends, so two chunks of "
+         "animation join without going floaty. Both sides of the slider do the same.", "stitch", "stitch"),
+    Mode("simplify_bake", "Simplify | Bake Keys", "SB", CURVE, "Left removes the keys that matter least (the ones "
+         "left keep their values: the curve keeps its shape - good for mocap); right adds keys on whole frames "
+         "along the curve as it is (every 2 frames half way, every frame at the end).", "fewer keys",
+         "more keys", modifier="Ctrl+Alt+Shift"),
     Mode("connect", "Connect to Neighbors", "CN", CURVE, "Move the whole run as one, until its first key meets "
          "the key before (left) or its last key meets the key after (right).", "to the key before",
          "to the key after"),
@@ -165,6 +172,80 @@ def position_of(weight: float, limit: float = 1.0) -> float:
         return 0.0
     part = max(-1.0, min(1.0, float(weight) / limit))
     return math.copysign(math.sqrt(abs(part)), part)
+
+
+# Gap Stitcher, MEASURED on the reference (two probes: a wave with a jump of 11.5 in ten picked keys, a noisy
+# curve with a drop of 6 in thirteen - 7 + 6 - keys; every mark clicked): the biggest jump between two picked keys
+# is closed by half of it from each side, A = w * jump / 2, each key leaning by A * u ** p - u its place counted
+# from its end of the run over HALF the run ((n + 1) / 2: a key at the middle of the run gets 1), p = 1 + 2w
+# (1.1 / 1.3 / 2 / 3 at the marks). Matches both probes to 0.002.
+# Simplify | Bake, MEASURED: simplify removes the keys that matter least, the rest keep their values - of 31 keys
+# 30 / 29 / 22 / 12 stayed at the marks (`SIMPLIFY_PART` of the inner keys go at the end, a little slower near the
+# middle; on a second probe the counts were off by at most one and 2 of 15 keys differed - the reference's own
+# pick wasn't found: not the line, a spline, Maya's simplify or Douglas-Peucker); bake keys whole frames every
+# round(1 / w) frames (2 half way, 1 at the end) counted back from each gap's later key, nothing when that is more
+# than BAKE_LONGEST frames (the reference then put one key in the middle of the longest gap - not copied).
+SIMPLIFY_PART = 0.655
+SIMPLIFY_CURVE = 1.1
+BAKE_LONGEST = 6
+STRUCTURE_MODES = ("simplify_bake",)        # modes that add / remove keys rather than move them
+
+
+def simplify_keep(times, values, weight: float) -> list:
+    """The indices of the keys Simplify keeps (the first and last always): the key whose value the
+    straight line between its neighbors left would miss least goes first, again and again."""
+    count = len(times)
+    if count <= 2:
+        return list(range(count))
+    remove = int(round(abs(weight) ** SIMPLIFY_CURVE * SIMPLIFY_PART * (count - 2)))
+    keep = list(range(count))
+    for _ in range(min(remove, count - 2)):
+        best, best_error = None, None
+        for position in range(1, len(keep) - 1):
+            a, i, b = keep[position - 1], keep[position], keep[position + 1]
+            straight = _line((times[a], values[a]), (times[b], values[b]), times[i])
+            error = abs(values[i] - straight)
+            if best_error is None or error < best_error:
+                best, best_error = position, error
+        keep.pop(best)
+    return keep
+
+
+def bake_times(times, weight: float) -> list:
+    """The whole frames Bake adds keys on: in each gap between two keys, every `step` frames counted
+    BACK from the gap's later key (measured: between keys on 5 and 12 at step 2 the reference keys 10, 8
+    and 6, not 7, 9 and 11); none that are keys already."""
+    if abs(weight) < 1e-9 or len(times) < 2:
+        return []
+    step = max(1, int(round(1.0 / abs(weight))))
+    if step > BAKE_LONGEST:
+        return []
+    added = []
+    for start, end in zip(times, times[1:]):
+        frame = math.ceil(end - 1e-6) - step if abs(end - round(end)) < 1e-6 else math.floor(end)
+        while frame > start + 1e-6:
+            added.append(float(frame))
+            frame -= step
+    have = {round(time, 3) for time in times}
+    return sorted(time for time in set(added) if round(time, 3) not in have)
+
+
+def _gap(block: Block, weight: float) -> list:
+    values = list(block.values)
+    count = len(values)
+    if count < 2 or weight == 0.0:
+        return values
+    gap = max(range(count - 1), key=lambda index: abs(values[index + 1] - values[index]))
+    amount = abs(weight) * (values[gap + 1] - values[gap]) / 2.0
+    power = 1.0 + 2.0 * abs(weight)
+    half = (count + 1) / 2.0
+    out = list(values)
+    for index in range(count):
+        if index <= gap:                     # this side moves toward the other, by its place from the start
+            out[index] += amount * ((index + 1) / half) ** power
+        else:
+            out[index] -= amount * ((count - index) / half) ** power
+    return out
 
 
 def weight_text(mode: "Mode | str", weight: float) -> str:
@@ -297,6 +378,10 @@ def apply(mode: "Mode | str", block: Block, weight: float) -> list:
             return values
         fraction = (weight + 1.0) / 2.0
         return [block.before[1] + (block.after[1] - block.before[1]) * fraction for _ in values]
+    if key == "gap":
+        return _gap(block, weight)
+    if key in STRUCTURE_MODES:              # adds / removes keys: scene.KeysDrag does it, not this
+        return values
     if key == "ease":
         # the run is laid out anew between the UNPICKED keys around it - what it held doesn't count,
         # as on the reference: the knob alone (0) lines it up straight, the further out the stronger

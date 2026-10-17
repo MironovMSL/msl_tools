@@ -504,9 +504,160 @@ def _euler(curves: list, low: float, high: float) -> None:
         _pick_keys(picked)
 
 
+# --------------------------------------------------------------------------- keys added / removed
+
+def _key_data(curve: str, time: float) -> dict:
+    """All a key is, read so it can be made again exactly: value and tangents (types, angles, weights,
+    locks), in the units the Graph Editor shows."""
+    span = (time, time)
+
+    def query(**flag):
+        found = cmds.keyTangent(curve, time=span, query=True, **flag)
+        return found[0] if found else None
+
+    return {"time": time, "value": cmds.keyframe(curve, time=span, query=True, valueChange=True)[0],
+            "itt": query(inTangentType=True), "ott": query(outTangentType=True),
+            "ia": query(inAngle=True), "oa": query(outAngle=True),
+            "iw": query(inWeight=True), "ow": query(outWeight=True),
+            "lock": query(lock=True), "weightLock": query(weightLock=True)}
+
+
+def _remake_key(curve: str, data: dict) -> None:
+    time = data["time"]
+    cmds.setKeyframe(curve, time=time, value=data["value"])
+    span = (time, time)
+    cmds.keyTangent(curve, time=span, lock=False)
+    try:
+        cmds.keyTangent(curve, time=span, weightLock=False)
+    except RuntimeError:
+        pass
+    flags = {"inTangentType": data["itt"], "outTangentType": data["ott"]}
+    if data["itt"] in ("fixed",) or data["ott"] in ("fixed",):
+        flags.update(inAngle=data["ia"], outAngle=data["oa"])
+    cmds.keyTangent(curve, time=span, **{k: v for k, v in flags.items() if v is not None})
+    if data["itt"] == "fixed" and data["iw"] is not None:
+        cmds.keyTangent(curve, time=span, inWeight=data["iw"])
+    if data["ott"] == "fixed" and data["ow"] is not None:
+        cmds.keyTangent(curve, time=span, outWeight=data["ow"])
+    if data["lock"] is not None:
+        cmds.keyTangent(curve, time=span, lock=bool(data["lock"]))
+    if data["weightLock"] is not None:
+        try:
+            cmds.keyTangent(curve, time=span, weightLock=bool(data["weightLock"]))
+        except RuntimeError:
+            pass
+
+
+class KeysDrag:
+    """A slider whose mode adds or removes keys (Simplify | Bake): every move puts the curves back as
+    they were - keys it added taken out, keys it removed made again with their exact tangents - and
+    does the new weight's change, all outside the undo queue; `commit()` puts them back once more and
+    does the final change as ONE undo step. On a single key (the current frame) it works on the whole
+    curve. The same face as Drag."""
+
+    buffered = 0
+
+    def __init__(self, mode: str, frame: "float | None" = None, frame_right: "float | None" = None):
+        self.mode = cv.BY_KEY[mode]
+        self.targets, self.where = find_targets(add_keys=False)
+        self._runs = []          # (target, the run's key times, values, the keys' full data)
+        for target in self.targets:
+            indices = target.indices if len(target.indices) > 1 else list(range(len(target.times)))
+            if len(indices) < 2:
+                continue
+            target.sample()
+            times = [target.times[i] for i in indices]
+            values = [target.values[i] for i in indices]
+            self._runs.append((target, times, values, {}))
+        self._changed = []       # (curve, times removed, times added) of the change on screen
+        self._done = False
+        # keys made again are made UNPICKED: the Graph Editor's pick is put back after (else the next drag
+        # works on the keys that happened to stay picked - it did: Simplify after an Esc took 31 keys to 5)
+        self._picked = _picked_keys() if self.where == "Graph Editor" else {}
+
+    def __bool__(self) -> bool:
+        return bool(self._runs)
+
+    def _plan(self, weight: float) -> list:
+        plan = []
+        for target, times, values, saved in self._runs:
+            if weight < 0:
+                keep = set(cv.simplify_keep(times, values, weight))
+                removed = [times[i] for i in range(len(times)) if i not in keep]
+                plan.append((target, removed, []))
+            else:
+                plan.append((target, [], cv.bake_times(times, weight)))
+        return plan
+
+    def _do(self, weight: float) -> int:
+        count = 0
+        for target, removed, added in self._plan(weight):
+            saved = next(run[3] for run in self._runs if run[0] is target)
+            for time in removed:
+                if time not in saved:
+                    saved[time] = _key_data(target.curve, time)
+                cmds.cutKey(target.curve, time=(time, time), clear=True)
+            in_type, out_type = default_tangents()
+            for time in added:
+                cmds.setKeyframe(target.curve, time=time, value=target.evaluate(time))
+                try:
+                    cmds.keyTangent(target.curve, time=(time, time), inTangentType=in_type, outTangentType=out_type)
+                except RuntimeError:
+                    pass
+            self._changed.append((target.curve, removed, added, saved))
+            count += len(removed) + len(added)
+        return count
+
+    def _undo_change(self) -> None:
+        for curve, removed, added, saved in reversed(self._changed):
+            for time in added:
+                cmds.cutKey(curve, time=(time, time), clear=True)
+            for time in removed:
+                _remake_key(curve, saved[time])
+        self._changed = []
+
+    def update(self, weight: float) -> None:
+        with _NoUndo():
+            self._undo_change()
+            self._do(weight)
+        cmds.refresh(currentView=True)
+
+    def cancel(self) -> None:
+        if not self._done:
+            with _NoUndo():
+                self._undo_change()
+                if self._picked:
+                    _pick_keys(self._picked)
+            self._done = True
+
+    def commit(self, weight: float, euler: bool = True) -> str:
+        if not self._runs or self._done:
+            return ""
+        with _NoUndo():
+            self._undo_change()
+        self._done = True
+        with _Chunk():
+            count = self._do(weight)
+            if self._picked:            # what is left of the picked runs, the baked keys included
+                cmds.selectKey(clear=True)
+                for target, times, _values, _saved in self._runs:
+                    cmds.selectKey(target.curve, add=True, time=(times[0], times[-1]))
+        self._changed = []
+        verb = "removed" if weight < 0 else "added"
+        return (f"{self.mode.title} {cv.weight_text(self.mode, weight)} · {count} key{'s' if count != 1 else ''} "
+                f"{verb} on {len(self._runs)} curve{'s' if len(self._runs) != 1 else ''} ({self.where})")
+
+
+def make_drag(mode: str, frame: "float | None" = None, frame_right: "float | None" = None):
+    """The drag that does this mode: a KeysDrag for the modes that add / remove keys, else a Drag."""
+    if mode in cv.STRUCTURE_MODES:
+        return KeysDrag(mode, frame, frame_right)
+    return Drag(mode, frame, frame_right)
+
+
 def apply_once(mode: str, weight: float, frame: "float | None" = None, say: bool = False) -> str:
     """One change without a drag (a click on a mark, a hotkey): one undo step. Returns it in words."""
-    drag = Drag(mode, frame)
+    drag = make_drag(mode, frame)
     if not drag:
         text = "Nothing to act on: select animated objects (or keys in the Graph Editor)"
     else:
