@@ -29,9 +29,21 @@ POSE = "pose"
 CURVE = "curve"
 
 TWEEN_FRACTIONS = (0.0, 1 / 8, 1 / 6, 1 / 4, 1 / 3, 1 / 2, 2 / 3, 3 / 4, 5 / 6, 7 / 8, 1.0)
-BLEND_MARKS = (-1.0, -0.75, -0.5, -0.25, -0.1, 0.0, 0.1, 0.25, 0.5, 0.75, 1.0)
+# The reference's marks, MEASURED (a probe of 11 keys, 5 picked, every mark clicked): 0.05, 0.15, 0.5 and 1 a
+# side on both sliders. On the CURVE slider whatever EXAGGERATES (push, rough, scale) goes twice as far: at the
+# end the distance from the line / the smooth curve / the pivot is three times what it was (`STRONG`).
+BLEND_MARKS = (-1.0, -0.5, -0.15, -0.05, 0.05, 0.15, 0.5, 1.0)
+STRONG = 2.0
+# The time offset - MEASURED on the reference: the keys stay on their frames and take the value the curve has that
+# many frames away - the marks 0.5 / 1 / 2 / 3 frames, the END 10 (a 60-key wave: the key on frame 12 took frame
+# 2's value, exactly), a drag growing about with the square of the distance. A zigzag showed the curve wrapping
+# round as a CYCLE between its first and last key, so nothing sticks at the ends. The stagger (five links of a
+# tail, picked tip-first and root-first: the same result) goes ROOT TO TIP - the tip the whole shift, each link
+# toward the root a step less (10 / 8 / 6 / 4 / 2 at the end); siblings by name.
 OFFSET_FRAMES = 10.0     # how far the time offset reaches at a full weight
-NOISE_PART = 0.25        # how big noise / wave get at a full weight, as a part of the run's own range
+OFFSET_MARKS = tuple(sign * frames / OFFSET_FRAMES for sign in (-1.0, 1.0)
+                     for frames in (0.5, 1.0, 2.0, 3.0, OFFSET_FRAMES))    # 0.5, 1, 2, 3 frames, the end
+NOISE_PART = 1.0         # noise / wave at a full weight: the run's own range (max - min) - measured
 # The ease's power by weight - MEASURED on the reference (keys 3 / 5 / 7 / 9 between unpicked 0 at 1 and 10 at
 # 11, its knob and marks clicked): the knob = a straight line, the marks 1.45, 2.35, 5.5 and 10 (u ** 10 at the
 # end: the keys hug the neighbor they ease into); between them the power runs evenly in log space; past 100 %
@@ -66,8 +78,9 @@ MODES = (
          "toward the left one's pose, right toward the right one's.", "toward the left frame",
          "toward the right frame", modifier="Ctrl"),
     Mode("infinity", "Blend to Infinity", "BI", POSE, "Toward where the curve would go on in a straight line: "
-         "from the two keys before (left) or the two after (right).", "the line from before",
-         "the line from after", modifier="Ctrl+Alt"),
+         "left the line the two keys AFTER the run point along (carried back), right the line of the two keys "
+         "BEFORE it (carried on) - great for handles.", "the line from after", "the line from before",
+         modifier="Ctrl+Alt"),
     Mode("undo", "Blend to Undo", "BU", POSE, "Toward the values before the last change made with these sliders "
          "(right) - undo only a part of it - or away from them (left).", "away from before",
          "back to before", modifier="Ctrl+Shift"),
@@ -75,11 +88,13 @@ MODES = (
          "Editor (Curves > Buffer Curve Snapshot), drawn there as a dark line: try things, then pull back to "
          "it as far as you like (right) or away from it (left).", "away from the buffer", "toward the buffer",
          modifier="Ctrl+Alt+Shift"),
-    Mode("pull_push", "Pull | Push", "PP", CURVE, "Soften (left: toward the straight line between the keys "
-         "around) or exaggerate (right) the run.", "pull to the straight line", "push away from it",
+    Mode("pull_push", "Pull | Push", "PP", CURVE, "Soften (left: all the way = the straight line between the "
+         "keys around) or exaggerate (right: up to three times as far from that line) the run.",
+         "pull to the straight line", "push away from it",
          modifier="Alt"),
-    Mode("scale_average", "Scale From Average", "SA", CURVE, "Scale the keys about their average: left "
-         "flattens (all the way: the average), right exaggerates.", "toward the average", "away from it"),
+    Mode("scale_average", "Scale From Average", "SA", CURVE, "Scale the keys about the middle of their range: half "
+         "way left flattens them, all the way inverts, right exaggerates up to three times.",
+         "flatten, invert", "exaggerate"),
     Mode("scale_default", "Scale From Default", "SD", CURVE, "Scale the keys about the attribute's default "
          "value: left releases the pose, right intensifies it.", "toward the default", "away from it",
          modifier="Alt+Shift"),
@@ -97,15 +112,18 @@ MODES = (
          "their own values don't count: the knob alone lines them up straight, further out the ease gets "
          "stronger, at 100 % they hug the neighbor they ease into. Left eases in (slow start), right eases "
          "out (slow end).", "ease in", "ease out", EASE_MARKS, modifier="Ctrl+Shift"),
-    Mode("time_offset", "Time Offsetter", "TO", CURVE, f"Slide the motion in time without moving the keys "
-         f"(a full weight: {OFFSET_FRAMES:g} frames).", "earlier", "later", modifier="Ctrl+Alt"),
-    Mode("stagger", "Time Offsetter Stagger", "TS", CURVE, "Like the Time Offsetter, spread over the selected "
-         "objects in the order they were picked: quick overlap down a chain.", "earlier, one after another",
-         "later, one after another"),
-    Mode("noise_wave", "Noise | Wave", "NW", CURVE, "Add noise (left) or a wave - up, down, up - (right) to the "
-         "run.", "noise", "wave"),
-    Mode("connect", "Connect to Neighbors", "CN", CURVE, "Move the run so its first key meets the key before "
-         "(left) or its last key meets the key after (right), fading along the run.", "to the key before",
+    Mode("time_offset", "Time Offsetter", "TO", CURVE, f"Slide the motion along the curve while the keys stay on "
+         f"their frames: each key takes the value the curve has a little earlier or later (the marks: 0.5, 1, 2, 3 "
+         f"frames, the end {OFFSET_FRAMES:g}), the curve wrapping round like a cycle so its ends never stick.",
+         "earlier", "later", OFFSET_MARKS, modifier="Ctrl+Alt"),
+    Mode("stagger", "Time Offsetter Stagger", "TS", CURVE, "The Time Offsetter spread down a chain: the object "
+         "deepest in the hierarchy (the tip) gets the whole shift, each one toward the root a step less "
+         "(objects side by side: by name) - overlap in one pull, whatever order they were picked in.",
+         "earlier, root to tip", "later, root to tip", OFFSET_MARKS),
+    Mode("noise_wave", "Noise | Wave", "NW", CURVE, "Add noise (left) or a wave - down, up, down ... - (right) to the "
+         "run, as big as the run's own range at the end.", "noise", "wave"),
+    Mode("connect", "Connect to Neighbors", "CN", CURVE, "Move the whole run as one, until its first key meets "
+         "the key before (left) or its last key meets the key after (right).", "to the key before",
          "to the key after"),
 )
 
@@ -180,6 +198,7 @@ class Block:
     buffer_values: "list | None" = None  # Maya's buffer curve at the run's times (Blend to Buffer)
     evaluate: "Callable | None" = None   # time -> the curve's value there (as it was before the drag)
     order: int = 0                       # its object's place in the selection, and how many there are
+    cycle: "tuple | None" = None         # (first, last) key time of the whole curve: the time offset wraps there
     count: int = 1
     seed: int = 0                        # keeps noise the same during one drag
 
@@ -211,9 +230,11 @@ def _toward_sides(value: float, left: "float | None", right: "float | None", wei
 
 
 def _scale(value: float, pivot: "float | None", weight: float) -> float:
+    """About a pivot, measured: the end exaggerates to 3x, half way left flattens to the pivot, the
+    left end inverts (-1x)."""
     if pivot is None:
         return value
-    return pivot + (value - pivot) * (1.0 + weight)
+    return pivot + (value - pivot) * (1.0 + STRONG * weight)
 
 
 def _smoothed(block: Block) -> list:
@@ -256,8 +277,11 @@ def _infinity(near: "tuple | None", far: "tuple | None", time: float) -> "float 
 
 
 def _amplitude(block: Block) -> float:
-    values = list(block.values) + [key[1] for key in (block.before, block.after) if key is not None]
-    spread = max(values) - min(values) if values else 0.0
+    """The run's own range (measured); a run of one key (or flat) borrows its neighbors'."""
+    spread = max(block.values) - min(block.values) if block.values else 0.0
+    if spread <= 1e-9:
+        values = list(block.values) + [key[1] for key in (block.before, block.after) if key is not None]
+        spread = max(values) - min(values) if values else 0.0
     return (spread if spread > 1e-9 else 1.0) * NOISE_PART
 
 
@@ -290,8 +314,9 @@ def apply(mode: "Mode | str", block: Block, weight: float) -> list:
     if key == "infinity":
         out = []
         for time, value in zip(block.times, values):
-            left = _infinity(block.before, block.before2, time)
-            right = _infinity(block.after, block.after2, time)
+            # measured: left = the line of the keys AFTER the run, right = the line of those BEFORE it
+            left = _infinity(block.after, block.after2, time)
+            right = _infinity(block.before, block.before2, time)
             out.append(_toward_sides(value, left, right, weight))
         return out
     if key == "undo":
@@ -307,11 +332,12 @@ def apply(mode: "Mode | str", block: Block, weight: float) -> list:
         out = []
         for time, value in zip(block.times, values):
             straight = _line(start, end, time)
-            out.append(straight + (value - straight) * (1.0 + weight))
+            factor = 1.0 + (weight if weight < 0 else STRONG * weight)   # measured: pull to 0, push to 3x
+            out.append(straight + (value - straight) * factor)
         return out
     if key == "scale_average":
-        average = sum(values) / len(values)
-        return [_scale(value, average, weight) for value in values]
+        middle = (max(values) + min(values)) / 2.0      # measured: the middle of the range, not the mean
+        return [_scale(value, middle, weight) for value in values]
     if key == "scale_default":
         return [_scale(value, block.default, weight) for value in values]
     if key == "scale_left":
@@ -324,39 +350,39 @@ def apply(mode: "Mode | str", block: Block, weight: float) -> list:
         smooth = _smoothed(block)
         if weight < 0:
             return [value + (target - value) * -weight for value, target in zip(values, smooth)]
-        return [value + (value - target) * weight for value, target in zip(values, smooth)]
+        return [value + (value - target) * STRONG * weight for value, target in zip(values, smooth)]
     if key in ("time_offset", "stagger"):
         if block.evaluate is None:
             return values
         share = 1.0
-        if key == "stagger":
-            share = block.order / (block.count - 1) if block.count > 1 else 0.0
+        if key == "stagger":                 # measured: 1/3, 2/3, 3/3 of the shift for three objects
+            share = (block.order + 1) / block.count if block.count > 0 else 1.0
         shift = weight * OFFSET_FRAMES * share
-        return [float(block.evaluate(time - shift)) for time in block.times]
+        return [float(block.evaluate(_wrapped(time - shift, block.cycle))) for time in block.times]
     if key == "noise_wave":
         amplitude = _amplitude(block) * abs(weight)
         if weight < 0:
             rng = random.Random(block.seed)
             return [value + amplitude * rng.uniform(-1.0, 1.0) for value in values]
-        return [value + amplitude * (1.0 if index % 2 == 0 else -1.0) for index, value in enumerate(values)]
+        # measured: down, up, down ... starting from the first key
+        return [value + amplitude * (-1.0 if index % 2 == 0 else 1.0) for index, value in enumerate(values)]
     if key == "connect":
         side = block.before if weight < 0 else block.after
         if side is None:
             return values
+        # measured: the whole run moves as one, its first (last) key meeting the key before (after)
         edge = values[0] if weight < 0 else values[-1]
         delta = (side[1] - edge) * abs(weight)
-        first, last = block.times[0], block.times[-1]
-        out = []
-        for time, value in zip(block.times, values):
-            if last == first:
-                fade = 1.0
-            elif weight < 0:
-                fade = (last - time) / (last - first)
-            else:
-                fade = (time - first) / (last - first)
-            out.append(value + delta * fade)
-        return out
+        return [value + delta for value in values]
     raise KeyError(f"unknown slider mode: {key}")
+
+
+def chain_ranks(nodes) -> dict:
+    """{node (a long DAG path): its place root to tip} - for the stagger: by depth in the hierarchy (a
+    chain's root first, its tip last), objects side by side by name. MEASURED on the reference: the
+    order they were picked in doesn't count."""
+    unique = sorted({node for node in nodes if node}, key=lambda node: (node.count("|"), node.rsplit("|", 1)[-1]))
+    return {node: index for index, node in enumerate(unique)}
 
 
 def split_runs(indices) -> list:
@@ -370,6 +396,14 @@ def split_runs(indices) -> list:
     return runs
 
 
+def _wrapped(time: float, cycle: "tuple | None") -> float:
+    """A time folded back into the curve's span (first key .. last key), as a cycle."""
+    if not cycle or cycle[1] <= cycle[0]:
+        return time
+    start, end = cycle
+    return start + (time - start) % (end - start)
+
+
 def block_from_keys(times, values, run, **extra) -> Block:
     """The Block of one run (key indices, consecutive) of a curve whose keys are `times` / `values`."""
     first, last = run[0], run[-1]
@@ -377,5 +411,6 @@ def block_from_keys(times, values, run, **extra) -> Block:
     def key(index):
         return (float(times[index]), float(values[index])) if 0 <= index < len(times) else None
 
+    extra.setdefault("cycle", (float(times[0]), float(times[-1])) if len(times) > 1 else None)
     return Block(times=[float(times[i]) for i in run], values=[float(values[i]) for i in run],
                  before=key(first - 1), after=key(last + 1), before2=key(first - 2), after2=key(last + 2), **extra)

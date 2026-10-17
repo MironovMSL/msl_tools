@@ -31,7 +31,7 @@ UNDO_NAME = "MSL Animation"
 TIME_CURVES = ("animCurveTA", "animCurveTL", "animCurveTU", "animCurveTT")
 ROTATIONS = ("rotateX", "rotateY", "rotateZ", "rx", "ry", "rz")
 SAME_TIME = 1e-3         # a key this close to the current frame IS on it
-SAMPLE_STEP = 0.1        # frames between the samples the time offset reads the original curve from
+SAMPLE_STEP = 0.05       # frames between the samples the time offset reads the original curve from
 SAMPLE_MARGIN = 2 * cv.OFFSET_FRAMES + 2
 
 
@@ -367,7 +367,6 @@ class Drag:
         self.frame = frame
         self.frame_right = frame_right
         self.targets, self.where = find_targets(add_keys=True)
-        self.objects = len(selected_objects())
         self._done = False
         if self.targets:
             with _NoUndo():
@@ -389,6 +388,7 @@ class Drag:
         needs_curve = self.mode.key in ("time_offset", "stagger") or self.frame is not None \
             or self.frame_right is not None
         self.buffered = 0      # curves that have a buffer curve (Blend to Buffer)
+        ranks = cv.chain_ranks(target.node for target in self.targets)
         for number, target in enumerate(self.targets):
             if needs_curve:
                 target.sample()
@@ -407,7 +407,7 @@ class Drag:
                     buffer_values=[buffered[i] for i in run] if buffered is not None else None,
                     undo_values=undo if all(v is not None for v in undo) else None,
                     evaluate=target.evaluate if target._samples else None,
-                    order=target.order, count=max(1, self.objects), seed=number * 7919 + run[0])
+                    order=ranks.get(target.node, 0), count=max(1, len(ranks)), seed=number * 7919 + run[0])
                 blocks.append((target, run, block))
         return blocks
 

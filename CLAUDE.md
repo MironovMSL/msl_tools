@@ -3851,7 +3851,30 @@ hub (it already sees an unclean end) + fast anim layer merge · 10 Master Spline
   never in the undo queue) + refresh; `commit(w)` puts it all back, then does it again in ONE chunk
   ("MSL Animation") with cmds.keyframe, Euler filter on rotations over the changed range +-1; remembers the
   values before (Blend to Undo); `cancel()`; `apply_once` (hotkeys, clicks); `describe()` (the window's line).
-  The time offset reads the original curve from samples taken at the press (0.1 frame).
+  The time offset reads the original curve from samples taken at the press (0.05 frame).
+  TIME OFFSETTER / STAGGER, MEASURED on the reference (zigzags, a ruler curve, and the user's 60-key tail wave,
+  five links): the keys stay on their frames and take the curve's value a few frames away - marks 0.5 / 1 / 2 / 3
+  frames, the END 10 (`OFFSET_FRAMES`, `OFFSET_MARKS`); the curve wraps round as a CYCLE between its first and
+  last key (`Block.cycle`, `_wrapped`). The STAGGER goes ROOT TO TIP, NOT by the pick order (the tail picked
+  tip-first and root-first gave the same): `cv.chain_ranks` = depth in the hierarchy, siblings by name; object i
+  of n gets (i + 1) / n - the tip the whole shift (10 / 8 / 6 / 4 / 2 at the end). Ours = the reference to the
+  last digit on all 300 keys of that tail at three marks. Few keys look poor on both (the user's finding): the
+  slide reads the curve between them, so put more keys first. (A first cut went by pick order and a 4-frame end.)
+  EVERY MODE MEASURED against the reference (2026-10-17, the user's Maya: a probe of 11 keys 0 3 8 5 9 2 7 4 10 6 1
+  on frames 1..21, the five of 7..15 picked, each mode picked from its menu and every mark clicked by a harness;
+  tests/maya/test_animation.py MeasuredTest holds the numbers and ours matches them to 0.002): marks 0.05 / 0.15 /
+  0.5 / 1 a side (`BLEND_MARKS`); on the curve slider what EXAGGERATES goes twice as far (`STRONG`): push 3x off the
+  straight line, rough 3x off the smooth curve, scales 1 + 2w (half way left = flat on the pivot, the left end
+  inverts); Scale From Average pivots on the MIDDLE OF THE RANGE (not the mean); Connect moves the whole run as
+  one (no fade); Noise / Wave as big as the run's own range, the wave starting down; Blend to Infinity is the
+  other way round (left = the line of the keys AFTER, right = BEFORE). Not built (the reference has them): Gap
+  Stitcher, Simplify | Bake Keys, the Graph Editor's own bar of sliders.
+  WORLD SPACE (`world.py` WorldDrag; the globe toggle beside the pose slider, `settings.world`; Tweener, Blend to
+  Neighbors, Blend to Frame): the selected transforms on the current frame put where they were in the WORLD on
+  their keys before / after (or the frames picked) - world matrices read at the press, translation / scale
+  straight, rotation slerped, `xform -ws -matrix` into their channels (pivots, joint orient, rotate order),
+  keyed; parents before children; one undo step. Checked against the reference's Tweener World Space (Alt +
+  middle click) on a child of a parent turning 90 degrees: both world (5, 0, 0), local (3.536, 0, 3.536).
   BLEND TO FRAME has TWO frames, as on the reference (seen there: grey squares past the slider's ends; hovered,
   pills with the frame numbers over them; a click on one takes the current frame): left = toward the left frame's
   pose, right = toward the right one's (`Block.frame_value` / `frame_value_right`, `Drag(mode, frame,

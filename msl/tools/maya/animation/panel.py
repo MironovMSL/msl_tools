@@ -31,6 +31,8 @@ WATCH_MS = 500           # how often the line "what the sliders act on" is read 
 OVERSHOOT = 2.0          # the weight at a slider's end with overshoot on
 FRAME_MODES = ("frame", "scale_frame")
 FRAME_SIDES = {"frame": ("left", "right"), "scale_frame": ("left",)}   # the slots each frame mode uses
+WORLD_MODES = ("tween", "neighbors", "frame")   # the pose modes that can work in world space (world.py)
+WORLD_WIDTH = 24
 MODE_WIDTH = 116          # the mode button; a longer name is cut short (the whole one in its tooltip)
 KEYS_MS = 50             # how often the held keys are read while the pointer is over a slider
 
@@ -55,6 +57,25 @@ class _SliderRow(qt.QtWidgets.QWidget):
         self.slider = BlendSlider(to_weight=cv.weight_at, to_position=cv.position_of)
         self.slider.setProperty("tone", family)
         layout.addWidget(self.button)
+        # the pose slider can blend where objects ARE in the world (world.py), not their channels
+        self.world = None
+        if family == cv.POSE:
+            self.world = ToggleIconButton(UiResources().iconManager.get_icon("world", sub_folder="actions"),
+                                          "World space", "Tweener, Blend to Neighbors and Blend to Frame work on "
+                                          "where the selected objects are in the WORLD - the hierarchy ignored: a "
+                                          "control under a moving parent goes where it was, and its own channels "
+                                          "are worked out from that.")
+            self.world.setObjectName("animationToggle")
+            self.world.setFocusPolicy(qt.QtCore.Qt.FocusPolicy.NoFocus)
+            self.world.setFixedWidth(WORLD_WIDTH)
+            policy = self.world.sizePolicy()
+            policy.setRetainSizeWhenHidden(True)      # a mode without it doesn't move the slider
+            self.world.setSizePolicy(policy)
+            layout.addWidget(self.world)
+        else:
+            room = qt.QtWidgets.QWidget()              # the same room, so both sliders start alike
+            room.setFixedWidth(WORLD_WIDTH)
+            layout.addWidget(room)
         layout.addWidget(self.slider, 1)
         self.button.clicked.connect(lambda: self._menu(self.button.mapToGlobal(
             qt.QtCore.QPoint(0, self.button.height()))))
@@ -114,6 +135,8 @@ class _SliderRow(qt.QtWidgets.QWidget):
         self.button.setText(f"{title}  ▾")
         self.button.setToolTip(f"{mode.title}\n{mode.tip}\nLeft: {mode.left} · right: {mode.right}")
         self.slider.set_label(mode.short)
+        if self.world is not None:
+            self.world.setVisible(mode.key in WORLD_MODES)
         self.slider.set_marks(mode.marks)
         self.slider.setToolTip(f"{mode.title}\nDrag left: {mode.left}, right: {mode.right}. A click on a mark "
                                f"goes straight there. Hold a key while pressing for another mode; right click: "
@@ -233,6 +256,9 @@ class AnimationPanel(qt.QtWidgets.QWidget):
         self._euler.setChecked(bool(self._get("euler", True)))
         self._euler.toggled.connect(lambda on: self._set("euler", bool(on)))
         self._overshoot_changed(self._overshoot.isChecked())
+        world = self._rows[cv.POSE].world
+        world.setChecked(bool(self._get("world", False)))
+        world.toggled.connect(lambda on: self._set("world", bool(on)))
 
     def header_widgets(self) -> list:
         """The window puts these in its header, before the theme toggle."""
@@ -302,7 +328,12 @@ class AnimationPanel(qt.QtWidgets.QWidget):
         frame_right = self._frames["right"] if "right" in sides else None
         try:
             from msl_tools.msl.tools.maya.animation import scene
-            self._drag = scene.Drag(mode.key, frame, frame_right)
+            world = row.world is not None and row.world.isChecked() and mode.key in WORLD_MODES
+            if world:
+                from msl_tools.msl.tools.maya.animation import world as world_space
+                self._drag = world_space.WorldDrag(mode.key, frame, frame_right)
+            else:
+                self._drag = scene.Drag(mode.key, frame, frame_right)
         except Exception as error:   # outside Maya, or Maya refused
             self._drag = None
             self._say(f"{mode.title}: {error}", "error")
