@@ -73,6 +73,10 @@ MODES = (
          "after (right).", "toward the key before", "toward the key after", modifier="Shift"),
     Mode("default", "Blend to Default", "BD", POSE, "Toward the rig's default pose (right) or away from it "
          "(left).", "away from the default", "toward the default", modifier="Alt+Shift"),
+    Mode("blend_ease", "Blend to Ease", "BE", POSE, "Tighten the spacing by forcing the ease: each key goes "
+         "toward the key before (left) or after (right) - the ones near it nearly all the way, the far ones "
+         "hardly - more strongly the further out (measured on the reference: 1 - u ** (10 x weight)).",
+         "ease out of the key before", "ease into the key after", modifier="Ctrl+Shift"),
     Mode("frame", "Blend to Frame", "BF", POSE, "Toward the pose at one of TWO frames - the grey squares at the "
          "slider's ends (hover: the frame; click: take the current frame; wheel: +-1; right click: type it): left "
          "toward the left one's pose, right toward the right one's.", "toward the left frame",
@@ -83,7 +87,7 @@ MODES = (
          modifier="Ctrl+Alt"),
     Mode("undo", "Blend to Undo", "BU", POSE, "Toward the values before the last change made with these sliders "
          "(right) - undo only a part of it - or away from them (left).", "away from before",
-         "back to before", modifier="Ctrl+Shift"),
+         "back to before"),
     Mode("buffer", "Blend to Buffer", "BB", POSE, "Toward Maya's buffer curve - the snapshot taken in the Graph "
          "Editor (Curves > Buffer Curve Snapshot), drawn there as a dark line: try things, then pull back to "
          "it as far as you like (right) or away from it (left).", "away from the buffer", "toward the buffer",
@@ -349,6 +353,24 @@ def _eased(block: Block, weight: float) -> list:
     return out
 
 
+def _blend_ease(block: Block, weight: float, values: list) -> list:
+    """Blend to Ease, measured on the reference to 0.001: with u = a key's place between the keys before and
+    after (0 at the one before), left takes it toward the key before by 1 - u ** p, right toward the key after
+    by 1 - (1 - u) ** p, p = 10 x |weight| - the keys near that neighbor nearly all the way, the far ones
+    hardly. Without the neighbor on that side nothing moves."""
+    side = block.before if weight < 0 else block.after
+    if side is None or block.before is None or block.after is None or block.after[0] == block.before[0]:
+        return values
+    power = 10.0 * abs(weight)
+    t0, t1 = block.before[0], block.after[0]
+    out = []
+    for time, value in zip(block.times, values):
+        u = max(0.0, min(1.0, (time - t0) / (t1 - t0)))
+        part = 1.0 - (u if weight < 0 else 1.0 - u) ** power
+        out.append(value + (side[1] - value) * part)
+    return out
+
+
 def _infinity(near: "tuple | None", far: "tuple | None", time: float) -> "float | None":
     if near is None:
         return None
@@ -396,6 +418,8 @@ def apply(mode: "Mode | str", block: Block, weight: float) -> list:
         return [_toward(value, block.default, weight) for value in values]
     if key == "frame":
         return [_toward_sides(value, block.frame_value, block.frame_value_right, weight) for value in values]
+    if key == "blend_ease":
+        return _blend_ease(block, weight, values)
     if key == "infinity":
         out = []
         for time, value in zip(block.times, values):

@@ -10,9 +10,13 @@ frame: at the press it reads each object's world matrix on its key before and af
 frame (keys of its translate / rotate channels) or on the frames picked, and every move:
     Tweener          between the two by the weight (0 = half way)
     Blend to Neighbors / Frame   from where it is now toward one of them
+    Blend to Infinity   from where it is now toward where its world motion would carry on: the two keys
+                     after (left) / before (right) give a step, M_near * inv(M_far), taken once more from the
+                     near key - so a turning parent's arc carries on too (measured on the reference to 0.001)
 — translation and scale in a straight line, rotation along the shortest arc (a quaternion slerp),
 then `xform -worldSpace -matrix` turns that into the object's translate / rotate (its pivots, joint
-orient and rotate order included) and those are keyed on the current frame. Parents go before
+orient and rotate order included) and those are keyed on the current frame - only the channels that are
+animated (measured: the reference keys nothing new; an unkeyed rotation stays as it was). Parents go before
 their children, so a child's world place counts its parent's new pose.
 """
 from __future__ import annotations
@@ -23,7 +27,7 @@ from maya.api import OpenMaya as om
 from msl_tools.msl.tools.maya.animation import curves as cv
 from msl_tools.msl.tools.maya.animation.scene import _Chunk, _NoUndo, _euler
 
-WORLD_MODES = ("tween", "neighbors", "frame")
+WORLD_MODES = ("tween", "neighbors", "frame", "infinity")
 CHANNELS = ("translateX", "translateY", "translateZ", "rotateX", "rotateY", "rotateZ")
 ROTATIONS = ("rotateX", "rotateY", "rotateZ")
 SAME_TIME = 1e-3
@@ -52,8 +56,8 @@ def blend(a: om.MMatrix, b: om.MMatrix, part: float) -> om.MMatrix:
 
 
 def _channels(node: str) -> list:
-    """The translate / rotate channels a pose can go into: keyable, not locked, not driven by anything
-    but an animation curve."""
+    """The translate / rotate channels a pose can go into: keyable, not locked, driven by an animation curve
+    and by nothing else."""
     out = []
     for channel in CHANNELS:
         plug = f"{node}.{channel}"
@@ -63,11 +67,18 @@ def _channels(node: str) -> list:
         except (RuntimeError, ValueError):
             continue
         sources = cmds.listConnections(plug, source=True, destination=False, skipConversionNodes=True) or []
-        if any(not cmds.nodeType(source).startswith("animCurve") and
-               not cmds.nodeType(source).startswith("animBlendNode") for source in sources):
+        if not sources or any(not cmds.nodeType(source).startswith("animCurve") and
+                              not cmds.nodeType(source).startswith("animBlendNode") for source in sources):
             continue
         out.append(channel)
     return out
+
+
+def _settable(plug: str) -> bool:
+    try:
+        return not cmds.getAttr(plug, lock=True) and not cmds.listConnections(plug, source=True, destination=False)
+    except (RuntimeError, ValueError):
+        return False
 
 
 def _key_times(node: str, channels: list) -> list:
@@ -87,6 +98,10 @@ class _Object:
         self.now = _matrix(node, now)
         self.before = _matrix(node, before[-1]) if before else None
         self.after = _matrix(node, after[0]) if after else None
+        # the second key on each side, for the infinity: (near time, far time, far matrix)
+        self.before2 = (before[-1], before[-2], _matrix(node, before[-2])) if len(before) > 1 else None
+        self.after2 = (after[0], after[1], _matrix(node, after[1])) if len(after) > 1 else None
+        self.time = now
         self.frame_left = _matrix(node, frames[0]) if frames[0] is not None else None
         self.frame_right = _matrix(node, frames[1]) if frames[1] is not None else None
         # what each channel holds on the current frame: (had a key there, its value)
@@ -101,6 +116,12 @@ class _Object:
             if self.before is None or self.after is None:
                 return None
             return blend(self.before, self.after, (weight + 1.0) / 2.0)
+        if mode == "infinity":
+            near, pair = (self.after, self.after2) if weight < 0 else (self.before, self.before2)
+            if near is None:
+                return None
+            side = near if pair is None else _carried_on(near, pair[2], pair[0], pair[1], self.time)
+            return blend(self.now, side, abs(weight))
         if mode == "neighbors":
             side = self.before if weight < 0 else self.after
         else:   # frame
@@ -108,6 +129,17 @@ class _Object:
         if side is None:
             return None
         return blend(self.now, side, abs(weight))
+
+
+def _carried_on(near: om.MMatrix, far: om.MMatrix, near_time: float, far_time: float,
+                time: float) -> om.MMatrix:
+    """Where the world motion from the far key to the near one carries on to at `time`: one step is
+    M_near * inv(M_far) * M_near (Maya's row vectors: first back out of the far pose, then into the near one,
+    from the near pose); a step of another length is a blend toward it."""
+    step = near * far.inverse() * near
+    span = near_time - far_time
+    part = (time - near_time) / span if abs(span) > SAME_TIME else 0.0
+    return blend(near, step, part)
 
 
 def _depth(node: str) -> int:
@@ -139,7 +171,11 @@ class WorldDrag:
             target = obj.target(self.mode.key, weight)
             if target is None:
                 continue
+            kept = {channel: cmds.getAttr(f"{obj.node}.{channel}") for channel in CHANNELS
+                    if channel not in obj.channels and _settable(f"{obj.node}.{channel}")}
             cmds.xform(obj.node, worldSpace=True, matrix=list(target))
+            for channel, value in kept.items():       # what isn't animated stays as it was
+                cmds.setAttr(f"{obj.node}.{channel}", value)
             for channel in obj.channels:
                 value = cmds.getAttr(f"{obj.node}.{channel}")
                 cmds.setKeyframe(obj.node, attribute=channel, time=self.now, value=value)

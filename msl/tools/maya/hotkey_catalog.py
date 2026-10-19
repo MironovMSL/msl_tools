@@ -73,12 +73,24 @@ KEY_COMMANDS = (
          "every curve of the scene", "inbetween", ("-N", True), "keys_remove"),
     _key("MSLAnimSpaceKeys", "Space keys N apart", "The picked keys (the range's) laid out N frames apart",
          "set_spacing", ("N",), "keys_space"),
+    _key("MSLAnimSpaceOnes", "Space keys on ones", "The picked keys (the range's) one frame apart", "set_spacing",
+         (1,), "keys_space"),
+    _key("MSLAnimSpaceTwos", "Space keys on twos", "The picked keys (the range's) two frames apart", "set_spacing",
+         (2,), "keys_space"),
+    _key("MSLAnimSpaceThrees", "Space keys on threes", "The picked keys (the range's) three frames apart",
+         "set_spacing", (3,), "keys_space"),
+    _key("MSLAnimSpaceFours", "Space keys on fours", "The picked keys (the range's) four frames apart",
+         "set_spacing", (4,), "keys_space"),
     _key("MSLAnimShareKeyTimes", "Share key times", "Every curve of the selection keyed wherever any of them is",
          "share_times", (), "keys_share"),
     _key("MSLAnimShareKeyTimesLast", "Share key times from the last selected", "The others keyed wherever the "
          "last selected object is", "share_times", (True,), "keys_share"),
     _key("MSLAnimCopyKeyTimes", "Copy key times", "Keep the key times in play to paste them", "copy_times", (),
          "copy"),
+    _key("MSLAnimCopyColorKeyTimes", "Copy color key times", "Keep the times of the keys of the current key's "
+         "color", "copy_times", (True,), "copy"),
+    _key("MSLAnimPasteTintKeyTimes", "Paste tint key times", "The selection's keys on the copied times take the "
+         "copied color", "paste_tint", (), "keyframe"),
     _key("MSLAnimPasteKeyTimes", "Paste key times · merge", "Keys at the copied times", "paste_times", ("merge",),
          "paste"),
     _key("MSLAnimPasteKeyTimesReplace", "Paste key times · replace", "Keys at the copied times, other keys in "
@@ -90,6 +102,8 @@ KEY_COMMANDS = (
     _key("MSLAnimBakeThrees", "Bake on threes", "A key every 3 frames", "bake", (3,), "keys_bake"),
     _key("MSLAnimBakeFours", "Bake on fours", "A key every 4 frames", "bake", (4,), "keys_bake"),
     _key("MSLAnimBakeEvery", "Bake every N frames", "A key every N frames", "bake", ("N",), "keys_bake"),
+    _key("MSLAnimBakeFromLast", "Bake from the last selected", "The others' keys on the last selected's key "
+         "times, constraints baked", "bake_from_last", (), "keys_share"),
     _key("MSLAnimBakeInfinity", "Bake infinity", "A cycling curve's infinity made real keys", "bake_infinity", (),
          "infinity"),
     _key("MSLAnimSmartSnap", "Smart snap keys", "Keys between frames to whole frames, the pose kept",
@@ -104,6 +118,8 @@ KEY_COMMANDS = (
     _key("MSLAnimTintYellow", "Tint keys yellow", "The keys in play: breakdowns", "tint", ("yellow",), "keyframe"),
     _key("MSLAnimTintGreen", "Tint keys green", "The keys in play: baked keys (Maya's breakdown)", "tint",
          ("green",), "keyframe"),
+    _key("MSLAnimTintSceneRed", "Every key in the scene red", "All the key colors in the scene cleared",
+         "tint_scene_red", (), "keyframe"),
     _key("MSLAnimRemoveRedKeys", "Remove red keys", "Every red key of the selection", "remove_color", ("red",),
          "clear"),
     _key("MSLAnimRemoveYellowKeys", "Remove yellow keys", "Every yellow key of the selection", "remove_color",

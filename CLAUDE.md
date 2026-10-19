@@ -3933,7 +3933,7 @@ hub (it already sees an unclean end) + fast anim layer merge · 10 Master Spline
   spaced, bake_plan, snap_plan, paste_times, infinity_keys; tests KeysTest), `keys_scene.py` (the commands, ONE undo
   step each; scope = picked GE keys > timeline range > current frame), `keys_row.py` KeysRow under the sliders
   (◀ [N] ▶ + six rename GroupButtons: inbetweens, key times, bake, clean up, color keys, play), `animation.key_action`
-  + 42 runtime commands in hotkey_catalog (KEY_COMMANDS, group Animation). New icons: key_nudge_left/right,
+  + 50 runtime commands in hotkey_catalog (KEY_COMMANDS, group Animation). New icons: key_nudge_left/right,
   keys_insert/remove/space/share/bake, infinity, reverse. Every rule MEASURED against the reference in Maya 2025
   (notes: the session notes folder, animation-phase2-measurements.md) and compared key for key: nudge (picked /
   frame / empty frame pulls the nearest key / all / scene; landing replaces, passing refuses), inbetweens (now /
@@ -3954,6 +3954,39 @@ hub (it already sees an unclean end) + fast anim layer merge · 10 Master Spline
   one (`_on_time`, guarded) - else that start frame was held for the whole gap. The row's seven menus open themed,
   tinted, "last" marked (pictured); a nudge from the row + one undo puts keys and time back.
   NOT checked: the row by a real hand.
+  PACK A (2026-10-20, after a second pass over the reference's whole list - the user picked this pack; their
+  other two were left: B = smart next / previous key, Set Smart Key, grow / shrink the key selection, copy / paste
+  keys, Smart Euler Filter; C = a number typed into a slider, the wheel on sliders, sliders at the cursor, hiding
+  static curves in the Graph Editor, framing a second there). Each MEASURED on the reference first, then ours
+  compared key for key in the same Maya:
+  BLEND TO EASE (pose slider, `curves._blend_ease`, Ctrl+Shift as on the reference - Blend to Undo lost Ctrl+Shift,
+  the reference has it on Ctrl+Shift+middle click): u = the key's place between the keys around, left v + (before -
+  v) * (1 - u ** (10|w|)), right v + (after - v) * (1 - (1 - u) ** (10 w)); every mark x every key of an 11-key probe
+  to 0.001 (test BlendToEaseTest, and live through scene.make_drag). BLEND TO INFINITY in WORLD SPACE
+  (`world._carried_on`): target = M_near * inv(M_far) * M_near (two keys after = left, before = right), then a world
+  blend from now - so a turning parent's arc carries on; to 0.001 with a still, a translating and a turning parent.
+  World space now keys ONLY the channels that are animated (measured: the reference leaves an unkeyed rotation as it
+  was) - `_channels` takes only curve-driven ones, the rest are put back after the matrix.
+  KEYS row: N presets on the field's right click (1 2 3 4 5 10 20 50 100); Space on ones..fours (fixed spacing);
+  Copy COLOR key times (`copy_times(color=True)`: the times of the keys of the current key's color) - every copy
+  keeps each time's color now, Paste Merge / Replace / Insert give new keys that color, Paste TINT key times
+  (`paste_tint`: keys on copied times take the copied color, none added); Every key in the scene red
+  (`tint_scene_red`); BAKE FROM THE LAST SELECTED (`bake_from_last`: in the range / animation range the others'
+  keys go onto the last one's times, constraint-driven channels baked on them and the constraint deleted); OPTIONS
+  in the Bake and Key times menus (settings bake_tangents / share_tangents type | shape | step, infinity crop |
+  extend; `keys_scene.options()`; `_new_key`): "type" (the reference's default, measured: linear stays linear,
+  step stays step, the rest Maya's default - 0.14 off on auto curves, same as the reference), "shape" (Maya's
+  insert: 0.0 off), "step" (the whole baked span stepped); Extend leaves a baked cycle's infinity on. PLAYBACK with
+  a highlighted range plays only it (the playback range set and put back), and every Play sets playbackSpeed 0 +
+  maxPlaybackSpeed 1 for the run (measured: in plain real-time Maya showed 3 4 5 6 7 on twos; the reference sets
+  them and gets 3 5 7). 11 more hotkeys (MSLAnimSpace*, CopyColorKeyTimes, PasteTintKeyTimes, BakeFromLast,
+  TintSceneRed). `scene.selected_objects` = the PLAIN selection list: a list selected by a script comes back
+  REVERSED from `orderedSelection` (measured), and "the last selected" must be the reference's.
+  TRAP, measured: `keyframe -e -tickDrawSpecial` is NOT in Maya's undo queue at all (set or cleared) - yellow keys
+  of phase 2 could not be undone; the flag now goes through `setAttr <curve>.keyTickDrawSpecial[i]` (undoable).
+  Undo checked in mayapy 2025: 31 commands, one Ctrl+Z each. The reference's bake-mode radio could not be
+  switched (its painted menu took no click, synthetic or real): "shape" / "step" are built from its help.
+  NOT checked by a real hand: the new menu lines.
 
 ## MSL Scripts (inside Maya)
 

@@ -47,6 +47,14 @@ GROUPS = (
                "curve of the scene", "keys_remove", "inbetween", ("-N", True)),
         Action("space", "Space the keys N apart", "The picked keys (or the range's) laid out N frames apart from the "
                "first one - the keys after them stay", "keys_space", "set_spacing", (N,)),
+        Action("space_1", "Space on ones", "The picked keys (or the range's) one frame apart", "keys_space",
+               "set_spacing", (1,)),
+        Action("space_2", "Space on twos", "The picked keys (or the range's) two frames apart", "keys_space",
+               "set_spacing", (2,)),
+        Action("space_3", "Space on threes", "The picked keys (or the range's) three frames apart", "keys_space",
+               "set_spacing", (3,)),
+        Action("space_4", "Space on fours", "The picked keys (or the range's) four frames apart", "keys_space",
+               "set_spacing", (4,)),
     )),
     ("times", "Key times", "blue", (
         Action("share", "Share key times", "Every curve of the selected objects gets a key wherever any of them has "
@@ -61,6 +69,10 @@ GROUPS = (
                "other frames go", "paste", "paste_times", (ky.REPLACE,)),
         Action("paste_insert", "Paste key times · at the current frame", "Replace, with the first copied time on "
                "the current frame", "paste", "paste_times", (ky.INSERT,)),
+        Action("copy_color", "Copy color key times", "Keep the times of the keys of ONE color - the color of the key "
+               "on the current frame", "copy", "copy_times", (True,)),
+        Action("paste_tint", "Paste tint key times", "The selection's keys on the copied times take the copied "
+               "color - no key is added", "keyframe", "paste_tint", ()),
     )),
     ("bake", "Bake", "violet", (
         Action("ones", "Bake on ones", "A key on every frame (picked span / range / the animation range)",
@@ -71,7 +83,10 @@ GROUPS = (
         Action("every", "Bake every N frames", "A key every N frames (the number field)", "keys_bake", "bake",
                (N,)),
         Action("infinity", "Bake infinity", "A cycling curve's infinity made real keys in the highlighted range "
-               "(else the playback range), then constant", "infinity", "bake_infinity", ()),
+               "(else the playback range)", "infinity", "bake_infinity", ()),
+        Action("from_last", "Bake from the last selected", "The other selected objects get their keys exactly on "
+               "the last one's key times (the range / the animation range); constraints baked and deleted",
+               "keys_share", "bake_from_last", ()),
     )),
     ("clean", "Clean up", "orange", (
         Action("snap", "Smart snap", "Keys between frames to the nearest whole frame, holding the pose there",
@@ -94,6 +109,8 @@ GROUPS = (
                (ky.YELLOW,)),
         Action("green", "Tint green", "Baked keys (Maya's breakdown key: it keeps its place between its "
                "neighbors when they move)", "keyframe", "tint", (ky.GREEN,)),
+        Action("red_scene", "Every key in the scene red", "All the colors in the scene cleared", "keyframe",
+               "tint_scene_red", ()),
         Action("remove_red", "Remove red keys", "Every red key of the selection", "clear", "remove_color",
                (ky.RED,)),
         Action("remove_yellow", "Remove yellow keys", "Every yellow key of the selection", "clear",
@@ -113,7 +130,8 @@ GROUPS = (
 )
 
 REFUSED = ("Nothing", "Not ", "Copy key times first", "Pick ", "Highlight", "Select ", "Bake every", "No cycling",
-           "No key on that side", "No key of that color")
+           "No key on that side", "No key of that color", "The last selected has no key",
+           "No key of the selection is on")
 TONE_OF_COLOR = {ky.RED: "red", ky.YELLOW: "yellow", ky.GREEN: "green"}
 
 
@@ -151,6 +169,8 @@ class KeysRow(qt.QtWidgets.QWidget):
         self.frames.setToolTip("Frames\nHow many frames a nudge, an inbetween, the spacing and \"bake every N\" use. "
                                "Wheel / Up / Down step it, a middle-drag scrubs it.")
         self.frames.value_changed.connect(lambda value: self._put("frames", float(value)))
+        self.frames.setContextMenuPolicy(qt.QtCore.Qt.ContextMenuPolicy.CustomContextMenu)
+        self.frames.customContextMenuRequested.connect(self._frames_menu)
         self._right = self._nudge_button(icons, 1)
         for widget in (self._left, self.frames, self._right):
             layout.addWidget(widget)
@@ -182,6 +202,18 @@ class KeysRow(qt.QtWidgets.QWidget):
         button.setContextMenuPolicy(qt.QtCore.Qt.ContextMenuPolicy.CustomContextMenu)
         button.customContextMenuRequested.connect(lambda _pos, b=button: self._nudge_menu(b, direction))
         return button
+
+    PRESETS = (1, 2, 3, 4, 5, 10, 20, 50, 100)     # the reference's "Set Nudge Value" choices
+
+    def _frames_menu(self, _position) -> None:
+        menu = self._new_menu()
+        title = menu.addAction("FRAMES")
+        title.setEnabled(False)
+        for value in self.PRESETS:
+            item = menu.addAction(f"{value}", lambda v=value: self.frames.set_value(v, emit=True))
+            item.setCheckable(True)
+            item.setChecked(abs(self.frames.value() - value) < 1e-6)
+        menu.exec(self.frames.mapToGlobal(qt.QtCore.QPoint(0, self.frames.height() + 2)))
 
     def _nudge(self, direction: int, reach: str) -> None:
         frames = self.frames.value() * direction
@@ -224,7 +256,7 @@ class KeysRow(qt.QtWidgets.QWidget):
         title = next(t for g, t, _tone, _a in GROUPS if g == group)
         button.setToolTip(f"{action.title}\n{action.tip}\n{title}: right click (or the corner) for the others.")
         if group == "color":
-            tone = TONE_OF_COLOR.get(action.args[0], "red")
+            tone = TONE_OF_COLOR.get(action.args[0] if action.args else ky.RED, "red")
             if button.property("tone") != tone:
                 button.setProperty("tone", tone)
                 repolish(button)
@@ -245,10 +277,40 @@ class KeysRow(qt.QtWidgets.QWidget):
             item = menu.addAction(icon, action.title + ("\tlast" if action is last else ""),
                                   lambda a=action: self._pick(group, a))
             item.setToolTip(action.tip)
+        self._add_options(menu, group)
         menu.exec(button.mapToGlobal(qt.QtCore.QPoint(0, button.height() + 2)))
 
+    OPTIONS = {
+        "bake": (("bake_tangents", "NEW KEYS' TANGENTS", (("type", "Keep the tangent type", "Linear stays linear, "
+                  "stepped stays stepped, the rest Maya's default"), ("shape", "Keep the curve's shape", "Tangents as "
+                  "steep as the curve there"), ("step", "Stepped", "Every new key stepped"))),
+                 ("infinity", "BAKE INFINITY THEN", (("crop", "Crop the cycle", "Infinity set to constant"),
+                  ("extend", "Extend the cycle", "The cycle goes on past the keys as it did")))),
+        "times": (("share_tangents", "SHARED KEYS' TANGENTS", (("type", "Keep the tangent type", "Linear stays "
+                   "linear, stepped stays stepped, the rest Maya's default"), ("shape", "Keep the curve's shape",
+                   "Tangents as steep as the curve there"))),),
+    }
+
+    def _add_options(self, menu, group: str) -> None:
+        """A group's choices under its actions: a caption and one ticked line per choice (kept in settings)."""
+        for key, caption, choices in self.OPTIONS.get(group, ()):
+            menu.addSeparator()
+            title = menu.addAction(caption)
+            title.setEnabled(False)
+            now = self._get(key, choices[0][0]) or choices[0][0]
+            for value, text, tip in choices:
+                item = menu.addAction(text, lambda k=key, v=value, t=text: self._choose(k, v, t))
+                item.setCheckable(True)
+                item.setChecked(value == now)
+                item.setToolTip(tip)
+
+    def _choose(self, key: str, value: str, text: str) -> None:
+        self._put(key, value)
+        self.said.emit(text, "")
+
     def _color_of(self, action: Action) -> "qt.QtGui.QColor":
-        return {ky.RED: self._red, ky.YELLOW: self._yellow, ky.GREEN: self._green}[action.args[0]]
+        color = action.args[0] if action.args and action.args[0] in ky.COLORS else ky.RED
+        return {ky.RED: self._red, ky.YELLOW: self._yellow, ky.GREEN: self._green}[color]
 
     def _pick(self, group: str, action: Action) -> None:
         last = dict(self._get("keys_last", {}) or {})

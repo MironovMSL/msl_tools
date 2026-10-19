@@ -34,7 +34,7 @@ WATCH_MS = 500           # how often the line "what the sliders act on" is read 
 OVERSHOOT = 2.0          # the weight at a slider's end with overshoot on
 FRAME_MODES = ("frame", "scale_frame")
 FRAME_SIDES = {"frame": ("left", "right"), "scale_frame": ("left",)}   # the slots each frame mode uses
-WORLD_MODES = ("tween", "neighbors", "frame")   # the pose modes that can work in world space (world.py)
+WORLD_MODES = ("tween", "neighbors", "frame", "infinity")   # the pose modes that can work in world space (world.py)
 WORLD_WIDTH = 24
 MODE_WIDTH = 116          # the mode button; a longer name is cut short (the whole one in its tooltip)
 KEYS_MS = 50             # how often the held keys are read while the pointer is over a slider
@@ -64,7 +64,7 @@ class _SliderRow(qt.QtWidgets.QWidget):
         self.world = None
         if family == cv.POSE:
             self.world = ToggleIconButton(UiResources().iconManager.get_icon("world", sub_folder="actions"),
-                                          "World space", "Tweener, Blend to Neighbors and Blend to Frame work on "
+                                          "World space", "Tweener, Blend to Neighbors, Frame and Infinity work on "
                                           "where the selected objects are in the WORLD - the hierarchy ignored: a "
                                           "control under a moving parent goes where it was, and its own channels "
                                           "are worked out from that.")

@@ -26,6 +26,27 @@ SAMPLE = 0.25          # frames between the samples that tell whether a key chan
 FLAT = 1e-5            # a curve that moves less than this (x its size, at least this) is not moving
 
 
+TANGENTS = ("type", "shape", "step")    # how keys a bake / a share adds get their tangents (the row's options)
+INFINITY = ("crop", "extend")           # what a baked infinity is left as
+
+
+def options() -> dict:
+    """The KEYS row's choices, kept in the Animation settings (configsMayaMng "animation"): bake_tangents,
+    share_tangents ("type" = the reference's default), infinity ("crop")."""
+    try:
+        from msl_tools.msl.core.resources import Resources
+        config = Resources().configsMayaMng.get_config("animation", defaults={"settings": {}})
+        data = config.data.get("settings") or {}
+    except Exception:
+        data = {}
+
+    def pick(key: str, allowed: tuple) -> str:
+        return data.get(key) if data.get(key) in allowed else allowed[0]
+
+    return {"bake_tangents": pick("bake_tangents", TANGENTS), "share_tangents": pick("share_tangents", TANGENTS),
+            "infinity": pick("infinity", INFINITY)}
+
+
 @dataclass
 class Scope:
     """What a command acts on now."""
@@ -101,6 +122,37 @@ def _set_key(curve: str, time: float, value: float) -> None:
     """A key with Maya's default tangents (what the reference's new keys get: auto out of the box)."""
     cmds.setKeyframe(curve, time=time, value=value)
     in_type, out_type = scene.default_tangents()
+    try:
+        cmds.keyTangent(curve, time=(time, time), inTangentType=in_type, outTangentType=out_type)
+    except RuntimeError:
+        pass
+
+
+def _segments(curve: str) -> list:
+    """[(time, out tangent type)] of the curve's keys as they are now - read BEFORE keys are added, so a new
+    key knows what kind of segment it lands in."""
+    return list(zip(_times(curve), cmds.keyTangent(curve, query=True, outTangentType=True) or []))
+
+
+def _segment_type(segments: list, time: float) -> str:
+    before = [kind for t, kind in segments if t <= time + ky.SAME]
+    return before[-1] if before else (segments[0][1] if segments else "")
+
+
+def _new_key(curve: str, time: float, value: float, tangents: str, segments: list) -> None:
+    """A key a bake or a share adds, its tangents by the option (measured on the reference for "type"):
+    "type" = what the segment it lands in is - linear stays linear, a stepped one stays stepped, anything else
+    gets Maya's default; "shape" = Maya's insert, its tangents as steep as the curve there; "step" = stepped."""
+    if tangents == "shape":
+        cmds.setKeyframe(curve, time=time, insert=True)
+        return
+    cmds.setKeyframe(curve, time=time, value=value)
+    in_type, out_type = scene.default_tangents()
+    kind = _segment_type(segments, time)
+    if tangents == "step" or kind in ("step", "stepnext"):
+        out_type = "step"
+    elif kind == "linear":
+        in_type = out_type = "linear"
     try:
         cmds.keyTangent(curve, time=(time, time), inTangentType=in_type, outTangentType=out_type)
     except RuntimeError:
@@ -307,16 +359,18 @@ def set_spacing(step: float, say: bool = False) -> str:
 
 class _Copied:
     times: list = []     # the key times copied last (kept for the Maya session)
+    colors: dict = {}    # time -> the color its key had (measured: a plain copy keeps them too)
 
 
-def _add_times(curve: str, times, values=None) -> int:
-    """Keys at `times` the curve has no key on, each with the value the curve had there (read first)."""
+def _add_times(curve: str, times, tangents: str = "type") -> int:
+    """Keys at `times` the curve has no key on, each with the value the curve had there (read first), their
+    tangents by the option."""
     present = _times(curve)
     wanted = [t for t in times if not any(ky.same(t, p) for p in present)]
-    values = values or {}
-    read = {t: values.get(t, _eval(curve, t)) for t in wanted}
+    read = {t: _eval(curve, t) for t in wanted}
+    segments = _segments(curve)
     for time in wanted:
-        _set_key(curve, time, read[time])
+        _new_key(curve, time, read[time], tangents, segments)
     return len(wanted)
 
 
@@ -338,22 +392,84 @@ def share_times(from_last: bool = False, say: bool = False) -> str:
         curves = [c for c, _order in pairs]
         times = ky.union(*[_times(c) for c in curves])
     with scene._Chunk():
-        added = sum(_add_times(curve, times) for curve in curves)
+        tangents = options()["share_tangents"]
+        added = sum(_add_times(curve, times, tangents) for curve in curves)
     return _done(f"Key times shared: {_plural(added, 'key')} added on {_plural(len(curves), 'curve')}", say)
 
 
-def copy_times(say: bool = False) -> str:
-    """The key times in play are kept to be pasted: the picked keys', the range's, else every key time of the
-    selected objects."""
+def _colored_times(curves, chosen=None) -> list:
+    """[(time, color)] of the keys of these curves (only the indices `chosen(curve)` gives, if given)."""
+    out = []
+    for curve in curves:
+        indices = chosen(curve) if chosen else None
+        for index, (time, (breakdown, special)) in enumerate(zip(_times(curve), _flags(curve))):
+            if indices is None or index in indices:
+                out.append((time, ky.color_of(breakdown, special)))
+    return out
+
+
+def copy_times(color: bool = False, say: bool = False) -> str:
+    """The key times in play are kept to be pasted - the picked keys', the range's, else every key time of the
+    selected objects - each with its key's color. `color`: only the times of the keys of ONE color, the color
+    of the key on the current frame (red when there is none) - "Copy Color Key Times"."""
     scope = find_scope()
     if scope.kind == "frame":
-        times = ky.union(*[_times(c) for c in scope.curves])
+        pairs = _colored_times(scope.curves)
     else:
-        times = ky.union(*[[_times(c)[i] for i in scope.chosen(c)] for c in scope.all_curves()])
-    if not times:
-        return _done(NOTHING, say)
-    _Copied.times = times
-    return _done(f"Copied {_plural(len(times), 'key time')} ({times[0]:g}-{times[-1]:g})", say)
+        pairs = _colored_times(scope.all_curves(), scope.chosen)
+    wanted = ky.RED
+    if color:
+        here = [kind for time, kind in _colored_times(scope.all_curves()) if ky.same(time, scope.now)]
+        wanted = here[0] if here else ky.RED
+        pairs = [(time, kind) for time, kind in pairs if kind == wanted]
+    if not pairs:
+        return _done(f"No {wanted} key on the selection" if color else NOTHING, say)
+    colors = {}
+    for time, kind in pairs:
+        if not any(ky.same(time, known) for known in colors):
+            colors[round(time, 6)] = kind
+    _Copied.times = sorted(colors)
+    _Copied.colors = colors
+    what = f"{wanted} key time" if color else "key time"
+    return _done(f"Copied {_plural(len(_Copied.times), what)} ({_Copied.times[0]:g}-{_Copied.times[-1]:g})", say)
+
+
+def _copied_color(time: float) -> str:
+    return next((kind for known, kind in _Copied.colors.items() if ky.same(known, time)), ky.RED)
+
+
+def _tint(curve: str, time: float, color: str) -> None:
+    index = next((i for i, t in enumerate(_times(curve)) if ky.same(t, time)), None)
+    if index is not None:
+        _color_key(curve, index, color)
+
+
+def _color_key(curve: str, index: int, color: str) -> None:
+    """One key's color: Maya's breakdown flag through `keyframe -e`, the special tick through setAttr on the
+    curve's keyTickDrawSpecial[i] - measured (Maya 2025): `keyframe -e -tickDrawSpecial` is NOT in the undo
+    queue at all, setting or clearing; the setAttr is."""
+    breakdown, special = ky.COLOR_FLAGS[color]
+    cmds.keyframe(curve, edit=True, index=(index, index), breakdown=breakdown)
+    cmds.setAttr(f"{curve}.keyTickDrawSpecial[{index}]", special)
+
+
+def paste_tint(say: bool = False) -> str:
+    """The selected objects' keys AT the copied times take the color copied with them - no key is added
+    ("Paste Tint Key Times"; measured: a copied red time turned a yellow key red)."""
+    if not _Copied.times:
+        return _done("Copy key times first", say)
+    jobs = []
+    for curve in selection_curves():
+        hits = [(t, _copied_color(t)) for t in _times(curve) if any(ky.same(t, c) for c in _Copied.times)]
+        if hits:
+            jobs.append((curve, hits))
+    if not jobs:
+        return _done("No key of the selection is on a copied time", say)
+    with scene._Chunk():
+        for curve, hits in jobs:
+            for time, color in hits:
+                _tint(curve, time, color)
+    return _done(f"Tinted {_plural(sum(len(h) for _c, h in jobs), 'key')} as copied", say)
 
 
 def paste_times(mode: str = ky.MERGE, say: bool = False) -> str:
@@ -371,11 +487,15 @@ def paste_times(mode: str = ky.MERGE, say: bool = False) -> str:
         times = _times(curve)
         added, removed = ky.paste_times(_Copied.times, times, mode, now)
         plans.append((curve, {t: _eval(curve, t) for t in added}, [times[i] for i in removed]))
+    shift = (now - _Copied.times[0]) if mode == ky.INSERT else 0.0
     count = 0
     with scene._Chunk():
         for curve, added, removed in plans:
             for time, value in added.items():     # added first: a curve whose every key goes is deleted by Maya
                 _set_key(curve, time, value)
+                color = _copied_color(time - shift)
+                if color != ky.RED:                # measured: a new key takes its copied key's color
+                    _tint(curve, time, color)
             _cut(curve, removed)
             count += len(added)
     return _done(f"Key times pasted ({mode}): {_plural(count, 'key')} on {_plural(len(plans), 'curve')}", say)
@@ -402,16 +522,89 @@ def bake(step: float, say: bool = False) -> str:
             start = float(cmds.playbackOptions(query=True, animationStartTime=True))
             end = float(cmds.playbackOptions(query=True, animationEndTime=True))
         grid, removed = ky.bake_plan(times, start, end, step)
-        jobs.append((curve, {t: _eval(curve, t) for t in grid}, [times[i] for i in removed]))
+        jobs.append((curve, {t: _eval(curve, t) for t in grid}, [times[i] for i in removed], _segments(curve),
+                     start, end))
     if not jobs:
         return _done(NOTHING, say)
+    tangents = options()["bake_tangents"]
     with scene._Chunk():
-        for curve, grid, removed in jobs:
-            for time, value in grid.items():      # keyed first: a curve whose every key goes is deleted by Maya
-                _set_key(curve, time, value)
+        for curve, grid, removed, segments, start, end in jobs:
+            _key_on(curve, grid, tangents, segments)  # keyed first: a curve whose every key goes is deleted by Maya
             _cut(curve, removed)
+            if tangents == "step":                    # a baked span on steps holds every key, the old ones too
+                cmds.keyTangent(curve, time=(start - ky.SAME, end + ky.SAME), outTangentType="step")
     every = {1: "ones", 2: "twos", 3: "threes", 4: "fours"}.get(step, f"every {step:g} frames")
     return _done(f"Baked on {every} ({_plural(len(jobs), 'curve')}, {scope.where() if scope.kind != 'frame' else 'animation range'})", say)
+
+
+def _key_on(curve: str, values: dict, tangents: str, segments: list) -> None:
+    """Keys at the times of `values` (read before anything changed) - a key already there stays as it is."""
+    present = _times(curve)
+    for time, value in values.items():
+        if not any(ky.same(time, t) for t in present):
+            _new_key(curve, time, value, tangents, segments)
+
+
+def _bake_span(scope: Scope) -> tuple:
+    if scope.kind == "range":
+        return scope.span
+    return (float(cmds.playbackOptions(query=True, animationStartTime=True)),
+            float(cmds.playbackOptions(query=True, animationEndTime=True)))
+
+
+def _driven_channels(node: str) -> list:
+    """The keyable channels of `node` a constraint drives (they get baked, the constraint goes)."""
+    out = []
+    for attribute in cmds.listAttr(node, keyable=True) or []:
+        plug = f"{node}.{attribute}"
+        sources = cmds.listConnections(plug, source=True, destination=False, skipConversionNodes=True) or []
+        if any(cmds.objectType(source, isAType="constraint") for source in sources):
+            out.append(attribute)
+    return out
+
+
+def bake_from_last(say: bool = False) -> str:
+    """Every selected object but the LAST gets its keys exactly on the last one's key times, inside the
+    highlighted range (else the animation range): keys there on other frames go, keys outside stay; channels a
+    constraint drives are baked on those times too and the constraint is deleted (measured on the reference)."""
+    objects = scene.selected_objects()
+    if len(objects) < 2:
+        return _done("Select two or more objects: the last one gives the key times", say)
+    scope = find_scope()
+    start, end = _bake_span(scope) if scope.kind != "picked" else _bake_span(Scope("frame"))
+    last_curves = [c for c, _o in scene._object_curves([objects[-1]])]
+    times = [t for t in ky.union(*[_times(c) for c in last_curves]) if start - ky.SAME <= t <= end + ky.SAME]
+    if not times:
+        return _done(f"The last selected has no key in frames {start:g}-{end:g}", say)
+    tangents = options()["bake_tangents"]
+    curve_jobs, driven_jobs, constraints = [], [], set()
+    for node in objects[:-1]:
+        for curve, _order in scene._object_curves([node]):
+            present = _times(curve)
+            removed = [t for t in present if start - ky.SAME <= t <= end + ky.SAME
+                       and not any(ky.same(t, k) for k in times)]
+            curve_jobs.append((curve, {t: _eval(curve, t) for t in times}, removed, _segments(curve)))
+        for attribute in _driven_channels(node):
+            plug = f"{node}.{attribute}"
+            driven_jobs.append((node, attribute, {t: float(cmds.getAttr(plug, time=t)) for t in times}))
+            for source in cmds.listConnections(plug, source=True, destination=False, skipConversionNodes=True) or []:
+                if cmds.objectType(source, isAType="constraint"):
+                    constraints.add(source)
+    if not curve_jobs and not driven_jobs:
+        return _done(NOTHING, say)
+    with scene._Chunk():
+        if constraints:
+            cmds.delete(sorted(constraints))
+        for node, attribute, values in driven_jobs:
+            for time, value in values.items():
+                cmds.setKeyframe(node, attribute=attribute, time=time, value=value)
+        for curve, values, removed, segments in curve_jobs:
+            if cmds.objExists(curve):
+                _key_on(curve, values, tangents, segments)
+                _cut(curve, removed)
+    baked = len(curve_jobs) + len(driven_jobs)
+    extra = f", {_plural(len(constraints), 'constraint')} baked and deleted" if constraints else ""
+    return _done(f"Keys on the last selected's {_plural(len(times), 'time')}: {_plural(baked, 'curve')}{extra}", say)
 
 
 def bake_infinity(say: bool = False) -> str:
@@ -439,6 +632,7 @@ def bake_infinity(say: bool = False) -> str:
         jobs.append((curve, found, sources, ends))
     if not jobs:
         return _done("No cycling curve: set a curve's infinity to cycle first", say)
+    keep_cycle = options()["infinity"] == "extend"     # the cycle goes on past the range as it did
     count = 0
     with scene._Chunk():
         for curve, found, sources, ends in jobs:
@@ -448,8 +642,9 @@ def bake_infinity(say: bool = False) -> str:
             for time, value in ends.items():
                 _set_key(curve, time, value)
                 cmds.keyTangent(curve, time=(time, time), inTangentType="spline", outTangentType="spline")
-            cmds.setAttr(curve + ".preInfinity", ky.CONSTANT)
-            cmds.setAttr(curve + ".postInfinity", ky.CONSTANT)
+            if not keep_cycle:
+                cmds.setAttr(curve + ".preInfinity", ky.CONSTANT)
+                cmds.setAttr(curve + ".postInfinity", ky.CONSTANT)
             count += len(found) + len(ends)
     return _done(f"Infinity baked: {_plural(count, 'key')} on {_plural(len(jobs), 'curve')}, frames {start:g}-{end:g}", say)
 
@@ -631,7 +826,6 @@ def tint(color: str, say: bool = False) -> str:
     """The keys in play take a color - Maya's own key flags, nothing added to the scene: yellow = its special
     tick, green = its breakdown (a breakdown key keeps its place between its neighbors when they move), red =
     neither. On an empty current frame the selection's curves get a key there first."""
-    breakdown, special = ky.COLOR_FLAGS[color]
     scope = find_scope()
     with scene._Chunk():
         count = 0
@@ -641,12 +835,25 @@ def tint(color: str, say: bool = False) -> str:
                 _set_key(curve, scope.now, _eval(curve, scope.now))
                 chosen = scope.chosen(curve)
             for index in chosen:
-                cmds.keyframe(curve, edit=True, index=(index, index), breakdown=breakdown)
-                cmds.keyframe(curve, edit=True, index=(index, index), tickDrawSpecial=special)
+                _color_key(curve, index, color)
                 count += 1
     if not count:
         return _done(NOTHING, say)
     return _done(f"{_plural(count, 'key')} tinted {color} ({scope.where()})", say)
+
+
+def tint_scene_red(say: bool = False) -> str:
+    """Every key of every curve in the scene back to red - the colors cleared ("Tint All Keys Red in the
+    Scene")."""
+    jobs = [(curve, [i for i, flags in enumerate(_flags(curve)) if any(flags)]) for curve in scene_curves()]
+    jobs = [(curve, indices) for curve, indices in jobs if indices]
+    if not jobs:
+        return _done("Every key in the scene is red already", say)
+    with scene._Chunk():
+        for curve, indices in jobs:
+            for index in indices:
+                _color_key(curve, index, ky.RED)
+    return _done(f"{_plural(sum(len(i) for _c, i in jobs), 'key')} back to red in the scene", say)
 
 
 def remove_color(color: str, say: bool = False) -> str:
@@ -671,8 +878,9 @@ def remove_color(color: str, say: bool = False) -> str:
 class Player:
     """Playback that shows only some frames, holding each: on twos / threes / fours (playbackOptions -by), or
     from key to key (the step changes at every key: each pose held until the next one) - all the selection's
-    keys, or only the keys of one color (the color of the key on the current frame, else red). Called again
-    while playing, it stops; stopped, the step and the frame it started from come back."""
+    keys, or only the keys of one color (the color of the key on the current frame, else red). With a range
+    highlighted on the timeline only that range plays. Called again while playing, it stops; stopped, the step
+    (and the playback range, and - when no range was played - the frame it started from) come back."""
 
     _time_cb = None
     _stop_cb = None
@@ -682,6 +890,8 @@ class Player:
 
     _playing = False
     _jumping = False
+    _range = None        # the playback range to put back, while a highlighted range is played
+    _speed = (1.0, 0.0)  # playbackSpeed, maxPlaybackSpeed to put back
 
     @classmethod
     def toggle(cls, mode, say: bool = False) -> str:
@@ -693,6 +903,19 @@ class Player:
         cls._playing = True
         cls._by = float(cmds.playbackOptions(query=True, by=True))
         cls._start = float(cmds.currentTime(query=True))
+        # measured: the reference plays every step, held to real time (in plain real-time mode Maya shows the
+        # frames between the steps too: 3 4 5 6 7 on twos)
+        cls._speed = (float(cmds.playbackOptions(query=True, playbackSpeed=True)),
+                      float(cmds.playbackOptions(query=True, maxPlaybackSpeed=True)))
+        cmds.playbackOptions(playbackSpeed=0, maxPlaybackSpeed=1)
+        cls._range = None
+        span = scene.timeline_range()
+        if span is not None:     # measured: only the highlighted range plays, the playback range comes back after
+            cls._range = (float(cmds.playbackOptions(query=True, minTime=True)),
+                          float(cmds.playbackOptions(query=True, maxTime=True)))
+            cmds.playbackOptions(minTime=span[0], maxTime=span[1] - 1)
+            cmds.currentTime(span[0])
+            cls._start = None    # measured: the time stays where it stopped
         if isinstance(mode, (int, float)):
             cmds.playbackOptions(by=float(mode))
             text = f"Playing on {({2: 'twos', 3: 'threes', 4: 'fours'}).get(int(mode), mode)}"
@@ -776,14 +999,22 @@ class Player:
         cls._playing = False
         cls._restore()
         cmds.evalDeferred(cls._restore, lowestPriority=True)
+        cmds.evalDeferred(cls._forget_range, lowestPriority=True)
 
     @classmethod
     def _restore(cls) -> None:
         try:
-            cmds.playbackOptions(by=cls._by)
-            cmds.currentTime(cls._start)
+            cmds.playbackOptions(by=cls._by, playbackSpeed=cls._speed[0], maxPlaybackSpeed=cls._speed[1])
+            if cls._range is not None:
+                cmds.playbackOptions(minTime=cls._range[0], maxTime=cls._range[1])
+            if cls._start is not None:
+                cmds.currentTime(cls._start)
         except RuntimeError:
             pass
+
+    @classmethod
+    def _forget_range(cls) -> None:
+        cls._range = None
 
 
 def play(mode, say: bool = False) -> str:

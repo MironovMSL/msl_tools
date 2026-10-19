@@ -151,7 +151,10 @@ def channel_box_attributes() -> set:
 
 
 def selected_objects() -> list:
-    return cmds.ls(orderedSelection=True, long=True) or []
+    """The selected objects in the order they were picked. The plain selection list: picked by hand it is in
+    that order, as `orderedSelection` is - but a list selected by a script comes back REVERSED from
+    `orderedSelection` (measured, Maya 2025), and the reference goes by the plain list ("the last selected")."""
+    return cmds.ls(selection=True, long=True) or []
 
 
 def _driven(curve: str) -> tuple:

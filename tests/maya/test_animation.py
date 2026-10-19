@@ -230,6 +230,25 @@ class MeasuredTest(unittest.TestCase):
         self.assertEqual(cv.BLEND_MARKS, (-1.0, -0.5, -0.15, -0.05, 0.05, 0.15, 0.5, 1.0))
 
 
+class BlendToEaseTest(unittest.TestCase):
+    """The reference's Blend to Ease, every mark clicked on the 11-key probe (keys 5 9 2 7 4 on frames 7..15
+    picked, 8 at 5 before them, 10 at 17 after)."""
+
+    MEASURED = {-1: (8.0, 8.0, 7.994, 7.983, 7.354), -0.5: (8.0, 8.004, 7.812, 7.868, 6.392),
+                -0.15: (7.796, 8.192, 5.879, 7.456, 4.957), -0.05: (6.775, 8.577, 3.757, 7.184, 4.349),
+                0.05: (5.436, 9.184, 4.343, 8.268, 7.551), 0.15: (6.196, 9.456, 7.172, 9.423, 9.592),
+                0.5: (7.991, 9.868, 9.75, 9.988, 9.999), 1: (9.192, 9.983, 9.992, 10.0, 10.0)}
+
+    def test_every_mark_is_the_references(self):
+        b = block(values=[5, 9, 2, 7, 4], times=[7, 9, 11, 13, 15], before=(5.0, 8.0), after=(17.0, 10.0))
+        for weight, wanted in self.MEASURED.items():
+            for got, value in zip(cv.apply("blend_ease", b, weight), wanted):
+                self.assertAlmostEqual(got, value, delta=0.002, msg=f"blend to ease at {weight}")
+
+    def test_it_holds_ctrl_shift_like_the_reference(self):
+        self.assertEqual(cv.mode_for_modifiers(cv.POSE, "ctrl+shift").key, "blend_ease")
+
+
 class KeysTest(unittest.TestCase):
     """Keys and timing (keys.py) - the numbers are the reference's, measured on a probe of
     A tx 1 5 9 13 20, A ry 1 9 20, B tx 1 4 11 17, C ty 2 7 15."""
