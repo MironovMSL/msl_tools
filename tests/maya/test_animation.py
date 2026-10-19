@@ -2,6 +2,7 @@
 import unittest
 
 from msl_tools.msl.tools.maya.animation import curves as cv
+from msl_tools.msl.tools.maya.animation import keys as ky
 
 
 def block(values=(2.0,), times=None, **extra):
@@ -227,6 +228,90 @@ class MeasuredTest(unittest.TestCase):
 
     def test_the_blend_marks_are_the_references(self):
         self.assertEqual(cv.BLEND_MARKS, (-1.0, -0.5, -0.15, -0.05, 0.05, 0.15, 0.5, 1.0))
+
+
+class KeysTest(unittest.TestCase):
+    """Keys and timing (keys.py) - the numbers are the reference's, measured on a probe of
+    A tx 1 5 9 13 20, A ry 1 9 20, B tx 1 4 11 17, C ty 2 7 15."""
+
+    TX = [1.0, 5.0, 9.0, 13.0, 20.0]
+
+    def test_nudge_moves_the_picked_keys(self):
+        self.assertEqual(ky.nudge(self.TX, [2], -3), {2: 6.0})
+        self.assertEqual(ky.nudge(self.TX, [1, 2], 2), {1: 7.0, 2: 11.0})
+
+    def test_nudge_onto_a_key_replaces_it_and_past_one_refuses_all(self):
+        self.assertEqual(ky.nudge(self.TX, [3], -4), {3: 9.0, 2: None})      # 13 -> 9 took 9's place
+        self.assertIsNone(ky.nudge(self.TX, [2], -5))                         # 9 would pass 5
+        self.assertIsNone(ky.nudge(self.TX, [1, 3], -6))                      # 13 would pass 9: 5 stays too
+
+    def test_the_nearest_key_on_a_side(self):
+        times = [1.0, 5.0, 9.0, 4.0, 11.0]
+        self.assertEqual(ky.nearest_key(times, 7.0, 1), 9.0)
+        self.assertEqual(ky.nearest_key(times, 7.0, -1), 5.0)
+        self.assertIsNone(ky.nearest_key(times, 20.0, 1))
+
+    def test_inbetween_after_the_current_frame(self):
+        self.assertEqual(ky.inbetween(self.TX, [9.0], 1), [1, 5, 9, 14, 21])
+        self.assertEqual(ky.inbetween(self.TX, [7.0], 2), [1, 5, 11, 15, 22])
+        self.assertEqual(ky.inbetween(self.TX, [7.0], -3), [1, 5, 6, 10, 17])
+
+    def test_inbetween_after_each_anchor(self):
+        self.assertEqual(ky.inbetween(self.TX, [5.0, 13.0], 1), [1, 5, 10, 14, 22])       # picked 5 and 13
+        self.assertEqual(ky.inbetween(self.TX, [4, 5, 9, 11], 1), [1, 6, 11, 17, 24])     # a range's key times
+        self.assertEqual(ky.inbetween([1.0, 4.0, 11.0, 17.0], [4, 5, 9, 11], -1), [1, 4, 8, 13])
+
+    def test_a_removal_onto_the_key_before_is_refused(self):
+        self.assertIsNone(ky.inbetween(self.TX, [7.0], -4))
+        self.assertIsNone(ky.inbetween(self.TX, [7.0], -5))
+
+    def test_spacing_the_times_in_play(self):
+        self.assertEqual(ky.remap(self.TX, ky.spaced([5, 9, 13], 2)), [1, 5, 7, 9, 20])
+        self.assertEqual(ky.spaced([9, 13, 11, 17], 2), {9: 9, 11: 11, 13: 13, 17: 15})
+        self.assertEqual(ky.remap(self.TX, ky.spaced([5, 9, 13], 6)), [1, 5, 11, 17, 20])
+        self.assertIsNone(ky.remap(self.TX, ky.spaced([5, 9, 13], 8)))           # 13 -> 21 would pass 20
+
+    def test_bake_on_a_grid_keeps_keys_outside(self):
+        grid, removed = ky.bake_plan([2.0, 7.0, 15.0], 1, 40, 3)
+        self.assertEqual(grid[:6], [1, 4, 7, 10, 13, 16])
+        self.assertEqual(grid[-1], 40)
+        self.assertEqual(removed, [0, 2])
+        grid, removed = ky.bake_plan([2.0, 7.0, 15.0], 7, 15, 2)                # picked 7 .. 15
+        self.assertEqual((grid, removed), ([7, 9, 11, 13, 15], []))
+        self.assertEqual(ky.bake_grid(1, 10, 2.5), [1, 3.5, 6, 8.5])
+
+    def test_snap_goes_to_the_nearest_frame_half_way_down(self):
+        self.assertEqual([ky.snap_frame(t) for t in (3.4, 5.6, 8.5, 4.5, 6.5, 3.45)], [3, 6, 8, 4, 6, 3])
+        groups = ky.snap_plan([1.0, 3.4, 3.45, 4.5, 6.5, 8.0])
+        self.assertEqual(groups, {3.0: [1, 2], 4.0: [3], 6.0: [4]})
+        self.assertEqual(ky.snap_plan([1.0, 3.6, 4.0]), {4.0: [1, 2]})            # joins the key on its frame
+
+    def test_pasting_key_times(self):
+        c = [2.0, 7.0, 15.0]
+        self.assertEqual(ky.paste_times(c, self.TX, ky.MERGE), ([2, 7, 15], []))
+        self.assertEqual(ky.paste_times(c, self.TX, ky.REPLACE), ([2, 7, 15], [1, 2, 3]))     # 1 and 20 stay
+        self.assertEqual(ky.paste_times(c, self.TX, ky.INSERT, now=9), ([14, 22], [3, 4]))     # 9 14 22
+
+    def test_union_of_key_times(self):
+        self.assertEqual(ky.union(self.TX, [1, 9, 20], [1, 4, 11, 17]), [1, 4, 5, 9, 11, 13, 17, 20])
+
+    def test_colors_are_maya_flags(self):
+        self.assertEqual(ky.color_of(False, False), ky.RED)
+        self.assertEqual(ky.color_of(False, True), ky.YELLOW)
+        self.assertEqual(ky.color_of(True, False), ky.GREEN)
+        self.assertEqual(ky.COLOR_FLAGS[ky.YELLOW], (False, True))
+
+    def test_infinity_repeats_the_cycle_inside_the_range(self):
+        # C ty 2:5 7:1 15:6 cycling, range 1-30 (measured: 2 7 15 20 28 inside, a seam at 15 and 28)
+        found = ky.infinity_keys([2.0, 7.0, 15.0], [5.0, 1.0, 6.0], 1, 30, ky.CYCLE, ky.CYCLE)
+        self.assertEqual([t for t, _v, _s in found], [1.99, 15.01, 20.0, 28.0, 28.01])
+        self.assertEqual([v for _t, v, _s in found], [6.0, 5.0, 1.0, 6.0, 5.0])
+
+    def test_infinity_with_offset_rises_and_meets_without_a_seam(self):
+        found = ky.infinity_keys([0.0, 5.0, 10.0], [0.0, 3.0, 2.0], 0, 25, ky.CONSTANT, ky.CYCLE_OFFSET)
+        self.assertEqual(found, [(15.0, 5.0, 1), (20.0, 4.0, 2), (25.0, 7.0, 1)])
+        self.assertEqual(ky.infinity_keys([0.0, 5.0], [0.0, 1.0], 0, 20, ky.LINEAR, ky.CONSTANT), [])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -3929,6 +3929,32 @@ hub (it already sees an unclean end) + fast anim layer merge · 10 Master Spline
   sliders had been poked by setValue / sendEvent before; the same steps in a fresh Maya ran clean twice - not
   reproduced. NOT tried: a real hand on the sliders, the timeline range, anim layers, a big rig's speed.
 
+- PHASE 2, KEYS AND TIMING (2026-10-17, built, NOT committed): `keys.py` (Qt-free arithmetic: nudge, inbetween,
+  spaced, bake_plan, snap_plan, paste_times, infinity_keys; tests KeysTest), `keys_scene.py` (the commands, ONE undo
+  step each; scope = picked GE keys > timeline range > current frame), `keys_row.py` KeysRow under the sliders
+  (◀ [N] ▶ + six rename GroupButtons: inbetweens, key times, bake, clean up, color keys, play), `animation.key_action`
+  + 42 runtime commands in hotkey_catalog (KEY_COMMANDS, group Animation). New icons: key_nudge_left/right,
+  keys_insert/remove/space/share/bake, infinity, reverse. Every rule MEASURED against the reference in Maya 2025
+  (notes: the session notes folder, animation-phase2-measurements.md) and compared key for key: nudge (picked /
+  frame / empty frame pulls the nearest key / all / scene; landing replaces, passing refuses), inbetweens (now /
+  picked / range union), spacing, share / copy / paste times, bake 1-4 / N (animation range), bake infinity (shape
+  identical to the cycle), snap (.5 down), redundant, static, crop, reverse (scaleKey -1), clear, tint (Maya's
+  breakdown / tickDrawSpecial flags), remove a color - SAME, apart from deliberate differences: exact times where the
+  reference rounds (reverse) or drifts (infinity seams 0.01 apart); time offset reads the REAL curve (the
+  reference's nudge offsetter doesn't); crop with nothing refuses; empty curves deleted; no auto-tint. Undo checked
+  in mayapy 2025 (22 commands: one Ctrl+Z each - the current time is in Maya's undo queue, so a nudge sets it inside
+  its chunk). TRAPS: a curve whose every key is cut is DELETED by Maya - key new times first; a package function
+  named like a submodule (`keys`) hides it. Maya 2025 with the reference loaded CRASHED twice (file -new; a script
+  doing delete + undo + keyframe query in one go) - not reproduced without it.
+  PLAYBACK (`keys_scene.Player`), checked live in windowed Maya 2025 (Dev, no reference loaded): Play keys steps
+  exactly 1 4 5 9 11 13 17 20 and round again; Play color keys only the keys of the current key's color; on twos =
+  playbackOptions -by 2. A stop by the row / hotkey AND by Maya's own stop gives the step and the start frame back
+  (`_finish`: at once and again when idle - a first cut restored only through evalDeferred and lost to a late time
+  change: by stayed 5). Coming round the loop to a range start that is no key in play jumps straight to the first
+  one (`_on_time`, guarded) - else that start frame was held for the whole gap. The row's seven menus open themed,
+  tinted, "last" marked (pictured); a nudge from the row + one undo puts keys and time back.
+  NOT checked: the row by a real hand.
+
 ## MSL Scripts (inside Maya)
 
 `msl/tools/maya/scripts/` (2026-10-15, the user's ask: their own scripts - and new ones - with a

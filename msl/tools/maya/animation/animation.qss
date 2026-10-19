@@ -74,3 +74,40 @@ ToggleIconButton#animationToggle[on="true"] {
 
 AnimationWindow QLabel#headerSubtitle[state="done"] { color: var(--success); }
 AnimationWindow QLabel#headerSubtitle[state="error"] { color: var(--error); }
+
+/* The KEYS row (keys_row.py): nudge arrows, the frames field, the group buttons (the icon in its group's hue). */
+KeysRow {
+    qproperty-redColor: var(--error);
+    qproperty-yellowColor: var(--yellow);
+    qproperty-greenColor: var(--success);
+}
+KeysRow QuickButton#animationNudge,
+KeysRow GroupButton#animationGroup {
+    qproperty-iconColor: var(--text-primary);
+    background: alpha(var(--text-primary), 5%);
+    border: 1px solid alpha(var(--border), 70%);
+    border-radius: 5px;
+    padding: 0px;
+}
+KeysRow GroupButton#animationGroup {
+    padding: 0px 5px 0px 0px;
+}
+KeysRow QuickButton#animationNudge:hover,
+KeysRow GroupButton#animationGroup:hover {
+    border: 1px solid var(--accent);
+    background: alpha(var(--accent), 12%);
+}
+KeysRow QuickButton#animationNudge:pressed,
+KeysRow GroupButton#animationGroup:pressed {
+    background: alpha(var(--accent), 25%);
+}
+KeysRow GroupButton#animationGroup[tone="teal"]   { qproperty-iconColor: var(--teal); }
+KeysRow GroupButton#animationGroup[tone="blue"]   { qproperty-iconColor: var(--accent); }
+KeysRow GroupButton#animationGroup[tone="violet"] { qproperty-iconColor: var(--violet); }
+KeysRow GroupButton#animationGroup[tone="orange"] { qproperty-iconColor: var(--orange); }
+KeysRow GroupButton#animationGroup[tone="red"]    { qproperty-iconColor: var(--error); }
+KeysRow GroupButton#animationGroup[tone="yellow"] { qproperty-iconColor: var(--yellow); }
+KeysRow GroupButton#animationGroup[tone="green"]  { qproperty-iconColor: var(--success); }
+KeysRow QLineEdit#animationFrames {
+    padding: 0px 2px;
+}

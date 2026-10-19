@@ -10,7 +10,10 @@ frame, wheel = +-1, right click = type it), and a line saying what the sliders a
 timeline's range, the current frame). A drag changes the curves live and ends as ONE undo step;
 Esc during it puts everything back.
 
-Settings: configsMayaMng "animation" (`settings`: pose, curve, overshoot, euler, frame_left, frame_right).
+Under them the KEYS row (keys_row.py): nudge, inbetweens, key times, bake, clean up, color keys, play.
+
+Settings: configsMayaMng "animation" (`settings`: pose, curve, overshoot, euler, frame_left, frame_right, world,
+frames, keys_last).
 """
 from pathlib import Path
 
@@ -234,6 +237,12 @@ class AnimationPanel(qt.QtWidgets.QWidget):
             self._rows[family] = row
             layout.addWidget(row)
 
+        # keys and timing: nudge, inbetweens, key times, bake, clean up, color keys, play (keys_row.py)
+        from msl_tools.msl.tools.maya.animation.keys_row import KeysRow
+        self._keys_row = KeysRow(self._get, self._set)
+        self._keys_row.said.connect(self._said)
+        layout.addWidget(self._keys_row)
+
         self._targets = qt.QtWidgets.QLabel("")
         self._targets.setObjectName("animationTargets")
         self._targets.setWordWrap(True)
@@ -386,6 +395,10 @@ class AnimationPanel(qt.QtWidgets.QWidget):
             text = ""
         if self._targets.text() != text:
             self._targets.setText(text)
+
+    def _said(self, text: str, state: str) -> None:
+        self._say(text, state)
+        self._show_targets()
 
     def _say(self, text: str, state: str = "") -> None:
         self.status_changed.emit(text, state)
