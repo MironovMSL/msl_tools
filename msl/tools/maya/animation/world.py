@@ -16,7 +16,9 @@ frame (keys of its translate / rotate channels) or on the frames picked, and eve
 — translation and scale in a straight line, rotation along the shortest arc (a quaternion slerp),
 then `xform -worldSpace -matrix` turns that into the object's translate / rotate (its pivots, joint
 orient and rotate order included) and those are keyed on the current frame - only the channels that are
-animated (measured: the reference keys nothing new; an unkeyed rotation stays as it was). Parents go before
+animated (measured: the reference keys nothing new; an unkeyed rotation stays as it was), and of those only the
+PICKED ones when channels are picked (keys picked in a Graph Editor on screen: their curves' channels; else the
+Channel Box's picked channels, on the objects it lists) - the rest keep their values (the user's ask, 2026-10-20). Parents go before
 their children, so a child's world place counts its parent's new pose.
 """
 from __future__ import annotations
@@ -74,11 +76,45 @@ def _channels(node: str) -> list:
     return out
 
 
-def _settable(plug: str) -> bool:
+def _keeps(plug: str) -> bool:
+    """A channel the pose must leave as it was can be put back: not locked, driven by nothing or by keys only
+    (an animated channel that isn't picked)."""
     try:
-        return not cmds.getAttr(plug, lock=True) and not cmds.listConnections(plug, source=True, destination=False)
+        if cmds.getAttr(plug, lock=True):
+            return False
     except (RuntimeError, ValueError):
         return False
+    sources = cmds.listConnections(plug, source=True, destination=False, skipConversionNodes=True) or []
+    return all(cmds.nodeType(source).startswith("animCurve") for source in sources)
+
+
+def picked_channels() -> "dict | None":
+    """{object (long name): {channel}} the user narrowed things to, or None when nothing narrows it - the same rule
+    as the channel sliders (scene.find_targets): a Graph Editor on screen -> the channels of its picked keys, else of
+    the curves it shows (a channel picked in its list); else the Channel Box's picked channels."""
+    from msl_tools.msl.tools.maya.animation.scene import _driven, graph_editor_curves, graph_editor_on_screen
+    from msl_tools.msl.tools.maya.scripts.reset_attributes import picked_channels as box_channels
+    picked = {}
+    if graph_editor_on_screen():
+        curves = cmds.keyframe(query=True, selected=True, name=True) or sorted(graph_editor_curves())
+        for curve in curves:
+            if not cmds.objExists(curve):        # the editor may still list a curve that is gone
+                continue
+            node, attribute = _driven(curve)
+            if node and attribute:
+                picked.setdefault(node, set()).add(_long_name(node, attribute))
+        return picked or None
+    for node, attribute in box_channels():
+        found = cmds.ls(node, long=True) or [node]
+        picked.setdefault(found[0], set()).add(_long_name(found[0], attribute))
+    return picked or None
+
+
+def _long_name(node: str, attribute: str) -> str:
+    try:
+        return cmds.attributeQuery(attribute.split("[")[0], node=node, longName=True)
+    except RuntimeError:
+        return attribute
 
 
 def _key_times(node: str, channels: list) -> list:
@@ -89,9 +125,9 @@ def _key_times(node: str, channels: list) -> list:
 
 
 class _Object:
-    def __init__(self, node: str, now: float, frames: tuple):
+    def __init__(self, node: str, now: float, frames: tuple, only: "set | None" = None):
         self.node = node
-        self.channels = _channels(node)
+        self.channels = [channel for channel in _channels(node) if only is None or channel in only]
         times = _key_times(node, self.channels)
         before = [t for t in times if t < now - SAME_TIME]
         after = [t for t in times if t > now + SAME_TIME]
@@ -156,7 +192,11 @@ class WorldDrag:
         self.now = float(cmds.currentTime(query=True))
         nodes = cmds.ls(orderedSelection=True, type="transform", long=True) or []
         nodes = sorted(nodes, key=_depth)                  # parents before their children
-        self.objects = [obj for obj in (_Object(node, self.now, (frame, frame_right)) for node in nodes)
+        picked = picked_channels()
+        if picked is not None:
+            nodes = [node for node in nodes if node in picked]
+        self.objects = [obj for obj in (_Object(node, self.now, (frame, frame_right),
+                                                None if picked is None else picked[node]) for node in nodes)
                         if obj.channels]
         self.where = f"frame {self.now:g}, world space"
         self._done = False
@@ -172,7 +212,7 @@ class WorldDrag:
             if target is None:
                 continue
             kept = {channel: cmds.getAttr(f"{obj.node}.{channel}") for channel in CHANNELS
-                    if channel not in obj.channels and _settable(f"{obj.node}.{channel}")}
+                    if channel not in obj.channels and _keeps(f"{obj.node}.{channel}")}
             cmds.xform(obj.node, worldSpace=True, matrix=list(target))
             for channel, value in kept.items():       # what isn't animated stays as it was
                 cmds.setAttr(f"{obj.node}.{channel}", value)

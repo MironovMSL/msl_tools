@@ -7,7 +7,10 @@
     world.py    the pose sliders in world space
     keys.py     keys and timing as arithmetic on key times: nudge, inbetweens, bake, snap, key times (no Qt, no Maya)
     keys_scene.py  those commands in the scene, one undo step each (what they act on: picked keys / range / frame)
-    keys_row.py the KEYS row under the sliders (nudge, and six groups that show the action used last)
+    keys_row.py the tool groups under the sliders, laid out flat: precise, nudge, default pose, baking, clean up,
+                color keys, play
+    precise.py  Precise - / +: picked channels or keys by an exact step
+    default_pose.py  reset the pose; the preferred default pose (a snapshot by name, kept in the config)
     panel.py    AnimationPanel (the POSE and CURVE sliders, their modes, the frames to blend to, the KEYS row),
     window.py   AnimationWindow
     animation.qss
@@ -31,11 +34,16 @@ def nudge(mode: str, weight: float) -> None:
 
 
 def key_action(call: str, *args) -> str:
-    """One KEYS-row action without the window - for hotkeys: keys_scene's `call` with `args` ("N" / "-N" = the
-    window's frames number, as it was left), on what it acts on now; one undo step, said in the viewport."""
+    """One tool-group action without the window - for hotkeys: `call` = a keys_scene function, or
+    "<module>.<function>" of this package (precise.precise, default_pose.reset ...), with `args` ("N" / "-N" =
+    the window's frames number, "STEP" / "-STEP" = its precise step, as they were left), on what it acts on
+    now; one undo step, said in the viewport."""
+    import importlib
     from msl_tools.msl.core.resources import Resources
-    from msl_tools.msl.tools.maya.animation import keys_scene
+    from msl_tools.msl.tools.maya.animation.keys import fill
     settings = Resources().configsMayaMng.get_config("animation", defaults={"settings": {}}).data.get("settings") or {}
     frames = float(settings.get("frames") or 1.0)
-    values = [frames if a == "N" else -frames if a == "-N" else a for a in args]
-    return getattr(keys_scene, call)(*values, say=True)
+    step = float(settings.get("precise") or 1.0)
+    module, _, function = call.rpartition(".")
+    target = importlib.import_module(f"msl_tools.msl.tools.maya.animation.{module or 'keys_scene'}")
+    return getattr(target, function)(*fill(args, frames, step), say=True)

@@ -334,3 +334,38 @@ class KeysTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ToolGroupNumbersTest(unittest.TestCase):
+    """The tool groups' numbers (keys.fill / precise_times) and the hotkeys reaching real functions."""
+
+    def test_fill_puts_in_the_frames_and_the_precise_step(self):
+        self.assertEqual(ky.fill(("N", "-N", "STEP", "-STEP", 3, True, "all"), 2.0, 0.5),
+                         [2.0, -2.0, 0.5, -0.5, 3, True, "all"])
+
+    def test_precise_steps_measured_on_the_reference(self):
+        self.assertEqual(ky.precise_times(False, False), 1.0)
+        self.assertEqual(ky.precise_times(True, False), 0.1)     # a tenth of the field
+        self.assertEqual(ky.precise_times(False, True), 5.0)     # five times it
+        self.assertEqual(ky.precise_times(True, True), 0.1)
+
+    def test_the_wheel_weights_match_the_reference(self):
+        # one notch = the middle, each next notch 0.3 of the half track: weight 0.09 (n - 1)^2 (measured)
+        weights = [cv.weight_at(-0.3 * (n - 1)) for n in range(1, 5)]
+        for got, want in zip(weights, (0.0, -0.09, -0.36, -0.81)):
+            self.assertAlmostEqual(got, want)
+
+    def test_every_animation_hotkey_names_a_function_that_exists(self):
+        import ast
+        from pathlib import Path
+        from msl_tools.msl.tools.maya.hotkey_catalog import KEY_COMMANDS
+        folder = Path(ky.__file__).parent
+        defined = {}
+        for module in ("keys_scene", "precise", "default_pose"):
+            tree = ast.parse((folder / f"{module}.py").read_text(encoding="utf-8"))
+            defined[module] = {node.name for node in tree.body if isinstance(node, ast.FunctionDef)}
+        for command in KEY_COMMANDS:
+            call = ast.parse(command.python.split("; ", 1)[1]).body[0].value
+            name = call.args[0].value
+            module, _, function = name.rpartition(".")
+            self.assertIn(function, defined[module or "keys_scene"], command.name)

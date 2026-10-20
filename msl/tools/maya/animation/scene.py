@@ -171,11 +171,14 @@ def _driven(curve: str) -> tuple:
 
 
 def _default(node: str, attribute: str) -> float:
+    """What Blend to Default / Scale From Default go to: the user's preferred default pose where one is kept,
+    else the node's default_<attribute>, else Maya's default (default_pose.default_for)."""
     if not node or not attribute:
         return 0.0
     try:
-        found = cmds.attributeQuery(attribute.split("[")[0], node=node, listDefault=True)
-        return float(found[0]) if found else 0.0
+        from msl_tools.msl.tools.maya.animation.default_pose import default_for
+        found = default_for(node, attribute)
+        return 0.0 if found is None else float(found)
     except (RuntimeError, TypeError, ValueError):
         return 0.0
 

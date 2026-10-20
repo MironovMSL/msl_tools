@@ -77,9 +77,16 @@ class AnimationWindow(FramelessDialog):
     def _fit_height(self) -> None:
         """As tall as what it shows - never taller (the sliders don't need room to grow into)."""
         if self.isVisible() and not self.isMaximized():
-            wanted = self.minimumSizeHint().height()
+            layout = self.layout()
+            wanted = layout.totalHeightForWidth(self.width()) if layout is not None and                 layout.hasHeightForWidth() else -1
+            wanted = max(wanted, self.minimumSizeHint().height())   # the groups wrap: their height follows the width
             if wanted != self.height():
                 self.resize(self.width(), wanted)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        if event.oldSize().width() != event.size().width():
+            qt.QtCore.QTimer.singleShot(30, self._fit_height)   # narrower = the groups wrap into more lines
 
     @classmethod
     def open(cls) -> "AnimationWindow":

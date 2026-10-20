@@ -10,10 +10,10 @@ frame, wheel = +-1, right click = type it), and a line saying what the sliders a
 timeline's range, the current frame). A drag changes the curves live and ends as ONE undo step;
 Esc during it puts everything back.
 
-Under them the KEYS row (keys_row.py): nudge, inbetweens, key times, bake, clean up, color keys, play.
+Under them the tool groups (keys_row.py), flat: precise, nudge, default pose, baking, clean up, color keys, play.
 
 Settings: configsMayaMng "animation" (`settings`: pose, curve, overshoot, euler, frame_left, frame_right, world,
-frames, keys_last).
+frames, precise, bake / share options, slider settings).
 """
 from pathlib import Path
 
@@ -38,12 +38,14 @@ WORLD_MODES = ("tween", "neighbors", "frame", "infinity")   # the pose modes tha
 WORLD_WIDTH = 24
 MODE_WIDTH = 116          # the mode button; a longer name is cut short (the whole one in its tooltip)
 KEYS_MS = 50             # how often the held keys are read while the pointer is over a slider
+NUMBER_WIDTH = 40        # the slider's number box
 
 
 class _SliderRow(qt.QtWidgets.QWidget):
     """A slider of one family with the button that names (and picks) its mode."""
 
     picked = qt.QtCore.Signal(str)        # a mode was picked for this slider
+    typed = qt.QtCore.Signal(float)       # a weight typed into the number box (1 = 100 %)
 
     def __init__(self, family: str, parent=None):
         super().__init__(parent)
@@ -80,6 +82,20 @@ class _SliderRow(qt.QtWidgets.QWidget):
             room.setFixedWidth(WORLD_WIDTH)
             layout.addWidget(room)
         layout.addWidget(self.slider, 1)
+        # the number box (setting "Show slider input box"): a percent typed + Enter = the mode at that weight
+        self.number = qt.QtWidgets.QLineEdit()
+        self.number.setObjectName("animationNumber")
+        self.number.setFixedWidth(NUMBER_WIDTH)
+        self.number.setPlaceholderText("%")
+        self.number.setAlignment(qt.QtCore.Qt.AlignmentFlag.AlignCenter)
+        self.number.setValidator(qt.QtGui.QDoubleValidator(-1000.0, 1000.0, 2, self.number))
+        self.number.setToolTip("A number for the slider\nType a percent (-100 .. 100; to 200 with overshoot) and press "
+                               "Enter: the slider's mode at exactly that weight, one undo step.")
+        self.number.returnPressed.connect(self._take_number)
+        # click focus only: a window that opens or comes to the front must not hand it the keyboard
+        self.number.setFocusPolicy(qt.QtCore.Qt.FocusPolicy.ClickFocus)
+        self.number.installEventFilter(self)
+        layout.addWidget(self.number)
         self.button.clicked.connect(lambda: self._menu(self.button.mapToGlobal(
             qt.QtCore.QPoint(0, self.button.height()))))
         self.slider.menu_requested.connect(self._menu)
@@ -93,12 +109,25 @@ class _SliderRow(qt.QtWidgets.QWidget):
         self._keys.timeout.connect(self._follow_keys)
         self.slider.installEventFilter(self)
 
+    def _take_number(self) -> None:
+        text = self.number.text().replace(",", ".")
+        self.number.clearFocus()              # done with it: the keyboard goes back (Maya's hotkeys work again)
+        try:
+            value = float(text)
+        except ValueError:
+            return
+        self.typed.emit(value / 100.0)
+
     def set_mode(self, key: str) -> None:
         self.mode = cv.BY_KEY.get(key) if key in cv.BY_KEY and cv.BY_KEY[key].family == self.family \
             else self.modes[0]
         self.show_mode(self.mode)
 
     def eventFilter(self, watched, event) -> bool:
+        if watched is self.number and event.type() == qt.QtCore.QEvent.Type.KeyPress and                 event.key() == qt.QtCore.Qt.Key.Key_Escape:
+            self.number.clear()
+            self.number.clearFocus()
+            return True
         if watched is self.slider:
             if event.type() == qt.QtCore.QEvent.Type.Enter:
                 self._follow_keys()
@@ -230,6 +259,7 @@ class AnimationPanel(qt.QtWidgets.QWidget):
             row.slider.slot_stepped.connect(lambda side, steps: self._set_frame(side, self._frames[side] + steps))
             row.slider.slot_menu_requested.connect(lambda side, position, r=row: self._frame_menu(r, side, position))
             row.picked.connect(lambda key, r=row: self._pick(r, key))
+            row.typed.connect(lambda weight, r=row: self._typed(r, weight))
             row.slider.drag_started.connect(lambda modifiers, r=row: self._start(r, modifiers))
             row.slider.dragged.connect(self._move)
             row.slider.drag_finished.connect(lambda weight, r=row: self._finish(r, weight))
@@ -237,7 +267,7 @@ class AnimationPanel(qt.QtWidgets.QWidget):
             self._rows[family] = row
             layout.addWidget(row)
 
-        # keys and timing: nudge, inbetweens, key times, bake, clean up, color keys, play (keys_row.py)
+        # the tool groups: precise, nudge, default pose, baking, clean up, color keys, play (keys_row.py)
         from msl_tools.msl.tools.maya.animation.keys_row import KeysRow
         self._keys_row = KeysRow(self._get, self._set)
         self._keys_row.said.connect(self._said)
@@ -265,13 +295,79 @@ class AnimationPanel(qt.QtWidgets.QWidget):
         self._euler.setChecked(bool(self._get("euler", True)))
         self._euler.toggled.connect(lambda on: self._set("euler", bool(on)))
         self._overshoot_changed(self._overshoot.isChecked())
+        # overshoot belongs to the sliders: at the end of the pose row, beside the number box (the curve row keeps
+        # the same room, so both sliders end alike)
+        self._overshoot.setFixedWidth(WORLD_WIDTH)
+        self._overshoot.setFocusPolicy(qt.QtCore.Qt.FocusPolicy.NoFocus)
+        self._rows[cv.POSE].layout().addWidget(self._overshoot)
+        room = qt.QtWidgets.QWidget()
+        room.setFixedWidth(WORLD_WIDTH)
+        self._rows[cv.CURVE].layout().addWidget(room)
         world = self._rows[cv.POSE].world
         world.setChecked(bool(self._get("world", False)))
         world.toggled.connect(lambda on: self._set("world", bool(on)))
 
+        from msl_tools.msl.ui.widgets.atoms.buttons.glyph_button import GlyphButton
+        self._settings_button = GlyphButton("", "Slider settings\nThe mouse wheel on the sliders, its direction, the "
+                                                "number box, overshoot", qt.QtCore.QSize(24, 22))
+        self._settings_button.setObjectName("animationGear")
+        self._settings_button.set_icon(self._icon("sliders"))
+        self._settings_button.clicked.connect(lambda: self._settings_menu().exec(
+            self._settings_button.mapToGlobal(qt.QtCore.QPoint(0, self._settings_button.height()))))
+        self._apply_slider_settings()
+
     def header_widgets(self) -> list:
         """The window puts these in its header, before the theme toggle."""
-        return [self._overshoot, self._euler]
+        return [self._euler, self._settings_button]
+
+    # ------------------------------------------------------------------ slider settings (the reference's preferences)
+
+    SLIDER_SETTINGS = (   # key, title, what it does, the default (the reference's)
+        ("wheel", "Mouse wheel on the sliders", "Over a slider the wheel pulls its knob: the first notch starts at the "
+         "middle (a Tweener's 50 %), each next notch a step further; moving off the slider ends it - one undo step",
+         True),
+        ("wheel_flip", "Flip the wheel's direction", "Wheel up moves the knob right instead of left", False),
+        ("input_box", "Show the sliders' number box", "A box beside each slider: type a percent, Enter applies the "
+         "mode at exactly that weight", True),
+    )
+
+    def _slider_setting(self, key: str) -> bool:
+        default = next(d for k, _t, _n, d in self.SLIDER_SETTINGS if k == key)
+        return bool(self._get(key, default))
+
+    def _apply_slider_settings(self) -> None:
+        for row in self._rows.values():
+            row.slider.set_wheel(self._slider_setting("wheel"), self._slider_setting("wheel_flip"))
+            row.number.setVisible(self._slider_setting("input_box"))
+
+    def _settings_menu(self) -> "qt.QtWidgets.QMenu":
+        menu = qt.QtWidgets.QMenu(self)
+        make_rounded_popup(menu)
+        menu.setToolTipsVisible(True)
+        caption = menu.addAction("SLIDERS")
+        caption.setEnabled(False)
+        for key, title, note, _default in self.SLIDER_SETTINGS:
+            item = menu.addAction(title)
+            item.setCheckable(True)
+            item.setChecked(self._slider_setting(key))
+            item.setToolTip(note)
+            if key == "wheel_flip":
+                item.setEnabled(self._slider_setting("wheel"))
+            item.toggled.connect(lambda on, k=key: (self._set(k, bool(on)), self._apply_slider_settings()))
+        overshoot = menu.addAction("Overshoot (the ends go to 200 %)")
+        overshoot.setCheckable(True)
+        overshoot.setChecked(self._overshoot.isChecked())
+        overshoot.toggled.connect(self._overshoot.setChecked)
+        return menu
+
+    def _typed(self, row: _SliderRow, weight: float) -> None:
+        """A number typed for a slider: its mode at exactly that weight, as a drag that ends there (one undo)."""
+        weight = max(-self._limit(), min(self._limit(), weight))
+        self._start(row, "")
+        if self._drag is None:
+            return
+        self._move(weight)
+        self._finish(row, weight)
 
     # ------------------------------------------------------------------ modes
 

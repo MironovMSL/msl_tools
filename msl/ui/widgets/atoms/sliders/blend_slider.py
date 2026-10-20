@@ -35,6 +35,12 @@ class BlendSlider(qt.QtWidgets.QWidget):
     it is dragged - `format_weight(weight)`, the owner's - is written inside the track at the end
     AWAY from the knob (dragged right: on the left), never under the pointer.
 
+    THE WHEEL (`set_wheel(True, flip=False)`, off unless asked): over the track it pulls the knob without
+    a press - the first notch starts a drag at the middle (drag_started, then dragged with the middle's
+    weight), each further notch moves the knob WHEEL_STEP of the half track (up = left; `flip` turns it
+    round), and the drag ends (drag_finished) when the pointer leaves the slider or a button is pressed.
+    The same signals as a drag with the mouse, so the owner needs nothing else.
+
     SLOTS (`set_slots(left, right)`: a short text each, or None) are small grey squares past the
     ends of the track - a value the owner keeps for that side (a frame to blend to). Hovered, a slot
     shows its text in place; a click, the wheel and a right click on it are the owner's
@@ -85,6 +91,7 @@ class BlendSlider(qt.QtWidgets.QWidget):
     THIN = 8                # the track's height at rest
     SLOT_ROOM = 16          # pixels at each end given to a slot (when the slider has any)
     SLOT_SIZE = 8
+    WHEEL_STEP = 0.3        # of the half track per wheel notch (measured on the reference: weight 0.09 (n-1)^2)
 
     def __init__(self, parent=None, to_weight=None, to_position=None):
         super().__init__(parent)
@@ -110,6 +117,9 @@ class BlendSlider(qt.QtWidgets.QWidget):
         self._position = 0.0        # where the knob is, -1 .. 1 along the track
         self._press = None          # the press's x, or None
         self._dragging = False
+        self._wheel = False         # the wheel pulls the knob (set_wheel)
+        self._wheel_flip = False
+        self._wheeling = False      # a drag the wheel started is going on
         self._hovered = None        # (position, weight) of the mark under the pointer
         self._pressed_mark = None   # (position, weight) of the mark held down
         self._spring = qt.QtCore.QVariantAnimation(self)
@@ -167,8 +177,14 @@ class BlendSlider(qt.QtWidgets.QWidget):
     def limit(self) -> float:
         return self._limit
 
+    def set_wheel(self, enabled: bool, flip: bool = False) -> None:
+        """The wheel over the track pulls the knob (see the class); `flip` = up moves it right."""
+        if not enabled and self._wheeling:
+            self._end_wheel()
+        self._wheel, self._wheel_flip = bool(enabled), bool(flip)
+
     def is_dragging(self) -> bool:
-        return self._press is not None
+        return self._press is not None or self._wheeling
 
     def mark_positions(self) -> list:
         """[(position -1..1, weight)] of the marks: even steps on each side, up to where a full
@@ -228,6 +244,8 @@ class BlendSlider(qt.QtWidgets.QWidget):
     # ------------------------------------------------------------------ the mouse
 
     def mousePressEvent(self, event) -> None:
+        if self._wheeling:
+            self._end_wheel()            # the wheel's drag ends here; the press is a new one
         slot = self._slot_at(event.position().x())
         if slot is not None:
             if event.button() == qt.QtCore.Qt.MouseButton.RightButton:
@@ -313,6 +331,10 @@ class BlendSlider(qt.QtWidgets.QWidget):
     def wheelEvent(self, event) -> None:
         slot = self._slot_at(event.position().x())
         delta = event.angleDelta().y()
+        if slot is None and delta and self._wheel and self._press is None:
+            self._wheel_notch(delta)
+            event.accept()
+            return
         if slot is None or not delta:
             return super().wheelEvent(event)
         notches = int(delta / 120) or (1 if delta > 0 else -1)
@@ -321,7 +343,46 @@ class BlendSlider(qt.QtWidgets.QWidget):
         self.slot_stepped.emit(slot, notches)
         event.accept()
 
+    def _modifier_names(self) -> str:
+        modifiers = qt.QtWidgets.QApplication.keyboardModifiers()
+        return "+".join(name for flag, name in ((qt.QtCore.Qt.KeyboardModifier.ControlModifier, "ctrl"),
+                                                (qt.QtCore.Qt.KeyboardModifier.AltModifier, "alt"),
+                                                (qt.QtCore.Qt.KeyboardModifier.ShiftModifier, "shift"))
+                        if modifiers & flag)
+
+    def _wheel_notch(self, delta: int) -> None:
+        """One notch: the first starts a drag at the middle, each next one moves the knob a step."""
+        if not self._wheeling:
+            self._wheeling = True
+            self._spring.stop()
+            self._closing.stop()
+            self._position = 0.0
+            self._open_to(1.0)
+            self.grabKeyboard()
+            self.drag_started.emit(self._modifier_names())
+        else:
+            notches = max(1, abs(int(delta / 120)))
+            up = delta > 0
+            direction = (1.0 if up else -1.0) * (1.0 if self._wheel_flip else -1.0)
+            self._position = max(-1.0, min(1.0, self._position + direction * self.WHEEL_STEP * notches))
+        self.update()
+        self.dragged.emit(self._weight(self._position))
+
+    def _end_wheel(self, cancel: bool = False) -> None:
+        if not self._wheeling:
+            return
+        self._wheeling = False
+        weight = self._weight(self._position)
+        self.releaseKeyboard()
+        self._spring_back()
+        if cancel:
+            self.cancelled.emit()
+        else:
+            self.drag_finished.emit(weight)
+
     def leaveEvent(self, event) -> None:
+        if self._wheeling:
+            self._end_wheel()
         if self._hovered is not None or self._hovered_slot is not None:
             self._hovered = None
             self._hovered_slot = None
@@ -329,7 +390,7 @@ class BlendSlider(qt.QtWidgets.QWidget):
         super().leaveEvent(event)
 
     def _open_to(self, value: float) -> None:
-        if self._press is not None and value < 1.0:
+        if (self._press is not None or self._wheeling) and value < 1.0:
             return
         if abs(self._open - value) < 1e-6 and self._opening.state() != qt.QtCore.QAbstractAnimation.State.Running:
             return
@@ -343,6 +404,9 @@ class BlendSlider(qt.QtWidgets.QWidget):
         self.update()
 
     def keyPressEvent(self, event) -> None:
+        if self._wheeling and event.key() == qt.QtCore.Qt.Key.Key_Escape:
+            self._end_wheel(cancel=True)
+            return
         if self._press is not None and event.key() == qt.QtCore.Qt.Key.Key_Escape:
             self._release()
             self._spring_back()
@@ -369,7 +433,7 @@ class BlendSlider(qt.QtWidgets.QWidget):
 
     def _sprung(self, value) -> None:
         self._position = float(value)
-        if self._press is None and abs(self._position) < 1e-6:
+        if self._press is None and not self._wheeling and abs(self._position) < 1e-6:
             self._closing.start()     # back in the middle: the track goes thin again
         self.update()
 

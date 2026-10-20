@@ -47,6 +47,31 @@ def _key(name: str, label: str, annotation: str, call: str, args: tuple, icon: s
 
 # the Animation window's KEYS row (keys_row.py); "N" = the window's frames number
 KEY_COMMANDS = (
+    _key("MSLAnimPreciseMinus", "Precise −", "The picked channels (Channel Box) / picked keys lowered by the precise "
+         "step", "precise.precise", ("-STEP",), "minus"),
+    _key("MSLAnimPrecisePlus", "Precise +", "The picked channels / picked keys raised by the precise step",
+         "precise.precise", ("STEP",), "add"),
+    _key("MSLAnimPreciseMinusFine", "Precise − fine", "Lowered by a tenth of the precise step", "precise.precise",
+         ("-STEP", 0.1), "minus"),
+    _key("MSLAnimPrecisePlusFine", "Precise + fine", "Raised by a tenth of the precise step", "precise.precise",
+         ("STEP", 0.1), "add"),
+    _key("MSLAnimPreciseMinusCoarse", "Precise − coarse", "Lowered by five precise steps", "precise.precise",
+         ("-STEP", 5.0), "minus"),
+    _key("MSLAnimPrecisePlusCoarse", "Precise + coarse", "Raised by five precise steps", "precise.precise",
+         ("STEP", 5.0), "add"),
+    _key("MSLAnimResetPose", "Reset pose", "Every keyable channel of the selected objects to its default (the "
+         "preferred default pose where one is kept; autokey keys the animated ones)", "default_pose.reset", ("all",),
+         "restart"),
+    _key("MSLAnimResetTranslation", "Reset translation", "Move of the selected objects back to its default",
+         "default_pose.reset", ("translate",), "move"),
+    _key("MSLAnimResetRotation", "Reset rotation", "Rotate of the selected objects back to its default",
+         "default_pose.reset", ("rotate",), "restart"),
+    _key("MSLAnimResetScale", "Reset scale", "Scale of the selected objects back to its default",
+         "default_pose.reset", ("scale",), "grow"),
+    _key("MSLAnimResetTRS", "Reset translation, rotation, scale", "Move, rotate and scale back to their defaults",
+         "default_pose.reset", ("trs",), "zero_out"),
+    _key("MSLAnimSnapshotDefaultPose", "Snapshot preferred default pose", "The selected objects' pose kept as "
+         "their default (by name without the namespace)", "default_pose.snapshot", (), "bookmark_add"),
     _key("MSLAnimNudgeLeft", "Nudge keys left", "The keys in play N frames left (picked / range / current frame)",
          "nudge", ("-N",), "key_nudge_left"),
     _key("MSLAnimNudgeRight", "Nudge keys right", "The keys in play N frames right", "nudge", ("N",),

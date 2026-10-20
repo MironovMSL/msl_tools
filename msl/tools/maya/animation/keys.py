@@ -240,3 +240,22 @@ def infinity_keys(times: list, values: list, start: float, end: float, pre: int,
         taken.append((time, value, n))
         out.append((time, value, source))
     return sorted(out)
+
+
+# --------------------------------------------------------------------------- an action's numbers
+
+N, STEP = "N", "STEP"     # in an action's arguments: the frames field's number / the precise step
+
+
+def fill(args: tuple, frames: float, step: float = 1.0) -> list:
+    """An action's arguments with the frames ("N" / "-N") and the precise step ("STEP" / "-STEP") put in."""
+    numbers = {N: frames, "-N": -frames, STEP: step, "-STEP": -step}
+    return [numbers[a] if isinstance(a, str) and a in numbers else a for a in args]
+
+
+PRECISE_FINE, PRECISE_COARSE = 0.1, 5.0     # measured on the reference: a tenth of the field / five times it
+
+
+def precise_times(fine: bool, coarse: bool) -> float:
+    """How many precise steps a click makes: Ctrl = a tenth, Shift = five (both: a tenth wins - the finer)."""
+    return PRECISE_FINE if fine else PRECISE_COARSE if coarse else 1.0

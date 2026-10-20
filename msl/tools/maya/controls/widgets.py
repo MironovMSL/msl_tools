@@ -48,6 +48,12 @@ class DragNumberField(qt.QtWidgets.QLineEdit):
         if self.text() != text:
             self.setText(text)
 
+    def commit_text(self) -> float:
+        """Takes what is typed now and returns the value - for a button that uses the number: buttons that
+        never take the focus leave the field without Enter / editingFinished."""
+        self._take_text()
+        return self._value
+
     def _take_text(self) -> None:
         try:
             self.set_value(float(self.text().replace(",", ".")), emit=True)

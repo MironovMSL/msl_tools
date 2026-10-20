@@ -72,42 +72,69 @@ ToggleIconButton#animationToggle[on="true"] {
     border: 1px solid alpha(var(--accent), 70%);
 }
 
+AnimationWindow GlyphButton#animationGear {
+    qproperty-glyphColor:       var(--text-secondary);
+    qproperty-activeGlyphColor: var(--accent);
+    qproperty-highlightColor:   alpha(var(--accent), 16%);
+}
+AnimationPanel QLineEdit#animationNumber {
+    padding: 0px 2px;
+    font-size: 11px;
+}
+
 AnimationWindow QLabel#headerSubtitle[state="done"] { color: var(--success); }
 AnimationWindow QLabel#headerSubtitle[state="error"] { color: var(--error); }
 
-/* The KEYS row (keys_row.py): nudge arrows, the frames field, the group buttons (the icon in its group's hue). */
-KeysRow {
-    qproperty-redColor: var(--error);
-    qproperty-yellowColor: var(--yellow);
-    qproperty-greenColor: var(--success);
+/* The tool groups (keys_row.py): a tinted block per group with a colored edge in its hue, its name in small
+   capitals, then its tool buttons (the icon in the group's hue - a color key's own color in Color keys). */
+QFrame#animationGroup {
+    border-radius: 6px;
 }
-KeysRow QuickButton#animationNudge,
-KeysRow GroupButton#animationGroup {
+QLabel#animationGroupTitle {
+    font-size: 9px;
+    font-weight: 700;
+    padding-right: 3px;
+}
+KeysRow QuickButton#animationTool {
     qproperty-iconColor: var(--text-primary);
     background: alpha(var(--text-primary), 5%);
     border: 1px solid alpha(var(--border), 70%);
     border-radius: 5px;
-    padding: 0px;
+    padding: 0px 3px;
+    font-size: 10px;
+    font-weight: 600;
 }
-KeysRow GroupButton#animationGroup {
-    padding: 0px 5px 0px 0px;
-}
-KeysRow QuickButton#animationNudge:hover,
-KeysRow GroupButton#animationGroup:hover {
+KeysRow QuickButton#animationTool:hover {
     border: 1px solid var(--accent);
     background: alpha(var(--accent), 12%);
 }
-KeysRow QuickButton#animationNudge:pressed,
-KeysRow GroupButton#animationGroup:pressed {
+KeysRow QuickButton#animationTool:pressed {
     background: alpha(var(--accent), 25%);
 }
-KeysRow GroupButton#animationGroup[tone="teal"]   { qproperty-iconColor: var(--teal); }
-KeysRow GroupButton#animationGroup[tone="blue"]   { qproperty-iconColor: var(--accent); }
-KeysRow GroupButton#animationGroup[tone="violet"] { qproperty-iconColor: var(--violet); }
-KeysRow GroupButton#animationGroup[tone="orange"] { qproperty-iconColor: var(--orange); }
-KeysRow GroupButton#animationGroup[tone="red"]    { qproperty-iconColor: var(--error); }
-KeysRow GroupButton#animationGroup[tone="yellow"] { qproperty-iconColor: var(--yellow); }
-KeysRow GroupButton#animationGroup[tone="green"]  { qproperty-iconColor: var(--success); }
 KeysRow QLineEdit#animationFrames {
     padding: 0px 2px;
 }
+QFrame#animationGroup[tone="teal"] { background: alpha(var(--teal), 7%); border-left: 3px solid alpha(var(--teal), 80%); }
+QLabel#animationGroupTitle[tone="teal"] { color: var(--teal); }
+KeysRow QuickButton#animationTool[tone="teal"] { qproperty-iconColor: var(--teal); }
+QFrame#animationGroup[tone="blue"] { background: alpha(var(--accent), 7%); border-left: 3px solid alpha(var(--accent), 80%); }
+QLabel#animationGroupTitle[tone="blue"] { color: var(--accent); }
+KeysRow QuickButton#animationTool[tone="blue"] { qproperty-iconColor: var(--accent); }
+QFrame#animationGroup[tone="violet"] { background: alpha(var(--violet), 7%); border-left: 3px solid alpha(var(--violet), 80%); }
+QLabel#animationGroupTitle[tone="violet"] { color: var(--violet); }
+KeysRow QuickButton#animationTool[tone="violet"] { qproperty-iconColor: var(--violet); }
+QFrame#animationGroup[tone="orange"] { background: alpha(var(--orange), 7%); border-left: 3px solid alpha(var(--orange), 80%); }
+QLabel#animationGroupTitle[tone="orange"] { color: var(--orange); }
+KeysRow QuickButton#animationTool[tone="orange"] { qproperty-iconColor: var(--orange); }
+QFrame#animationGroup[tone="red"] { background: alpha(var(--error), 7%); border-left: 3px solid alpha(var(--error), 80%); }
+QLabel#animationGroupTitle[tone="red"] { color: var(--error); }
+KeysRow QuickButton#animationTool[tone="red"] { qproperty-iconColor: var(--error); }
+QFrame#animationGroup[tone="yellow"] { background: alpha(var(--yellow), 7%); border-left: 3px solid alpha(var(--yellow), 80%); }
+QLabel#animationGroupTitle[tone="yellow"] { color: var(--yellow); }
+KeysRow QuickButton#animationTool[tone="yellow"] { qproperty-iconColor: var(--yellow); }
+QFrame#animationGroup[tone="green"] { background: alpha(var(--success), 7%); border-left: 3px solid alpha(var(--success), 80%); }
+QLabel#animationGroupTitle[tone="green"] { color: var(--success); }
+KeysRow QuickButton#animationTool[tone="green"] { qproperty-iconColor: var(--success); }
+QFrame#animationGroup[tone="pink"] { background: alpha(var(--pink), 7%); border-left: 3px solid alpha(var(--pink), 80%); }
+QLabel#animationGroupTitle[tone="pink"] { color: var(--pink); }
+KeysRow QuickButton#animationTool[tone="pink"] { qproperty-iconColor: var(--pink); }

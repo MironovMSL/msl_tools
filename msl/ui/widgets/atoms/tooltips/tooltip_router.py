@@ -199,10 +199,54 @@ class WindowTooltipRouter(TooltipRouter):
 
     OBJECT_NAME = "windowTooltipRouter"
 
+    # Maya's Help > Popup Help OFF swallows every ToolTip event Qt would make on hover - in our windows too
+    # (measured, Maya 2025: none reached the window's widgets until popup help was switched on). So the router
+    # keeps its own wake-up timer: the pointer entering a widget starts it, and if no bubble is up when it fires,
+    # a ToolTip event is sent to the widget under the pointer (Maya lets a sent one through). A little later than
+    # Qt's own delay, so with popup help on Qt's event comes first and this one sees the bubble and does nothing.
+    WAKE_EXTRA_MS = 120
+
     def __init__(self, window: qt.QtWidgets.QWidget):
         super().__init__(window)
         self.setObjectName(self.OBJECT_NAME)
+        self._window = window
+        self._wake = qt.QtCore.QTimer(self)
+        self._wake.setSingleShot(True)
+        delay = qt.QtWidgets.QApplication.style().styleHint(qt.QtWidgets.QStyle.StyleHint.SH_ToolTip_WakeUpDelay)
+        self._wake.setInterval(max(300, int(delay or 700)) + self.WAKE_EXTRA_MS)
+        self._wake.timeout.connect(self._wake_up)
         self.watch(window)
+
+    def _wake_up(self) -> None:
+        if qt.QtWidgets.QApplication.mouseButtons() != qt.QtCore.Qt.MouseButton.NoButton:
+            return
+        where = qt.QtGui.QCursor.pos()
+        widget = qt.QtWidgets.QApplication.widgetAt(where)
+        if widget is None or isinstance(widget, ArrowTooltip):
+            return
+        try:
+            if widget.window() is not self._window and not self._window.isAncestorOf(widget):
+                return
+            tip = ArrowTooltip.shared(widget, create=False)
+            if tip is not None and tip.isVisible():
+                return                                  # Qt's own event already showed one
+        except RuntimeError:
+            return
+        # not sendEvent: Maya's filter on its QApplication eats a SENT ToolTip event as well (measured) - the
+        # widget and then its parents are asked directly, as Qt would pass the event up
+        while widget is not None:
+            hook = _hook_of(widget)
+            try:
+                if hook is not None:
+                    hook.show(widget, animate=True)
+                    return
+                if self.show(widget, widget.mapFromGlobal(where)):
+                    return
+            except Exception:  # never let a tooltip break the window
+                return
+            if widget is self._window:
+                return
+            widget = widget.parentWidget()
 
     def watch(self, widget: qt.QtWidgets.QWidget) -> None:
         """Filters `widget` and every widget under it (again is harmless: Qt keeps one)."""
@@ -219,6 +263,13 @@ class WindowTooltipRouter(TooltipRouter):
             except RuntimeError:  # gone already
                 pass
             return False
+        kind = event.type()
+        if kind == qt.QtCore.QEvent.Type.Enter:
+            self._wake.start()
+        elif kind in (qt.QtCore.QEvent.Type.MouseButtonPress, qt.QtCore.QEvent.Type.Wheel,
+                      qt.QtCore.QEvent.Type.KeyPress, qt.QtCore.QEvent.Type.WindowDeactivate) or \
+                (kind == qt.QtCore.QEvent.Type.Leave and watched is self._window):
+            self._wake.stop()
         return super().eventFilter(watched, event)
 
 
