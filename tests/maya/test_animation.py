@@ -362,7 +362,7 @@ class ToolGroupNumbersTest(unittest.TestCase):
         from msl_tools.msl.tools.maya.hotkey_catalog import KEY_COMMANDS
         folder = Path(ky.__file__).parent
         defined = {}
-        for module in ("keys_scene", "precise", "default_pose", "tangents_scene"):
+        for module in ("keys_scene", "precise", "default_pose", "tangents_scene", "transfer_scene"):
             tree = ast.parse((folder / f"{module}.py").read_text(encoding="utf-8"))
             defined[module] = {node.name for node in tree.body if isinstance(node, ast.FunctionDef)}
         for command in KEY_COMMANDS:
@@ -473,3 +473,33 @@ class TangentsTest(unittest.TestCase):
 
     def test_the_end_rule_is_flat_toward_a_hold(self):
         self.assertEqual(self.tg.end_rule(0.0, -0.8333), 0.0)
+
+
+class TransferTest(unittest.TestCase):
+    def setUp(self):
+        from msl_tools.msl.tools.maya.animation import transfer
+        self.tf = transfer
+
+    def test_one_copied_object_goes_onto_every_target(self):
+        self.assertEqual(self.tf.pair(["|A"], ["|ns:A", "|Other"]), [(0, "|ns:A"), (0, "|Other")])
+
+    def test_several_pair_by_name_then_by_order(self):
+        copied = ["|rig|L_arm", "|rig|R_arm"]
+        self.assertEqual(self.tf.pair(copied, ["|hero:rig|hero:R_arm"]), [(1, "|hero:rig|hero:R_arm")])
+        self.assertEqual(self.tf.pair(copied, ["|a", "|b"]), [(0, "|a"), (1, "|b")])
+        self.assertEqual(self.tf.pair(copied, ["|a"]), [])
+
+    def test_insert_lands_as_measured(self):
+        self.assertEqual(self.tf.landing(1, 40, 12), (11, 12, 51))        # span start on the current frame
+        self.assertEqual(self.tf.landing(1, 60, 12, (20, 25)), (19, 20, 25))  # on the span highlighted when pasting
+
+    def test_text_round_trip_and_refusals(self):
+        data = {"format": self.tf.FORMAT, "version": 1, "kind": self.tf.POSE, "frame": 5.0,
+                "objects": [{"name": "A", "path": "|A", "channels": {"tx": {"value": 5.0}}}]}
+        text = self.tf.to_text(data)
+        self.assertEqual(self.tf.from_text(text, self.tf.POSE), data)
+        self.assertIsNone(self.tf.from_text(text, self.tf.ANIMATION))
+        self.assertIsNone(self.tf.from_text("hello"))
+        self.assertIsNone(self.tf.from_text('{"format": "msl_transfer"'))
+        self.assertEqual(self.tf.describe(data), "1 object, 1 channel (frame 5)")
+        self.assertEqual(self.tf.short_name("|rig|ns:arm_ctrl"), "arm_ctrl")

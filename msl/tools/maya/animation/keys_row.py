@@ -202,6 +202,23 @@ GROUPS = (
         Action("remove_green", "Remove green keys", "Every green key of the selection", "clear", "remove_color",
                (ky.GREEN,), tone="green"),
     )),
+    ("transfer", "Transfer", "blue", (
+        Action("copy_anim", "Copy animation", "The selected objects' keys in the highlighted span (else the animation "
+               "range) - onto the clipboard as text and into a file, so another Maya pastes it too. Right click: "
+               "export / import a file", "copy", "copy_animation", (), badge="A", module="transfer_scene",
+               options="transfer_anim"),
+        Action("paste_insert", "Paste insert animation", "The copy's start on the current frame (or the span "
+               "highlighted now); the target's keys over that span cleared first", "paste", "paste_insert", (),
+               badge="I", module="transfer_scene", options="transfer_anim"),
+        Action("paste_replace", "Paste replace animation", "The target's animation replaced by the copy, on its own "
+               "frames", "paste", "paste_replace", (), badge="R", module="transfer_scene", options="transfer_anim"),
+        Action("copy_pose", "Copy pose", "Every Channel Box value of the selection on this frame - clipboard and file, "
+               "for another Maya too. Right click: export / import a file", "copy", "copy_pose", (), badge="P",
+               module="transfer_scene", options="transfer_pose"),
+        Action("paste_pose", "Paste pose", "The copied values set - with auto key on, the animated channels keyed "
+               "here. One copied object goes onto every selected one; several pair by name, else by order",
+               "paste", "paste_pose", (), badge="P", module="transfer_scene", options="transfer_pose"),
+    )),
     ("play", "Play", "green", (
         Action("keys", "Play keys", "Playback from key to key, each pose held until the next (again: stop)",
                "play", "play", ("keys",), badge="key"),
@@ -363,6 +380,9 @@ class KeysRow(qt.QtWidgets.QWidget):
         if action.options in ("tangent", "native", "step", "cycle"):
             self._tangent_menu(button, action)
             return
+        if action.options in ("transfer_anim", "transfer_pose"):
+            self._transfer_menu(button, "animation" if action.options == "transfer_anim" else "pose")
+            return
         menu = self._new_menu()
         first = True
         for key, caption, choices in self.OPTIONS.get(action.options, ()):
@@ -440,6 +460,35 @@ class KeysRow(qt.QtWidgets.QWidget):
                                       lambda: self._say(lambda: tangents_scene.set_global(tool)))
                 item.setToolTip(f"New keys get {action.title.lower()}s (Maya's preference)")
         menu.exec(button.mapToGlobal(qt.QtCore.QPoint(0, button.height() + 2)))
+
+    def _transfer_menu(self, button, kind: str) -> None:
+        """Copy / paste's right click: the copy as a file - for keeping, or for a Maya the clipboard can't reach."""
+        from msl_tools.msl.tools.maya.animation import transfer_scene
+        menu = self._new_menu()
+        title = menu.addAction(f"{kind.upper()} AS A FILE")
+        title.setEnabled(False)
+        if kind == "animation":
+            menu.addAction("Paste insert", lambda: self._say(lambda: transfer_scene.paste_insert()))
+            menu.addAction("Paste replace", lambda: self._say(lambda: transfer_scene.paste_replace()))
+        else:
+            menu.addAction("Paste pose", lambda: self._say(lambda: transfer_scene.paste_pose()))
+        menu.addSeparator()
+        menu.addAction(f"Export the copied {kind}…", lambda: self._transfer_file(kind, True))
+        menu.addAction(f"Import {kind}…", lambda: self._transfer_file(kind, False))
+        menu.exec(button.mapToGlobal(qt.QtCore.QPoint(0, button.height() + 2)))
+
+    def _transfer_file(self, kind: str, export: bool) -> None:
+        from msl_tools.msl.tools.maya.animation import transfer_scene
+        dialog = qt.QtWidgets.QFileDialog
+        title = f"{'Export' if export else 'Import'} {kind}"
+        pattern = "MSL animation copy (*.json)"
+        if export:
+            path, _ = dialog.getSaveFileName(self, title, f"{kind}.json", pattern)
+        else:
+            path, _ = dialog.getOpenFileName(self, title, "", pattern)
+        if path:
+            self._say(lambda: transfer_scene.export_copy(kind, path) if export
+                      else transfer_scene.import_copy(kind, path))
 
     def _choose(self, key: str, value: str, text: str) -> None:
         self._put(key, value)

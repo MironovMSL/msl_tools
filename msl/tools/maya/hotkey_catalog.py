@@ -159,6 +159,17 @@ KEY_COMMANDS = (
     _key("MSLAnimPlayFours", "Play on fours", "Playback every fourth frame", "play", (4,), "play"),
     _key("MSLAnimTangentCycle", "Cycle match tangent", "Each curve's last key takes the first key's tangent",
          "tangents_scene.cycle", (), "tangent_cycle"),
+    _key("MSLAnimCopyAnimation", "Copy animation", "The selection's keys (the highlighted span, else the animation "
+         "range) to the clipboard and a file - another Maya pastes them too", "transfer_scene.copy_animation", (),
+         "copy"),
+    _key("MSLAnimPasteInsert", "Paste insert animation", "The copied animation from the current frame, the target "
+         "cleared over that span", "transfer_scene.paste_insert", (), "paste"),
+    _key("MSLAnimPasteReplace", "Paste replace animation", "The target's animation replaced by the copied one",
+         "transfer_scene.paste_replace", (), "paste"),
+    _key("MSLAnimCopyPose", "Copy pose", "The selection's Channel Box values on this frame to the clipboard and a "
+         "file", "transfer_scene.copy_pose", (), "copy"),
+    _key("MSLAnimPastePose", "Paste pose", "The copied pose onto the selection (keyed where auto key would)",
+         "transfer_scene.paste_pose", (), "paste"),
     _key("MSLAnimTangentCycleFirst", "Cycle match tangent · first key", "Each curve's first key takes the last "
          "key's tangent", "tangents_scene.cycle", (True,), "tangent_cycle"),
     *(_key(f"MSLAnimTangent{name.title().replace('_', '')}", f"{title} tangent", tip, "tangents_scene.tangent",

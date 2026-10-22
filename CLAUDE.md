@@ -4122,6 +4122,32 @@ hub (it already sees an unclean end) + fast anim layer merge · 10 Master Spline
   reference's SLIDER gives one key a different in and out there (0.1 - 1 degree) where its button gives one.
   Checked through the panel (drag, release + one undo, Esc, the number box at 100 %, a real click at the end = flat
   type). Not tried by a real hand: dragging the knob.
+  TRANSFER (2026-10-22, the reference's "Anim Pose Transfer"; the user's ask: a clipboard BETWEEN Mayas): a blue group
+  after Color keys - Copy animation (A), Paste insert (I), Paste replace (R), Copy pose (P), Paste pose (P); right
+  click: the pastes + Export / Import the copy as a .json file; hotkeys MSLAnimCopyAnimation / PasteInsert /
+  PasteReplace / CopyPose / PastePose. `transfer.py` (Qt-free: the format {"format": "msl_transfer", "kind":
+  "animation" | "pose", ...}, `pair`, `landing`, text round trip; TransferTest) + `transfer_scene.py` (maya.cmds; one
+  undo step "MSL Transfer"). A COPY GOES TWO WAYS: the system clipboard as TEXT (any Maya, even on another computer
+  through a chat) and a file `%TEMP%/msl_tools/animation/transfer_<kind>.json` (another Maya here finds it after the
+  clipboard was used for something else); a paste takes the clipboard when it holds a copy of ours of that kind,
+  else the file. (The reference keeps its copy only in a file of its own.) Keys go with
+  their tangent types / angles / weights / locks, breakdown + special tick (the key colors) and the curves' infinity.
+  MEASURED on the reference (Maya 2025, its buttons clicked with a real mouse; a timeline span highlighted by a real
+  Shift-drag on the time slider - `cmds` can't set one): COPY ANIMATION = the selected objects' keys in the
+  highlighted span, else in the ANIMATION range (time slider start / end - keys outside the playback range copied);
+  PASTE INSERT = the copy's span start onto the current frame (on the span highlighted when pasting, if one is),
+  the target's keys over the span it lands on cleared first on EVERY animated channel (a curve left keyless goes),
+  keys before / after kept; PASTE REPLACE = every curve of the target cleared, the copy on its own frames, a channel
+  the copy has no keys on takes the source's value (tz 4 -> 0); COPY POSE = every Channel Box channel now; PASTE
+  POSE = the values set, with auto key on a key on the channels that are animated only; one copied object onto
+  each selected (another name / namespace alike). Ours, several copied objects: by the name without path and
+  namespace, else by order when the counts match; NOTHING selected = the objects of the copied names in this scene
+  (each target once). Compared in the same Maya on the same scenes: insert at 1 / 12 with and without a span, replace
+  onto a namespaced copy and onto another name, pose with auto key off / on - the same keys and values. Seen ACROSS
+  MAYAS: copied in Maya 2025, pasted in a Maya 2026 started by the hub (animation through the file while the
+  clipboard held the pose, the pose through the clipboard; then animation through the clipboard alone, the file
+  deleted); one undo for each paste. NOT built from the reference's menus: Paste Mirror (the mirror phase), Paste
+  ... To (another namespace). Not tried by a real hand: the right-click menus, the file dialogs.
 
 ## MSL Scripts (inside Maya)
 
