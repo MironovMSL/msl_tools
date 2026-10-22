@@ -357,7 +357,7 @@ class KeysRow(qt.QtWidgets.QWidget):
         button.clicked.connect(lambda _checked=False, a=action: self._run(a))
         if action.options:
             button.setContextMenuPolicy(qt.QtCore.Qt.ContextMenuPolicy.CustomContextMenu)
-            button.customContextMenuRequested.connect(lambda _pos, b=button, a=action: self._options_menu(b, a))
+            button.customContextMenuRequested.connect(lambda _pos, b=button, a=action: self._open_options(b, a))
         self.buttons[f"{group}.{action.key}"] = button
         return button
 
@@ -394,6 +394,24 @@ class KeysRow(qt.QtWidgets.QWidget):
                    "linear, stepped stays stepped, the rest Maya's default"), ("shape", "Keep the curve's shape",
                    "Tangents as steep as the curve there"))),),
     }
+
+    def _open_options(self, button, action: Action) -> None:
+        """A right click's menu - then the button let go of its hover look: the open menu holds the mouse, so the
+        button never hears that the pointer left it, and its :hover frame stayed lit."""
+        try:
+            self._options_menu(button, action)
+        finally:
+            self._unhover(button)
+
+    @staticmethod
+    def _unhover(button) -> None:
+        if button.rect().contains(button.mapFromGlobal(qt.QtGui.QCursor.pos())):
+            return
+        qt.QtWidgets.QApplication.sendEvent(button, qt.QtCore.QEvent(qt.QtCore.QEvent.Type.Leave))
+        button.setAttribute(qt.QtCore.Qt.WidgetAttribute.WA_UnderMouse, False)
+        button.style().unpolish(button)
+        button.style().polish(button)
+        button.update()
 
     def _options_menu(self, button, action: Action) -> None:
         if action.options == "default":
