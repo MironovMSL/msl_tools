@@ -363,7 +363,7 @@ class ToolGroupNumbersTest(unittest.TestCase):
         folder = Path(ky.__file__).parent
         defined = {}
         for module in ("keys_scene", "precise", "default_pose", "tangents_scene", "transfer_scene",
-                       "mirror_scene"):
+                       "mirror_scene", "align_scene"):
             tree = ast.parse((folder / f"{module}.py").read_text(encoding="utf-8"))
             defined[module] = {node.name for node in tree.body if isinstance(node, ast.FunctionDef)}
         for command in KEY_COMMANDS:
@@ -571,3 +571,15 @@ class MirrorTest(unittest.TestCase):
         row = [10.0, 2.0, "fixed", "fixed", 30.0, 25.0, 1.0, 1.0, True, True, False, False]
         self.assertEqual(self.mr.mirrored_row(row, -1)[:6], [10.0, -2.0, "fixed", "fixed", -30.0, -25.0])
         self.assertEqual(self.mr.mirrored_row(row, 1), row)
+
+
+class AlignTest(unittest.TestCase):
+    """On which frames Align keys (MEASURED on the reference, 2026-10-22)."""
+
+    def test_frames(self):
+        from msl_tools.msl.tools.maya.animation import align
+        own, target = [5, 15, 25], [1, 10, 20, 1, 12]
+        self.assertEqual(align.frames(own, target), [1, 5, 10, 12, 15, 20, 25])        # all keys
+        self.assertEqual(align.frames(own, target, (3, 20)), [5, 10, 12, 15, 20])      # a span 3-20
+        self.assertEqual(align.frames([], [], (1, 10)), [])
+        self.assertEqual(align.describe(2, 5), "Aligned 2 objects to the last selected on 5 frames")

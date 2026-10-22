@@ -12,6 +12,7 @@ buttons wrap inside it. In the reference's own order:
     CLEAN UP · COLOR KEYS
     TRANSFER   copy / paste animation or a pose - also into another Maya
     MIRROR     mirror pose, to right / to left, all keys, select opposite, the snapshot of the signs
+    ALIGN      the selected onto the last selected - now, on a span's keys, or on all keys
     PLAY
 
 What each action does and acts on: keys_scene.py / precise.py / default_pose.py (one undo step each).
@@ -241,6 +242,13 @@ GROUPS = (
                "click: flip one channel, forget", "mirror_snapshot", "snapshot", (), module="mirror_scene",
                options="mirror"),
     )),
+    ("align", "Align", "yellow", (
+        Action("objects", "Align objects", "Every selected object put onto the LAST selected one in the world (rotate "
+               "pivot and turn; scale left). A span highlighted on the timeline: keyed on every key frame of either "
+               "inside it", "align_objects", "align", (), module="align_scene", options="align"),
+        Action("all_keys", "Align objects all keys", "The same keyed on every frame where the object or the last "
+               "selected one has a key", "align_keys", "align_all_keys", (), module="align_scene", options="align_keys"),
+    )),
     ("play", "Play", "green", (
         Action("keys", "Play keys", "Playback from key to key, each pose held until the next (again: stop)",
                "play", "play", ("keys",), badge="key"),
@@ -420,6 +428,9 @@ class KeysRow(qt.QtWidgets.QWidget):
         if action.options in ("tangent", "native", "step", "cycle"):
             self._tangent_menu(button, action)
             return
+        if action.options in ("align", "align_keys"):
+            self._align_menu(button, action.options == "align")
+            return
         if action.options == "mirror":
             self._mirror_menu(button)
             return
@@ -502,6 +513,29 @@ class KeysRow(qt.QtWidgets.QWidget):
                 item = menu.addAction("Set Maya's global tangent",
                                       lambda: self._say(lambda: tangents_scene.set_global(tool)))
                 item.setToolTip(f"New keys get {action.title.lower()}s (Maya's preference)")
+        menu.exec(button.mapToGlobal(qt.QtCore.QPoint(0, button.height() + 2)))
+
+    ALIGN_PARTS = (("translate", "Position", "Only the move: the rotate pivot onto the last selected one's"),
+                   ("rotate", "Orientation", "Only the turn: the object turns about its pivot, its move stays"),
+                   ("scale", "Scale", "Only the scale: the last selected one's world scale"))
+
+    def _align_menu(self, button, now: bool) -> None:
+        """Align's right click (the reference's): one part alone - position, orientation, scale -, on this frame /
+        the highlighted span, or on all keys."""
+        from msl_tools.msl.tools.maya.animation import align_scene
+        menu = self._new_menu()
+        ways = (("align", "Align {}", ""), None, ("align_all_keys", "Align all keys", "whole"),
+                ("align_all_keys", "Align {} all keys", "")) if now else (("align_all_keys", "Align {} all keys", ""),)
+        for way in ways:
+            if way is None:
+                menu.addSeparator()
+                continue
+            call, text, whole = way
+            parts = (("", "", "Position and orientation, on every key frame of either"),) if whole                 else self.ALIGN_PARTS
+            for part, name, tip in parts:
+                item = menu.addAction(text.format(name.lower()) if part else text,
+                                      lambda c=call, p=part: self._say(lambda: getattr(align_scene, c)(p)))
+                item.setToolTip(tip)
         menu.exec(button.mapToGlobal(qt.QtCore.QPoint(0, button.height() + 2)))
 
     MIRROR_CHANNELS = ("translateX", "translateY", "translateZ", "rotateX", "rotateY", "rotateZ")

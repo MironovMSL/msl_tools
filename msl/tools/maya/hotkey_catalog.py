@@ -182,6 +182,16 @@ KEY_COMMANDS = (
          "mirror_scene.select_opposite", (), "select_all"),
     _key("MSLAnimSnapshotMirror", "Snapshot mirror settings", "The signs of the selected controls' channels kept "
          "as their axes are now (the rig in its default pose)", "mirror_scene.snapshot", (), "mirror_snapshot"),
+    _key("MSLAnimAlignObjects", "Align objects", "The selected objects onto the last selected (a highlighted "
+         "span: keyed on its key frames)", "align_scene.align", (), "align_objects"),
+    _key("MSLAnimAlignAllKeys", "Align objects all keys", "The selected objects onto the last selected on every "
+         "key frame of either", "align_scene.align_all_keys", (), "align_keys"),
+    *(_key(f"MSLAnimAlign{name}{suffix}", f"Align objects {name.lower()}{title}", f"Only the {name.lower()} "
+           f"of the selected objects onto the last selected{tip}", f"align_scene.{call}", (part,),
+           "align_keys" if suffix else "align_objects")
+      for part, name in (("translate", "Position"), ("rotate", "Orientation"), ("scale", "Scale"))
+      for suffix, title, tip, call in (("", "", "", "align"),
+                                       ("AllKeys", " all keys", " on every key frame of either", "align_all_keys"))),
     _key("MSLAnimTangentCycleFirst", "Cycle match tangent · first key", "Each curve's first key takes the last "
          "key's tangent", "tangents_scene.cycle", (True,), "tangent_cycle"),
     *(_key(f"MSLAnimTangent{name.title().replace('_', '')}", f"{title} tangent", tip, "tangents_scene.tangent",
