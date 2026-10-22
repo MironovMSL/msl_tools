@@ -23,6 +23,13 @@ AnimationPanel QPushButton#animationMode[tone="pose"] {
 AnimationPanel QPushButton#animationMode[tone="curve"] {
     border-left: 3px solid var(--success);
 }
+AnimationPanel QPushButton#animationMode[tone="tangent"] {
+    border-left: 3px solid var(--error);
+}
+AnimationPanel QPushButton#animationMode[tone="tangent"][held="true"] {
+    color: var(--error);
+    border-color: alpha(var(--error), 70%);
+}
 /* the held keys switch the mode for the next press: the button says so in its slider's color */
 AnimationPanel QPushButton#animationMode[tone="pose"][held="true"] {
     color: var(--yellow);
@@ -46,6 +53,7 @@ QLabel#animationModeChip {
 }
 QLabel#animationModeChip[tone="pose"] { border: 1px solid var(--yellow); }
 QLabel#animationModeChip[tone="curve"] { border: 1px solid var(--success); }
+QLabel#animationModeChip[tone="tangent"] { border: 1px solid var(--error); }
 AnimationPanel QLabel#animationCaption,
 AnimationPanel QLabel#animationTargets {
     color: var(--text-secondary);

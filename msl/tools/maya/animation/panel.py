@@ -1,8 +1,10 @@
 # tools/maya/animation/panel.py
-"""The Animation tool's panel: two sliders that are pulled, not set —
-    POSE   where the keys go: Tweener, Blend to Neighbors / Default / Frame / Infinity / Undo
-    CURVE  the shape of the keys: Pull | Push, Scale From ..., Smooth | Rough, Ease, Time Offset,
-           Noise | Wave, Connect to Neighbors
+"""The Animation tool's panel: three sliders that are pulled, not set —
+    POSE     where the keys go: Tweener, Blend to Neighbors / Default / Frame / Infinity / Undo
+    CURVE    the shape of the keys: Pull | Push, Scale From ..., Smooth | Rough, Ease, Time Offset,
+             Noise | Wave, Connect to Neighbors
+    TANGENT  the keys' tangents blended toward a tangent tool's: Best guess, Polished, Flow, Bounce, Auto,
+             Spline, Clamped, Linear, Flat, Plateau (tangents_scene.TangentDrag)
 — each with the mode it is on (a click on the name, or a right click on the slider, picks another;
 held modifiers switch it for one drag: Shift = Blend to Neighbors / Smooth | Rough, ...), the frames
 the "Frame" modes go to (grey squares at the slider's ends: hover = the frame, click = the current
@@ -50,7 +52,7 @@ class _SliderRow(qt.QtWidgets.QWidget):
     def __init__(self, family: str, parent=None):
         super().__init__(parent)
         self.family = family
-        self.modes = cv.POSE_MODES if family == cv.POSE else cv.CURVE_MODES
+        self.modes = {cv.POSE: cv.POSE_MODES, cv.CURVE: cv.CURVE_MODES}.get(family, cv.TANGENT_MODES)
         layout = qt.QtWidgets.QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
@@ -186,8 +188,9 @@ class _SliderRow(qt.QtWidgets.QWidget):
         """Every mode of this slider, each with a line saying what its two sides do and the key that
         switches to it for one drag; the full explanation in the row's tooltip."""
         menu = OptionMenu(self)
-        menu.add_caption("POSE SLIDER · where the keys go" if self.family == cv.POSE
-                         else "CURVE SLIDER · the shape of the keys")
+        menu.add_caption({cv.POSE: "POSE SLIDER · where the keys go",
+                          cv.CURVE: "CURVE SLIDER · the shape of the keys"}.get(
+                             self.family, "TANGENT SLIDER · the keys' tangents toward a tool's"))
         for mode in self.modes:
             chip = qt.QtWidgets.QLabel(mode.short)
             chip.setObjectName("animationModeChip")
@@ -251,7 +254,7 @@ class AnimationPanel(qt.QtWidgets.QWidget):
         self._rows = {}
         left = float(self._get("frame_left", self._get("frame", 1.0)))
         self._frames = {"left": left, "right": float(self._get("frame_right", left + 10.0))}
-        for family in (cv.POSE, cv.CURVE):
+        for family in (cv.POSE, cv.CURVE, cv.TANGENT):
             row = _SliderRow(family)
             row.frames = self._frames
             row.set_mode(str(self._get(family, row.modes[0].key)))
@@ -300,9 +303,10 @@ class AnimationPanel(qt.QtWidgets.QWidget):
         self._overshoot.setFixedWidth(WORLD_WIDTH)
         self._overshoot.setFocusPolicy(qt.QtCore.Qt.FocusPolicy.NoFocus)
         self._rows[cv.POSE].layout().addWidget(self._overshoot)
-        room = qt.QtWidgets.QWidget()
-        room.setFixedWidth(WORLD_WIDTH)
-        self._rows[cv.CURVE].layout().addWidget(room)
+        for family in (cv.CURVE, cv.TANGENT):
+            room = qt.QtWidgets.QWidget()
+            room.setFixedWidth(WORLD_WIDTH)
+            self._rows[family].layout().addWidget(room)
         world = self._rows[cv.POSE].world
         world.setChecked(bool(self._get("world", False)))
         world.toggled.connect(lambda on: self._set("world", bool(on)))
@@ -432,6 +436,13 @@ class AnimationPanel(qt.QtWidgets.QWidget):
         frame = self._frames["left"] if "left" in sides else None
         frame_right = self._frames["right"] if "right" in sides else None
         try:
+            if mode.family == cv.TANGENT:
+                from msl_tools.msl.tools.maya.animation import tangents_scene
+                self._drag = tangents_scene.TangentDrag(mode.key[2:])
+                if not self._drag:
+                    self._drag = None
+                    self._say("Nothing to act on: pick keys in the Graph Editor (or select animated objects)", "error")
+                return
             from msl_tools.msl.tools.maya.animation import scene
             world = row.world is not None and row.world.isChecked() and mode.key in WORLD_MODES
             if world:

@@ -126,8 +126,9 @@ class FeelTest(unittest.TestCase):
         self.assertIsNone(cv.mode_for_modifiers(cv.POSE, ""))
 
     def test_every_modifier_is_used_once_per_family(self):
-        for family in (cv.POSE, cv.CURVE):
-            used = [cv.normalize_modifiers(m.modifier) for m in cv.MODES if m.family == family and m.modifier]
+        for family in (cv.POSE, cv.CURVE, cv.TANGENT):
+            used = [cv.normalize_modifiers(m.modifier) for m in cv.MODES + cv.TANGENT_MODES
+                    if m.family == family and m.modifier]
             self.assertEqual(len(used), len(set(used)), family)
 
 
@@ -361,7 +362,7 @@ class ToolGroupNumbersTest(unittest.TestCase):
         from msl_tools.msl.tools.maya.hotkey_catalog import KEY_COMMANDS
         folder = Path(ky.__file__).parent
         defined = {}
-        for module in ("keys_scene", "precise", "default_pose"):
+        for module in ("keys_scene", "precise", "default_pose", "tangents_scene"):
             tree = ast.parse((folder / f"{module}.py").read_text(encoding="utf-8"))
             defined[module] = {node.name for node in tree.body if isinstance(node, ast.FunctionDef)}
         for command in KEY_COMMANDS:
@@ -369,3 +370,106 @@ class ToolGroupNumbersTest(unittest.TestCase):
             name = call.args[0].value
             module, _, function = name.rpartition(".")
             self.assertIn(function, defined[module or "keys_scene"], command.name)
+
+
+class TangentsTest(unittest.TestCase):
+    """The TANGENTS group's arithmetic (tangents.py) - the numbers measured on the reference (Maya 2025)."""
+
+    def setUp(self):
+        from msl_tools.msl.tools.maya.animation import tangents
+        self.tg = tangents
+
+    def test_best_guess_clamps_the_ends_and_the_extremes(self):
+        guess = self.tg.best_guess
+        self.assertEqual("".join(k[0] for k in guess([0, 3, 8, 5, 9, 2, 7, 4, 10, 6, 1])), "cacccccccac")
+        self.assertEqual("".join(k[0] for k in guess([0, 0, 5, 5, 5, 0])), "caaaac")
+        self.assertEqual("".join(k[0] for k in guess([1, 1, 4, 1, 1])), "cacac")
+
+    def test_the_end_rule_matches_bounce_and_polished_ends(self):
+        rule = self.tg.end_rule
+        for d, m, want in ((2.5, 2.0, 2.7222), (-1.5, 0.25, -2.2777), (2.0, -0.75, 3.2223), (2.5, 0.0, 3.6110),
+                           (0.5, 0.25, 0.6111), (2.0, 1.3438, 2.2916), (-3.5, -0.75, -4.7221)):
+            self.assertAlmostEqual(rule(d, m), want, places=3)
+
+    def test_bounce_points_straight_at_bounced_neighbors(self):
+        times, values = [1, 3, 5, 7, 9, 11], [0, 3, 8, 5, 9, 2]
+        ins = outs = [1.5, 2.0, 0.5, 0.25, -0.75, -3.5]
+        plan = self.tg.bounce(times, values, [1, 2, 3], ins, outs)
+        self.assertAlmostEqual(plan[1][0][1], 1.5)
+        self.assertAlmostEqual(plan[1][1][1], 2.5)
+        self.assertAlmostEqual(plan[3][1][1], 3.2222, places=3)    # the neighbor after is not bounced
+        everything = self.tg.bounce(times, values, range(6), ins, outs)
+        self.assertEqual(everything[0][0][0], "linear")
+        self.assertEqual(everything[5][1][0], "linear")
+        only_in = self.tg.bounce(times, values, [1, 2, 3], ins, outs, "in")
+        self.assertAlmostEqual(only_in[3][0][1], -2.3889, places=3)
+        self.assertIsNone(only_in[3][1])
+
+    def test_polished_gives_extremes_spline_and_leans_the_ends(self):
+        plan = self.tg.polished([1, 5, 9], [0, 10, 0], [0, 1, 2], [2.5, 0, -2.5], [2.5, 0, -2.5])
+        self.assertEqual(plan[1][0], ("spline", 0.0))
+        self.assertAlmostEqual(plan[0][1][1], 3.6110, places=3)
+        self.assertEqual(plan[0][0][0], "spline")                  # the outer side: Maya's spline (measured)
+        self.assertAlmostEqual(plan[2][0][1], -3.6110, places=3)
+
+    def test_options_and_cycle_match(self):
+        self.assertEqual(self.tg.option_indices(6, [1, 2], "both"), [0, 5])
+        self.assertEqual(self.tg.option_indices(6, [1, 2], "all"), list(range(6)))
+        plan = self.tg.cycle_match(4, [2.5, 0.375, -1.25, -0.75], [2.5, 0.375, -1.25, -0.75])
+        self.assertEqual(plan, {3: (("fixed", 2.5), ("fixed", 2.5))})
+        self.assertEqual(self.tg.cycle_match(4, [0, 1, 1, -0.75], [2.5, 1, 1, -0.75], True),
+                         {0: (("fixed", -0.75), ("fixed", -0.75))})
+
+    def test_flow_as_measured_on_the_reference(self):
+        line = self.tg.flow_slopes([1, 2, 3, 4, 5], [0, 1, 2, 3, 4])           # a straight line: held by the bounds
+        for got, want in zip(line, [0.5, 0.765625, 0.703125, 0.817708, 0.5]):
+            self.assertAlmostEqual(got, want, places=4)
+        bend = self.tg.flow_slopes([1, 2, 3], [0, 1, 1.5])                   # a bend: the kernel alone
+        for got, want in zip(bend, [0.4375, 0.8125, 0.1875]):
+            self.assertAlmostEqual(got, want, places=4)
+        uneven = self.tg.flow_slopes([1, 3, 4], [0, 2, 2.9])                 # the right bound wins by the spacing
+        for got, want in zip(uneven, [0.375, 0.6854, 0.4375]):
+            self.assertAlmostEqual(got, want, places=3)
+        wide = self.tg.flow_slopes([1, 2, 5, 7], [0, 3, -1, 4])              # uneven spacing, kernel only
+        self.assertAlmostEqual(wide[0], (3 * 3 + (2 * 3 - 1) * (-4 / 3)) / 8, places=6)
+
+    def test_polished_holds_and_tops_as_measured(self):
+        def plan(values):
+            times = [1 + 3 * i for i in range(len(values))]
+            slopes = [0.0] * len(values)
+            return self.tg.polished(times, values, range(len(values)), slopes, slopes)
+        top = plan([0, 10, 10, 0])                                 # an even two-key top: both spline
+        self.assertEqual((top[1][0][0], top[2][0][0]), ("spline", "spline"))
+        three = plan([0, 5, 5, 5, 0])                              # a three-key one goes flat
+        self.assertEqual([three[i][0][1] for i in (1, 2, 3)], [0.0, 0.0, 0.0])
+        self.assertEqual(plan([0, 10, 10, 20])[1][0][1], 0.0)       # a hold on the way: flat
+        lopsided = plan([0, 1.05, 0.8, 0.8, 3.56, 4.61])           # a lopsided two-key bottom: flat (measured)
+        self.assertEqual((lopsided[2][0], lopsided[3][0]), (("fixed", 0.0), ("fixed", 0.0)))
+
+    def test_polished_limits_as_measured_on_the_reference(self):
+        slopes = self.tg.polished_slopes
+        self.assertAlmostEqual(slopes([1, 2, 3], [0, 1, 21])[1][1], 1.591174, places=4)   # a steep side
+        self.assertAlmostEqual(slopes([1, 2, 3], [0, 1, 6.5])[1][1], 2.6875, places=4)    # 5.5: not yet - the kernel
+        self.assertAlmostEqual(slopes([1, 2, 3], [0, 1, -9])[1][1], -1.4306, places=3)    # an extreme past 83/17
+        self.assertEqual(slopes([1, 2, 3], [0, 1, -2])[1][0], "spline")                   # an extreme below it
+        self.assertAlmostEqual(slopes([1, 2, 4], [0, 1, -9])[1][1], -0.9538, places=3)    # uneven: rises / mean
+        line = slopes([1, 2, 3, 4, 5, 6], [0, 1, 2, 3, 4, 5])                             # a line: the bounds
+        for got, want in zip(line[1:-1], [0.4236, 0.7562, 0.6084, 0.7504]):
+            self.assertAlmostEqual(got[1], want, places=3)
+        mixed = slopes([1, 2, 3, 4, 5, 6, 7], [0, 3.55, -2.61, -2.9, 3.38, -3.38, 0])     # a step at a bottom
+        self.assertEqual((mixed[2][0], mixed[3][0]), ("spline", "spline"))
+        ends = self.tg.polished([1, 2, 3, 4], [0, 3.05, 0.42, -0.27], range(4), [0] * 4, [0] * 4)
+        self.assertAlmostEqual(ends[3][0][1], 0.0183, places=3)    # the end rule may turn against its chord
+
+    def test_the_tangent_slider_blends_the_angle_as_measured(self):
+        blend = self.tg.blend_angle
+        self.assertAlmostEqual(blend(-31.4, 56.31, 0.5), 12.455)          # half way (measured)
+        self.assertAlmostEqual(blend(36.87, 0.0, -0.5), 55.305)           # Flat to the left: steeper (measured)
+        self.assertEqual(blend(40.5, -20.556, -1.0), 90.0)                # held to +-90 (measured)
+        self.assertEqual(blend(10.0, 30.0, 0.0), 10.0)
+        self.assertEqual(cv.mode_for_modifiers(cv.TANGENT, "ctrl").key, "t_polished")
+        for mode in cv.TANGENT_MODES:
+            self.assertIn(mode.key[2:], ("best_guess", "polished", "flow", "bounce") + self.tg.NATIVE)
+
+    def test_the_end_rule_is_flat_toward_a_hold(self):
+        self.assertEqual(self.tg.end_rule(0.0, -0.8333), 0.0)

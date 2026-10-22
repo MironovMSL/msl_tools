@@ -4059,6 +4059,69 @@ hub (it already sees an unclean end) + fast anim layer merge · 10 Master Spline
   (4) The number boxes and the number fields take the focus only by a click (a window coming to the front hands
   them nothing), Enter / Esc give it back; OVERSHOOT left the header for the end of the pose slider's row, beside
   the number box (the curve row keeps the same room); it is in the settings menu too.
+  TANGENTS (2026-10-22, the next group of the reference's list; the tangent SLIDER comes after): a red group after
+  Baking - Cycle match, Best guess, Polished, Flow, Bounce, then Maya's Auto / Spline / Clamped / Linear / Flat /
+  Step / Plateau (icons `tangent_*`). `tangents.py` (Qt-free arithmetic, slopes per frame, angle = atan) +
+  `tangents_scene.py` (`tangent(tool, option, sides)`, `cycle(to_first)`, `set_global(tool)`; one undo step
+  "MSL Tangents"; the KEYS row's Scope). Right click = the reference's menu, applied at once: In / Out tangent,
+  First / Last key / Both ends (each curve's own end keys), All keys; natives add "Set Maya's global tangent"; Step
+  has only All keys + global; Cycle match: First / Last key; Shift+click on Cycle match = the first key takes the
+  last's. 15 hotkeys MSLAnimTangent*. MEASURED on the reference (Maya 2025, its buttons clicked with a REAL mouse -
+  synthetic clicks and its signals do nothing; its toolbar buttons are findable by the instance attributes `icon`
+  ("bounce_tangent") and the group name; the timeline bar and the Graph Editor bar act the same: picked keys, else
+  the current frame): BEST GUESS = ends and strict extremes clamped, the rest auto (exact). BOUNCE = each side straight
+  at its neighbor when that neighbor's facing side is bounced too, else the END RULE (13 d - 4 m) / 9 with the
+  neighbor's tangent m as it is (exact to 0.0001 on every probe; flat toward a hold, d = 0 - otherwise taken as it
+  comes, also against the chord; the curve's first in / last out linear). CYCLE MATCH = the last key fixed to the
+  first key's IN angle on both sides (a linear first key gives 0), Shift = the first takes the last's (exact). STEP =
+  out tangent only.
+  FLOW (`flow_kernel` + `flow_slopes`, FOUND 2026-10-22 by 1-D scans on the reference, then 606 / 606 keys of random
+  even and uneven curves exact, and 171 / 171 through our own button in Maya): every key fixed; a KERNEL of the chord
+  slopes d around the key, the curve held flat outside its keys - even spacing (-d[i-2] + 5 d[i-1] + 3 d[i] +
+  d[i+1]) / 8 (= the average of the two chords + the curvature at the key before and after / 8: momentum carried
+  FORWARD, not symmetric), uneven with c = 2 h[i] / (h[i-1] + h[i]): (-(2-c) d[i-2] + (8-3c) d[i-1] + (2+c) d[i] +
+  c (2 h[i+1]/h[i] - 1) d[i+1]) / 8 (ends: the missing interval = the one beside it); then left to right two BOUNDS,
+  left = 7/6 d[i-1] - 1/3 m[i-1] (the key before as Flow left it) - 5/24 F, right = 7/6 d[i] - 1/3 F[i+1] - 5/24 F:
+  F between them stays, beyond both the bound nearer to it, each distance weighted by the interval on its side. They
+  bite where the curve runs nearly straight (a line: 0.5 at the ends, ~0.72 between).
+  POLISHED (`polished_slopes`, the same day; 240 / 240 even monotonic keys, 599 / 606 random, 163 / 171 random uneven
+  through our button): the kernel and bounds of Flow but 4/3 as strong (14/9 d - 4/9 m - 11/18 F; the curve's ends
+  count with their chord); a LIMIT where one side is far steeper, worked on the RISES and divided by the mean
+  interval: a monotonic key = the smaller root of m (S - m) = 25/17 small S, S = small + big (exact to 1e-5), when 3
+  d_big h_big > (10 h_big + 7 h_small) d_small (small side left) / 12 d_big h_big >= (35 h_big + 28 h_small) d_small
+  (right) - thresholds 17/3 and 21/4 when even; an EXTREME gets Maya's SPLINE (not "left as it is" - the first
+  probe had spline tangents), past a rise ratio of 83/17 a limit along its big side read from a MEASURED curve
+  (`POLISH_EXTREME_CURVE`: no formula found, its value dips under 25/17 near ratio 11); holds flat; the curve's ends
+  by the END RULE, their outer side spline. A TOP / BOTTOM TWO KEYS WIDE (a small step or none between them,
+  `two_key_top`) = both spline when the two sides are about as big - the band 0.65..1.55 is FITTED, not found (sides 5
+  and 6 round a step of 1 fall out of it on the reference); lopsided = each key its own (a hold flat). The 8 keys of
+  171 still off are uneven spacing near those limits. Checked: tests (TangentsTest), the reference vs our
+  `tangents_scene` in the test Maya, one undo. NOT by a real hand: the new right-click menus of our row.
+  LOCKS (the user saw our tangents broken): the reference NEVER breaks a tangent - its keys stay locked even with
+  different in / out angles. Measured: two angles set in ONE keyTangent call keep the lock; one side set alone on a
+  locked key drags the other (cmds and the API alike); unlock - set - lock again keeps both. `_write` does that and
+  puts back the lock as it was; every tool checked locked after, the untouched side as it was, one undo.
+  TANGENT SLIDER (2026-10-22, the next group of the reference's list): a THIRD slider row in the window (red, tone
+  "tangent"; `curves.TANGENT_MODES`, keys "t_<tool>": Blend to Best Guess / Polished / Flow / Bounce / Auto / Spline /
+  Clamped / Linear / Flat / Plateau; held at the press, as on the reference: Ctrl+Alt Best guess, Ctrl Polished,
+  Shift Flow, Alt Bounce, Ctrl+Shift Auto, Alt+Shift Spline, Ctrl+Alt+Shift Flat - Clamped, Linear, Plateau from
+  the menu; the reference has a slider of its own for each in its bottom bar, and two stacked ones in its Graph
+  Editor bar). `tangents_scene.TangentDrag(tool)` is the drag (the panel's `_start` picks it for the family;
+  `scene.apply_once` routes "t_" modes to it, so `animation.nudge` works too). MEASURED on the reference (its
+  SliderWidgets found by their `name` attribute "blendToFlowTangent"..., each mark clicked with a real mouse on a
+  probe of random FIXED tangents): each picked key's in and out ANGLE = now + w (target - now) - `tangents.
+  blend_angle`, held to +-90 -, type fixed; the left side goes AWAY from the target (Flat: steeper - "negative
+  values force easing"); marks 0.05 / 0.15 / 0.5 / 1 like the other sliders; at the RIGHT END a native target is set
+  as its kind (auto, spline, clamped, linear, flat, plateau type), the smart ones stay fixed; the tangent lock is
+  kept (in and out may differ on a locked key). The target = the angles Maya reports after the tool (auto / plateau
+  report 0 on extremes and ends - real, not a quirk); ours gets it by WRITING the tool for a moment outside the undo
+  queue, reading it back and putting the keys back - exactly what the tool's button leaves; a side the tool doesn't
+  touch stays as it is. Live drag outside the undo queue, the release ONE undo step ("MSL Tangents"), Esc puts back.
+  Compared key for key in the same Maya: 10 sliders x -50 / 50 / 100 % x 11 keys (zigzag, monotonic, a hold, half
+  locked, uneven spacing): 321 / 330 sides the same; the 9 off are Polished / Flow targets on the uneven keys - the
+  reference's SLIDER gives one key a different in and out there (0.1 - 1 degree) where its button gives one.
+  Checked through the panel (drag, release + one undo, Esc, the number box at 100 %, a real click at the end = flat
+  type). Not tried by a real hand: dragging the knob.
 
 ## MSL Scripts (inside Maya)
 

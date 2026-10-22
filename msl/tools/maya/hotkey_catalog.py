@@ -157,6 +157,25 @@ KEY_COMMANDS = (
     _key("MSLAnimPlayTwos", "Play on twos", "Playback every second frame (again: stop)", "play", (2,), "play"),
     _key("MSLAnimPlayThrees", "Play on threes", "Playback every third frame", "play", (3,), "play"),
     _key("MSLAnimPlayFours", "Play on fours", "Playback every fourth frame", "play", (4,), "play"),
+    _key("MSLAnimTangentCycle", "Cycle match tangent", "Each curve's last key takes the first key's tangent",
+         "tangents_scene.cycle", (), "tangent_cycle"),
+    _key("MSLAnimTangentCycleFirst", "Cycle match tangent · first key", "Each curve's first key takes the last "
+         "key's tangent", "tangents_scene.cycle", (True,), "tangent_cycle"),
+    *(_key(f"MSLAnimTangent{name.title().replace('_', '')}", f"{title} tangent", tip, "tangents_scene.tangent",
+           (name,), f"tangent_{name}")
+      for name, title, tip in (
+          ("best_guess", "Best guess", "Maya's own tangents picked by the keys (clamped on ends and extremes, auto "
+                                       "between) on the keys in play"),
+          ("polished", "Polished", "Smooth tangents without overshoot on the keys in play"),
+          ("flow", "Flow", "Smooth tangents carrying the momentum through the keys in play"),
+          ("bounce", "Bounce", "Sharp tangents pointing at the neighbor keys"),
+          ("auto", "Auto", "Maya's auto tangents on the keys in play"),
+          ("spline", "Spline", "Maya's spline tangents on the keys in play"),
+          ("clamped", "Clamped", "Maya's clamped tangents on the keys in play"),
+          ("linear", "Linear", "Maya's linear tangents on the keys in play"),
+          ("flat", "Flat", "Maya's flat tangents on the keys in play"),
+          ("step", "Step", "Maya's stepped out tangents on the keys in play"),
+          ("plateau", "Plateau", "Maya's plateau tangents on the keys in play"))),
 )
 
 TOOL_COMMANDS = (

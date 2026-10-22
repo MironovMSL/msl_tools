@@ -362,6 +362,7 @@ BlendSlider {
 }
 BlendSlider[tone="pose"]  { qproperty-fillColor: var(--yellow); }
 BlendSlider[tone="curve"] { qproperty-fillColor: var(--success); }
+BlendSlider[tone="tangent"] { qproperty-fillColor: var(--error); }
 
 /* --- BarStrip: a handful of measurements as thin bars ------------------------------- */
 

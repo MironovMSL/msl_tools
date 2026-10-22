@@ -27,6 +27,7 @@ from typing import Callable
 
 POSE = "pose"
 CURVE = "curve"
+TANGENT = "tangent"
 
 TWEEN_FRACTIONS = (0.0, 1 / 8, 1 / 6, 1 / 4, 1 / 3, 1 / 2, 2 / 3, 3 / 4, 5 / 6, 7 / 8, 1.0)
 # The reference's marks, MEASURED (a probe of 11 keys, 5 picked, every mark clicked): 0.05, 0.15, 0.5 and 1 a
@@ -138,7 +139,36 @@ MODES = (
          "to the key after"),
 )
 
-BY_KEY = {mode.key: mode for mode in MODES}
+# The TANGENT slider (tangents_scene.TangentDrag does the work, not `apply`): each mode blends the picked keys'
+# tangent ANGLES toward what one tangent tool would give them - measured on the reference (a probe with fixed random
+# tangents, every mark clicked): angle = now + weight x (target - now) on each side, held to +-90 degrees; the left
+# side goes AWAY from the target ("negative values force easing" for Flat); the marks those of the other sliders; at
+# the right end a native kind (auto, spline, ...) is SET as that kind, the others stay fixed.
+TANGENT_MODES = (
+    Mode("t_best_guess", "Blend to Best Guess", "BG", TANGENT, "Toward the tangents Best guess would give: clamped "
+         "on the ends and the extremes, auto between.", "away from it", "toward best guess", modifier="Ctrl+Alt"),
+    Mode("t_polished", "Blend to Polished", "PO", TANGENT, "Toward Polished: smooth, kept by the keys, overshoots "
+         "kept to a minimum.", "away from it", "toward polished", modifier="Ctrl"),
+    Mode("t_flow", "Blend to Flow", "FL", TANGENT, "Toward Flow: momentum carried from the neighbors - the "
+         "movement flows on, even if that costs a little overshoot.", "away from it", "toward flow",
+         modifier="Shift"),
+    Mode("t_bounce", "Blend to Bounce", "BO", TANGENT, "Toward Bounce: sharp, straight at the neighbors - 'hitting "
+         "a wall', no easing in or out.", "away from it", "toward bounce", modifier="Alt"),
+    Mode("t_auto", "Blend to Auto", "AU", TANGENT, "Toward Maya's Auto tangents (at the right end they ARE auto).",
+         "away from it", "toward auto", modifier="Ctrl+Shift"),
+    Mode("t_spline", "Blend to Spline", "SP", TANGENT, "Toward Maya's Spline tangents (at the right end they ARE "
+         "spline).", "away from it", "toward spline", modifier="Alt+Shift"),
+    Mode("t_clamped", "Blend to Clamped", "CL", TANGENT, "Toward Maya's Clamped tangents (at the right end they "
+         "ARE clamped).", "away from it", "toward clamped"),
+    Mode("t_linear", "Blend to Linear", "LI", TANGENT, "Toward Maya's Linear tangents (at the right end they ARE "
+         "linear).", "away from it", "toward linear"),
+    Mode("t_flat", "Blend to Flat", "FT", TANGENT, "Toward flat tangents; to the left the tangents get steeper - "
+         "the keys ease harder.", "steeper", "flatter", modifier="Ctrl+Alt+Shift"),
+    Mode("t_plateau", "Blend to Plateau", "PL", TANGENT, "Toward Maya's Plateau tangents (at the right end they "
+         "ARE plateau).", "away from it", "toward plateau"),
+)
+
+BY_KEY = {mode.key: mode for mode in MODES + TANGENT_MODES}
 POSE_MODES = tuple(mode for mode in MODES if mode.family == POSE)
 CURVE_MODES = tuple(mode for mode in MODES if mode.family == CURVE)
 
@@ -149,7 +179,7 @@ def mode_for_modifiers(family: str, modifiers: str) -> "Mode | None":
     wanted = normalize_modifiers(modifiers)
     if not wanted:
         return None
-    for mode in MODES:
+    for mode in MODES + TANGENT_MODES:
         if mode.family == family and mode.modifier and normalize_modifiers(mode.modifier) == wanted:
             return mode
     return None

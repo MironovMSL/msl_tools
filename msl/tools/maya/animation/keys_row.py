@@ -142,6 +142,36 @@ GROUPS = (
         Action("paste_tint", "Paste tint key times", "The selection's keys on the copied times take the copied "
                "color - no key is added", "paste", "paste_tint", (), badge="col"),
     )),
+    ("tangents", "Tangents", "red", (
+        Action("cycle", "Cycle match tangent", "The last key of each curve takes the first key's tangent, so a cycle "
+               "flows through its seam. Shift: the first key takes the last's. Right click: first / last key",
+               "tangent_cycle", "cycle", (), module="tangents_scene", options="cycle"),
+        Action("best_guess", "Best guess tangent", "Maya's own tangents picked by the keys: clamped on the ends and "
+               "the extremes, auto between - a better first pass than auto everywhere", "tangent_best_guess",
+               "tangent", ("best_guess",), module="tangents_scene", options="tangent"),
+        Action("polished", "Polished tangent", "Smooth without overshooting: extremes and holds stay, the keys "
+               "between ease through, the ends lean into the curve", "tangent_polished", "tangent", ("polished",),
+               module="tangents_scene", options="tangent"),
+        Action("flow", "Flow tangent", "The momentum carried through every key - smooth even if it overshoots "
+               "(a tail wagging)", "tangent_flow", "tangent", ("flow",), module="tangents_scene", options="tangent"),
+        Action("bounce", "Bounce tangent", "Sharp: each side points at its neighbor - hitting a wall, no easing. "
+               "On in tangents only: shark fins", "tangent_bounce", "tangent", ("bounce",), module="tangents_scene",
+               options="tangent"),
+        Action("auto", "Auto tangent", "Maya's auto tangents", "tangent_auto", "tangent", ("auto",),
+               module="tangents_scene", options="native"),
+        Action("spline", "Spline tangent", "Maya's spline tangents", "tangent_spline", "tangent", ("spline",),
+               module="tangents_scene", options="native"),
+        Action("clamped", "Clamped tangent", "Maya's clamped tangents", "tangent_clamped", "tangent", ("clamped",),
+               module="tangents_scene", options="native"),
+        Action("linear", "Linear tangent", "Maya's linear tangents", "tangent_linear", "tangent", ("linear",),
+               module="tangents_scene", options="native"),
+        Action("flat", "Flat tangent", "Maya's flat tangents", "tangent_flat", "tangent", ("flat",),
+               module="tangents_scene", options="native"),
+        Action("step", "Step tangent", "Maya's stepped tangents (the out side)", "tangent_step", "tangent",
+               ("step",), module="tangents_scene", options="step"),
+        Action("plateau", "Plateau tangent", "Maya's plateau tangents", "tangent_plateau", "tangent", ("plateau",),
+               module="tangents_scene", options="native"),
+    )),
     ("clean", "Clean up", "orange", (
         Action("snap", "Smart snap", "Keys between frames to the nearest whole frame, holding the pose there",
                "snap_grid", "smart_snap", ()),
@@ -330,6 +360,9 @@ class KeysRow(qt.QtWidgets.QWidget):
         if action.options == "default":
             self._default_menu(button)
             return
+        if action.options in ("tangent", "native", "step", "cycle"):
+            self._tangent_menu(button, action)
+            return
         menu = self._new_menu()
         first = True
         for key, caption, choices in self.OPTIONS.get(action.options, ()):
@@ -370,12 +403,53 @@ class KeysRow(qt.QtWidgets.QWidget):
                                                                         module="default_pose")))
         menu.exec(button.mapToGlobal(qt.QtCore.QPoint(0, button.height() + 2)))
 
+    TANGENT_LINES = (("in", "In tangent", "Only the in tangents of the keys in play"),
+                     ("out", "Out tangent", "Only the out tangents"), None,
+                     ("first", "First key", "Each curve's first key"), ("last", "Last key", "Each curve's last key"),
+                     ("both", "Both ends", "Each curve's first and last key"), None,
+                     ("all", "All keys", "Every key of the curves in play"))
+
+    def _tangent_menu(self, button, action: Action) -> None:
+        """A tangent tool's right click (the reference's): a side, the curves' end keys, or all their keys -
+        each runs the tool at once."""
+        from msl_tools.msl.tools.maya.animation import tangents_scene
+        menu = self._new_menu()
+        tool = action.args[0] if action.args else ""
+        if action.options == "cycle":
+            menu.addAction("First key  ·  takes the last key's tangent",
+                           lambda: self._say(lambda: tangents_scene.cycle(True)))
+            menu.addAction("Last key  ·  takes the first key's tangent",
+                           lambda: self._say(lambda: tangents_scene.cycle(False)))
+        else:
+            lines = (("all", "All keys", "Every key of the curves in play"),) if action.options == "step" \
+                else self.TANGENT_LINES
+            for line in lines:
+                if line is None:
+                    menu.addSeparator()
+                    continue
+                key, text, tip = line
+                if key in ("in", "out"):
+                    do = (lambda k=key: tangents_scene.tangent(tool, "selected", k))
+                else:
+                    do = (lambda k=key: tangents_scene.tangent(tool, k))
+                item = menu.addAction(text, lambda d=do: self._say(d))
+                item.setToolTip(tip)
+            if action.options in ("native", "step"):
+                menu.addSeparator()
+                item = menu.addAction("Set Maya's global tangent",
+                                      lambda: self._say(lambda: tangents_scene.set_global(tool)))
+                item.setToolTip(f"New keys get {action.title.lower()}s (Maya's preference)")
+        menu.exec(button.mapToGlobal(qt.QtCore.QPoint(0, button.height() + 2)))
+
     def _choose(self, key: str, value: str, text: str) -> None:
         self._put(key, value)
         self.said.emit(text, "")
 
     def _run(self, action: Action) -> None:
         args = action.args
+        if action.call == "cycle":               # Shift: the first key takes the last's (the reference's)
+            modifiers = qt.QtWidgets.QApplication.keyboardModifiers()
+            args = (bool(modifiers & qt.QtCore.Qt.KeyboardModifier.ShiftModifier),)
         if action.module == "precise":           # Ctrl = a tenth of the step, Shift = five steps (precise.py)
             modifiers = qt.QtWidgets.QApplication.keyboardModifiers()
             args = args + (ky.precise_times(bool(modifiers & qt.QtCore.Qt.KeyboardModifier.ControlModifier),

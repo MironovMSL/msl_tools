@@ -663,7 +663,11 @@ def make_drag(mode: str, frame: "float | None" = None, frame_right: "float | Non
 
 def apply_once(mode: str, weight: float, frame: "float | None" = None, say: bool = False) -> str:
     """One change without a drag (a click on a mark, a hotkey): one undo step. Returns it in words."""
-    drag = make_drag(mode, frame)
+    if cv.BY_KEY[mode].family == cv.TANGENT:
+        from msl_tools.msl.tools.maya.animation.tangents_scene import TangentDrag
+        drag = TangentDrag(mode[2:])
+    else:
+        drag = make_drag(mode, frame)
     if not drag:
         text = "Nothing to act on: select animated objects (or keys in the Graph Editor)"
     else:
