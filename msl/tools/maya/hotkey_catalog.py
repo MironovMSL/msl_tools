@@ -192,6 +192,17 @@ KEY_COMMANDS = (
       for part, name in (("translate", "Position"), ("rotate", "Orientation"), ("scale", "Scale"))
       for suffix, title, tip, call in (("", "", "", "align"),
                                        ("AllKeys", " all keys", " on every key frame of either", "align_all_keys"))),
+    *(_key(f"MSLAnim{verb}Xform{noun}{suffix}", f"{verb} xform {title}{label}", f"{verb} the "
+           f"{title}{tip}", f"xform_scene.{verb.lower()}_{what}{tail}", (), icon)
+      for what, noun, title, icon in (("relationship", "Relationship", "relationship", "link"),
+                                      ("world", "World", "world space", "world"))
+      for verb, suffix, label, tip, tail in (
+          ("Copy", "", "", " of the selection (a relationship: to the last selected)", ""),
+          ("Copy", "Range", " · playback range", " on every frame of the playback range", "_range"),
+          ("Paste", "", "", " onto the selection (a highlighted span: its key frames)", ""),
+          ("Paste", "NextFrame", " · next frame", " one frame on, keyed", "_next"),
+          ("Paste", "AllKeys", " · all keys", " on every key frame", "_all_keys"),
+          ("Paste", "Bake", " · bake frames", " on every frame of the playback range", "_bake"))),
     _key("MSLAnimTangentCycleFirst", "Cycle match tangent · first key", "Each curve's first key takes the last "
          "key's tangent", "tangents_scene.cycle", (True,), "tangent_cycle"),
     *(_key(f"MSLAnimTangent{name.title().replace('_', '')}", f"{title} tangent", tip, "tangents_scene.tangent",

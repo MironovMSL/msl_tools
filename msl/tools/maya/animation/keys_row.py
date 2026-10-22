@@ -13,6 +13,7 @@ buttons wrap inside it. In the reference's own order:
     TRANSFER   copy / paste animation or a pose - also into another Maya
     MIRROR     mirror pose, to right / to left, all keys, select opposite, the snapshot of the signs
     ALIGN      the selected onto the last selected - now, on a span's keys, or on all keys
+    XFORM      copy / paste the relationship to a parent, or the world space - also into another Maya
     PLAY
 
 What each action does and acts on: keys_scene.py / precise.py / default_pose.py (one undo step each).
@@ -249,6 +250,23 @@ GROUPS = (
         Action("all_keys", "Align objects all keys", "The same keyed on every frame where the object or the last "
                "selected one has a key", "align_keys", "align_all_keys", (), module="align_scene", options="align_keys"),
     )),
+    ("xform", "Xform", "violet", (
+        Action("copy_relationship", "Copy xform relationship", "The selected objects' place relative to the LAST "
+               "selected (their parent) - no constraint, nothing in the scene; clipboard and file, for another Maya "
+               "too. Right click: on every frame of the playback range", "link", "copy_relationship", (), badge="C",
+               module="xform_scene", options="xform_relationship"),
+        Action("paste_relationship", "Paste xform relationship", "The selected children put where the copied "
+               "relationship and their parent (the last selected, not moved) say; a span highlighted: its key "
+               "frames, or every frame of a span with none. Right click: next frame, all keys, bake", "link",
+               "paste_relationship", (), badge="P", module="xform_scene", options="xform_relationship"),
+        Action("copy_world", "Copy xform world space", "The selected objects' world place (rotate pivot and turn) - "
+               "clipboard and file. Right click: on every frame of the playback range", "world", "copy_world", (),
+               badge="C", module="xform_scene", options="xform_world"),
+        Action("paste_world", "Paste xform world space", "The copied world place given to the selection (one copied "
+               "object onto every selected); a span highlighted: its key frames, or every frame of a span with none. "
+               "Right click: next frame, all keys, bake", "world", "paste_world", (), badge="P",
+               module="xform_scene", options="xform_world"),
+    )),
     ("play", "Play", "green", (
         Action("keys", "Play keys", "Playback from key to key, each pose held until the next (again: stop)",
                "play", "play", ("keys",), badge="key"),
@@ -428,6 +446,9 @@ class KeysRow(qt.QtWidgets.QWidget):
         if action.options in ("tangent", "native", "step", "cycle"):
             self._tangent_menu(button, action)
             return
+        if action.options in ("xform_relationship", "xform_world"):
+            self._xform_menu(button, action.options == "xform_relationship")
+            return
         if action.options in ("align", "align_keys"):
             self._align_menu(button, action.options == "align")
             return
@@ -513,6 +534,30 @@ class KeysRow(qt.QtWidgets.QWidget):
                 item = menu.addAction("Set Maya's global tangent",
                                       lambda: self._say(lambda: tangents_scene.set_global(tool)))
                 item.setToolTip(f"New keys get {action.title.lower()}s (Maya's preference)")
+        menu.exec(button.mapToGlobal(qt.QtCore.QPoint(0, button.height() + 2)))
+
+    def _xform_menu(self, button, relationship: bool) -> None:
+        """Copy / paste xform's right click (the reference's): the copy over the whole playback range, the paste on
+        the next frame, on all keys, or baked over the playback range."""
+        from msl_tools.msl.tools.maya.animation import xform_scene
+        what = "relationship" if relationship else "world"
+        title = "relationship" if relationship else "world space"
+        menu = self._new_menu()
+        for line in (
+                (f"Copy {title}", f"copy_{what}", "On this frame"),
+                (f"Copy {title} · playback range", f"copy_{what}_range", "Every frame of the playback range: a "
+                 "paste then takes each frame's own"), None,
+                (f"Paste {title}", f"paste_{what}", "On this frame (a highlighted span: its key frames)"),
+                (f"Paste {title} · next frame", f"paste_{what}_next", "One frame on, keyed"),
+                (f"Paste {title} · all keys", f"paste_{what}_all_keys",
+                 "Every key frame of the object" + (" or its parent" if relationship else "")),
+                (f"Paste {title} · bake frames", f"paste_{what}_bake", "Every frame of the playback range, keyed")):
+            if line is None:
+                menu.addSeparator()
+                continue
+            text, call, tip = line
+            item = menu.addAction(text, lambda c=call: self._say(lambda: getattr(xform_scene, c)()))
+            item.setToolTip(tip)
         menu.exec(button.mapToGlobal(qt.QtCore.QPoint(0, button.height() + 2)))
 
     ALIGN_PARTS = (("translate", "Position", "Only the move: the rotate pivot onto the last selected one's"),

@@ -70,14 +70,33 @@ def put(node: str, target: str, parts=WHOLE) -> list:
     rotate pivot over and leaves its turn, Scale = the target's world scale over the object's parent's, axis by
     axis); the channels it set."""
     import maya.api.OpenMaya as om
+    world = _matrix(f"{target}.worldMatrix[0]")
+    there = om.MPoint(cmds.xform(target, query=True, worldSpace=True, rotatePivot=True))
+    scale = om.MTransformationMatrix(world).scale(om.MSpace.kWorld) if "scale" in parts else None
+    return put_to(node, _turn(world), there, parts, scale)
+
+
+def pivot_matrix(node: str):
+    """The node's place as one matrix: its world turn, its ROTATE PIVOT as the position (what Align, the world
+    space copy and the relationship copy carry - measured)."""
+    import maya.api.OpenMaya as om
+    matrix = om.MMatrix(_turn(_matrix(f"{node}.worldMatrix[0]")))
+    x, y, z = cmds.xform(node, query=True, worldSpace=True, rotatePivot=True)
+    matrix[12], matrix[13], matrix[14] = x, y, z
+    return matrix
+
+
+def put_to(node: str, turn, there, parts=WHOLE, scale=None) -> list:
+    """`node` given the world turn `turn` (a rotation matrix) with its rotate pivot at `there` (an MPoint), on the
+    current frame - by its own channels; the channels it set."""
+    import maya.api.OpenMaya as om
     unit = om.MAngle.uiUnit()
     parent = _parent(node)
     done = []
     if "rotate" in parts:
         order = cmds.getAttr(f"{node}.rotateOrder")
         # world turn = rotate axis x rotate x joint orient x parent  ->  rotate = Ra^-1 x W x (Jo x P)^-1
-        wanted = _turn(_matrix(f"{target}.worldMatrix[0]"))
-        local = _rotate_axis(node).inverse() * wanted * (_orient(node) * _turn(parent)).inverse()
+        local = _rotate_axis(node).inverse() * turn * (_orient(node) * _turn(parent)).inverse()
         now = [om.MAngle(v, unit).asRadians() for v in cmds.getAttr(f"{node}.rotate")[0]]
         euler = om.MTransformationMatrix(local).rotation().reorder(order)
         euler = euler.closestSolution(om.MEulerRotation(*now, order))
@@ -85,18 +104,16 @@ def put(node: str, target: str, parts=WHOLE) -> list:
             if _free(node, attribute):
                 cmds.setAttr(f"{node}.{attribute}", om.MAngle(value).asUnits(unit))
                 done.append(attribute)
-    if "scale" in parts:
-        wanted = om.MTransformationMatrix(_matrix(f"{target}.worldMatrix[0]")).scale(om.MSpace.kWorld)
+    if "scale" in parts and scale is not None:
         above = om.MTransformationMatrix(parent).scale(om.MSpace.kWorld)
-        for attribute, value, under in zip(SCALES, wanted, above):
+        for attribute, value, under in zip(SCALES, scale, above):
             if _free(node, attribute) and abs(under) > 1e-12:
                 cmds.setAttr(f"{node}.{attribute}", value / under)
                 done.append(attribute)
     if "translate" in parts:
-        # the object's rotate pivot onto the target's, the difference brought into the parent's space
-        there = om.MPoint(cmds.xform(target, query=True, worldSpace=True, rotatePivot=True))
+        # the object's rotate pivot onto `there`, the difference brought into the parent's space
         here = om.MPoint(cmds.xform(node, query=True, worldSpace=True, rotatePivot=True))
-        shift = (there - here) * parent.inverse()
+        shift = (om.MPoint(there) - here) * parent.inverse()
         for attribute, delta in zip(CHANNELS[:3], (shift.x, shift.y, shift.z)):
             if not _free(node, attribute):
                 continue

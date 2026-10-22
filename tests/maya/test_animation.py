@@ -363,7 +363,7 @@ class ToolGroupNumbersTest(unittest.TestCase):
         folder = Path(ky.__file__).parent
         defined = {}
         for module in ("keys_scene", "precise", "default_pose", "tangents_scene", "transfer_scene",
-                       "mirror_scene", "align_scene"):
+                       "mirror_scene", "align_scene", "xform_scene"):
             tree = ast.parse((folder / f"{module}.py").read_text(encoding="utf-8"))
             defined[module] = {node.name for node in tree.body if isinstance(node, ast.FunctionDef)}
         for command in KEY_COMMANDS:
@@ -583,3 +583,27 @@ class AlignTest(unittest.TestCase):
         self.assertEqual(align.frames(own, target, (3, 20)), [5, 10, 12, 15, 20])      # a span 3-20
         self.assertEqual(align.frames([], [], (1, 10)), [])
         self.assertEqual(align.describe(2, 5), "Aligned 2 objects to the last selected on 5 frames")
+
+
+class XformTest(unittest.TestCase):
+    """Which copied frame a paste takes and where it keys (MEASURED on the reference, 2026-10-22)."""
+
+    def setUp(self):
+        from msl_tools.msl.tools.maya.animation import xform
+        self.xf = xform
+
+    def test_plan(self):
+        xf, keys = self.xf, [1, 10, 20, 1, 15]
+        self.assertIsNone(xf.plan(xf.NOW, keys, 10))                              # values only
+        self.assertEqual(xf.plan(xf.NOW, keys, 10, (5, 20)), [10, 15, 20])        # a span's key frames
+        self.assertEqual(xf.plan(xf.NOW, keys, 10, (2, 8)), [2, 3, 4, 5, 6, 7, 8])  # a span with none: baked
+        self.assertEqual(xf.plan(xf.NEXT, keys, 10), [11.0])
+        self.assertEqual(xf.plan(xf.ALL, keys, 10), [1, 10, 15, 20])
+        self.assertEqual(len(xf.plan(xf.BAKE, keys, 10, None, (1, 120))), 120)
+
+    def test_copied_frame(self):
+        frames = {"1": "a", "5": "b", "9": "c"}
+        self.assertEqual(self.xf.at(frames, 5), "b")
+        self.assertEqual(self.xf.at(frames, 30), "c")
+        self.assertEqual(self.xf.at({"1": "a"}, 40), "a")
+        self.assertIsNone(self.xf.at({}, 1))
