@@ -8,7 +8,11 @@ buttons wrap inside it. In the reference's own order:
     NUDGE      ◀ [N] ▶ and the rest of nudging, spacing and inbetweens
     DEFAULT    reset the pose (all, move, rotate, scale, all three), snapshot of a preferred default pose
     BAKE       bake on 1-4 / N, from the last selected, infinity; share / copy / paste key times
-    CLEAN UP · COLOR KEYS · PLAY   (phase 2's other tools)
+    TANGENTS   cycle match, best guess, polished, flow, bounce and Maya's own types
+    CLEAN UP · COLOR KEYS
+    TRANSFER   copy / paste animation or a pose - also into another Maya
+    MIRROR     mirror pose, to right / to left, all keys, select opposite, the snapshot of the signs
+    PLAY
 
 What each action does and acts on: keys_scene.py / precise.py / default_pose.py (one undo step each).
 The row only says what happened (`said(text, state)` -> the window's header) and keeps its numbers
@@ -219,6 +223,24 @@ GROUPS = (
                "here. One copied object goes onto every selected one; several pair by name, else by order",
                "paste", "paste_pose", (), badge="P", module="transfer_scene", options="transfer_pose"),
     )),
+    ("mirror", "Mirror", "orange", (
+        Action("pose", "Mirror pose", "The selected controls' pose onto their opposites (lf_ <-> rt_, _L <-> _R); both "
+               "sides selected swap, a middle control mirrors onto itself. A span highlighted on the timeline: its "
+               "keys", "mirror_sides", "mirror_pose", (), module="mirror_scene", options="mirror"),
+        Action("to_right", "Mirror to right", "The right side takes the left side's pose - whichever of a pair is "
+               "selected", "mirror_to_right", "mirror_to_right", (), module="mirror_scene", options="mirror"),
+        Action("to_left", "Mirror to left", "The left side takes the right side's pose", "mirror_to_left",
+               "mirror_to_left", (), module="mirror_scene", options="mirror"),
+        Action("all_keys", "Mirror all keys", "The whole animation onto the opposites (both sides selected swap): "
+               "their curves replaced, values and tangents mirrored", "mirror_keys", "mirror_all_keys", (),
+               module="mirror_scene", options="mirror"),
+        Action("opposite", "Select opposite", "The opposites of the selected controls selected instead",
+               "select_all", "select_opposite", (), module="mirror_scene"),
+        Action("snapshot", "Snapshot mirror settings", "Run once per rig, with it in its default pose (T-pose): "
+               "each channel's sign kept as the controls' axes are now - for rigs whose groups say nothing. Right "
+               "click: flip one channel, forget", "mirror_snapshot", "snapshot", (), module="mirror_scene",
+               options="mirror"),
+    )),
     ("play", "Play", "green", (
         Action("keys", "Play keys", "Playback from key to key, each pose held until the next (again: stop)",
                "play", "play", ("keys",), badge="key"),
@@ -380,6 +402,9 @@ class KeysRow(qt.QtWidgets.QWidget):
         if action.options in ("tangent", "native", "step", "cycle"):
             self._tangent_menu(button, action)
             return
+        if action.options == "mirror":
+            self._mirror_menu(button)
+            return
         if action.options in ("transfer_anim", "transfer_pose"):
             self._transfer_menu(button, "animation" if action.options == "transfer_anim" else "pose")
             return
@@ -459,6 +484,40 @@ class KeysRow(qt.QtWidgets.QWidget):
                 item = menu.addAction("Set Maya's global tangent",
                                       lambda: self._say(lambda: tangents_scene.set_global(tool)))
                 item.setToolTip(f"New keys get {action.title.lower()}s (Maya's preference)")
+        menu.exec(button.mapToGlobal(qt.QtCore.QPoint(0, button.height() + 2)))
+
+    MIRROR_CHANNELS = ("translateX", "translateY", "translateZ", "rotateX", "rotateY", "rotateZ")
+
+    def _mirror_menu(self, button) -> None:
+        """Mirror's right click: the four mirrors, then the signs - what a channel of the selected does, flip one
+        (the reference's Fix Mirror Setting), snapshot, forget."""
+        from msl_tools.msl.tools.maya.animation import mirror_scene
+        menu = self._new_menu()
+        for text, call in (("Mirror pose", "mirror_pose"), ("Mirror to right", "mirror_to_right"),
+                           ("Mirror to left", "mirror_to_left"), ("Mirror all keys", "mirror_all_keys")):
+            menu.addAction(text, lambda c=call: self._say(lambda: getattr(mirror_scene, c)()))
+        menu.addSeparator()
+        try:
+            objects = mirror_scene.scene.selected_objects()
+            node = objects[0] if objects else ""
+            other = mirror_scene.opposite(node) if node else ""
+            signs = mirror_scene.signs(node, other) if other else {}
+            kept = bool(node and mirror_scene.kept(node))
+        except Exception:
+            node, signs, kept = "", {}, False
+        title = menu.addAction(f"SIGNS · {mirror_scene.mr_short(node)}{' · kept' if kept else ''}" if node
+                               else "SIGNS · select a control")
+        title.setEnabled(False)
+        for channel in self.MIRROR_CHANNELS:
+            sign = signs.get(channel)
+            item = menu.addAction(f"{channel}   {'−' if sign == -1 else '+' if sign == 1 else ''}",
+                                  lambda c=channel: self._say(lambda: mirror_scene.flip_channel(c)))
+            item.setEnabled(bool(signs))
+            item.setToolTip("A click turns this channel's sign over for the selected controls and their opposites")
+        menu.addSeparator()
+        menu.addAction("Snapshot the selected", lambda: self._say(lambda: mirror_scene.snapshot()))
+        menu.addAction("Forget the selected", lambda: self._say(lambda: mirror_scene.forget()))
+        menu.addAction("Forget them all", lambda: self._say(lambda: mirror_scene.forget(True)))
         menu.exec(button.mapToGlobal(qt.QtCore.QPoint(0, button.height() + 2)))
 
     def _transfer_menu(self, button, kind: str) -> None:

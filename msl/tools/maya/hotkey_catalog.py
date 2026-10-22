@@ -170,6 +170,18 @@ KEY_COMMANDS = (
          "file", "transfer_scene.copy_pose", (), "copy"),
     _key("MSLAnimPastePose", "Paste pose", "The copied pose onto the selection (keyed where auto key would)",
          "transfer_scene.paste_pose", (), "paste"),
+    _key("MSLAnimMirrorPose", "Mirror pose", "The selected controls' pose onto their opposites (both sides "
+         "selected swap; a highlighted span: its keys)", "mirror_scene.mirror_pose", (), "mirror_sides"),
+    _key("MSLAnimMirrorToRight", "Mirror to right", "The right side takes the left side's pose",
+         "mirror_scene.mirror_to_right", (), "mirror_to_right"),
+    _key("MSLAnimMirrorToLeft", "Mirror to left", "The left side takes the right side's pose",
+         "mirror_scene.mirror_to_left", (), "mirror_to_left"),
+    _key("MSLAnimMirrorAllKeys", "Mirror all keys", "The whole animation onto the opposites",
+         "mirror_scene.mirror_all_keys", (), "mirror_keys"),
+    _key("MSLAnimSelectOpposite", "Select opposite", "The opposites of the selected controls selected instead",
+         "mirror_scene.select_opposite", (), "select_all"),
+    _key("MSLAnimSnapshotMirror", "Snapshot mirror settings", "The signs of the selected controls' channels kept "
+         "as their axes are now (the rig in its default pose)", "mirror_scene.snapshot", (), "mirror_snapshot"),
     _key("MSLAnimTangentCycleFirst", "Cycle match tangent · first key", "Each curve's first key takes the last "
          "key's tangent", "tangents_scene.cycle", (True,), "tangent_cycle"),
     *(_key(f"MSLAnimTangent{name.title().replace('_', '')}", f"{title} tangent", tip, "tangents_scene.tangent",

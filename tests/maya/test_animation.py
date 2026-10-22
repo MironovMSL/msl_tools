@@ -362,7 +362,8 @@ class ToolGroupNumbersTest(unittest.TestCase):
         from msl_tools.msl.tools.maya.hotkey_catalog import KEY_COMMANDS
         folder = Path(ky.__file__).parent
         defined = {}
-        for module in ("keys_scene", "precise", "default_pose", "tangents_scene", "transfer_scene"):
+        for module in ("keys_scene", "precise", "default_pose", "tangents_scene", "transfer_scene",
+                       "mirror_scene"):
             tree = ast.parse((folder / f"{module}.py").read_text(encoding="utf-8"))
             defined[module] = {node.name for node in tree.body if isinstance(node, ast.FunctionDef)}
         for command in KEY_COMMANDS:
@@ -503,3 +504,70 @@ class TransferTest(unittest.TestCase):
         self.assertIsNone(self.tf.from_text('{"format": "msl_transfer"'))
         self.assertEqual(self.tf.describe(data), "1 object, 1 channel (frame 5)")
         self.assertEqual(self.tf.short_name("|rig|ns:arm_ctrl"), "arm_ctrl")
+
+
+class MirrorTest(unittest.TestCase):
+    """Mirror as data; the signs MEASURED on the reference (2026-10-22)."""
+
+    def setUp(self):
+        from msl_tools.msl.tools.maya.animation import mirror
+        self.mr = mirror
+
+    @staticmethod
+    def _frame(rx=0.0, ry=0.0, rz=0.0):
+        """Axes of an XYZ Euler turn (degrees) as row vectors, Maya's way (x first)."""
+        import math
+        def turn(vector, axis, degrees):
+            c, s = math.cos(math.radians(degrees)), math.sin(math.radians(degrees))
+            x, y, z = vector
+            if axis == 0:
+                return (x, c * y - s * z, s * y + c * z)
+            if axis == 1:
+                return (c * x + s * z, y, -s * x + c * z)
+            return (c * x - s * y, s * x + c * y, z)
+        rows = []
+        for vector in ((1, 0, 0), (0, 1, 0), (0, 0, 1)):
+            for axis, degrees in ((0, rx), (1, ry), (2, rz)):
+                vector = turn(vector, axis, degrees)
+            rows.append(vector)
+        return rows
+
+    def _signs(self, left, right):
+        found, loose = self.mr.channel_signs(left, right)
+        return "".join("+" if found[c] > 0 else "-" for c in self.mr.TRANSLATE + self.mr.ROTATE), loose
+
+    def test_measured_sign_sets(self):
+        world = self._frame()
+        self.assertEqual(self._signs(world, world), ("-++" "+--", []))            # world-aligned pair, middle
+        # a pair mirrored with Maya's Behavior (left turned 30 about Z, right (180, 0, -30))
+        self.assertEqual(self._signs(self._frame(rz=30), self._frame(rx=180, rz=-30)), ("---" "+++", []))
+        # groups turned 90 / -90 about Y
+        self.assertEqual(self._signs(self._frame(ry=90), self._frame(ry=-90)), ("-++" "+--", []))
+
+    def test_axes_that_are_no_mirror_are_reported(self):
+        signs, loose = self._signs(self._frame(), self._frame(rz=90))
+        self.assertIn("translateX", loose)
+
+    def test_name_side(self):
+        side = self.mr.name_side
+        self.assertEqual(side("|rig|ns:lf_hand_ctrl"), self.mr.LEFT)
+        self.assertEqual(side("arm_R"), self.mr.RIGHT)
+        self.assertEqual(side("leftArm"), self.mr.LEFT)
+        self.assertEqual(side("armRight"), self.mr.RIGHT)
+        self.assertEqual(side("spine_ctrl"), "")
+        self.assertEqual(side("Lips_ctrl"), "")
+        self.assertEqual(side("gauche_arm", left_words=["gauche"]), self.mr.LEFT)
+
+    def test_pairs(self):
+        opposite = {"lf_a": "rt_a", "rt_a": "lf_a", "mid": "mid", "lf_b": "rt_b", "rt_b": "lf_b", "x": ""}.get
+        side = lambda node: {"l": self.mr.LEFT, "r": self.mr.RIGHT}.get(node[0], self.mr.CENTER)
+        pairs = lambda selected, mode: self.mr.pairs(selected, opposite, side, mode)
+        self.assertEqual(pairs(["lf_a", "mid", "x"], self.mr.POSE), ([("lf_a", "rt_a"), ("mid", "mid")], ["x"]))
+        self.assertEqual(pairs(["lf_a", "rt_a"], self.mr.POSE)[0], [("lf_a", "rt_a"), ("rt_a", "lf_a")])
+        self.assertEqual(pairs(["rt_a", "lf_b", "mid"], self.mr.TO_RIGHT)[0], [("lf_a", "rt_a"), ("lf_b", "rt_b")])
+        self.assertEqual(pairs(["rt_a", "lf_a", "lf_b"], self.mr.TO_LEFT)[0], [("rt_a", "lf_a"), ("rt_b", "lf_b")])
+
+    def test_mirrored_row(self):
+        row = [10.0, 2.0, "fixed", "fixed", 30.0, 25.0, 1.0, 1.0, True, True, False, False]
+        self.assertEqual(self.mr.mirrored_row(row, -1)[:6], [10.0, -2.0, "fixed", "fixed", -30.0, -25.0])
+        self.assertEqual(self.mr.mirrored_row(row, 1), row)

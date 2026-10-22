@@ -232,7 +232,7 @@ msl_tools/                 (repo root)
     named by what the icon IS, not the gesture (`drag_handle`, not
     `dragAndDrop`). Categories: `window/` (chrome: close/maximize/...),
     `actions/` (row/toolbar actions: `drag_handle`, `copy`, `delete`,
-    `browse`, `folder_add`, `file_video`, `bookmark`, `bookmark_add`, `save`, `file_add`, `chevron_right`, `eye`, `folder_into`, `compress`, `scissors`, `repeat`, `text_frame`, `volume`, `gif`, `image_stack`, `clapper`, `crop`, `merge`, `split_view`, `film`, `timeline`, `folder_watch`, `pause`, `bell` (the Media actions and its queue), `clear`, `arrow_right`, `chevron_down`, `add`, `check`, `select_all`, `more`, `report`, `code`, `restart`, `power`, `play`, `edit`, `scene`, `stop`, `lock`, `search`, `rename`, and the Rename tool's quick buttons: `case_upper`, `case_capital`, `case_lower`, `case_snake` (a snake), `case_camel` (a camel's humps), `cut_prefix`, `cut_suffix`, `cut_number`, `cut_digits`, `cut_first`, `cut_last`, `namespace_out`, `magic_fix`, `sweep`, `mirror_sides`, `shape_name`, `warning`, `error`, `keyboard` (Maya Gate's EN), and the Rename strip's `names_same`, `name_bad`, `skin_joints`, `side_other`, `lock_find`, `convention_check`, `names_unique`, `name_related`, `convention_fix`, `unlock`, `sets`, `star`, `sliders`, `book`, `replace`, `skin_mesh` (the grey cube under `skin_joints`), `branch`, and the Controls tool's `controls`, `grow`, `shrink`, `outliner`, `color_pick`, `line_width`, `mirror_shape`, `mirror_update`, `zero_out`, `zero_matrix`, `matrix_out`, `on_top`, `cvs`, `paste`, `drive_constraint`, `drive_matrix`, `drive_off`, `locator`, `joint_chain`, `center`, `move`, `minus`, `smooth_curve`, `expand`, `collapse`, `undo`, `redo`, `snap_grid`, `chevron_left`, `chevron_up`, `layout`, `joint_node`, `joint_shape`, `joints_separate`, `shape_off`, `eye_off`, `same_shape`, `channels`, `attributes`, `keyframe`, `range`, `viewport`, `shade_lighter`, `shade_darker`, `brush` (the COLOR card and its header button; `color_pick` stays the pipette of "take the color") (`joint_chain` = a ball and a tapering bone to a smaller ball, like Maya's own joint icon), and the Labels tool's `labels` (a tag with two lines of text), and the Animation tool's `animation` (a curve with a key on its top); add new action icons here),
+    `browse`, `folder_add`, `file_video`, `bookmark`, `bookmark_add`, `save`, `file_add`, `chevron_right`, `eye`, `folder_into`, `compress`, `scissors`, `repeat`, `text_frame`, `volume`, `gif`, `image_stack`, `clapper`, `crop`, `merge`, `split_view`, `film`, `timeline`, `folder_watch`, `pause`, `bell` (the Media actions and its queue), `clear`, `arrow_right`, `chevron_down`, `add`, `check`, `select_all`, `more`, `report`, `code`, `restart`, `power`, `play`, `edit`, `scene`, `stop`, `lock`, `search`, `rename`, and the Rename tool's quick buttons: `case_upper`, `case_capital`, `case_lower`, `case_snake` (a snake), `case_camel` (a camel's humps), `cut_prefix`, `cut_suffix`, `cut_number`, `cut_digits`, `cut_first`, `cut_last`, `namespace_out`, `magic_fix`, `sweep`, `mirror_sides`, `shape_name`, `warning`, `error`, `keyboard` (Maya Gate's EN), and the Rename strip's `names_same`, `name_bad`, `skin_joints`, `side_other`, `lock_find`, `convention_check`, `names_unique`, `name_related`, `convention_fix`, `unlock`, `sets`, `star`, `sliders`, `book`, `replace`, `skin_mesh` (the grey cube under `skin_joints`), `branch`, and the Controls tool's `controls`, `grow`, `shrink`, `outliner`, `color_pick`, `line_width`, `mirror_shape`, `mirror_update`, `zero_out`, `zero_matrix`, `matrix_out`, `on_top`, `cvs`, `paste`, `drive_constraint`, `drive_matrix`, `drive_off`, `locator`, `joint_chain`, `center`, `move`, `minus`, `smooth_curve`, `expand`, `collapse`, `undo`, `redo`, `snap_grid`, `chevron_left`, `chevron_up`, `layout`, `joint_node`, `joint_shape`, `joints_separate`, `shape_off`, `eye_off`, `same_shape`, `channels`, `attributes`, `keyframe`, `range`, `viewport`, `shade_lighter`, `shade_darker`, `brush` (the COLOR card and its header button; `color_pick` stays the pipette of "take the color") (`joint_chain` = a ball and a tapering bone to a smaller ball, like Maya's own joint icon), and the Labels tool's `labels` (a tag with two lines of text), and the Animation tool's `animation` (a curve with a key on its top) and its Mirror group's `mirror_to_right`, `mirror_to_left`, `mirror_keys`, `mirror_snapshot`; add new action icons here),
     `apps/` (third-party application logos: `maya`; later houdini, blender...
     — named after the app, not the tool that uses it, so several tools can
     share one), `tools/` (sidebar icons of our OWN hub tools, one-color like
@@ -4148,6 +4148,36 @@ hub (it already sees an unclean end) + fast anim layer merge · 10 Master Spline
   clipboard held the pose, the pose through the clipboard; then animation through the clipboard alone, the file
   deleted); one undo for each paste. NOT built from the reference's menus: Paste Mirror (the mirror phase), Paste
   ... To (another namespace). Not tried by a real hand: the right-click menus, the file dialogs.
+  MIRROR (2026-10-22, the next group of the reference's list): an orange group after Transfer - Mirror pose,
+  Mirror to right, Mirror to left, Mirror all keys, Select opposite, Snapshot mirror settings (icons `mirror_sides`,
+  `mirror_to_right`, `mirror_to_left`, `mirror_keys`, `select_all`, `mirror_snapshot`); right click on any = the four
+  mirrors + "SIGNS · <control>": each channel's sign, a click flips it (the reference's Fix Mirror Setting) +
+  snapshot / forget; hotkeys MSLAnimMirrorPose / ToRight / ToLeft / AllKeys, MSLAnimSelectOpposite,
+  MSLAnimSnapshotMirror. `mirror.py` (Qt-free: `name_side`, `channel_signs`, `pairs`, `mirrored_row`; MirrorTest) +
+  `mirror_scene.py` (one undo step "MSL Mirror"). MEASURED on the reference (Maya 2025, its buttons clicked with a
+  real mouse - they sit in its second bottom row, found by the group attribute value "mirror"): MIRROR POSE = each
+  selected control's pose onto its OPPOSITE by name; both of a pair selected = a SWAP; a control with no side word
+  mirrors onto itself; TO RIGHT / TO LEFT = for every selected control's pair (either side selected) the right /
+  left one takes the other's, middle ones left. Current frame, auto key OFF = values only; auto key ON = a key on
+  every channel that is animated on the target OR the source. A span HIGHLIGHTED (real Shift-drag) = keys: the
+  target's keys inside it replaced by the source's at the source's key times there (a target key between them
+  removed), auto key or not. MIRROR ALL KEYS = the target's curves replaced by the source's (values and tangent
+  angles signed, types kept), a channel the source has no curve on loses the target's curve; both selected swap.
+  THE SIGNS: one per channel (translate / rotate; scale and own attributes +1 - copied as they are), from the two
+  controls' axes AT REST (a posed control - ry 170 - gave the same): a translate axis a of the source mirrored is
+  M a (M = x -> -x), its sign = round(M a . b) with the target's axis b; a rotation is a pseudo-vector, so the rotate
+  sign is the opposite one. World-aligned pairs and middle controls -tx ty tz rx -ry -rz, Maya's "Behavior"
+  joint mirror -tx -ty -tz rx ry rz, groups turned 90 / -90 about Y -++ +-- (all three seen on the reference).
+  Rest frame = parentMatrix x offsetParentMatrix (the rotate frame x a joint's jointOrient). The reference keeps a
+  table per rig in a file of its own; ours: Snapshot = the selected controls' signs from their axes NOW (the rig in
+  its T-pose), kept under the name without namespace in configsMayaMng "animation" `mirror` {name: {channel:
+  sign}} (`mirror_scene._store_override` in tests); a kept table wins over the worked-out signs. Opposites by name
+  only (Rename's `rules.mirror` with the user's side words; the whole long path mirrored first) - the reference's
+  "Snapshot Opposite Controls" by world position is not built. Compared key for key in the same Maya on the same
+  probes: five poses (world-aligned, Behavior, middle, 90-degree groups with own attributes, both sides, to right /
+  to left), auto key off / on (two cases), a highlighted span, all keys (tangents too) and the swap - all identical;
+  one Ctrl+Z each. NOT built: Blend to Mirror / Mirror to Frame sliders, Auto Mirror, Paste Mirror (Transfer).
+  Not tried by a real hand: the buttons (Qt clicks), the right-click menu.
 
 ## MSL Scripts (inside Maya)
 
