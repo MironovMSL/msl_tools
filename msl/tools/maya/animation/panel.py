@@ -35,7 +35,7 @@ StylesheetBuilder.register_template(Path(__file__).with_name("animation.qss"))
 WATCH_MS = 500           # how often the line "what the sliders act on" is read while on screen
 OVERSHOOT = 2.0          # the weight at a slider's end with overshoot on
 FRAME_MODES = ("frame", "scale_frame")
-FRAME_SIDES = {"frame": ("left", "right"), "scale_frame": ("left",)}   # the slots each frame mode uses
+FRAME_SIDES = {"frame": ("left", "right"), "scale_frame": ("left",), "x_mirror_frame": ("left",)}   # the slots each frame mode uses
 WORLD_MODES = ("tween", "neighbors", "frame", "infinity")   # the pose modes that can work in world space (world.py)
 WORLD_WIDTH = 24
 MODE_WIDTH = 116          # the mode button; a longer name is cut short (the whole one in its tooltip)
@@ -52,7 +52,8 @@ class _SliderRow(qt.QtWidgets.QWidget):
     def __init__(self, family: str, parent=None):
         super().__init__(parent)
         self.family = family
-        self.modes = {cv.POSE: cv.POSE_MODES, cv.CURVE: cv.CURVE_MODES}.get(family, cv.TANGENT_MODES)
+        self.modes = {cv.POSE: cv.POSE_MODES, cv.CURVE: cv.CURVE_MODES, cv.XFORM: cv.XFORM_MODES}.get(
+            family, cv.TANGENT_MODES)
         layout = qt.QtWidgets.QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
@@ -189,7 +190,8 @@ class _SliderRow(qt.QtWidgets.QWidget):
         switches to it for one drag; the full explanation in the row's tooltip."""
         menu = OptionMenu(self)
         menu.add_caption({cv.POSE: "POSE SLIDER · where the keys go",
-                          cv.CURVE: "CURVE SLIDER · the shape of the keys"}.get(
+                          cv.CURVE: "CURVE SLIDER · the shape of the keys",
+                          cv.XFORM: "XFORM SLIDER · toward a mirror, an object, a copied place"}.get(
                              self.family, "TANGENT SLIDER · the keys' tangents toward a tool's"))
         for mode in self.modes:
             chip = qt.QtWidgets.QLabel(mode.short)
@@ -254,7 +256,7 @@ class AnimationPanel(qt.QtWidgets.QWidget):
         self._rows = {}
         left = float(self._get("frame_left", self._get("frame", 1.0)))
         self._frames = {"left": left, "right": float(self._get("frame_right", left + 10.0))}
-        for family in (cv.POSE, cv.CURVE, cv.TANGENT):
+        for family in (cv.POSE, cv.CURVE, cv.TANGENT, cv.XFORM):
             row = _SliderRow(family)
             row.frames = self._frames
             row.set_mode(str(self._get(family, row.modes[0].key)))
@@ -303,7 +305,7 @@ class AnimationPanel(qt.QtWidgets.QWidget):
         self._overshoot.setFixedWidth(WORLD_WIDTH)
         self._overshoot.setFocusPolicy(qt.QtCore.Qt.FocusPolicy.NoFocus)
         self._rows[cv.POSE].layout().addWidget(self._overshoot)
-        for family in (cv.CURVE, cv.TANGENT):
+        for family in (cv.CURVE, cv.TANGENT, cv.XFORM):
             room = qt.QtWidgets.QWidget()
             room.setFixedWidth(WORLD_WIDTH)
             self._rows[family].layout().addWidget(room)
@@ -436,6 +438,14 @@ class AnimationPanel(qt.QtWidgets.QWidget):
         frame = self._frames["left"] if "left" in sides else None
         frame_right = self._frames["right"] if "right" in sides else None
         try:
+            if mode.family == cv.XFORM:
+                from msl_tools.msl.tools.maya.animation import xform_slider
+                self._drag = xform_slider.XformDrag(mode.key, frame)
+                if not self._drag:
+                    problem = self._drag.problem or "Nothing to act on: select animated controls"
+                    self._drag = None
+                    self._say(problem, "error")
+                return
             if mode.family == cv.TANGENT:
                 from msl_tools.msl.tools.maya.animation import tangents_scene
                 self._drag = tangents_scene.TangentDrag(mode.key[2:])

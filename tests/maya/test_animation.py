@@ -643,3 +643,25 @@ class SpaceTest(unittest.TestCase):
         labels = rate((20, 40, 10))
         self.assertEqual(labels["yzx"], "Best")
         self.assertEqual((labels["xyz"], labels["zyx"]), ("OK", "OK"))
+
+
+class XformSliderTest(unittest.TestCase):
+    """The XFORM slider's modes (MEASURED on the reference, 2026-10-23)."""
+
+    def test_modifiers_pick_the_modes(self):
+        for held, key in (("Alt", "x_mirror"), ("Ctrl", "x_mirror_frame"), ("Shift", "x_align"),
+                          ("Alt+Shift", "x_relationship"), ("Ctrl+Shift", "x_world")):
+            self.assertEqual(cv.mode_for_modifiers(cv.XFORM, held).key, key)
+        self.assertEqual(cv.BY_KEY["x_align"].marks, cv.BLEND_MARKS)
+
+    def test_world_blends_are_half_as_strong_to_the_left(self):
+        import ast
+        from pathlib import Path
+        tree = ast.parse((Path(cv.__file__).parent / "xform_slider.py").read_text(encoding="utf-8"))
+        source = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "strength")
+        namespace = {"WORLD_MODES": ("x_align", "x_relationship", "x_world")}
+        exec(compile(ast.Module([source], []), "strength", "exec"), namespace)
+        strength = namespace["strength"]
+        self.assertEqual(strength("x_align", -1.0), -0.5)
+        self.assertEqual(strength("x_world", 0.5), 0.5)
+        self.assertEqual(strength("x_mirror", -1.0), -1.0)

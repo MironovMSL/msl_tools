@@ -4246,6 +4246,23 @@ hub (it already sees an unclean end) + fast anim layer merge · 10 Master Spline
   mixed turns; no single measure separated its labels). TRAP met: the reference remembers controls BY NAME within a
   Maya session - after a pick on one, a fresh rig with the same control name showed "No Switchers for selection";
   probe with a new name each time. Not by a real hand: our buttons and menu (Qt clicks / QAction.trigger).
+  XFORM SLIDER (2026-10-23, the reference's "Xform Slider" group): a FOURTH slider row (pink, tone "xform";
+  `curves.XFORM_MODES`, keys "x_*") - Blend to Mirror (Alt), Mirror to Frame (Ctrl; its frame = the LEFT slot, as
+  Scale From Frame), Blend to Align (Shift), Blend to Xform Relationship (Alt+Shift), Blend to Xform World Space
+  (Ctrl+Shift); the held keys are the reference's own (its ONE slider's right-click menu lists them).
+  `xform_slider.py` `XformDrag(mode, frame)` (update live outside the undo queue, commit = one step "MSL Xform
+  Slider" keying the animated channels on this frame, cancel; `scene.apply_once` routes "x_*" to it). MEASURED on
+  the reference (its slider widgets found by their name attribute "blendToMirror" ..., marks at x 13 / 34 / 55 / 76 |
+  123 / 144 / 165 / 186 of 200 clicked with a held real click - press and release in separate event-loop turns):
+  marks +-0.05 / 0.15 / 0.5 / 1; BLEND TO MIRROR = each animated channel v + w (the opposite's value x the mirror
+  sign - v), both sides whole (the left end pushes as far away); a control WITHOUT keys is not moved at all (it took
+  a while to see: every probe without keys did nothing); BLEND TO ALIGN / XFORM WORLD SPACE (and Relationship) =
+  in the world, the rotate pivot along the straight line and the turn SLERPED (checked with a three-axis turn:
+  slerp, not channel lerp), the LEFT side HALF as strong (-1 = -0.5, -0.05 = -0.025). Mirror to Frame did nothing
+  on the reference without a frame of its own set (its frame field wasn't found in its compact bar) - ours takes the
+  slot's frame. Compared in the same Maya: Blend to Mirror at all 8 marks, Align at 6 marks + the slerp case, World
+  Space at 5 marks - 20 of 20 identical; Relationship at 1 = Paste Relationship exactly; cancel and one Ctrl+Z put
+  everything back. Not by a real hand: our row's knob (driven through the panel's own start / move / finish).
 
 ## MSL Scripts (inside Maya)
 

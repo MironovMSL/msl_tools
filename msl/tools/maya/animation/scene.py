@@ -666,6 +666,9 @@ def apply_once(mode: str, weight: float, frame: "float | None" = None, say: bool
     if cv.BY_KEY[mode].family == cv.TANGENT:
         from msl_tools.msl.tools.maya.animation.tangents_scene import TangentDrag
         drag = TangentDrag(mode[2:])
+    elif cv.BY_KEY[mode].family == cv.XFORM:
+        from msl_tools.msl.tools.maya.animation.xform_slider import XformDrag
+        drag = XformDrag(mode, frame)
     else:
         drag = make_drag(mode, frame)
     if not drag:

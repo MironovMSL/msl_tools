@@ -28,6 +28,7 @@ from typing import Callable
 POSE = "pose"
 CURVE = "curve"
 TANGENT = "tangent"
+XFORM = "xform"
 
 TWEEN_FRACTIONS = (0.0, 1 / 8, 1 / 6, 1 / 4, 1 / 3, 1 / 2, 2 / 3, 3 / 4, 5 / 6, 7 / 8, 1.0)
 # The reference's marks, MEASURED (a probe of 11 keys, 5 picked, every mark clicked): 0.05, 0.15, 0.5 and 1 a
@@ -168,7 +169,27 @@ TANGENT_MODES = (
          "ARE plateau).", "away from it", "toward plateau"),
 )
 
-BY_KEY = {mode.key: mode for mode in MODES + TANGENT_MODES}
+# The XFORM slider (xform_slider.XformDrag does the work): the selected controls on the current frame blended toward a
+# pose that is not on their curves - MEASURED on the reference (its one slider, the mode by the held keys as below,
+# every mark clicked): Blend to Mirror = each animated channel v + w (the opposite's value x its sign - v), both sides
+# whole (the left end pushes as far away); Blend to Align / Xform Relationship / Xform World Space = in the WORLD,
+# the rotate pivot carried along the straight line and the turn slerped, the LEFT side half as strong (-1 = -0.5).
+# Only channels that are animated move (a control without keys: nothing, as there).
+XFORM_MODES = (
+    Mode("x_mirror", "Blend to Mirror", "MI", XFORM, "Toward the opposite control's pose, mirrored (the signs of "
+         "Mirror Pose).", "away from the mirror", "toward the mirror", modifier="Alt"),
+    Mode("x_mirror_frame", "Mirror to Frame", "MF", XFORM, "Toward the opposite control's pose at ANOTHER frame, "
+         "mirrored - in a cycle, the other leg's pose half a cycle away. The frame is the slot at the slider's left "
+         "end.", "away from it", "toward it", modifier="Ctrl"),
+    Mode("x_align", "Blend to Align", "AL", XFORM, "The selected objects toward the LAST selected one, in the world "
+         "(its rotate pivot and turn).", "repelled (half as strong)", "attracted", modifier="Shift"),
+    Mode("x_relationship", "Blend to Xform Relationship", "XR", XFORM, "Toward the copied relationship to the last "
+         "selected (Xform > Copy relationship first).", "away (half as strong)", "toward it", modifier="Alt+Shift"),
+    Mode("x_world", "Blend to Xform World Space", "XW", XFORM, "Toward the copied world space (Xform > Copy world "
+         "space first).", "away (half as strong)", "toward it", modifier="Ctrl+Shift"),
+)
+
+BY_KEY = {mode.key: mode for mode in MODES + TANGENT_MODES + XFORM_MODES}
 POSE_MODES = tuple(mode for mode in MODES if mode.family == POSE)
 CURVE_MODES = tuple(mode for mode in MODES if mode.family == CURVE)
 
@@ -179,7 +200,7 @@ def mode_for_modifiers(family: str, modifiers: str) -> "Mode | None":
     wanted = normalize_modifiers(modifiers)
     if not wanted:
         return None
-    for mode in MODES + TANGENT_MODES:
+    for mode in MODES + TANGENT_MODES + XFORM_MODES:
         if mode.family == family and mode.modifier and normalize_modifiers(mode.modifier) == wanted:
             return mode
     return None
