@@ -14,6 +14,7 @@ buttons wrap inside it. In the reference's own order:
     MIRROR     mirror pose, to right / to left, all keys, select opposite, the snapshot of the signs
     ALIGN      the selected onto the last selected - now, on a span's keys, or on all keys
     XFORM      copy / paste the relationship to a parent, or the world space - also into another Maya
+    SPACE      the space switcher: the selection's / the rig's enum switches and rotate orders, kept in place
     PLAY
 
 What each action does and acts on: keys_scene.py / precise.py / default_pose.py (one undo step each).
@@ -266,6 +267,13 @@ GROUPS = (
                "object onto every selected); a span highlighted: its key frames, or every frame of a span with none. "
                "Right click: next frame, all keys, bake", "world", "paste_world", (), badge="P",
                module="xform_scene", options="xform_world"),
+    )),
+    ("space", "Space", "teal", (
+        Action("selection", "Space switcher", "The selected controls' switches (their enum attributes and rotate "
+               "order) as a menu: a value picked switches with the control kept where it is - on this frame or on "
+               "all its keys", "space_switch", "selection", (False,), module="space_menu"),
+        Action("asset", "Asset space switcher", "The switches of every control of the selection's rig, as a menu",
+               "space_asset", "asset", (True,), module="space_menu"),
     )),
     ("play", "Play", "green", (
         Action("keys", "Play keys", "Playback from key to key, each pose held until the next (again: stop)",
@@ -659,6 +667,14 @@ class KeysRow(qt.QtWidgets.QWidget):
             modifiers = qt.QtWidgets.QApplication.keyboardModifiers()
             args = args + (ky.precise_times(bool(modifiers & qt.QtCore.Qt.KeyboardModifier.ControlModifier),
                                      bool(modifiers & qt.QtCore.Qt.KeyboardModifier.ShiftModifier)),)
+        if action.module == "space_menu":         # a menu of the switches at the pointer
+            from msl_tools.msl.tools.maya.animation import space_menu
+            menu = space_menu.build(self, bool(action.args and action.args[0]), self._say)
+            menu.exec(qt.QtGui.QCursor.pos())
+            button = self.buttons.get(f"space.{action.key}")
+            if button is not None:
+                self._unhover(button)            # the menu held the mouse: the button never saw it leave
+            return
         frames, step = self.frames.commit_text(), self.precise.commit_text()   # typed but not entered yet
         for field in (self.frames, self.precise):
             if field.hasFocus():

@@ -203,6 +203,10 @@ KEY_COMMANDS = (
           ("Paste", "NextFrame", " · next frame", " one frame on, keyed", "_next"),
           ("Paste", "AllKeys", " · all keys", " on every key frame", "_all_keys"),
           ("Paste", "Bake", " · bake frames", " on every frame of the playback range", "_bake"))),
+    _key("MSLAnimSpaceSwitcher", "Space switcher", "The selected controls' switches as a menu at the pointer: a "
+         "value switches with the control kept in place", "space_menu.popup", (), "space_switch"),
+    _key("MSLAnimAssetSpaceSwitcher", "Asset space switcher", "The switches of every control of the selection's rig "
+         "as a menu at the pointer", "space_menu.popup_asset", (), "space_asset"),
     _key("MSLAnimTangentCycleFirst", "Cycle match tangent · first key", "Each curve's first key takes the last "
          "key's tangent", "tangents_scene.cycle", (True,), "tangent_cycle"),
     *(_key(f"MSLAnimTangent{name.title().replace('_', '')}", f"{title} tangent", tip, "tangents_scene.tangent",

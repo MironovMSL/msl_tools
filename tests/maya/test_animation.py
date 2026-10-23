@@ -363,7 +363,8 @@ class ToolGroupNumbersTest(unittest.TestCase):
         folder = Path(ky.__file__).parent
         defined = {}
         for module in ("keys_scene", "precise", "default_pose", "tangents_scene", "transfer_scene",
-                       "mirror_scene", "align_scene", "xform_scene"):
+                       "mirror_scene", "align_scene", "xform_scene",
+                       "space_menu"):
             tree = ast.parse((folder / f"{module}.py").read_text(encoding="utf-8"))
             defined[module] = {node.name for node in tree.body if isinstance(node, ast.FunctionDef)}
         for command in KEY_COMMANDS:
@@ -607,3 +608,38 @@ class XformTest(unittest.TestCase):
         self.assertEqual(self.xf.at(frames, 30), "c")
         self.assertEqual(self.xf.at({"1": "a"}, 40), "a")
         self.assertIsNone(self.xf.at({}, 1))
+
+
+class SpaceTest(unittest.TestCase):
+    """The space switcher's names and the rotate orders' rating (MEASURED on the reference, 2026-10-23)."""
+
+    def setUp(self):
+        from msl_tools.msl.tools.maya.animation import space
+        self.sp = space
+
+    def test_nice_names(self):
+        self.assertEqual(self.sp.nice("fkIk"), "Fk Ik")
+        self.assertEqual(self.sp.nice("space"), "Space")
+        self.assertEqual(self.sp.nice("rotateOrder"), "Rotate Order")
+        self.assertEqual(self.sp.nice("follow_space"), "Follow Space")
+
+    def test_orders_round_trip(self):
+        import random
+        random.seed(5)
+        for _ in range(100):
+            rotation = [random.uniform(-170, 170) for _ in range(3)]
+            now, other = random.choice(self.sp.ORDERS), random.choice(self.sp.ORDERS)
+            converted = self.sp.euler(self.sp.matrix(rotation, now), other)
+            a, b = self.sp.matrix(rotation, now), self.sp.matrix(converted, other)
+            self.assertTrue(all(abs(a[i][j] - b[i][j]) < 1e-9 for i in range(3) for j in range(3)))
+
+    def test_rating(self):
+        rate = lambda rotation: self.sp.rate_orders([rotation], [rotation], "xyz")
+        for ry, label in ((30, "OK"), (40, "OK"), (45, ""), (70, "")):
+            labels = rate((0, ry, 0))
+            self.assertEqual((labels["xyz"], labels["zyx"]), (label, label), ry)
+            self.assertEqual({labels[o] for o in ("yzx", "zxy", "xzy", "yxz")}, {"Best"})
+        # ours on a mixed turn (the reference differs here): the least largest middle angle is Best
+        labels = rate((20, 40, 10))
+        self.assertEqual(labels["yzx"], "Best")
+        self.assertEqual((labels["xyz"], labels["zyx"]), ("OK", "OK"))
