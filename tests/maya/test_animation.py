@@ -1,4 +1,5 @@
 """Animation without Maya: the sliders' arithmetic on a run of keys."""
+import math
 import unittest
 
 from msl_tools.msl.tools.maya.animation import curves as cv
@@ -364,7 +365,7 @@ class ToolGroupNumbersTest(unittest.TestCase):
         defined = {}
         for module in ("keys_scene", "precise", "default_pose", "tangents_scene", "transfer_scene",
                        "mirror_scene", "align_scene", "xform_scene",
-                       "space_menu"):
+                       "space_menu", "micro"):
             tree = ast.parse((folder / f"{module}.py").read_text(encoding="utf-8"))
             defined[module] = {node.name for node in tree.body if isinstance(node, ast.FunctionDef)}
         for command in KEY_COMMANDS:
@@ -372,6 +373,24 @@ class ToolGroupNumbersTest(unittest.TestCase):
             name = call.args[0].value
             module, _, function = name.rpartition(".")
             self.assertIn(function, defined[module or "keys_scene"], command.name)
+
+
+class MicroTest(unittest.TestCase):
+    """The micro manipulator's rule (micro.py) - measured on the reference (Maya 2025): 100 px of drag in mouse
+    events of 2 / 5 / 10 / 25 / 50 px gave 1.9 / 4.6 / 8.7 / 24 / 49 % of the Move tool's distance."""
+
+    def test_the_part_of_a_step_grows_with_the_mouse_step(self):
+        from msl_tools.msl.tools.maya.animation import micro
+        for pixels, measured in ((2, 0.019), (5, 0.046), (10, 0.087), (25, 0.24), (50, 0.49)):
+            self.assertAlmostEqual(micro.part_of_step(pixels), measured, delta=measured * 0.12, msg=pixels)
+        self.assertEqual(micro.part_of_step(500), 1.0)
+        self.assertEqual(micro.part_of_step(0), 0.0)
+        self.assertAlmostEqual(micro.part_of_step(10, speed=2 * micro.FULL_SPEED_PX), micro.part_of_step(5))
+
+    def test_a_scale_step_is_its_log(self):
+        from msl_tools.msl.tools.maya.animation import micro
+        self.assertAlmostEqual(micro._step("scaleX", 2.0, 1.0), math.log(2.0))
+        self.assertEqual(micro._step("translateX", 1.5, 1.0), 0.5)
 
 
 class TangentsTest(unittest.TestCase):

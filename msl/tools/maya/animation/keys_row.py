@@ -15,6 +15,7 @@ buttons wrap inside it. In the reference's own order:
     ALIGN      the selected onto the last selected - now, on a span's keys, or on all keys
     XFORM      copy / paste the relationship to a parent, or the world space - also into another Maya
     SPACE      the space switcher: the selection's / the rig's enum switches and rotate orders, kept in place
+    MICRO      the micro manipulator: Maya's handles, the objects taking a part of each step (micro.py)
     PLAY
 
 What each action does and acts on: keys_scene.py / precise.py / default_pose.py (one undo step each).
@@ -29,7 +30,7 @@ import msl_tools.msl.ui.qt_bindings as qt
 from msl_tools.msl.tools.maya.animation import keys as ky
 from msl_tools.msl.tools.maya.controls.widgets import DragNumberField
 from msl_tools.msl.tools.maya.rename.buttons import QuickButton
-from msl_tools.msl.ui.theme.qss import make_rounded_popup
+from msl_tools.msl.ui.theme.qss import make_rounded_popup, repolish
 from msl_tools.msl.ui.ui_resources import UiResources
 from msl_tools.msl.ui.widgets.atoms.layouts.flow_layout import FlowLayout
 
@@ -275,6 +276,12 @@ GROUPS = (
         Action("asset", "Asset space switcher", "The switches of every control of the selection's rig, as a menu",
                "space_asset", "asset", (True,), module="space_menu"),
     )),
+    ("micro", "Micro", "pink", (
+        Action("micro", "Micro manipulator", "On / off. Maya's own Move / Rotate / Scale handles, but the selected "
+               "objects take only a part of each step - the slower the mouse, the finer (a slow hand: about 4 % of the "
+               "move). One drag = one undo step. Right click: how fine", "micro_manipulator", "toggle",
+               module="micro", options="micro"),
+    )),
     ("play", "Play", "green", (
         Action("keys", "Play keys", "Playback from key to key, each pose held until the next (again: stop)",
                "play", "play", ("keys",), badge="key"),
@@ -393,7 +400,23 @@ class KeysRow(qt.QtWidgets.QWidget):
             button.setContextMenuPolicy(qt.QtCore.Qt.ContextMenuPolicy.CustomContextMenu)
             button.customContextMenuRequested.connect(lambda _pos, b=button, a=action: self._open_options(b, a))
         self.buttons[f"{group}.{action.key}"] = button
+        if action.module == "micro":
+            self._watch_micro(button)
         return button
+
+    def _watch_micro(self, button) -> None:
+        """The micro manipulator's button is lit while it is on - also when a hotkey switched it."""
+        from msl_tools.msl.tools.maya.animation import micro
+
+        def show(on, b=button):
+            b.setProperty("on", bool(on))
+            repolish(b)
+        try:
+            show(micro.is_on())
+        except Exception:                 # outside Maya
+            return
+        micro.LISTENERS.append(show)
+        button.destroyed.connect(lambda *_a, f=show: f in micro.LISTENERS and micro.LISTENERS.remove(f))
 
     # ------------------------------------------------------------------ number fields
 
@@ -424,6 +447,9 @@ class KeysRow(qt.QtWidgets.QWidget):
                   "steep as the curve there"), ("step", "Stepped", "Every new key stepped"))),
                  ("infinity", "BAKE INFINITY THEN", (("crop", "Crop the cycle", "Infinity set to constant"),
                   ("extend", "Extend the cycle", "The cycle goes on past the keys as it did")))),
+        "micro": (("micro_speed", "HOW FINE", (("108", "As measured", "A slow hand moves it about 4 % of Maya's "
+                   "own step, a fast flick nearly all of it (the reference's feel)"), ("216", "Finer", "Half that "
+                   "part"), ("54", "Coarser", "Twice that part"))),),
         "times": (("share_tangents", "SHARED KEYS' TANGENTS", (("type", "Keep the tangent type", "Linear stays "
                    "linear, stepped stays stepped, the rest Maya's default"), ("shape", "Keep the curve's shape",
                    "Tangents as steep as the curve there"))),),
@@ -656,6 +682,9 @@ class KeysRow(qt.QtWidgets.QWidget):
 
     def _choose(self, key: str, value: str, text: str) -> None:
         self._put(key, value)
+        if key == "micro_speed":
+            from msl_tools.msl.tools.maya.animation import micro
+            micro.set_speed(float(value))
         self.said.emit(text, "")
 
     def _run(self, action: Action) -> None:

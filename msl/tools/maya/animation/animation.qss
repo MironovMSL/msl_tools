@@ -154,3 +154,9 @@ KeysRow QuickButton#animationTool[tone="green"] { qproperty-iconColor: var(--suc
 QFrame#animationGroup[tone="pink"] { background: alpha(var(--pink), 7%); border-left: 3px solid alpha(var(--pink), 80%); }
 QLabel#animationGroupTitle[tone="pink"] { color: var(--pink); }
 KeysRow QuickButton#animationTool[tone="pink"] { qproperty-iconColor: var(--pink); }
+
+/* the micro manipulator's switch while it is on (keys_row._watch_micro) */
+KeysRow QuickButton#animationTool[on="true"] {
+    background: alpha(var(--pink), 28%);
+    border: 1px solid var(--pink);
+}
