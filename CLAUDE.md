@@ -232,7 +232,7 @@ msl_tools/                 (repo root)
     named by what the icon IS, not the gesture (`drag_handle`, not
     `dragAndDrop`). Categories: `window/` (chrome: close/maximize/...),
     `actions/` (row/toolbar actions: `drag_handle`, `copy`, `delete`,
-    `browse`, `folder_add`, `file_video`, `bookmark`, `bookmark_add`, `save`, `file_add`, `chevron_right`, `eye`, `folder_into`, `compress`, `scissors`, `repeat`, `text_frame`, `volume`, `gif`, `image_stack`, `clapper`, `crop`, `merge`, `split_view`, `film`, `timeline`, `folder_watch`, `pause`, `bell` (the Media actions and its queue), `clear`, `arrow_right`, `chevron_down`, `add`, `check`, `select_all`, `more`, `report`, `code`, `restart`, `power`, `play`, `edit`, `scene`, `stop`, `lock`, `search`, `rename`, and the Rename tool's quick buttons: `case_upper`, `case_capital`, `case_lower`, `case_snake` (a snake), `case_camel` (a camel's humps), `cut_prefix`, `cut_suffix`, `cut_number`, `cut_digits`, `cut_first`, `cut_last`, `namespace_out`, `magic_fix`, `sweep`, `mirror_sides`, `shape_name`, `warning`, `error`, `keyboard` (Maya Gate's EN), and the Rename strip's `names_same`, `name_bad`, `skin_joints`, `side_other`, `lock_find`, `convention_check`, `names_unique`, `name_related`, `convention_fix`, `unlock`, `sets`, `star`, `sliders`, `book`, `replace`, `skin_mesh` (the grey cube under `skin_joints`), `branch`, and the Controls tool's `controls`, `grow`, `shrink`, `outliner`, `color_pick`, `line_width`, `mirror_shape`, `mirror_update`, `zero_out`, `zero_matrix`, `matrix_out`, `on_top`, `cvs`, `paste`, `drive_constraint`, `drive_matrix`, `drive_off`, `locator`, `joint_chain`, `center`, `move`, `minus`, `smooth_curve`, `expand`, `collapse`, `undo`, `redo`, `snap_grid`, `chevron_left`, `chevron_up`, `layout`, `joint_node`, `joint_shape`, `joints_separate`, `shape_off`, `eye_off`, `same_shape`, `channels`, `attributes`, `keyframe`, `range`, `viewport`, `shade_lighter`, `shade_darker`, `brush` (the COLOR card and its header button; `color_pick` stays the pipette of "take the color") (`joint_chain` = a ball and a tapering bone to a smaller ball, like Maya's own joint icon), and the Labels tool's `labels` (a tag with two lines of text), and the Animation tool's `animation` (a curve with a key on its top) and its Mirror group's `mirror_to_right`, `mirror_to_left`, `mirror_keys`, `mirror_snapshot`, and its Align group's `align_objects`, `align_keys`, and Xform's `link`, and the space switcher's `space_switch`, `space_asset`, and the micro manipulator's `micro_manipulator` (a small move cross in corner brackets); add new action icons here),
+    `browse`, `folder_add`, `file_video`, `bookmark`, `bookmark_add`, `save`, `file_add`, `chevron_right`, `eye`, `folder_into`, `compress`, `scissors`, `repeat`, `text_frame`, `volume`, `gif`, `image_stack`, `clapper`, `crop`, `merge`, `split_view`, `film`, `timeline`, `folder_watch`, `pause`, `bell` (the Media actions and its queue), `clear`, `arrow_right`, `chevron_down`, `add`, `check`, `select_all`, `more`, `report`, `code`, `restart`, `power`, `play`, `edit`, `scene`, `stop`, `lock`, `search`, `rename`, and the Rename tool's quick buttons: `case_upper`, `case_capital`, `case_lower`, `case_snake` (a snake), `case_camel` (a camel's humps), `cut_prefix`, `cut_suffix`, `cut_number`, `cut_digits`, `cut_first`, `cut_last`, `namespace_out`, `magic_fix`, `sweep`, `mirror_sides`, `shape_name`, `warning`, `error`, `keyboard` (Maya Gate's EN), and the Rename strip's `names_same`, `name_bad`, `skin_joints`, `side_other`, `lock_find`, `convention_check`, `names_unique`, `name_related`, `convention_fix`, `unlock`, `sets`, `star`, `sliders`, `book`, `replace`, `skin_mesh` (the grey cube under `skin_joints`), `branch`, and the Controls tool's `controls`, `grow`, `shrink`, `outliner`, `color_pick`, `line_width`, `mirror_shape`, `mirror_update`, `zero_out`, `zero_matrix`, `matrix_out`, `on_top`, `cvs`, `paste`, `drive_constraint`, `drive_matrix`, `drive_off`, `locator`, `joint_chain`, `center`, `move`, `minus`, `smooth_curve`, `expand`, `collapse`, `undo`, `redo`, `snap_grid`, `chevron_left`, `chevron_up`, `layout`, `joint_node`, `joint_shape`, `joints_separate`, `shape_off`, `eye_off`, `same_shape`, `channels`, `attributes`, `keyframe`, `range`, `viewport`, `shade_lighter`, `shade_darker`, `brush` (the COLOR card and its header button; `color_pick` stays the pipette of "take the color") (`joint_chain` = a ball and a tapering bone to a smaller ball, like Maya's own joint icon), and the Labels tool's `labels` (a tag with two lines of text), and the Animation tool's `animation` (a curve with a key on its top) and its Mirror group's `mirror_to_right`, `mirror_to_left`, `mirror_keys`, `mirror_snapshot`, and its Align group's `align_objects`, `align_keys`, and Xform's `link`, and the space switcher's `space_switch`, `space_asset`, and the micro manipulator's `micro_manipulator` (a small move cross in corner brackets), and the KEYS group's `key_go_previous`, `key_go_next` (a bar, an arrow, a key), `smart_key` (a key with two sparks), `euler_filter` (an epsilon); add new action icons here),
     `apps/` (third-party application logos: `maya`; later houdini, blender...
     — named after the app, not the tool that uses it, so several tools can
     share one), `tools/` (sidebar icons of our OWN hub tools, one-color like
@@ -4290,6 +4290,46 @@ hub (it already sees an unclean end) + fast anim layer merge · 10 Master Spline
   windowed Maya 2025 with real mouse drags (only pressed after checking Maya is the foreground window): move 0.83 ->
   0.038, rotate 78 -> 4.4 degrees, scale x1.96 -> x1.027, two objects alike, auto key at frame 10, one undo puts both
   back, off = Maya's full move again; the window's switch by a Qt click. Not by a hand: the feel itself.
+  KEYS (2026-11-10, the reference's "anim curve extra tools", the user's everyday hotkeys - their favorites: delete
+  key, smart key, go to the next key; its "go to next / previous COLOR key" not wanted): a green group after Nudge -
+  Previous / Next key, Previous / Next frame, Set smart key, Set smart key · all channels, Copy / Cut / Paste /
+  Paste relative / Delete keys; Euler filter joined CLEAN UP. `keys_extra.py` (maya.cmds; `keys.step_to_key` /
+  `whole_frames` Qt-free) + 12 hotkeys MSLAnim{Previous,Next}{Key,Frame}, SetSmartKey(All), CopyKeys, CutKeys,
+  PasteKeys(Relative), DeleteKeys, EulerFilter. WHERE IT ACTS (`context` / `_scope`): keys PICKED in a Graph
+  Editor on screen, wherever the pointer is (the user's ask: the picked key is the one to delete); none picked -
+  the timeline: the highlighted range, else the current frame, on the selected objects' curves (also with the
+  pointer over a Graph Editor). A Graph Editor under the pointer (or with the focus, from our window) matters only
+  where a paste goes with nothing picked: onto the curves it shows. NOT the reference's rule - measured (Maya 2025,
+  its own QActions fired on a QTimer - a trigger inside the console's run did nothing; a range by a real
+  Shift-drag): its Delete Keys with keys picked in a Graph Editor on screen but WITHOUT focus deleted the current
+  frame's keys, not the picked ones. GO TO KEY = the selected objects' keys inside the playback range, ROUND the
+  ends (20 -> 1, 1 -> 20), several objects = all their keys, picked keys = only those (also outside the range),
+  nothing selected = a frame on / back; GO TO FRAME = +-1 (3.5 -> 4.5, 30 -> 31, no wrap); neither is in the undo
+  queue (`_NoUndo`). SMART KEY on a frame = a key on every ANIMATED channel that has none there, INSERTED: the curve
+  keeps its shape exactly (Maya's Insert Key: the new key and its neighbours get fixed tangents as steep as the
+  curve), a linear segment keyed linear, a stepped one stays stepped (`_range_key`); keys already there left; an
+  object with nothing animated = Maya's S on every keyable channel (with Channel Box picks: those); ALL CHANNELS =
+  every keyable channel; a HIGHLIGHTED RANGE = the same on every whole frame of it. The reference keys a frame
+  with Maya's default tangents ("type": auto) and the curve moves round the key - built that way first, numbers
+  identical to it, then changed on the user's word ("it should not change the curve, like Maya's insert key"); on
+  a range it inserts too but turns a stepped curve's keys after the step to auto, ours stay stepped. KEYS PICKED
+  (or whole curves selected) in a Graph Editor on screen = only those curves get the key (the user's ask; the
+  reference keys every animated channel); All channels ignores the pick. Checked: the
+  curve sampled every half frame before / after = 0 difference on auto, linear, stepped and spline curves.
+  DELETE: the picked keys, else the range's / the frame's keys. EULER FILTER = Maya's own
+  filterCurve euler, an object's rotation curves TOGETHER (a flip is fixed only with x / y / z at once) over the
+  picked stretch / the range / the whole curves - the reference's numbers exactly (a +-360 jump and a
+  (x+180, 180-y, z+180) flip). COPY / CUT / PASTE are OURS (its rules read from its help, not measured): copy =
+  the context's keys with Transfer's rows (`transfer_scene._key_rows`: tangents, weights, locks, colors), kept in
+  this Maya (`_Copied`); paste from the current frame (the range's start), in the graph context at each curve's LAST
+  picked key or onto the curves it shows, REPLACING the keys over the pasted stretch (`_put_keys`); a channel's
+  own copy, else the same channel of another object, else - one channel copied - that one (a channel onto
+  another); RELATIVE moves the values so the first lands where the curve was. One undo step each ("MSL Keys").
+  Checked in the test Maya 2025: go to (11 cases + picked keys) and smart key against the reference's numbers,
+  delete / euler identical, copy / paste / relative / onto another object / cut / the graph context (context
+  faked) by hand, the window's buttons by Qt clicks. NOT built: the reference's "Channel Box multi selection
+  helper", the sound while stepping, selecting the keys in the Graph Editor while stepping. Not by a real hand:
+  the hotkeys and the graph context under a real pointer.
 
 ## MSL Scripts (inside Maya)
 

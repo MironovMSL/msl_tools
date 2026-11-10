@@ -365,7 +365,7 @@ class ToolGroupNumbersTest(unittest.TestCase):
         defined = {}
         for module in ("keys_scene", "precise", "default_pose", "tangents_scene", "transfer_scene",
                        "mirror_scene", "align_scene", "xform_scene",
-                       "space_menu", "micro"):
+                       "space_menu", "micro", "keys_extra"):
             tree = ast.parse((folder / f"{module}.py").read_text(encoding="utf-8"))
             defined[module] = {node.name for node in tree.body if isinstance(node, ast.FunctionDef)}
         for command in KEY_COMMANDS:
@@ -373,6 +373,24 @@ class ToolGroupNumbersTest(unittest.TestCase):
             name = call.args[0].value
             module, _, function = name.rpartition(".")
             self.assertIn(function, defined[module or "keys_scene"], command.name)
+
+
+class GoToKeyTest(unittest.TestCase):
+    """Going key to key (keys.step_to_key) - measured on the reference (Maya 2025): keys 1 / 10 / 20."""
+
+    def test_next_and_previous_go_round_the_ends(self):
+        times = [10.0, 1.0, 20.0, 10.0]
+        self.assertEqual(ky.step_to_key(times, 1, 1), 10)
+        self.assertEqual(ky.step_to_key(times, 10, 1), 20)
+        self.assertEqual(ky.step_to_key(times, 20, 1), 1)
+        self.assertEqual(ky.step_to_key(times, 1, -1), 20)
+        self.assertEqual(ky.step_to_key(times, 3.5, 1), 10)
+        self.assertEqual(ky.step_to_key(times, 3.5, -1), 1)
+        self.assertIsNone(ky.step_to_key([], 3, 1))
+
+    def test_the_frames_of_a_range(self):
+        self.assertEqual(ky.whole_frames(6, 14), [float(f) for f in range(6, 15)])
+        self.assertEqual(ky.whole_frames(5.5, 7.2), [6.0, 7.0])
 
 
 class MicroTest(unittest.TestCase):

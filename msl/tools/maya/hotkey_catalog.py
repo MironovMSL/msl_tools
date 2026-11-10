@@ -207,6 +207,30 @@ KEY_COMMANDS = (
          "value switches with the control kept in place", "space_menu.popup", (), "space_switch"),
     _key("MSLAnimAssetSpaceSwitcher", "Asset space switcher", "The switches of every control of the selection's rig "
          "as a menu at the pointer", "space_menu.popup_asset", (), "space_asset"),
+    *(_key(f"MSLAnim{name}", title, tip, f"keys_extra.{function}", (), icon) for name, title, tip, function, icon in (
+        ("PreviousKey", "Previous key", "The selected objects' key before this frame (picked keys only, when some "
+         "are), round to the last; nothing selected: a frame back. Not in the undo queue", "previous_key",
+         "key_go_previous"),
+        ("NextKey", "Next key", "The selected objects' next key in the playback range (picked keys only, when some "
+         "are), round to the first; nothing selected: a frame on. Not in the undo queue", "next_key", "key_go_next"),
+        ("PreviousFrame", "Previous frame", "One frame back, not in the undo queue", "previous_frame", "chevron_left"),
+        ("NextFrame", "Next frame", "One frame on, not in the undo queue", "next_frame", "chevron_right"),
+        ("SetSmartKey", "Set smart key", "A key inserted on the selection's animated channels, the curves' shape kept "
+         "(nothing animated: every channel); a highlighted range: every frame of it, the shape kept",
+         "set_smart_key", "smart_key"),
+        ("SetSmartKeyAll", "Set smart key · all channels", "A key on every keyable channel of the selection",
+         "set_smart_key_all", "smart_key"),
+        ("CopyKeys", "Copy keys", "Keys picked in the Graph Editor, else the range's / this frame's keys of the "
+         "selection", "copy_keys", "copy"),
+        ("CutKeys", "Cut keys", "Copy keys and delete them", "cut_keys", "scissors"),
+        ("PasteKeys", "Paste keys", "The copied keys from this frame, replacing the keys over the pasted stretch "
+         "(over the Graph Editor: at each curve's last picked key)", "paste_keys", "paste"),
+        ("PasteKeysRelative", "Paste keys relative", "Paste keys, moved so the first lands where the curve was",
+         "paste_keys_relative", "paste"),
+        ("DeleteKeys", "Delete keys", "Keys picked in the Graph Editor, else the range's / this frame's keys of the "
+         "selection", "delete_keys", "delete"),
+        ("EulerFilter", "Euler filter", "Rotation flips taken out (picked stretch / range / whole curves)",
+         "euler_filter", "euler_filter"))),
     _key("MSLAnimMicroManipulator", "Micro manipulator", "On / off: Maya's Move / Rotate / Scale handles, the selected "
          "objects taking only a part of each step - the slower the mouse, the finer", "micro.toggle", (),
          "micro_manipulator"),

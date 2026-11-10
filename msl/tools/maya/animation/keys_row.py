@@ -6,6 +6,7 @@ buttons wrap inside it. In the reference's own order:
 
     PRECISE    − [step] +   the picked channels / keys by an exact step (precise.py)
     NUDGE      ◀ [N] ▶ and the rest of nudging, spacing and inbetweens
+    KEYS       go key to key / frame to frame, the smart key, copy / cut / paste / delete keys (keys_extra.py)
     DEFAULT    reset the pose (all, move, rotate, scale, all three), snapshot of a preferred default pose
     BAKE       bake on 1-4 / N, from the last selected, infinity; share / copy / paste key times
     TANGENTS   cycle match, best guess, polished, flow, bounce and Maya's own types
@@ -101,6 +102,40 @@ GROUPS = (
         Action("remove_scene", "Remove inbetween · scene", "N frames taken out after the current frame, on every "
                "curve of the scene", "keys_remove", "inbetween", ("-N", True), badge="sc"),
     )),
+    ("keys", "Keys", "green", (
+        Action("previous_key", "Previous key", "The selected objects' key before this frame (the picked keys only, "
+               "when some are picked) - round to the last at the start; nothing selected: one frame back. Not in "
+               "the undo queue", "key_go_previous", "previous_key", (), module="keys_extra"),
+        Action("next_key", "Next key", "The selected objects' next key in the playback range (the picked keys "
+               "only, when some are) - round to the first at the end; nothing selected: one frame on. Not in the "
+               "undo queue", "key_go_next", "next_key", (), module="keys_extra"),
+        Action("previous_frame", "Previous frame", "One frame back, not in the undo queue", "chevron_left",
+               "previous_frame", (), module="keys_extra"),
+        Action("next_frame", "Next frame", "One frame on, not in the undo queue", "chevron_right", "next_frame", (),
+               module="keys_extra"),
+        Action("smart_key", "Set smart key", "A key on this frame, inserted so the curve keeps its shape (linear stays "
+               "linear, stepped stepped): on the curves picked in the Graph Editor (keys or whole curves), else on "
+               "every ANIMATED channel of the selection (nothing animated: every channel). A highlighted range: "
+               "a key on every frame of it",
+               "smart_key", "set_smart_key", (), module="keys_extra"),
+        Action("smart_key_all", "Set smart key · all channels", "A key on EVERY keyable channel of the selection "
+               "(the animated ones as Set smart key does)", "smart_key", "set_smart_key_all", (), badge="all",
+               module="keys_extra"),
+        Action("copy", "Copy keys", "Keys picked in the Graph Editor; none picked: the keys of the "
+               "highlighted range / this frame of the selected objects - with their tangents", "copy", "copy_keys",
+               (), module="keys_extra"),
+        Action("cut", "Cut keys", "Copy keys, then the copied keys deleted", "scissors", "cut_keys", (),
+               module="keys_extra"),
+        Action("paste", "Paste keys", "The copied keys from this frame (the range's start) onto the selected "
+               "objects - over the Graph Editor at each curve's last picked key, or onto the curves it shows - "
+               "replacing the keys over the pasted stretch; one copied channel goes onto any one curve", "paste",
+               "paste_keys", (), module="keys_extra"),
+        Action("paste_relative", "Paste keys relative", "Paste keys, the values moved so the first one lands where "
+               "the curve was", "paste", "paste_keys_relative", (), badge="rel", module="keys_extra"),
+        Action("delete", "Delete keys", "Keys picked in the Graph Editor; none picked: the keys of the "
+               "highlighted range / this frame of the selected objects", "delete", "delete_keys", (),
+               module="keys_extra"),
+    )),
     ("default", "Default pose", "pink", (
         Action("pose", "Reset pose", "Every keyable channel of the selected objects back to its default (your "
                "snapshot's value where it has one)", "restart", "reset", ("all",), module="default_pose"),
@@ -181,6 +216,9 @@ GROUPS = (
                module="tangents_scene", options="native"),
     )),
     ("clean", "Clean up", "orange", (
+        Action("euler", "Euler filter", "Rotation flips taken out (Maya's own filter, x / y / z together): over "
+               "the Graph Editor only the stretch of its picked keys; else the range, else the whole curves",
+               "euler_filter", "euler_filter", (), module="keys_extra"),
         Action("snap", "Smart snap", "Keys between frames to the nearest whole frame, holding the pose there",
                "snap_grid", "smart_snap", ()),
         Action("redundant", "Remove redundant keys", "Keys that don't change the curve", "sweep",

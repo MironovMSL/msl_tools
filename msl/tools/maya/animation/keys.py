@@ -259,3 +259,22 @@ PRECISE_FINE, PRECISE_COARSE = 0.1, 5.0     # measured on the reference: a tenth
 def precise_times(fine: bool, coarse: bool) -> float:
     """How many precise steps a click makes: Ctrl = a tenth, Shift = five (both: a tenth wins - the finer)."""
     return PRECISE_FINE if fine else PRECISE_COARSE if coarse else 1.0
+
+
+def step_to_key(times, now: float, direction: int) -> "float | None":
+    """The next (direction +1) or previous (-1) of `times` from `now`, ROUND the ends: past the last key the
+    first, before the first the last (measured on the reference: 20 -> 1, 1 -> 20). None for no times."""
+    times = sorted({round(float(t), 6) for t in times})
+    if not times:
+        return None
+    if direction > 0:
+        later = [t for t in times if t > now + SAME]
+        return later[0] if later else times[0]
+    earlier = [t for t in times if t < now - SAME]
+    return earlier[-1] if earlier else times[-1]
+
+
+def whole_frames(start: float, end: float) -> list:
+    """Every whole frame from start to end, both in."""
+    first, last = int(math.ceil(start - SAME)), int(math.floor(end + SAME))
+    return [float(f) for f in range(first, last + 1)]
