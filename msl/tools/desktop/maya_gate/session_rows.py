@@ -9,7 +9,8 @@ import msl_tools.msl.ui.qt_bindings as qt
 from msl_tools.msl.ui.process_launcher.process_launcher import ProcessLauncher
 from msl_tools.msl.core.link.session import MayaSession
 from msl_tools.msl.tools.desktop.maya_gate.session_history import SessionRecord
-from msl_tools.msl.ui.theme.qss import make_rounded_popup, repolish
+from msl_tools.msl.ui.icon_manager import tinted_menu_icon
+from msl_tools.msl.ui.theme.qss import color_property, make_rounded_popup, repolish
 from msl_tools.msl.ui.ui_resources import UiResources
 from msl_tools.msl.ui.widgets.atoms.buttons.glyph_button import GlyphButton
 
@@ -27,6 +28,9 @@ class _SceneLabel(qt.QtWidgets.QLabel):
     """
 
     reveal_failed = qt.QtCore.Signal(str)
+    # its menu's icons (maya_gate.qss): a menu's icons are QIcons, tinted when it opens
+    menuIconColor = color_property("_menu_icon_color", None)
+    MENU_ICON_SIZE = 16
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -37,6 +41,9 @@ class _SceneLabel(qt.QtWidgets.QLabel):
         self._path = ""
         self.paths_handler = None   # a live session's "Paths to variables…" (set by the tab)
         self.paths_count = 0
+        self.plugins_handler = None  # its "Clean unknown plug-ins…", shown while the scene asks for any
+        self.plugins_count = 0
+        self._menu_icon_color = qt.QtGui.QColor(128, 128, 128)   # until the stylesheet sets it
         self._pressed = False
         self._press_position = qt.QtCore.QPoint()
 
@@ -114,18 +121,26 @@ class _SceneLabel(qt.QtWidgets.QLabel):
             return
         super().mouseReleaseEvent(event)
 
+    def _icon(self, name: str) -> qt.QtGui.QIcon:
+        return tinted_menu_icon(UiResources().iconManager.get_icon(name, sub_folder="actions"), self._menu_icon_color,
+                                self.devicePixelRatioF(), self.MENU_ICON_SIZE)
+
     def contextMenuEvent(self, event) -> None:
         if not self._path:
             return
         menu = make_rounded_popup(qt.QtWidgets.QMenu(self))
         menu.setAttribute(qt.QtCore.Qt.WidgetAttribute.WA_DeleteOnClose, True)
-        menu.addAction("Show in folder").triggered.connect(self.reveal)
-        menu.addAction("Copy path").triggered.connect(
+        menu.addAction(self._icon("browse"), "Show in folder").triggered.connect(self.reveal)
+        menu.addAction(self._icon("copy"), "Copy path").triggered.connect(
             lambda: qt.QtGui.QGuiApplication.clipboard().setText(self._path))
         if self.paths_handler is not None:
             menu.addSeparator()
             count = f" ({self.paths_count})" if self.paths_count else ""
-            menu.addAction(f"Paths to variables…{count}").triggered.connect(lambda: self.paths_handler())
+            menu.addAction(self._icon("folder_into"), f"Paths to variables…{count}").triggered.connect(
+                lambda: self.paths_handler())
+        if self.plugins_handler is not None and self.plugins_count:
+            menu.addAction(self._icon("sweep"), f"Clean unknown plug-ins… ({self.plugins_count})").triggered.connect(
+                lambda: self.plugins_handler())
         self._menu = menu  # for tests; the menu deletes itself on close
         menu.popup(event.globalPos())
 
@@ -248,6 +263,7 @@ class _SessionRow(qt.QtWidgets.QWidget):
             repolish(self.dot)
         self.scene_label.set_scene(session.scene, session.modified)
         self.scene_label.paths_count = session.paths
+        self.scene_label.plugins_count = session.plugins
         self.time_label.setText(session.connected_for())
         lines = [f"Maya {session.full_version or session.version}  ·  process {session.pid}"
                  + (f"  ·  memory {_size(memory)}" if memory else ""),

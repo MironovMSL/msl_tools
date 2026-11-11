@@ -29,6 +29,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from msl_tools.msl.core.fs.safe_json import write_bytes_atomic
+from msl_tools.msl.core.scene_paths import requires
 from msl_tools.msl.core.scene_paths.roots import Root, normalized
 
 ASCII_SUFFIX = ".ma"
@@ -121,6 +122,16 @@ class SceneScan:
     error: str = ""
     binary: bool = False      # a .mb, read by a mayapy (mb_paths.py): no byte offsets, written by Maya
     maya: str = ""            # the Maya that read it (binary scenes)
+    requires: list = field(default_factory=list)   # its `requires` lines (requires.Requirement; .ma only)
+
+    @property
+    def requires_out(self) -> list:
+        """The `requires` lines the next write takes out (picked, and nothing in the file uses them)."""
+        return [requirement for requirement in self.requires if requirement.remove and requirement.removable]
+
+    @property
+    def unused_requires(self) -> list:
+        return [requirement for requirement in self.requires if requirement.removable]
 
     @property
     def changes(self) -> list[PathUse]:
@@ -161,6 +172,7 @@ class ApplyResult:
     path: Path
     changed: int
     backup: Path | None
+    requires: int = 0         # `requires` lines taken out (counted in `changed` too)
 
 
 # --- the scenes of a drop ----------------------------------------------------------------------
@@ -252,7 +264,7 @@ def _exists(path: str, cache: dict) -> bool | None:
 
 
 def scan(path, roots: list[Root], environment: dict | None = None, check_files: bool = True,
-         exists_cache: dict | None = None) -> SceneScan:
+         exists_cache: dict | None = None, known_plugins: set | None = None) -> SceneScan:
     """Reads one scene and lists every absolute path in it, with what it would become.
 
     roots: deepest first (roots.roots_from() sorts them). environment: values of the variables
@@ -274,6 +286,7 @@ def scan(path, roots: list[Root], environment: dict | None = None, check_files: 
         result.error = "not a Maya ASCII scene (no “//Maya ASCII” line at its start)"
         return result
     codeset = result.codeset = codeset_of(data)
+    result.requires = requires.read(data, known_plugins)
     patterns = [(root, _root_pattern(root, codeset)) for root in roots]
     patterns = [(root, pattern) for root, pattern in patterns if pattern is not None]
     given = environment
@@ -400,7 +413,8 @@ def apply(result: SceneScan, backup: bool = True) -> ApplyResult:
     Refuses a scene changed since it was read, and one that is read-only. Raises ScenePathsError."""
     path = result.path
     changes = result.writes
-    if result.error or not changes:
+    dropped = [requirement.plugin for requirement in result.requires_out]
+    if result.error or not (changes or dropped):
         return ApplyResult(path, 0, None)
     if result.binary:
         raise ScenePathsError(f"{path.name} is a binary scene — Maya writes it (mb_paths.apply_binary)")
@@ -414,7 +428,10 @@ def apply(result: SceneScan, backup: bool = True) -> ApplyResult:
         raise ScenePathsError(f"{path.name} is read-only (checked in? check it out first)")
     try:
         data = path.read_bytes()
-        updated = rewrite(data, changes, result.codeset)
+        updated = rewrite(data, changes, result.codeset) if changes else data
+        removed = 0
+        if dropped:   # after the paths: they are found by name, not by the read's byte offsets
+            updated, removed = requires.strip(updated, dropped)
         copy = None
         if backup:
             copy = backup_name(path)
@@ -424,7 +441,7 @@ def apply(result: SceneScan, backup: bool = True) -> ApplyResult:
         raise ScenePathsError(f"{path.name}: its encoding ({result.codeset}) can’t hold a new path") from error
     except OSError as error:
         raise ScenePathsError(f"{path.name}: couldn’t be written ({error.strerror or error})") from error
-    return ApplyResult(path, len(changes), copy)
+    return ApplyResult(path, len(changes) + removed, copy, removed)
 
 
 def summary(result: SceneScan) -> dict:

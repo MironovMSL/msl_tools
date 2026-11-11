@@ -72,7 +72,7 @@ class HubLink(QtCore.QObject):
         self._verified = False  # the hub on the other end proved it knows the token
         self._decoder = protocol.FrameDecoder()
         self._script_jobs: list[int] = []
-        self._sent_scene: tuple | None = None  # (scene, modified, autosave, its folder) the hub was last told
+        self._sent_scene: tuple | None = None  # (scene, modified, autosave, its folder, unknown plug-ins) the hub was last told
         self._log_all = False                # False: warnings and errors only
         self._console_running = False        # console code is running: its output goes in the reply
         self._log_buffer: list[list[str]] = []
@@ -199,6 +199,7 @@ class HubLink(QtCore.QObject):
             modified=self._sent_scene[1],
             autosave=self._sent_scene[2],
             autosave_folder=self._sent_scene[3],
+            plugins=self._sent_scene[4],
             paths=self._paths_count(),
             startup_seconds=_startup_seconds(),
             msl_version=_msl_version))
@@ -482,6 +483,20 @@ class HubLink(QtCore.QObject):
         self._on_scene_changed()   # the new count (and the "modified" mark) to the hub now
         return {"changed": changed, "skipped": skipped + refused, "gone": [key for key in keys if key not in found]}
 
+    def _handle_scene_plugins(self, _data: dict) -> dict:
+        """What "Clean unknown plug-ins" would do in the open scene (scripts/scene_cleanup.py) - nothing changes."""
+        from msl_tools.msl.tools.maya.scripts import scene_cleanup
+        return scene_cleanup.state()
+
+    def _handle_scene_plugins_clean(self, _data: dict) -> dict:
+        """The clean-up itself, asked by the hub's user (the hub asked its question first): the scene's own
+        unknown nodes deleted (one undo step), its unknown plug-ins dropped. Not saved."""
+        from msl_tools.msl.tools.maya.scripts import scene_cleanup
+        outcome = scene_cleanup.clean(ask=False)
+        print("MSL " + outcome.text() + " (from MSL Tools)")
+        self._on_scene_changed()   # the new count (and the "modified" mark) to the hub now
+        return scene_cleanup.as_data(outcome)
+
     def _handle_hotkeys_state(self, _data: dict) -> dict:
         from msl_tools.msl.tools.maya import hotkey_set
         return hotkey_set.state()
@@ -513,6 +528,8 @@ class HubLink(QtCore.QObject):
         protocol.RUN_PYTHON: _handle_run_python,
         protocol.SCENE_PATHS: _handle_scene_paths,
         protocol.SCENE_PATHS_APPLY: _handle_scene_paths_apply,
+        protocol.SCENE_PLUGINS: _handle_scene_plugins,
+        protocol.SCENE_PLUGINS_CLEAN: _handle_scene_plugins_clean,
         protocol.HOTKEYS_STATE: _handle_hotkeys_state,
         protocol.HOTKEYS_APPLY: _handle_hotkeys_apply,
         protocol.RUN_COMMAND: _handle_run_command,
@@ -547,8 +564,18 @@ class HubLink(QtCore.QObject):
         except Exception:
             return (False, "")
 
+    @staticmethod
+    def _plugins_count() -> int:
+        """How many plug-ins the open scene asks for that this Maya doesn't have (the hub's "Clean unknown
+        plug-ins… (N)"); cheap, so it is part of the polled scene state."""
+        try:
+            from msl_tools.msl.tools.maya.scripts import scene_cleanup
+            return int(scene_cleanup.count())
+        except Exception:
+            return 0
+
     def _scene_state(self) -> tuple:
-        return (self._scene(), self._modified()) + self._autosave()
+        return (self._scene(), self._modified()) + self._autosave() + (self._plugins_count(),)
 
     def _watch_scene(self) -> None:
         import maya.cmds as cmds
@@ -574,7 +601,8 @@ class HubLink(QtCore.QObject):
             self._sent_scene = state
             # counted only when something changed (not on every poll): it walks the scene's file nodes
             self._send(protocol.event(protocol.SCENE, scene=state[0], modified=state[1],
-                                      autosave=state[2], autosave_folder=state[3], paths=self._paths_count()))
+                                      autosave=state[2], autosave_folder=state[3], plugins=state[4],
+                                      paths=self._paths_count()))
 
 
 class _Tee(object):

@@ -8,6 +8,7 @@ work on what is selected / under the pointer and say what they did in the viewpo
     camera_views.py       the viewport camera to an orthographic view of the side it faces, and back
     viewport.py           what a viewport shows: a kind on / off, geometry only (Shift: every viewport)
     rig.py                locators / joints on the selection (the Controls tool's own functions)
+    scene_cleanup.py      the open scene stops asking for plug-ins this Maya doesn't have
 
 SCRIPTS is the one list of them: tools/maya/hotkeys.py makes each a runtime command of the Hotkey
 Editor (Custom Scripts > MSL Scripts, NO key given — the user gives keys), the MSL menu lists them
@@ -67,6 +68,10 @@ SCRIPTS = (
            "(an edge loop's center)", f"{_HERE}.rig.locator_in_middle", "Rig"),
     Script("MSLJointsOnSelection", "Joints on Selection", "A joint chain through the selection in the order picked",
            f"{_HERE}.rig.joints", "Rig"),
+    # the scene
+    Script("MSLCleanUnknownPlugins", "Clean Unknown Plug-ins", "The open scene stops asking for plug-ins this Maya "
+           "doesn't have: their unknown nodes deleted (asked first), the plug-ins dropped; what a referenced file "
+           "asks for is named - clean that file itself", f"{_HERE}.scene_cleanup.run", "Scene"),
     # the Controls tool's quick actions
     Script("MSLControlsMirror", "Mirror Controls", "Controls: mirror the selected controls to the other side",
            f"{_TOOLS}.controls.quick.mirror", "Controls"),
@@ -88,4 +93,4 @@ SCRIPTS = (
     Script("MSLLabelsToggle", "Labels On / Off", "Show or hide every set of MSL Labels in the scene",
            f"{_TOOLS}.labels.toggle", "Show"),
 )
-GROUPS = ("Camera", "Viewport", "Attributes", "Rig", "Controls", "Show")
+GROUPS = ("Camera", "Viewport", "Attributes", "Rig", "Scene", "Controls", "Show")

@@ -40,6 +40,7 @@ class MayaSession:
     autosave: bool = False
     autosave_folder: str = ""
     paths: int = 0              # paths of its scene one of its variables could stand for (scene_paths_tool.py)
+    plugins: int = 0            # plug-ins its scene asks for that it doesn't have (scripts/scene_cleanup.py)
     startup_seconds: float = 0.0
     busy_since: float = 0.0
     boosted: bool = False
@@ -77,6 +78,7 @@ class MayaSession:
                    autosave=bool(data.get("autosave")),
                    autosave_folder=str(data.get("autosave_folder") or ""),
                    paths=_count(data.get("paths")),
+                   plugins=_count(data.get("plugins")),
                    startup_seconds=_number(data.get("startup_seconds")),
                    boosted=bool(data.get("boosted")),
                    skipped=[str(name) for name in data.get("skipped") or [] if name],

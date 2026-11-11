@@ -4381,6 +4381,51 @@ and Labels toggles moved here from hotkeys.COMMANDS (same command names).
   faked: every viewport alike, geometry only everywhere and back).
 - `rig.py` (`MSLLocatorsOnSelection`, `MSLLocatorInMiddle`, `MSLJointsOnSelection`): the Controls
   tool's `locators_on_selection` / `joints_on_selection`, said in the viewport.
+- `scene_cleanup.py` (`MSLCleanUnknownPlugins`, group Scene, icon `sweep`; 2026-11-11, after a rig's
+  "Plug-in "evoattrib" was not found" errors): the scene's OWN unknown / unknownDag / unknownTransform
+  nodes deleted (unlocked first; a confirmDialog names how many of which plug-in - their data is lost;
+  one undo step), THEN every `unknownPlugin -list` entry dropped (the other order: Maya refuses while
+  nodes are there; the list is read BEFORE the deletion - a plug-in leaves it with its last node).
+  MEASURED (mayapy 2024): a shot lists its REFERENCE's plug-ins too, and dropping them there changes
+  nothing - the reference asks again on the next open; so a plug-in a referenced .ma's `requires` names
+  (its head read as text) and the reference's unknown nodes are left and NAMED ("still asked for by
+  Rig_Shiba_01.ma: open it and clean it there"). Measured too: five such missing plug-ins cost ~0.5 s of
+  a 2.4 s rig open - they are noise in the log, not why a scene opens slowly. Nothing is saved.
+  Checked in mayapy 2024 (a locked node, a DAG one under a transform, undo, the saved file without the
+  requires, a shot referencing such a rig, an empty scene). NOT seen: the dialog in a windowed Maya.
+  THE HUB'S ROAD (2026-11-11, the user's "all four"): (1) `MayaSession.plugins` = `scene_cleanup.count()`
+  (len of unknownPlugin -list, cheap) - hub_link keeps it IN the polled scene state (`_scene_state()[4]`),
+  so hello and every scene event carry it; the row's ⋯ menu and the scene name's right click get "Clean
+  unknown plug-ins… (N)" only while N > 0. (2) Two FIXED requests (protocol.SCENE_PLUGINS -> `state()`:
+  {plugins it drops, nodes [{plugin, count}], referenced [{file, plugins}]}; SCENE_PLUGINS_CLEAN ->
+  `clean(ask=False)` as `as_data()`, then a scene event): the hub asks in a ConfirmDialog ("danger" when
+  unknown nodes go), "Fix in the files…" for a reference's -> Scenes › Paths (`_fix_in_paths(find=False)`).
+  (3) The log: `maya_gate/missing_plugins.py` reads "Plug-in, "x", was not found on MAYA_PLUG_IN_PATH"
+  (+ the file of "file: <path> line N") - such a line is kept as a WARNING (no unread error, the row
+  counts it as a warning) and `QFrame#sessionsPluginsHint` above the log says it once: "5 plug-ins this
+  Maya doesn't have, asked for by Rig_Shiba_01.ma — not errors" with Clean… / Fix in the file / Load
+  Arnold (Arnold's "The MtoA plug-in needed for this scene is not loaded" in a Maya whose boost skipped
+  mtoa) / ×. (4) Scenes › Paths: `core/scene_paths/requires.py` - a .ma's `requires` lines; UNUSED = no
+  `-nodeType` the file's createNode uses (or none named), never one with `-dataType`, never `maya`;
+  `known_plugins(installs)` = bin/plug-ins of every installed Maya + the plug-ins folders of the .mod
+  files Maya finds by default (its modules, Autodesk Shared/Modules/maya/<year>, Documents/maya/modules;
+  .mod paths hold spaces and KEY:VALUE fields) - 134 names here, 0.1 s. Taken out by default: unused AND
+  not known; a known one (stereoCamera) only when picked. `SceneScan.requires` / `requires_out`; the rows
+  under a scene ("requires “evoattrib” 1.0 · taken out"), right / double click = keep / take out for
+  every listed scene (`_requires_choice`); `ma_paths.apply` strips them AFTER the path swaps (found by
+  name, not by the read's offsets - references stand BEFORE the requires lines), so Replace, .bak and
+  Undo last replace cover them. Tests: tests/core/test_scene_requires.py, tests/ui/test_sessions_plugins.py
+  (a fake Maya on a private port). Checked: mayapy 2024 (state / clean data with a referenced rig);
+  offscreen from an isolated copy (Paths: listed, defaults, a double click, Replace wrote, .bak; both tabs
+  rendered dark). NOT seen: a real Maya through the real hub (it needs a restart + "Reload code").
+  Icons (the user's ask, the same day): the plug-ins line starts with `plugins/plugin` (TintedIcon, --warning)
+  and its links carry `actions/sweep` / `tools/paths` / `plugins/arnold` / `actions/clear` (× is icon-only),
+  tinted from SessionsTab qproperty linkIconColor (--accent; `_tint_hint_icons`); the scene name's menu has
+  icons like the row's (`_SceneLabel` qproperty menuIconColor: browse, copy, folder_into, sweep); in Paths a
+  scene row has `actions/scene`, an unused `requires` row `plugins/plugin` in its row's tone (`_row_icon`,
+  tinted in `_recolor`). Rendered offscreen in both themes.
+  TRAP met: a Bash heredoc in this tool turned "\\n" in Python edit scripts into real newlines - write
+  such scripts with the file tool.
 Checked: mayapy 2026 from an isolated copy (30 checks: reset of transforms / default_ / locked /
 driven / one undo / transforms_only / channels / a history node / a shape / a picked key / a keyed
 channel; ortho of a zxy camera tilted -80 looking down: top, up a world axis, same target, width,

@@ -290,7 +290,7 @@ SCRIPT_ICONS = {
     "MSLOrthoView": "camera", "MSLCameraBack": "undo",
     "MSLToggleCurves": "smooth_curve", "MSLTogglePolygons": "viewport", "MSLToggleJoints": "joint_node",
     "MSLToggleLocators": "locator", "MSLGeometryOnly": "eye",
-    "MSLResetAttributes": "zero_out",
+    "MSLResetAttributes": "zero_out", "MSLCleanUnknownPlugins": "sweep",
     "MSLLocatorsOnSelection": "locator", "MSLLocatorInMiddle": "center", "MSLJointsOnSelection": "joint_chain",
     "MSLControlsMirror": "mirror_shape", "MSLControlsZero": "zero_out", "MSLControlsSelect": "select_all",
     "MSLControlsPoseCopy": "copy", "MSLControlsPosePaste": "paste", "MSLControlsMatch": "move",

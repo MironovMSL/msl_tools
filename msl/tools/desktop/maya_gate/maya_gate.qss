@@ -454,3 +454,21 @@ KeyboardMap {
     qproperty-successColor:   var(--success);
     qproperty-errorColor:     var(--error);
 }
+
+/* Above the log: plug-ins the scene asked for that this Maya lacks - one line, with what fixes it. */
+SessionsTab QFrame#sessionsPluginsHint {
+    background-color: alpha(var(--warning), 10%);
+    border: 1px solid alpha(var(--warning), 35%);
+    border-radius: 6px;
+}
+SessionsTab QLabel#sessionsPluginsHintText {
+    color: var(--text-primary);
+    font-size: 11px;
+}
+SessionsTab { qproperty-linkIconColor: var(--accent); }
+SessionsTab TintedIcon#sessionsPluginsHintIcon { qproperty-iconColor: var(--warning); }
+SessionsTab QPushButton#sessionsHintClose {
+    padding: 2px 4px;
+}
+/* The scene name's right-click menu: icons like the row's menu. */
+SessionsTab QLabel#sessionScene { qproperty-menuIconColor: var(--text-secondary); }

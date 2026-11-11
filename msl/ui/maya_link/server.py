@@ -299,12 +299,16 @@ class MayaLinkServer(qt.QtCore.QObject):
         elif kind == protocol.EVENT and name == protocol.SCENE:
             session = peer.session
             paths = data.get("paths", session.paths)
+            plugins = data.get("plugins", session.plugins)
             state = (str(data.get("scene") or ""), bool(data.get("modified")),
                      bool(data.get("autosave", session.autosave)),  # absent from a Maya with older code
                      str(data.get("autosave_folder", session.autosave_folder) or ""),
-                     paths if isinstance(paths, int) and paths >= 0 else 0)
-            if state != (session.scene, session.modified, session.autosave, session.autosave_folder, session.paths):
-                session.scene, session.modified, session.autosave, session.autosave_folder, session.paths = state
+                     paths if isinstance(paths, int) and paths >= 0 else 0,
+                     plugins if isinstance(plugins, int) and plugins >= 0 else 0)
+            if state != (session.scene, session.modified, session.autosave, session.autosave_folder, session.paths,
+                         session.plugins):
+                (session.scene, session.modified, session.autosave, session.autosave_folder, session.paths,
+                 session.plugins) = state
                 self.sessions_changed.emit()
         elif kind == protocol.EVENT and name == protocol.OPEN_IN_MEDIA:
             paths = data.get("paths")

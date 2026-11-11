@@ -148,6 +148,11 @@ class _ControlMixin:
             "The scene’s absolute paths swapped for this Maya’s variables (E:/branches/Animation/… → "
             "$WG_ANIM/…) — shows what changes first; the scene isn’t saved", lambda: self._on_scene_paths(session_id),
             enabled=reachable)
+        if session.plugins:
+            add(f"Clean unknown plug-ins… ({session.plugins})", ("sweep", "actions"),
+                "The scene asks for plug-ins this Maya doesn’t have (“was not found on MAYA_PLUG_IN_PATH”) — "
+                "shows what would go first: their unknown nodes, the plug-ins; what a referenced file asks for "
+                "is cleaned in that file", lambda: self._on_scene_plugins(session_id), enabled=reachable)
         if session.skipped:
             add("Load plug-ins…", ("plugin", "plugins"), "Load plug-ins that boost start left out — in this "
                 "running Maya, no restart", lambda: self._on_plugins(session_id), enabled=reachable)
@@ -342,8 +347,57 @@ class _ControlMixin:
 
         self._ask(session.session_id, protocol.SCENE_PATHS_APPLY, done, self.REPORT_TIMEOUT_MS, writes=writes)
 
-    def _fix_in_paths(self, files: list) -> None:
-        """The referenced files into Scenes › Paths, which looks for their missing files once they are read."""
+    def _on_scene_plugins(self, session_id: int) -> None:
+        """Clean unknown plug-ins: asks the Maya what would go (scripts/scene_cleanup.py), shows it, and on
+        "Clean" has it delete the scene's own unknown nodes and drop the plug-ins. What a referenced file asks
+        for is cleaned in that file: Scenes › Paths takes its unused `requires` lines out."""
+        self._ask(session_id, protocol.SCENE_PLUGINS,
+                  lambda session, data: qt.QtCore.QTimer.singleShot(0, self, lambda: self._show_scene_plugins(session, data)),
+                  self.REPORT_TIMEOUT_MS)
+
+    def _show_scene_plugins(self, session: MayaSession, data: dict) -> None:
+        name = self._names.get(session.pid, f"Maya {session.version}")
+        plugins = [str(plugin) for plugin in data.get("plugins") or []]
+        nodes = [entry for entry in data.get("nodes") or [] if isinstance(entry, dict)]
+        referenced = [entry for entry in data.get("referenced") or [] if isinstance(entry, dict) and entry.get("file")]
+        count = sum(int(entry.get("count") or 0) for entry in nodes)
+        if not (plugins or nodes or referenced):
+            self._say(f"{name}: {session.scene_name} asks for no missing plug-in.", "success")
+            return
+        said, details = [], []
+        if count:
+            said.append(f"delete {count} unknown node{'s' if count != 1 else ''} — what they held is lost")
+            details.append("Unknown nodes: " + ", ".join(f"{entry.get('count')} of {entry.get('plugin')}" for entry in nodes))
+        if plugins:
+            said.append(f"drop {len(plugins)} plug-in{'s' if len(plugins) != 1 else ''} from the scene’s list")
+            details.append("Plug-ins: " + ", ".join(plugins))
+        message = (f"{session.scene_name} asks for plug-ins {name} doesn’t have. " +
+                   ("Clean: " + "; ".join(said) + ". One undo step for the nodes; the scene isn’t saved." if said else ""))
+        files = [str(entry["file"]) for entry in referenced]
+        if referenced:
+            details.append("Asked for by referenced files (the scene can’t clean those — Scenes › Paths takes the "
+                           "lines out of the file itself):\n" + "\n".join(
+                               f"{os.path.basename(str(entry['file']))}: {', '.join(entry.get('plugins') or [])}"
+                               for entry in referenced))
+            message += (f"  {len(referenced)} referenced file{'s ask' if len(referenced) != 1 else ' asks'} for "
+                        f"{'them' if not said else 'more'} — fix {'those files' if len(referenced) != 1 else 'that file'}, "
+                        "or every shot that references it keeps asking.")
+        choices = (([("clean", "Clean")] if said else []) + ([("fix", "Fix in the files…")] if referenced else [])
+                   + [("cancel", "Cancel")])
+        choice = ConfirmDialog.ask(self, "Clean unknown plug-ins", message, "\n\n".join(details), choices,
+                                   kind="danger" if count else "question")
+        if choice == "fix":
+            self._fix_in_paths(files, find=False)
+        elif choice == "clean":
+            self._ask(session.session_id, protocol.SCENE_PLUGINS_CLEAN,
+                      lambda session, reply: self._say(f"{name}: " + str(reply.get("text") or "cleaned")
+                                                       .replace("Clean unknown plug-ins: ", ""),
+                                                       "error" if reply.get("refused") else "success"),
+                      self.REPORT_TIMEOUT_MS)
+
+    def _fix_in_paths(self, files: list, find: bool = True) -> None:
+        """The referenced files into Scenes › Paths, which looks for their missing files once they are read
+        (`find`) - and lists their unused `requires` lines either way."""
         window = self.window()
         open_tool = getattr(window, "open_tool", None)
         page = open_tool("scenes") if callable(open_tool) else None
@@ -352,7 +406,7 @@ class _ControlMixin:
             self._say("Scenes isn’t in this hub — open the files in its Paths tab yourself.", "error")
             return
         page.show_tab(page.PATHS)
-        paths.add(files, find=True)
+        paths.add(files, find=find)
 
     def _on_report(self, session_id: int) -> None:
         self._ask(session_id, protocol.LAUNCH_REPORT,

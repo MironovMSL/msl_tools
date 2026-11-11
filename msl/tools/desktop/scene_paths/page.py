@@ -8,12 +8,13 @@ from msl_tools.msl.core.batch import environments
 from msl_tools.msl.core.resources import Resources
 from msl_tools.msl.core.fs.maya_paths import MayaPaths
 from msl_tools.msl.core.environment.shell import move_to_recycle_bin
-from msl_tools.msl.core.scene_paths import backups, coverage, finder, ma_paths, mb_paths, undo
+from msl_tools.msl.core.scene_paths import backups, coverage, finder, ma_paths, mb_paths, requires, undo
 from msl_tools.msl.core.scene_paths.progress import Progress
 from msl_tools.msl.core.scene_paths.roots import roots_from, why_not
 from msl_tools.msl.core.theme import ThemeRegistry
 from msl_tools.msl.tools.desktop.maya_gate.maya_variables import KNOWN_VARIABLES
 from msl_tools.msl.ui.process_launcher.process_launcher import ProcessLauncher
+from msl_tools.msl.ui.icon_manager import tinted_menu_icon
 from msl_tools.msl.ui.theme.qss import color_property, make_rounded_popup, repolish
 from msl_tools.msl.ui.theme.stylesheet_builder import StylesheetBuilder
 from msl_tools.msl.ui.ui_resources import UiResources
@@ -34,6 +35,7 @@ PATH_ROLE = qt.QtCore.Qt.ItemDataRole.UserRole          # a scene row: its file
 TONE_ROLE = qt.QtCore.Qt.ItemDataRole.UserRole + 1      # how a row is colored: change / missing / quiet / ""
 KEY_ROLE = qt.QtCore.Qt.ItemDataRole.UserRole + 2       # a missing path's row: finder.key_of(its path)
 CHOICE_ROLE = qt.QtCore.Qt.ItemDataRole.UserRole + 3    # a path a variable can stand for: finder.key_of(its path)
+REQUIRES_ROLE = qt.QtCore.Qt.ItemDataRole.UserRole + 4  # an unused `requires` line's row: its plug-in (lower case)
 STATE_TEXT = {ma_paths.CHANGE: "", ma_paths.VARIABLE: "already a variable", ma_paths.OUTSIDE: "under no variable",
               ma_paths.LEFT: "inside a script — left as it is"}
 
@@ -68,6 +70,10 @@ class ScenePathsPage(qt.QtWidgets.QWidget):
     - SCENES: files and folders dropped (or chosen) are read on a worker (core/scene_paths/
       ma_paths.py) — a row per scene, "3 to change · 1 file missing", unfolded: each path, what it
       becomes, and what it is (reference, texture, a reference's edit...).
+    - PLUG-INS: a .ma's `requires` lines that nothing in the file uses (core/scene_paths/requires.py) are
+      listed under it; those of plug-ins no Maya here has are taken out at the next write (a right click /
+      a double click: keep it / take it out - for every listed scene) - the scene, and every shot
+      referencing it, stop asking for them.
     - the bottom bar: a copy of each scene first (.bak beside it), then "Replace in N scenes".
 
     Nothing is written before that click, and then only the folder at a path's start: the rest
@@ -106,6 +112,8 @@ class ScenePathsPage(qt.QtWidgets.QWidget):
         self._found: dict[str, list] = {}      # a missing path (finder.key_of) -> files of its name, best first
         self._picked: dict[str, str] = {}      # the user's pick for one ("" = don't relink it)
         self._root_choice: dict[str, str] = {}  # a path (finder.key_of) -> the variable picked for it ("" = leave it)
+        self._requires_choice: dict[str, bool] = {}   # a plug-in (lower case) -> its unused line taken out or kept
+        self._known_plugins: set | None = None        # what the installed Mayas have (requires.known_plugins), read once
         self._searching = False
         self._progress: Progress | None = None      # the run at hand (reading / writing) - shown, stoppable
         self._mb_progress: Progress | None = None   # the binary scenes a mayapy reads
@@ -390,6 +398,7 @@ class ScenePathsPage(qt.QtWidgets.QWidget):
         token = self._reading
         scenes, roots, environment = list(self._scenes), self.roots(), self._variables()
         raw = dict(self._mb_raw)
+        known_now = self._known_plugins
         self._summary.setText(f"Reading {len(scenes)} scene{'s' if len(scenes) != 1 else ''}…")
         self._set_busy(True)
 
@@ -399,6 +408,7 @@ class ScenePathsPage(qt.QtWidgets.QWidget):
         def read() -> tuple:
             cache: dict = {}
             found, copies = {}, {}
+            known = known_now if known_now is not None else requires.known_plugins(MayaPaths.get_available_installs())
             for scene in scenes:
                 copies[str(scene)] = backups.backups_of(scene)
                 if progress.stopped:
@@ -407,9 +417,10 @@ class ScenePathsPage(qt.QtWidgets.QWidget):
                     if str(scene) in raw:
                         found[str(scene)] = mb_paths.scan_from_raw(scene, raw[str(scene)], roots, environment, cache)
                 else:
-                    found[str(scene)] = ma_paths.scan(scene, roots, environment=environment, exists_cache=cache)
+                    found[str(scene)] = ma_paths.scan(scene, roots, environment=environment, exists_cache=cache,
+                                                      known_plugins=known)
                 progress.done += 1
-            return found, copies
+            return found, copies, known
 
         run_in_background(read, lambda result: self._on_read(token, result),
                           lambda error: self._on_failed(token, error), keep=self._workers, parent=self)
@@ -417,7 +428,7 @@ class ScenePathsPage(qt.QtWidgets.QWidget):
     def _on_read(self, token: int, result: tuple) -> None:
         if token != self._reading:
             return
-        result, self._backups = result
+        result, self._backups, self._known_plugins = result
         stopped = self._progress is not None and self._progress.stopped
         self._progress = None
         self._scans = result
@@ -520,7 +531,7 @@ class ScenePathsPage(qt.QtWidgets.QWidget):
         self._tree.clear()
         everything = self._show_all.isChecked()
         roots = self.roots()
-        scenes_to_write = changes = relinks = missing = 0
+        scenes_to_write = changes = relinks = missing = plugins_out = 0
         for scene in self._scenes:
             result = self._scans.get(str(scene))
             item = qt.QtWidgets.QTreeWidgetItem([scene.name])
@@ -538,15 +549,19 @@ class ScenePathsPage(qt.QtWidgets.QWidget):
             else:
                 self._choose(result)
                 self._relink(result, roots)
-                count, found = len(result.changes), len(result.relinks)
+                self._choose_requires(result)
+                count, found, out = len(result.changes), len(result.relinks), len(result.requires_out)
                 lost = len(result.missing) - found
-                scenes_to_write += bool(count or found)
+                scenes_to_write += bool(count or found or out)
                 changes += count
                 relinks += found
                 missing += lost
+                plugins_out += out
                 said = [f"{count} to change"] if count else []
                 if found:
                     said.append(f"{found} found again")
+                if out:
+                    said.append(f"{out} plug-in{'s' if out != 1 else ''} out")
                 item.setText(1, "  ·  ".join(said) or "nothing to change")
                 parts = [f"{len(result.uses)} path{'s' if len(result.uses) != 1 else ''}"]
                 if result.binary:
@@ -556,7 +571,15 @@ class ScenePathsPage(qt.QtWidgets.QWidget):
                 if lost:
                     parts.append(f"{lost} file{'s' if lost != 1 else ''} missing")
                 item.setText(2, "  ·  ".join(parts))
-                item.setData(0, TONE_ROLE, "change" if count or found else "quiet")
+                unused = result.unused_requires
+                if unused and not result.uses:
+                    parts = parts[1:]          # "0 paths" says nothing next to the plug-ins
+                if unused:
+                    parts.append(f"{len(unused)} unused plug-in{'s' if len(unused) != 1 else ''} asked for")
+                    item.setText(2, "  ·  ".join(parts))
+                item.setData(0, TONE_ROLE, "change" if count or found or out else "quiet")
+                for requirement in unused:
+                    item.addChild(self._requires_item(requirement))
                 lost_ids = {id(use) for use in result.missing}
                 for use in result.uses:
                     if everything or use.state == ma_paths.CHANGE or id(use) in lost_ids or use.options:
@@ -585,6 +608,8 @@ class ScenePathsPage(qt.QtWidgets.QWidget):
             parts.append(f"{changes} path{'s' if changes != 1 else ''} to change")
         if relinks:
             parts.append(f"{relinks} missing file{'s' if relinks != 1 else ''} found again")
+        if plugins_out:
+            parts.append(f"{plugins_out} unused plug-in line{'s' if plugins_out != 1 else ''} out")
         if parts:
             parts[-1] += f" in {scenes_to_write} scene{'s' if scenes_to_write != 1 else ''}"
         elif total:
@@ -607,6 +632,36 @@ class ScenePathsPage(qt.QtWidgets.QWidget):
             if chosen is None:
                 chosen = finder.best(use.path, use.found)
             use.relink = finder.through_root(chosen, roots) if chosen else ""
+
+    def _choose_requires(self, result) -> None:
+        """Gives each unused `requires` line of `result` the user's choice (else its default: out when no Maya
+        here has the plug-in). Idempotent: the default is kept apart, so a choice can change again."""
+        for requirement in result.requires:
+            if not hasattr(requirement, "default_remove"):
+                requirement.default_remove = requirement.remove
+            requirement.remove = self._requires_choice.get(requirement.plugin.lower(), requirement.default_remove)
+
+    def _requires_item(self, requirement) -> qt.QtWidgets.QTreeWidgetItem:
+        """An unused `requires` line's row: taken out at the next write, or kept."""
+        version = f" {requirement.version}" if requirement.version else ""
+        child = qt.QtWidgets.QTreeWidgetItem([f"requires “{requirement.plugin}”{version}",
+                                              "taken out" if requirement.remove else "stays",
+                                              "plug-in  ·  " + requirement.why()])
+        child.setData(0, REQUIRES_ROLE, requirement.plugin.lower())
+        tip = (f"The scene asks Maya to load the plug-in “{requirement.plugin}” on every open, and nothing in "
+               "it uses it." + ("" if requirement.known else " No Maya on this computer has it: Maya says “was not "
+               "found on MAYA_PLUG_IN_PATH” each time — also in every shot that references this file.")
+               + ("\n\nTaken out at the next write — right click or double click to keep it." if requirement.remove
+                  else "\n\nStays — right click or double click to take it out."))
+        for column in range(3):
+            child.setToolTip(column, tip)
+        child.setData(0, TONE_ROLE, "change" if requirement.remove else "quiet")
+        return child
+
+    def _set_requires(self, plugin: str, remove: bool) -> None:
+        """An unused `requires` line of `plugin` taken out / kept — in every listed scene."""
+        self._requires_choice[plugin] = remove
+        self._show()
 
     def _use_item(self, use, missing: bool) -> qt.QtWidgets.QTreeWidgetItem:
         """A path's row; `missing`: a file the scene needs isn't there (not said of a script's path)."""
@@ -646,8 +701,19 @@ class ScenePathsPage(qt.QtWidgets.QWidget):
         for index in range(tree.topLevelItemCount()):
             top = tree.topLevelItem(index)
             self._paint(top, colors, columns=(1, 2))
+            top.setIcon(0, self._row_icon("scene", "actions", self._quiet_color))
             for child_index in range(top.childCount()):
-                self._paint(top.child(child_index), colors, columns=(1,))
+                child = top.child(child_index)
+                self._paint(child, colors, columns=(1,))
+                if child.data(0, REQUIRES_ROLE):   # an unused `requires` line: the plug-in, in its row's tone
+                    color = colors.get(child.data(0, TONE_ROLE) or "", self._quiet_color)
+                    child.setIcon(0, self._row_icon("plugin", "plugins", color))
+
+    def _row_icon(self, name: str, folder: str, color) -> qt.QtGui.QIcon:
+        """A one-color icon for a row of the list (a tree item's icon is a QIcon: tinted here, from the
+        QSS-set row colors)."""
+        return tinted_menu_icon(UiResources().iconManager.get_icon(name, sub_folder=folder), color,
+                                self.devicePixelRatioF(), 14)
 
     @staticmethod
     def _paint(item, colors: dict, columns) -> None:
@@ -663,6 +729,10 @@ class ScenePathsPage(qt.QtWidgets.QWidget):
         self._show()
 
     def _on_double_click(self, item, _column: int) -> None:
+        plugin = (item.data(0, REQUIRES_ROLE) or "") if item.parent() is not None else ""
+        if plugin:
+            self._set_requires(plugin, item.text(1) != "taken out")
+            return
         if item.parent() is None and item.childCount() == 0 and item.data(0, PATH_ROLE):
             self._say("Nothing listed under it: tick “Every path” to see the paths that stay.")
 
@@ -674,7 +744,13 @@ class ScenePathsPage(qt.QtWidgets.QWidget):
         path = scene_item.data(0, PATH_ROLE)
         menu = make_rounded_popup(qt.QtWidgets.QMenu(self))
         menu.setAttribute(qt.QtCore.Qt.WidgetAttribute.WA_DeleteOnClose, True)
-        if item.parent() is not None:
+        plugin = (item.data(0, REQUIRES_ROLE) or "") if item.parent() is not None else ""
+        if plugin:
+            out = item.text(1) == "taken out"
+            menu.addAction("Keep this line" if out else "Take this line out").triggered.connect(
+                lambda: self._set_requires(plugin, not out))
+            menu.addSeparator()
+        elif item.parent() is not None:
             key = item.data(0, KEY_ROLE) or ""
             if key and self._found.get(key):
                 self._add_pick_items(menu, key)
@@ -1041,7 +1117,7 @@ class ScenePathsPage(qt.QtWidgets.QWidget):
         targets, held = [], []
         for scene in self._scenes:
             result = self._scans.get(str(scene))
-            if result is None or result.error or not result.writes:
+            if result is None or result.error or not (result.writes or result.requires_out):
                 continue
             maya = open_now.get(os.path.normcase(os.path.normpath(str(scene))))
             (held if maya else targets).append((result, maya))
@@ -1049,6 +1125,7 @@ class ScenePathsPage(qt.QtWidgets.QWidget):
             self._say("Every scene with paths to change is open in Maya — close it there first.", "error")
             return
         count = sum(len(result.writes) for result, _maya in targets)
+        out = sum(len(result.requires_out) for result, _maya in targets)
         roots = ", ".join(f"${root.name}" for root in self.roots())
         details = "\n".join(str(result.path) for result, _maya in targets[:12])
         if len(targets) > 12:
@@ -1062,7 +1139,11 @@ class ScenePathsPage(qt.QtWidgets.QWidget):
         what = [f"{count - found} get {roots}"] if count - found else []
         if found:
             what.append(f"{found} missing file{'s' if found != 1 else ''} found again")
-        message = (f"{count} path{'s' if count != 1 else ''} in {len(targets)} scene{'s' if len(targets) != 1 else ''} "
+        if out:
+            what.append(f"{out} unused plug-in line{'s' if out != 1 else ''} taken out")
+        written = " and ".join(([f"{count} path{'s' if count != 1 else ''}"] if count else [])
+                               + ([f"{out} requires line{'s' if out != 1 else ''}"] if out else []))
+        message = (f"{written} in {len(targets)} scene{'s' if len(targets) != 1 else ''} "
                    f"are written ({', '.join(what)}). "
                    + ("A copy of each scene is kept beside it (.bak)." if backup
                       else "No copy is kept — this can’t be undone."))
@@ -1123,8 +1204,11 @@ class ScenePathsPage(qt.QtWidgets.QWidget):
             self._settings["last_run"] = {}   # written without copies: nothing to undo any more
         written = [done for _path, done, error in outcome if done is not None and done.changed]
         failed = [error for _path, _done, error in outcome if error]
-        paths = sum(done.changed for done in written)
-        text = f"Done: {paths} path{'s' if paths != 1 else ''} in {len(written)} scene{'s' if len(written) != 1 else ''}."
+        lines_out = sum(getattr(done, "requires", 0) for done in written)
+        paths = sum(done.changed for done in written) - lines_out
+        what = ([f"{paths} path{'s' if paths != 1 else ''}"] if paths else []) + (
+            [f"{lines_out} plug-in line{'s' if lines_out != 1 else ''} out"] if lines_out else [])
+        text = f"Done: {', '.join(what) or 'nothing'} in {len(written)} scene{'s' if len(written) != 1 else ''}."
         if held:
             text += f"  {len(held)} left out: open in Maya."
         if failed:
@@ -1156,7 +1240,8 @@ class ScenePathsPage(qt.QtWidgets.QWidget):
         for widget in (self._apply, self._reread, self._environment, self._roots, self._clear):
             widget.setEnabled(not busy)
         if not busy:
-            self._apply.setEnabled(any(result.writes for result in self._scans.values() if not result.error))
+            self._apply.setEnabled(any(result.writes or result.requires_out
+                                       for result in self._scans.values() if not result.error))
 
     # --- choosing / dropping -------------------------------------------------------------------------
 

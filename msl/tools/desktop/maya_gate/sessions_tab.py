@@ -8,12 +8,16 @@ from msl_tools.msl.core.resources import Resources
 from msl_tools.msl.ui.process_launcher.process_launcher import ProcessLauncher
 from msl_tools.msl.core.link.session import MayaSession
 from msl_tools.msl.core.environment.processes import process_memory
+from msl_tools.msl.tools.desktop.maya_gate import missing_plugins
 from msl_tools.msl.tools.desktop.maya_gate.snippets import SnippetStore
 from msl_tools.msl.tools.desktop.maya_gate.session_history import (LOG_FOLDER_NAME, SessionHistory, SessionRecord,
                                                                    find_autosave, read_log, write_log)
 from msl_tools.msl.ui.maya_link.server import MayaLinkServer
 from msl_tools.msl.core.theme import ThemeRegistry
+from msl_tools.msl.ui.icon_manager import tinted_menu_icon
 from msl_tools.msl.ui.theme.qss import color_property, repolish
+from msl_tools.msl.ui.ui_resources import UiResources
+from msl_tools.msl.ui.widgets.atoms.icons.tinted_icon import TintedIcon
 from msl_tools.msl.ui.widgets.atoms.editors import LogView
 from msl_tools.msl.ui.widgets.atoms.layouts import FlowLayout
 from msl_tools.msl.ui.widgets.atoms.segmented.segmented_control import SegmentedControl
@@ -129,6 +133,9 @@ class SessionsTab(_ConsoleMixin, _ControlMixin, qt.QtWidgets.QWidget):
     # can't tint - the tab takes the colors as properties and tints them when the menu opens.
     menuIconColor = color_property("_menu_icon_color", None)
     menuDangerColor = color_property("_menu_danger_color", None)
+    # The icons of the plug-ins line's links (QPushButton icons are QIcons too): tinted in this color.
+    linkIconColor = color_property("_link_icon_color", "_tint_hint_icons")
+    HINT_ICON_SIZE = 14
     HISTORY_CAPTION_HEIGHT = 24
 
     def __init__(self, server: MayaLinkServer, history: SessionHistory | None = None, launch=None,
@@ -138,6 +145,7 @@ class SessionsTab(_ConsoleMixin, _ControlMixin, qt.QtWidgets.QWidget):
         fallback = ThemeRegistry.fallback()  # until QSS applies
         self._menu_icon_color = qt.QtGui.QColor(fallback.text_secondary)
         self._menu_danger_color = qt.QtGui.QColor(fallback.error)
+        self._link_icon_color = qt.QtGui.QColor(fallback.accent)
         self._snippets = snippets                 # None: the console has no snippets
         self._snippet_chips: list = []
         self._snippets_shown = False              # the snippet file is first read when the console shows
@@ -163,6 +171,9 @@ class SessionsTab(_ConsoleMixin, _ControlMixin, qt.QtWidgets.QWidget):
         self._rows: dict[int, _SessionRow] = {}
         self._logs: dict[int, list] = {}          # pid -> [(level, text, time), ...]
         self._problems: dict[int, list] = {}      # pid -> [errors, warnings]
+        self._missing: dict[int, dict] = {}       # pid -> {plug-in it lacks: the file asking} (from its log)
+        self._arnold_wanted: set[int] = set()     # pids whose log says the scene needs Arnold (boost left it out)
+        self._hint_dismissed: set[int] = set()    # pids whose plug-ins line was put away
         self._console_running: set[int] = set()  # pids of the Mayas running code from the console
         self._selected_pid = 0
         self._gone: dict[int, float] = {}         # pid -> when that Maya left (its log is kept a while)
@@ -222,6 +233,39 @@ class SessionsTab(_ConsoleMixin, _ControlMixin, qt.QtWidgets.QWidget):
         self._copy_log_button = _SessionRow._action("Copy", "Copy the log")
         self._clear_log_button = _SessionRow._action("Clear", "Empty this Maya\u2019s log here (nothing changes in Maya)")
         self._log_view = LogView(self.LOG_PLACEHOLDER)
+        # Above the log: "5 plug-ins this Maya doesn't have, asked for by Rig.ma" once, with what fixes it -
+        # instead of a red line per plug-in (missing_plugins.py).
+        self._plugins_hint = qt.QtWidgets.QFrame()
+        self._plugins_hint.setObjectName("sessionsPluginsHint")
+        self._plugins_hint_text = qt.QtWidgets.QLabel()
+        self._plugins_hint_text.setObjectName("sessionsPluginsHintText")
+        self._plugins_hint_text.setWordWrap(True)
+        self._plugins_hint_text.setSizePolicy(qt.QtWidgets.QSizePolicy.Policy.Ignored,
+                                              qt.QtWidgets.QSizePolicy.Policy.Preferred)
+        self._hint_clean = _SessionRow._action("Clean…", "Clean unknown plug-ins in this Maya’s scene: shows what "
+                                                          "would go first")
+        self._hint_fix = _SessionRow._action("Fix in the file", "Opens the file that asks for them in Scenes › "
+                                                                "Paths: its unused requires lines are taken out "
+                                                                "there, so every shot referencing it stops asking")
+        self._hint_arnold = _SessionRow._action("Load Arnold", "Boost start left Arnold (mtoa) out of this Maya; "
+                                                               "load it now, no restart")
+        self._hint_close = _SessionRow._action("", "Put this line away (the log keeps the lines)")
+        self._hint_close.setObjectName("sessionsHintClose")
+        self._plugins_hint_icon = TintedIcon(UiResources().iconManager.get_icon("plugin", sub_folder="plugins"), 16)
+        self._plugins_hint_icon.setObjectName("sessionsPluginsHintIcon")
+        hint_layout = qt.QtWidgets.QHBoxLayout(self._plugins_hint)
+        hint_layout.setContentsMargins(10, 4, 6, 4)
+        hint_layout.setSpacing(8)
+        hint_layout.addWidget(self._plugins_hint_icon, 0, qt.QtCore.Qt.AlignmentFlag.AlignTop)
+        hint_layout.addWidget(self._plugins_hint_text, 1)
+        for button in (self._hint_arnold, self._hint_clean, self._hint_fix, self._hint_close):
+            hint_layout.addWidget(button)
+        self._plugins_hint.hide()
+        self._tint_hint_icons()
+        self._hint_clean.clicked.connect(self._on_hint_clean)
+        self._hint_fix.clicked.connect(self._on_hint_fix)
+        self._hint_arnold.clicked.connect(self._on_hint_arnold)
+        self._hint_close.clicked.connect(self._on_hint_close)
         wrap = bool(self._settings.get("log_wrap", True)) if self._settings is not None else True
         self._log_view.set_wrap(wrap)
         self._wrap_button = qt.QtWidgets.QPushButton("Wrap")
@@ -310,6 +354,7 @@ class SessionsTab(_ConsoleMixin, _ControlMixin, qt.QtWidgets.QWidget):
         layout.addWidget(self._scroll)
         layout.addWidget(self._message_label)
         layout.addLayout(log_header)
+        layout.addWidget(self._plugins_hint)
         # The log over the console, with a handle between them: drag it to give the console the
         # room of a real editor (taken from the log) or to get the log back. Remembered.
         self._split = qt.QtWidgets.QSplitter(qt.QtCore.Qt.Orientation.Vertical)
@@ -394,6 +439,8 @@ class SessionsTab(_ConsoleMixin, _ControlMixin, qt.QtWidgets.QWidget):
                 row.menu_requested.connect(self._on_row_menu)
                 row.scene_label.paths_handler = (lambda session_id=session.session_id:
                                                  self._on_scene_paths(session_id))
+                row.scene_label.plugins_handler = (lambda session_id=session.session_id:
+                                                   self._on_scene_plugins(session_id))
                 row.selected.connect(self._select_session)
                 row.scene_label.reveal_failed.connect(self._on_reveal_failed)
                 self._rows[session_id] = row
@@ -493,6 +540,7 @@ class SessionsTab(_ConsoleMixin, _ControlMixin, qt.QtWidgets.QWidget):
             if pid != self._selected_pid:
                 self._logs.pop(pid, None)
                 self._problems.pop(pid, None)
+                self._missing.pop(pid, None)
                 self._gone.pop(pid, None)
                 self._names.pop(pid, None)
         for session_id, row in self._rows.items():
@@ -505,6 +553,7 @@ class SessionsTab(_ConsoleMixin, _ControlMixin, qt.QtWidgets.QWidget):
             row.set_selected(row.record.key == self._history_selected)
         self._clear_log_button.setEnabled(self._history_selected is None)
         self._update_log_title(pids.get(self._selected_pid))
+        self._update_plugins_hint(pids.get(self._selected_pid))
         # The console: only for a selected Maya that is here and accepts code.
         selected = pids.get(self._selected_pid)
         console_was_shown = self._console.isVisible()
@@ -546,6 +595,7 @@ class SessionsTab(_ConsoleMixin, _ControlMixin, qt.QtWidgets.QWidget):
         if self._selected_pid in self._gone:  # leaving a closed Maya's log: it isn't kept any longer
             self._logs.pop(self._selected_pid, None)
             self._problems.pop(self._selected_pid, None)
+            self._missing.pop(self._selected_pid, None)
             self._gone.pop(self._selected_pid, None)
         self._history_selected = None
         self._selected_pid = session.pid
@@ -578,7 +628,18 @@ class SessionsTab(_ConsoleMixin, _ControlMixin, qt.QtWidgets.QWidget):
         now = time.time()
         log = self._logs.setdefault(session.pid, [])
         problems = self._problems.setdefault(session.pid, [0, 0])
-        for level, text in entries:
+        missing = self._missing.setdefault(session.pid, {})
+        entries = list(entries)
+        for index, (level, text) in enumerate(entries):
+            found = missing_plugins.missing_plugin(text)
+            if found is not None:
+                missing[found[0]] = found[1] or missing.get(found[0], "")
+                if level == protocol.LOG_ERROR:   # no error of the scene: Maya opens it without the plug-in
+                    level = protocol.LOG_WARNING
+                    entries[index] = (level, text)
+                self._hint_dismissed.discard(session.pid)
+            elif missing_plugins.needs_arnold(text):
+                self._arnold_wanted.add(session.pid)
             log.append((level, text, now))
             if level == protocol.LOG_ERROR:
                 problems[0] += 1
@@ -595,6 +656,73 @@ class SessionsTab(_ConsoleMixin, _ControlMixin, qt.QtWidgets.QWidget):
         new_errors = sum(1 for level, _text in entries if level == protocol.LOG_ERROR)
         if new_errors and not self.isVisible():
             self._server.set_unread_errors(self._server.unread_errors() + new_errors)
+        if session.pid == self._selected_pid:
+            self._update_plugins_hint(session)
+
+    # --- plug-ins a scene asks for that Maya doesn't have ------------------------------------------
+
+    def _update_plugins_hint(self, session: MayaSession | None) -> None:
+        """The line above the log, for the selected Maya: the plug-ins its scene asked for and lacked (read
+        from its log), with Clean (the scene's own), Fix in the file (a reference's), Load Arnold (boost)."""
+        pid = self._selected_pid
+        missing = self._missing.get(pid) or {}
+        arnold = (session is not None and pid in self._arnold_wanted
+                  and missing_plugins.ARNOLD in [name.lower() for name in session.skipped])
+        shown = (self._history_selected is None and pid not in self._hint_dismissed and bool(missing or arnold))
+        if not shown:
+            if self._plugins_hint.isVisibleTo(self):
+                self._plugins_hint.hide()
+            return
+        scene = session.scene if session is not None else ""
+        parts = [missing_plugins.summary(missing, scene)] if missing else []
+        if arnold:
+            parts.append("needs Arnold — boost left it out")
+        self._plugins_hint_text.setText(" · ".join(parts))
+        self._plugins_hint_text.setToolTip("\n".join(f"{name}  —  {file or 'no file named'}"
+                                                     for name, file in sorted(missing.items())))
+        live = session is not None
+        files = [file for file in missing_plugins.files_of(missing, scene) if file.lower().endswith(".ma")]
+        self._hint_clean.setVisible(live and bool(session.plugins))
+        self._hint_fix.setVisible(bool(files))
+        self._hint_fix.setText("Fix in the file" if len(files) == 1 else f"Fix in {len(files)} files")
+        self._hint_arnold.setVisible(bool(arnold))
+        self._plugins_hint.show()
+
+    def _tint_hint_icons(self) -> None:
+        """The links' icons in linkIconColor (maya_gate.qss) - again whenever the theme sets it."""
+        if not hasattr(self, "_hint_close"):
+            return   # the stylesheet came before the line was built
+        icons = UiResources().iconManager
+        for button, name, folder in ((self._hint_clean, "sweep", "actions"), (self._hint_fix, "paths", "tools"),
+                                     (self._hint_arnold, "arnold", "plugins"), (self._hint_close, "clear", "actions")):
+            button.setIcon(tinted_menu_icon(icons.get_icon(name, sub_folder=folder), self._link_icon_color,
+                                            self.devicePixelRatioF(), self.HINT_ICON_SIZE))
+            button.setIconSize(qt.QtCore.QSize(self.HINT_ICON_SIZE, self.HINT_ICON_SIZE))
+
+    def _on_hint_clean(self) -> None:
+        session = self._session_by_pid(self._selected_pid)
+        if session is not None:
+            self._on_scene_plugins(session.session_id)
+
+    def _on_hint_fix(self) -> None:
+        session = self._session_by_pid(self._selected_pid)
+        missing = self._missing.get(self._selected_pid) or {}
+        files = [file for file in missing_plugins.files_of(missing, session.scene if session else "")
+                 if file.lower().endswith(".ma")]
+        if files:
+            self._fix_in_paths(files, find=False)
+
+    def _on_hint_arnold(self) -> None:
+        session = self._session_by_pid(self._selected_pid)
+        if session is not None:
+            self._arnold_wanted.discard(session.pid)
+            self._load_plugins(session.session_id, [name for name in session.skipped
+                                                    if name.lower() == missing_plugins.ARNOLD])
+            self._update_plugins_hint(session)
+
+    def _on_hint_close(self) -> None:
+        self._hint_dismissed.add(self._selected_pid)
+        self._plugins_hint.hide()
 
     # --- a Maya that ended unexpectedly ---------------------------------------------------
 
@@ -742,6 +870,7 @@ class SessionsTab(_ConsoleMixin, _ControlMixin, qt.QtWidgets.QWidget):
         self._ended.pop(pid, None)
         self._logs.pop(pid, None)
         self._problems.pop(pid, None)
+        self._missing.pop(pid, None)
         if self._selected_pid == pid:
             self._selected_pid = 0
             self._log_view.clear_entries()
@@ -768,5 +897,7 @@ class SessionsTab(_ConsoleMixin, _ControlMixin, qt.QtWidgets.QWidget):
     def _on_clear_log(self) -> None:
         self._logs.pop(self._selected_pid, None)
         self._problems.pop(self._selected_pid, None)
+        self._missing.pop(self._selected_pid, None)
+        self._arnold_wanted.discard(self._selected_pid)
         self._log_view.clear_entries()
         self.refresh()
